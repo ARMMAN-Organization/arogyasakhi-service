@@ -32,6 +32,7 @@
     "@commitlint/cli": "^19.4.0",
     "@commitlint/config-conventional": "^19.2.2",
     "@nx/eslint": "^19.5.0",
+    "@nx/eslint-plugin": "^19.8.0",
     "@nx/jest": "^19.5.0",
     "@nx/js": "^19.5.0",
     "@nx/nest": "^19.5.0",
@@ -46,7 +47,8 @@
     "prettier": "^3.3.3",
     "prisma": "5.22.0",
     "ts-jest": "^29.2.4",
-    "typescript": "^5.5.4"
+    "typescript": "^5.5.4",
+    "typescript-eslint": "^8.0.0"
   },
   "dependencies": {
     "@prisma/client": "5.22.0"
