@@ -1,0 +1,13 @@
+{
+  "name": "visit-form-service",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/visit-form-service/src",
+  "projectType": "application",
+  "tags": ["scope:visit-form-service", "type:service"],
+  "targets": {
+    "build": { "executor": "@nx/webpack:webpack", "outputs": ["{options.outputPath}"], "options": { "outputPath": "dist/apps/visit-form-service", "webpackConfig": "apps/visit-form-service/webpack.config.js" } },
+    "serve": { "executor": "@nx/js:node", "options": { "buildTarget": "visit-form-service:build" } },
+    "lint": { "executor": "@nx/eslint:lint" },
+    "test": { "executor": "@nx/jest:jest", "options": { "jestConfig": "apps/visit-form-service/jest.config.ts" } }
+  }
+}

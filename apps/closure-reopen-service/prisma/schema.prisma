@@ -1,0 +1,20 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../../../node_modules/.prisma/client-closure-reopen-service"
+}
+
+datasource db {
+  provider = "postgresql"
+  directUrl = env("DIRECT_URL")
+  url      = env("DATABASE_URL")
+}
+
+// closure-reopen-service owns these tables only (forklift rule).
+model Closure {
+  id        String   @id @default(uuid())
+  name      String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("closures")
+}

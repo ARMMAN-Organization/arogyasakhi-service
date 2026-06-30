@@ -1,0 +1,9 @@
+# Default owners for everything in the backend monorepo.
+*                                   @armman/backend-leads
+
+# Security-sensitive services require stricter review.
+/apps/auth-service/                 @armman/security
+/apps/audit-service/                @armman/security
+
+# Shared libraries affect all services — review carefully.
+/libs/                              @armman/backend-leads @armman/architects

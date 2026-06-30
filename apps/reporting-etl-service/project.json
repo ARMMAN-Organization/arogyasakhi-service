@@ -1,0 +1,13 @@
+{
+  "name": "reporting-etl-service",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/reporting-etl-service/src",
+  "projectType": "application",
+  "tags": ["scope:reporting-etl-service", "type:service"],
+  "targets": {
+    "build": { "executor": "@nx/webpack:webpack", "outputs": ["{options.outputPath}"], "options": { "outputPath": "dist/apps/reporting-etl-service", "webpackConfig": "apps/reporting-etl-service/webpack.config.js" } },
+    "serve": { "executor": "@nx/js:node", "options": { "buildTarget": "reporting-etl-service:build" } },
+    "lint": { "executor": "@nx/eslint:lint" },
+    "test": { "executor": "@nx/jest:jest", "options": { "jestConfig": "apps/reporting-etl-service/jest.config.ts" } }
+  }
+}

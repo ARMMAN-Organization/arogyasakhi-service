@@ -1,0 +1,13 @@
+{
+  "name": "audit-service",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/audit-service/src",
+  "projectType": "application",
+  "tags": ["scope:audit-service", "type:service"],
+  "targets": {
+    "build": { "executor": "@nx/webpack:webpack", "outputs": ["{options.outputPath}"], "options": { "outputPath": "dist/apps/audit-service", "webpackConfig": "apps/audit-service/webpack.config.js" } },
+    "serve": { "executor": "@nx/js:node", "options": { "buildTarget": "audit-service:build" } },
+    "lint": { "executor": "@nx/eslint:lint" },
+    "test": { "executor": "@nx/jest:jest", "options": { "jestConfig": "apps/audit-service/jest.config.ts" } }
+  }
+}

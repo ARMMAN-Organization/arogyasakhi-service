@@ -1,0 +1,12 @@
+{
+  "name": "core",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/core/src",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:util"],
+  "targets": {
+    "build": { "executor": "@nx/js:tsc", "options": { "main": "libs/core/src/index.ts", "tsConfig": "libs/core/tsconfig.json", "outputPath": "dist/libs/core" } },
+    "lint": { "executor": "@nx/eslint:lint" },
+    "test": { "executor": "@nx/jest:jest", "options": { "jestConfig": "libs/core/jest.config.ts" } }
+  }
+}

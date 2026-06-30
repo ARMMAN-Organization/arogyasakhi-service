@@ -1,0 +1,9 @@
+{
+  "name": "@armman/core",
+  "version": "0.1.0",
+  "description": "Framework-agnostic shared helpers for Arogya Sakhi backend services.",
+  "private": true,
+  "type": "commonjs",
+  "main": "./src/index.js",
+  "types": "./src/index.d.ts"
+}

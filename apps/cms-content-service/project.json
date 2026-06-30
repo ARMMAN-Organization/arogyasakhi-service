@@ -1,0 +1,13 @@
+{
+  "name": "cms-content-service",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/cms-content-service/src",
+  "projectType": "application",
+  "tags": ["scope:cms-content-service", "type:service"],
+  "targets": {
+    "build": { "executor": "@nx/webpack:webpack", "outputs": ["{options.outputPath}"], "options": { "outputPath": "dist/apps/cms-content-service", "webpackConfig": "apps/cms-content-service/webpack.config.js" } },
+    "serve": { "executor": "@nx/js:node", "options": { "buildTarget": "cms-content-service:build" } },
+    "lint": { "executor": "@nx/eslint:lint" },
+    "test": { "executor": "@nx/jest:jest", "options": { "jestConfig": "apps/cms-content-service/jest.config.ts" } }
+  }
+}

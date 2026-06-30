@@ -1,0 +1,18 @@
+openapi: 3.0.3
+info:
+  title: Arogya Sakhi API
+  version: 0.1.0
+  description: Source-of-truth contract for all Arogya Sakhi backend services.
+servers:
+  - url: https://api.arogyasakhi.armman.org/v1
+components:
+  schemas:
+    ApiError:
+      type: object
+      properties:
+        success: { type: boolean, example: false }
+        message: { type: string }
+        errorCode: { type: string }
+        details: { type: object, additionalProperties: true }
+      required: [success, message, errorCode]
+paths: {}

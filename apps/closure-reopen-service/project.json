@@ -1,0 +1,13 @@
+{
+  "name": "closure-reopen-service",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/closure-reopen-service/src",
+  "projectType": "application",
+  "tags": ["scope:closure-reopen-service", "type:service"],
+  "targets": {
+    "build": { "executor": "@nx/webpack:webpack", "outputs": ["{options.outputPath}"], "options": { "outputPath": "dist/apps/closure-reopen-service", "webpackConfig": "apps/closure-reopen-service/webpack.config.js" } },
+    "serve": { "executor": "@nx/js:node", "options": { "buildTarget": "closure-reopen-service:build" } },
+    "lint": { "executor": "@nx/eslint:lint" },
+    "test": { "executor": "@nx/jest:jest", "options": { "jestConfig": "apps/closure-reopen-service/jest.config.ts" } }
+  }
+}

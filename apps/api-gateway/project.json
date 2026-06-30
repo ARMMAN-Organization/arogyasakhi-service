@@ -1,0 +1,13 @@
+{
+  "name": "api-gateway",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/api-gateway/src",
+  "projectType": "application",
+  "tags": ["scope:api-gateway", "type:service"],
+  "targets": {
+    "build": { "executor": "@nx/webpack:webpack", "outputs": ["{options.outputPath}"], "options": { "outputPath": "dist/apps/api-gateway", "webpackConfig": "apps/api-gateway/webpack.config.js" } },
+    "serve": { "executor": "@nx/js:node", "options": { "buildTarget": "api-gateway:build" } },
+    "lint": { "executor": "@nx/eslint:lint" },
+    "test": { "executor": "@nx/jest:jest", "options": { "jestConfig": "apps/api-gateway/jest.config.ts" } }
+  }
+}

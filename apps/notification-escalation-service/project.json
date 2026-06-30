@@ -1,0 +1,13 @@
+{
+  "name": "notification-escalation-service",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/notification-escalation-service/src",
+  "projectType": "application",
+  "tags": ["scope:notification-escalation-service", "type:service"],
+  "targets": {
+    "build": { "executor": "@nx/webpack:webpack", "outputs": ["{options.outputPath}"], "options": { "outputPath": "dist/apps/notification-escalation-service", "webpackConfig": "apps/notification-escalation-service/webpack.config.js" } },
+    "serve": { "executor": "@nx/js:node", "options": { "buildTarget": "notification-escalation-service:build" } },
+    "lint": { "executor": "@nx/eslint:lint" },
+    "test": { "executor": "@nx/jest:jest", "options": { "jestConfig": "apps/notification-escalation-service/jest.config.ts" } }
+  }
+}

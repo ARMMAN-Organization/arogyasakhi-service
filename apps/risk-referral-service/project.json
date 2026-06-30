@@ -1,0 +1,13 @@
+{
+  "name": "risk-referral-service",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/risk-referral-service/src",
+  "projectType": "application",
+  "tags": ["scope:risk-referral-service", "type:service"],
+  "targets": {
+    "build": { "executor": "@nx/webpack:webpack", "outputs": ["{options.outputPath}"], "options": { "outputPath": "dist/apps/risk-referral-service", "webpackConfig": "apps/risk-referral-service/webpack.config.js" } },
+    "serve": { "executor": "@nx/js:node", "options": { "buildTarget": "risk-referral-service:build" } },
+    "lint": { "executor": "@nx/eslint:lint" },
+    "test": { "executor": "@nx/jest:jest", "options": { "jestConfig": "apps/risk-referral-service/jest.config.ts" } }
+  }
+}
