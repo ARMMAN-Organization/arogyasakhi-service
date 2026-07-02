@@ -1,0 +1,12 @@
+{
+  "name": "@armman/api-contracts",
+  "version": "0.1.0",
+  "description": "OpenAPI 3.0 specification and generated typed clients — single source of truth for Arogya Sakhi APIs.",
+  "private": true,
+  "type": "commonjs",
+  "main": "./src/index.js",
+  "types": "./src/index.d.ts",
+  "scripts": {
+    "generate": "echo 'TODO: run openapi-typescript / openapi-generator against openapi/openapi.yaml'"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "incentive-wages-service",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/incentive-wages-service/src",
+  "projectType": "application",
+  "tags": ["scope:incentive-wages-service", "type:service"],
+  "targets": {
+    "build": { "executor": "@nx/webpack:webpack", "outputs": ["{options.outputPath}"], "options": { "outputPath": "dist/apps/incentive-wages-service", "webpackConfig": "apps/incentive-wages-service/webpack.config.js" } },
+    "serve": { "executor": "@nx/js:node", "options": { "buildTarget": "incentive-wages-service:build" } },
+    "lint": { "executor": "@nx/eslint:lint" },
+    "test": { "executor": "@nx/jest:jest", "options": { "jestConfig": "apps/incentive-wages-service/jest.config.ts" } }
+  }
+}

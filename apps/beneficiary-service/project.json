@@ -1,0 +1,17 @@
+{
+  "name": "beneficiary-service",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/beneficiary-service/src",
+  "projectType": "application",
+  "tags": ["scope:beneficiary", "type:service"],
+  "targets": {
+    "build": {
+      "executor": "@nx/webpack:webpack",
+      "outputs": ["{options.outputPath}"],
+      "options": { "outputPath": "dist/apps/beneficiary-service", "webpackConfig": "apps/beneficiary-service/webpack.config.js" }
+    },
+    "serve": { "executor": "@nx/js:node", "options": { "buildTarget": "beneficiary-service:build" } },
+    "lint": { "executor": "@nx/eslint:lint" },
+    "test": { "executor": "@nx/jest:jest", "options": { "jestConfig": "apps/beneficiary-service/jest.config.ts" } }
+  }
+}

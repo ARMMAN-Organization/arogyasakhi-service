@@ -1,0 +1,13 @@
+{
+  "name": "wrapper-api-service",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/wrapper-api-service/src",
+  "projectType": "application",
+  "tags": ["scope:wrapper-api-service", "type:service"],
+  "targets": {
+    "build": { "executor": "@nx/webpack:webpack", "outputs": ["{options.outputPath}"], "options": { "outputPath": "dist/apps/wrapper-api-service", "webpackConfig": "apps/wrapper-api-service/webpack.config.js" } },
+    "serve": { "executor": "@nx/js:node", "options": { "buildTarget": "wrapper-api-service:build" } },
+    "lint": { "executor": "@nx/eslint:lint" },
+    "test": { "executor": "@nx/jest:jest", "options": { "jestConfig": "apps/wrapper-api-service/jest.config.ts" } }
+  }
+}
