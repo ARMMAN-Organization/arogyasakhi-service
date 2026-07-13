@@ -1,10 +1,15 @@
-import { Injectable } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import type { CreateAuditLogDto } from './dto/create-auditLog.dto';
+import type { PrismaService } from '../prisma/prisma.service';
+import type { CreateAuditLogInput } from './dto/create-auditLog.dto';
 
-@Injectable()
+/** Data access for audit logs. Owns only this service's `auditLog` table. */
 export class AuditLogRepository {
   constructor(private readonly prisma: PrismaService) {}
-  findMany() { return this.prisma.auditLog.findMany({ orderBy: { createdAt: 'desc' }, take: 50 }); }
-  create(data: CreateAuditLogDto) { return this.prisma.auditLog.create({ data }); }
+
+  findMany() {
+    return this.prisma.auditLog.findMany({ orderBy: { createdAt: 'desc' }, take: 50 });
+  }
+
+  create(data: CreateAuditLogInput) {
+    return this.prisma.auditLog.create({ data });
+  }
 }

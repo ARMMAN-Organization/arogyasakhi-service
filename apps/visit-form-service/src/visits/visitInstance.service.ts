@@ -1,10 +1,15 @@
-import { Injectable } from '@nestjs/common';
-import { VisitInstanceRepository } from './visitInstance.repository';
-import type { CreateVisitInstanceDto } from './dto/create-visitInstance.dto';
+import type { VisitInstanceRepository } from './visitInstance.repository';
+import type { CreateVisitInstanceInput } from './dto/create-visitInstance.dto';
 
-@Injectable()
+/** Visit instance domain logic. Data access is delegated to the repository. */
 export class VisitInstanceService {
   constructor(private readonly repository: VisitInstanceRepository) {}
-  list() { return this.repository.findMany(); }
-  create(dto: CreateVisitInstanceDto) { return this.repository.create(dto); }
+
+  list() {
+    return this.repository.findMany();
+  }
+
+  create(dto: CreateVisitInstanceInput) {
+    return this.repository.create(dto);
+  }
 }

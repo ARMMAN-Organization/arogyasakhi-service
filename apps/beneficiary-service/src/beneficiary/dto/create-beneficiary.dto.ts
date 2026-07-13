@@ -1,15 +1,15 @@
-import { IsIn, IsNotEmpty, IsString, IsUUID, MaxLength } from 'class-validator';
+import { z } from 'zod';
 
-/** Validated payload for creating a beneficiary case. */
-export class CreateBeneficiaryDto {
-  @IsIn(['MOTHER', 'CHILD'])
-  caseType!: 'MOTHER' | 'CHILD';
+/**
+ * Validation schema for creating a beneficiary case. `.strict()` rejects unknown
+ * fields, matching the previous global ValidationPipe `forbidNonWhitelisted: true`.
+ */
+export const createBeneficiarySchema = z
+  .object({
+    caseType: z.enum(['MOTHER', 'CHILD']),
+    name: z.string().trim().min(1).max(120),
+    projectId: z.string().uuid(),
+  })
+  .strict();
 
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(120)
-  name!: string;
-
-  @IsUUID()
-  projectId!: string;
-}
+export type CreateBeneficiaryInput = z.infer<typeof createBeneficiarySchema>;

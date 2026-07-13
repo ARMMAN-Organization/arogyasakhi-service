@@ -1,10 +1,27 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Post } from '@nestjs/common';
-import { ClosureService } from './closure.service';
-import { CreateClosureDto } from './dto/create-closure.dto';
+import { Router } from 'express';
+import type { ClosureService } from './closure.service';
+import { createClosureSchema } from './dto/create-closure.dto';
+import { asyncHandler, ok, validateBody } from '../app.module';
 
-@Controller('closures')
-export class ClosureController {
-  constructor(private readonly service: ClosureService) {}
-  @Get() list() { return this.service.list(); }
-  @Post() @HttpCode(HttpStatus.CREATED) create(@Body() dto: CreateClosureDto) { return this.service.create(dto); }
+/** Closure HTTP routes. Mounted under the global `api/v1` prefix. */
+export function createClosureRouter(service: ClosureService): Router {
+  const router = Router();
+
+  router.get(
+    '/closures',
+    asyncHandler(async (_req, res) => {
+      res.json(ok(await service.list()));
+    }),
+  );
+
+  router.post(
+    '/closures',
+    validateBody(createClosureSchema),
+    asyncHandler(async (req, res) => {
+      const created = await service.create(req.body);
+      res.status(201).json(ok(created));
+    }),
+  );
+
+  return router;
 }

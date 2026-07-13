@@ -1,10 +1,15 @@
-import { Injectable } from '@nestjs/common';
-import { ReferralRepository } from './referral.repository';
-import type { CreateReferralDto } from './dto/create-referral.dto';
+import type { ReferralRepository } from './referral.repository';
+import type { CreateReferralInput } from './dto/create-referral.dto';
 
-@Injectable()
+/** Referral domain logic. Data access is delegated to the repository. */
 export class ReferralService {
   constructor(private readonly repository: ReferralRepository) {}
-  list() { return this.repository.findMany(); }
-  create(dto: CreateReferralDto) { return this.repository.create(dto); }
+
+  list() {
+    return this.repository.findMany();
+  }
+
+  create(dto: CreateReferralInput) {
+    return this.repository.create(dto);
+  }
 }

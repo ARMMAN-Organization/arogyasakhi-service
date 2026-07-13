@@ -1,8 +1,13 @@
-import { IsNotEmpty, IsString, MaxLength } from 'class-validator';
+import { z } from 'zod';
 
-export class CreateReferralDto {
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(200)
-  name!: string;
-}
+/**
+ * Validation schema for creating a referral. `.strict()` rejects unknown fields,
+ * matching the previous global ValidationPipe `forbidNonWhitelisted: true`.
+ */
+export const createReferralSchema = z
+  .object({
+    name: z.string().trim().min(1).max(200),
+  })
+  .strict();
+
+export type CreateReferralInput = z.infer<typeof createReferralSchema>;

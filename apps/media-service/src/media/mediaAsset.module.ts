@@ -1,8 +1,15 @@
-import { Module } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import { MediaAssetController } from './mediaAsset.controller';
+import type { Router } from 'express';
+import type { PrismaService } from '../prisma/prisma.service';
 import { MediaAssetRepository } from './mediaAsset.repository';
 import { MediaAssetService } from './mediaAsset.service';
+import { createMediaAssetRouter } from './mediaAsset.controller';
 
-@Module({ controllers: [MediaAssetController], providers: [MediaAssetService, MediaAssetRepository, PrismaService] })
-export class MediaAssetModule {}
+/**
+ * Composition root for the media feature: wires repository → service → router.
+ * Replaces the former NestJS module + DI container.
+ */
+export function createMediaAssetModule(prisma: PrismaService): Router {
+  const repository = new MediaAssetRepository(prisma);
+  const service = new MediaAssetService(repository);
+  return createMediaAssetRouter(service);
+}

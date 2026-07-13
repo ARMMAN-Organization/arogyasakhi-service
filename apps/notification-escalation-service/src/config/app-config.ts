@@ -1,4 +1,3 @@
-import { loadConfig } from '@armman/service-commons';
 import { z } from 'zod';
 
 const schema = z.object({
@@ -9,4 +8,15 @@ const schema = z.object({
   CORS_ORIGINS: z.string().default('').transform((v) => v.split(',').map((o) => o.trim()).filter(Boolean)),
 });
 export type AppConfig = z.infer<typeof schema>;
-export const appConfig: AppConfig = loadConfig(schema);
+
+function loadConfig(): AppConfig {
+  const parsed = schema.safeParse(process.env);
+  if (!parsed.success) {
+    const issues = parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');
+    console.error(`Invalid environment configuration: ${issues}`);
+    process.exit(1);
+  }
+  return Object.freeze(parsed.data);
+}
+
+export const appConfig: AppConfig = loadConfig();
