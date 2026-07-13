@@ -6,7 +6,7 @@ scalability, security and developer experience. Explain *why* for non-obvious
 decisions. Never assume — ask when scope or intent is unclear. No over-engineering.
 
 ## 1. Purpose & boundaries
-This repo is an **Nx monorepo of independently deployable NestJS microservices**.
+This repo is an **Nx monorepo of independently deployable Express (Node.js) microservices**.
 
 - **What belongs here:** backend microservices (`apps/*`) and shared backend
   libraries (`libs/*`).
@@ -20,36 +20,37 @@ This repo is an **Nx monorepo of independently deployable NestJS microservices**
 ## 2. Folder structure
 ```
 apps/<service>/src/
-  main.ts                bootstrap (helmet, validation, graceful shutdown)
-  app.module.ts
+  main.ts                bootstrap (helmet, listen, graceful shutdown)
+  app.module.ts          createApp(): wires Express middleware + routers
   config/                env schema + typed config
   health/                liveness/readiness endpoints
-  <domain>/              controllers, services, repositories, dto
-  common/                service-local filters/interceptors (rare)
+  <domain>/              express routers, services, repositories, zod schemas
+  common/                service-local middleware (rare)
 libs/
   core/                  pure helpers (validators, dates, crypto, result types)
-  service-commons/       NestJS cross-cutting: logger, exception filter,
-                         response interceptor, RBAC guard, config helpers
+  service-commons/       Express cross-cutting: logger, error handler,
+                         response envelope, RBAC middleware, config helpers
   api-contracts/         OpenAPI 3.0 + generated typed client
 ```
 
 ## 3. Coding standards
 - TypeScript strict mode. No `any` (use `unknown` + narrowing).
-- Thin controllers; business logic in services; data access in repositories.
+- Thin routers; business logic in services; data access in repositories.
 - Files ≤ ~250 lines — split by responsibility when larger.
 - No dead/commented-out code, no `TODO` in merged code.
 - Public functions get a short JSDoc explaining *what* and *why*.
 
 ## 4. Naming conventions
 - `camelCase` — variables, functions, parameters
-- `PascalCase` — classes, types, interfaces, enums, NestJS providers
+- `PascalCase` — classes, types, interfaces, enums
 - `UPPER_SNAKE_CASE` — constants, env keys
 - `snake_case` — database identifiers
 - Files: `kebab-case.ts`; tests: `*.spec.ts`.
 
 ## 5. Error handling
-- Use Nest exceptions (`BadRequestException`, `NotFoundException`, etc.); a global
-  exception filter (from `service-commons`) converts them to the standard envelope.
+- Throw `HttpError` (from `service-commons`, or its `badRequest`/`notFound`/etc.
+  helpers) for expected failures; a global Express error-handling middleware
+  (`errorHandler`, from `service-commons`) converts them to the standard envelope.
 - Never leak stack traces, DB errors, or internal fields to the client.
 - Log the full technical error server-side with context (requestId, userId).
 - Validation errors must name the field and the fix.
@@ -69,8 +70,9 @@ Status codes: 200 ok · 201 created · 204 no content · 400 bad input · 401 un
 - NEVER log PII, tokens, passwords, or full request bodies.
 
 ## 8. Validation
-- Validate all input at the controller edge with `class-validator` DTOs +
-  global `ValidationPipe({ whitelist: true, forbidNonWhitelisted: true })`.
+- Validate all input at the route edge with Zod `.strict()` schemas via the
+  `validateBody`/`validate` middleware (from `service-commons`) — `.strict()`
+  rejects unknown fields, matching the old `forbidNonWhitelisted` behavior.
 - Re-validate sync submissions server-side against the active form version.
 
 ## 9. Configuration & environment
@@ -80,7 +82,8 @@ Status codes: 200 ok · 201 created · 204 no content · 400 bad input · 401 un
 - `.env.example` lists every variable a service needs.
 
 ## 10. Security
-- JWT auth; RBAC + geography scope enforced on the server (guards), not just UI.
+- JWT auth; RBAC + geography scope enforced on the server (`requireRoles`
+  middleware), not just UI.
 - Parameterised queries only (Prisma) — never string-interpolate SQL.
 - PII encrypted/tokenised at the application layer before persistence.
 - `helmet`, strict CORS (explicit origins), rate limiting on the gateway.

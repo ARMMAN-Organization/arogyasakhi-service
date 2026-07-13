@@ -1,6 +1,6 @@
 # arogya-backend
 
-Nx monorepo of independently deployable NestJS microservices for the Arogya Sakhi
+Nx monorepo of independently deployable Express microservices for the Arogya Sakhi
 platform. Engineering standards live in [`.claude/CLAUDE.md`](./.claude/CLAUDE.md).
 
 ## Layout

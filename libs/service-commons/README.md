@@ -1,13 +1,16 @@
 # @armman/service-commons
 
-Shared NestJS cross-cutting concerns used by every service:
+Shared Express cross-cutting concerns used by every service:
 
-- `ResponseInterceptor` — wraps success responses in the standard envelope
-- `AllExceptionsFilter` — converts errors to the standard failure envelope (no leaks)
-- `RequestIdMiddleware` — X-Request-Id propagation
-- `buildLoggerOptions` — structured pino logging with PII redaction
-- `RbacGuard` + `@Roles()` — server-side role enforcement
+- `ok` / `fail` — standard success/failure response envelopes
+- `errorHandler` / `notFoundHandler` — converts thrown errors to the standard failure envelope (no leaks)
+- `requestId` — X-Request-Id propagation middleware
+- `buildLoggerOptions` — structured pino-http logging options with PII redaction
+- `requireRoles(...roles)` — server-side role enforcement middleware
+- `asyncHandler` — wraps async route handlers so rejections reach `errorHandler`
+- `validate` / `validateBody` — Zod-schema request validation middleware
+- `HttpError` (+ `badRequest`/`unauthorized`/`forbidden`/`notFound`/`conflict`) — errors carrying an HTTP status
 - `loadConfig(schema)` — fail-fast typed env validation (Zod)
 
 Wire these up in each service's `main.ts` / `app.module.ts` (see the reference
-`beneficiary-service`).
+`auth-service`).
