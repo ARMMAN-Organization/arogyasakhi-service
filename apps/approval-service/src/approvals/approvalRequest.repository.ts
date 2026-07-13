@@ -1,10 +1,15 @@
-import { Injectable } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import type { CreateApprovalRequestDto } from './dto/create-approvalRequest.dto';
+import type { PrismaService } from '../prisma/prisma.service';
+import type { CreateApprovalRequestInput } from './dto/create-approvalRequest.dto';
 
-@Injectable()
+/** Data access for approval requests. Owns only this service's `approval_requests` table. */
 export class ApprovalRequestRepository {
   constructor(private readonly prisma: PrismaService) {}
-  findMany() { return this.prisma.approvalRequest.findMany({ orderBy: { createdAt: 'desc' }, take: 50 }); }
-  create(data: CreateApprovalRequestDto) { return this.prisma.approvalRequest.create({ data }); }
+
+  findMany() {
+    return this.prisma.approvalRequest.findMany({ orderBy: { createdAt: 'desc' }, take: 50 });
+  }
+
+  create(data: CreateApprovalRequestInput) {
+    return this.prisma.approvalRequest.create({ data });
+  }
 }

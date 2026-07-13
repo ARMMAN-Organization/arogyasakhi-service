@@ -1,10 +1,7 @@
-import { Injectable } from '@nestjs/common';
-
-import { BeneficiaryRepository } from './beneficiary.repository';
-import type { CreateBeneficiaryDto } from './dto/create-beneficiary.dto';
+import type { BeneficiaryRepository } from './beneficiary.repository';
+import type { CreateBeneficiaryInput } from './dto/create-beneficiary.dto';
 
 /** Business logic for the beneficiary lifecycle. */
-@Injectable()
 export class BeneficiaryService {
   constructor(private readonly repository: BeneficiaryRepository) {}
 
@@ -14,7 +11,7 @@ export class BeneficiaryService {
   }
 
   /** Creates a beneficiary case. Duplicate detection is added with the rules layer. */
-  create(dto: CreateBeneficiaryDto) {
+  create(dto: CreateBeneficiaryInput) {
     return this.repository.create(dto);
   }
 }

@@ -1,8 +1,13 @@
-import { IsNotEmpty, IsString, MaxLength } from 'class-validator';
+import { z } from 'zod';
 
-export class CreateClosureDto {
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(200)
-  name!: string;
-}
+/**
+ * Validation schema for creating a closure. `.strict()` rejects unknown fields,
+ * matching the previous global ValidationPipe `forbidNonWhitelisted: true`.
+ */
+export const createClosureSchema = z
+  .object({
+    name: z.string().trim().min(1).max(200),
+  })
+  .strict();
+
+export type CreateClosureInput = z.infer<typeof createClosureSchema>;
