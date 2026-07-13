@@ -1,4 +1,3 @@
-import { Logger } from '@nestjs/common';
 import type { z } from 'zod';
 
 /**
@@ -10,7 +9,7 @@ export function loadConfig<TSchema extends z.ZodTypeAny>(schema: TSchema): z.inf
   const parsed = schema.safeParse(process.env);
   if (!parsed.success) {
     const issues = parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');
-    new Logger('Config').error(`Invalid environment configuration: ${issues}`);
+    console.error(`Invalid environment configuration: ${issues}`);
     process.exit(1);
   }
   return Object.freeze(parsed.data);

@@ -1,23 +1,11 @@
-import {
-  type CallHandler,
-  type ExecutionContext,
-  Injectable,
-  type NestInterceptor,
-} from '@nestjs/common';
-import type { Observable } from 'rxjs';
-import { map } from 'rxjs/operators';
-
-import type { ApiSuccess } from './api-response';
+import type { Response } from 'express';
+import { ok } from './api-response';
 
 /**
- * Wraps every successful controller return value in the standard success
- * envelope, so controllers can simply return their data.
+ * Sends a value wrapped in the standard success envelope. Replaces the former
+ * NestJS ResponseInterceptor — handlers now call this explicitly instead of
+ * returning bare data.
  */
-@Injectable()
-export class ResponseInterceptor<T> implements NestInterceptor<T, ApiSuccess<T>> {
-  intercept(_context: ExecutionContext, next: CallHandler<T>): Observable<ApiSuccess<T>> {
-    return next.handle().pipe(
-      map((data) => ({ success: true as const, message: 'OK', data })),
-    );
-  }
+export function sendOk<TData>(res: Response, data: TData, status = 200): void {
+  res.status(status).json(ok(data));
 }

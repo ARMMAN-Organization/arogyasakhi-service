@@ -3,7 +3,7 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "libs/service-commons/src",
   "projectType": "library",
-  "tags": ["scope:shared", "type:nest-lib"],
+  "tags": ["scope:shared", "type:node-lib"],
   "targets": {
     "build": { "executor": "@nx/js:tsc", "options": { "main": "libs/service-commons/src/index.ts", "tsConfig": "libs/service-commons/tsconfig.json", "outputPath": "dist/libs/service-commons" } },
     "lint": { "executor": "@nx/eslint:lint" },

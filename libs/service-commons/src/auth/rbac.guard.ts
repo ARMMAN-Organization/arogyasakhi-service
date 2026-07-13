@@ -1,14 +1,5 @@
-import {
-  type CanActivate,
-  type ExecutionContext,
-  ForbiddenException,
-  Injectable,
-  UnauthorizedException,
-} from '@nestjs/common';
-import { Reflector } from '@nestjs/core';
-import type { Request } from 'express';
-
-import { ROLES_KEY } from './roles.decorator';
+import type { Request, RequestHandler } from 'express';
+import { forbidden, unauthorized } from '../http/http-error';
 
 interface AuthenticatedUser {
   id: string;
@@ -17,25 +8,16 @@ interface AuthenticatedUser {
 
 /**
  * Enforces role-based access at the server edge. Assumes an upstream auth guard
- * has populated `request.user`. Authorization is NEVER left to the client.
+ * has populated `req.user`. Authorization is NEVER left to the client. Apply as
+ * per-route middleware, e.g. `router.post('/x', requireRoles('admin'), handler)`.
  */
-@Injectable()
-export class RbacGuard implements CanActivate {
-  constructor(private readonly reflector: Reflector) {}
-
-  canActivate(context: ExecutionContext): boolean {
-    const required = this.reflector.getAllAndOverride<string[] | undefined>(ROLES_KEY, [
-      context.getHandler(),
-      context.getClass(),
-    ]);
-    if (!required || required.length === 0) return true;
-
-    const request = context.switchToHttp().getRequest<Request & { user?: AuthenticatedUser }>();
-    const user = request.user;
-    if (!user) throw new UnauthorizedException('Authentication required.');
-
-    const allowed = user.roles.some((role) => required.includes(role));
-    if (!allowed) throw new ForbiddenException('You do not have access to this resource.');
-    return true;
-  }
+export function requireRoles(...roles: string[]): RequestHandler {
+  return (req, _res, next) => {
+    if (roles.length === 0) return next();
+    const user = (req as Request & { user?: AuthenticatedUser }).user;
+    if (!user) return next(unauthorized());
+    const allowed = user.roles.some((role) => roles.includes(role));
+    if (!allowed) return next(forbidden());
+    next();
+  };
 }
