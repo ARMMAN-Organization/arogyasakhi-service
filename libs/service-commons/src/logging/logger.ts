@@ -1,25 +1,23 @@
-import type { Params } from 'nestjs-pino';
+import type { Options } from 'pino-http';
 
 /**
- * Pino logger options for all services. Emits structured JSON, attaches the
+ * pino-http options for all services. Emits structured JSON, attaches the
  * request id, and redacts sensitive fields so PII/tokens are never logged.
  */
-export function buildLoggerOptions(level: string): Params {
+export function buildLoggerOptions(level: string): Options {
   return {
-    pinoHttp: {
-      level,
-      autoLogging: true,
-      redact: {
-        paths: [
-          'req.headers.authorization',
-          'req.headers.cookie',
-          'req.body.password',
-          'req.body.token',
-          '*.pii',
-        ],
-        remove: true,
-      },
-      customProps: (req) => ({ requestId: req.headers['x-request-id'] }),
+    level,
+    autoLogging: true,
+    redact: {
+      paths: [
+        'req.headers.authorization',
+        'req.headers.cookie',
+        'req.body.password',
+        'req.body.token',
+        '*.pii',
+      ],
+      remove: true,
     },
+    customProps: (req) => ({ requestId: req.headers['x-request-id'] }),
   };
 }
