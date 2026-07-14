@@ -43,14 +43,66 @@ const ROLES: { roleCode: string; roleName: string; description: string }[] = [
 ];
 
 async function seedRoles(): Promise<void> {
-  for (const role of ROLES) {
-    await prisma.role.upsert({
-      where: { roleCode: role.roleCode },
-      update: { roleName: role.roleName, description: role.description },
-      create: role,
-    });
+  // Only seed when the roles table is empty (e.g. first boot on a fresh DB).
+  // Once roles exist, leave them untouched so runtime edits are never reverted.
+  const existingCount = await prisma.role.count();
+  if (existingCount > 0) {
+    console.log(`Roles already present (${existingCount}) — skipping role seed.`);
+    return;
   }
+
+  await prisma.role.createMany({ data: ROLES });
   console.log(`Seeded ${ROLES.length} roles.`);
+}
+
+/**
+ * Bootstraps the initial ADMIN user from environment variables so no admin
+ * credential is ever hardcoded in the repo. Runs in every environment
+ * (including production) when both ADMIN_MOBILE_NUMBER and ADMIN_PASSWORD are
+ * set; if either is missing it logs a notice and skips, so a fresh env is
+ * never blocked from seeding. Only creates the admin when no user with that
+ * mobile number exists yet — an existing user is left untouched (never
+ * re-created and never has its password rotated by the seed).
+ */
+async function seedAdminUser(): Promise<void> {
+  const mobileNumber = process.env.ADMIN_MOBILE_NUMBER;
+  const password = process.env.ADMIN_PASSWORD;
+
+  if (!mobileNumber || !password) {
+    console.log('ADMIN_MOBILE_NUMBER / ADMIN_PASSWORD not set — skipping admin bootstrap.');
+    return;
+  }
+
+  if (!/^\+91\d{10}$/.test(mobileNumber)) {
+    throw new Error('ADMIN_MOBILE_NUMBER must be in the format +91XXXXXXXXXX.');
+  }
+
+  // Seed only when this admin does not already exist.
+  const existing = await prisma.user.findUnique({ where: { mobileNumber } });
+  if (existing) {
+    console.log(`Admin user ${mobileNumber} already exists — skipping admin bootstrap.`);
+    return;
+  }
+
+  const passwordHash = await argon2.hash(password);
+  const adminRole = await prisma.role.findUniqueOrThrow({ where: { roleCode: 'ADMIN' } });
+
+  // Create the user and their ADMIN role assignment atomically.
+  await prisma.$transaction(async (tx) => {
+    const user = await tx.user.create({
+      data: {
+        mobileNumber,
+        passwordHash,
+        displayName: 'System Administrator',
+        status: 'ACTIVE',
+      },
+    });
+    await tx.userRole.create({
+      data: { userId: user.id, roleId: adminRole.id, effectiveFrom: new Date(), status: 'ACTIVE' },
+    });
+  });
+
+  console.log(`Seeded ADMIN user ${mobileNumber}.`);
 }
 
 /**
@@ -63,38 +115,38 @@ async function seedTestUser(): Promise<void> {
     return;
   }
 
-  const mobileNumber = '+919999999999';
+  const mobileNumber = '+919000000001';
+
+  // Seed only when this test user does not already exist.
+  const existing = await prisma.user.findUnique({ where: { mobileNumber } });
+  if (existing) {
+    console.log(`Test user ${mobileNumber} already exists — skipping test user seed.`);
+    return;
+  }
+
   const passwordHash = await argon2.hash('Test@1234');
-
-  const user = await prisma.user.upsert({
-    where: { mobileNumber },
-    update: {},
-    create: {
-      mobileNumber,
-      passwordHash,
-      displayName: 'Test Sakhi',
-      status: 'ACTIVE',
-    },
-  });
-
   const sakhiRole = await prisma.role.findUniqueOrThrow({ where: { roleCode: 'SAKHI' } });
 
-  // user_roles has no unique constraint on (userId, roleId) in the schema, so
-  // this is a plain find-or-create rather than an upsert.
-  const existingAssignment = await prisma.userRole.findFirst({
-    where: { userId: user.id, roleId: sakhiRole.id },
-  });
-  if (!existingAssignment) {
-    await prisma.userRole.create({
+  await prisma.$transaction(async (tx) => {
+    const user = await tx.user.create({
+      data: {
+        mobileNumber,
+        passwordHash,
+        displayName: 'Test Sakhi',
+        status: 'ACTIVE',
+      },
+    });
+    await tx.userRole.create({
       data: { userId: user.id, roleId: sakhiRole.id, effectiveFrom: new Date(), status: 'ACTIVE' },
     });
-  }
+  });
 
   console.log(`Seeded test user ${mobileNumber} (password: Test@1234) with SAKHI role.`);
 }
 
 async function main(): Promise<void> {
   await seedRoles();
+  await seedAdminUser();
   await seedTestUser();
 }
 

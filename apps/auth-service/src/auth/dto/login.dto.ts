@@ -1,9 +1,5 @@
 import { z } from 'zod';
-
-/** Indian mobile number in normalized E.164-like format, e.g. +919876543210. */
-const mobileNumberSchema = z
-  .string()
-  .regex(/^\+91\d{10}$/, 'mobileNumber must be in the format +91XXXXXXXXXX');
+import { mobileNumberSchema } from './mobile-number';
 
 export const loginSchema = z
   .object({
