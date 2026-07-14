@@ -4,17 +4,162 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider  = "postgresql"
   directUrl = env("DIRECT_URL")
-  url      = env("DATABASE_URL")
+  url       = env("DATABASE_URL")
 }
 
 // incentive-wages-service owns these tables only (forklift rule).
+// Field/table definitions sourced from docs/Arogya_Sakhi_Database_Design_ERD_Table_Definitions.docx.md
+// section "incentive_rates", "incentive_events", "payout_batches", "payout_lines" (Appendix A.1).
+// sakhi_id / geography_unit_id / project_id / changed_by_user_id / generated_by_user_id /
+// approved_by_user_id / created_by_user_id / updated_by_user_id / source_entity_id are plain
+// scalar columns, not Prisma relations, because sakhi_profiles, geography_units, projects, and
+// users are owned by other services (no cross-service joins per the forklift rule).
+// rate_id and payout_batch_id FKs are within this same service, so proper Prisma @relations
+// are declared between IncentiveRate/IncentiveEvent and PayoutBatch/PayoutLine.
+
+enum IncentiveRateType {
+  VISIT
+  REFERRAL
+  MEETING
+  TRAINING
+  RETAINER
+}
+
+enum IncentiveVisitType {
+  REGISTRATION_MOTHER
+  REGISTRATION_CHILD
+  ANC
+  ANC_HR
+  DELIVERY
+  PP
+  PP_HR
+  NN
+  NN_HR
+  INC
+  INC_HR
+  CCV
+  CCV_HR
+  REFERRAL_FOLLOWUP
+  CLOSURE_MOTHER
+  CLOSURE_CHILD
+}
+
+enum IncentiveReferralType {
+  STANDARD
+  ACCOMPANIED
+}
+
+enum IncentiveEligibilityStatus {
+  ELIGIBLE
+  INELIGIBLE
+  PENDING
+  REVERSED
+}
+
+enum PayoutBatchStatus {
+  DRAFT
+  GENERATED
+  APPROVED
+  PAID
+  CANCELLED
+}
+
+model IncentiveRate {
+  id              String                 @id @default(uuid()) @map("rate_id")
+  rateType        IncentiveRateType      @map("rate_type")
+  visitType       IncentiveVisitType?    @map("visit_type")
+  referralType    IncentiveReferralType? @map("referral_type")
+  // geography_units.geography_unit_id — owned by another service, no cross-service relation.
+  geographyUnitId String?                @map("geography_unit_id")
+  amountInr       Decimal                @map("amount_inr") @db.Decimal(10, 2)
+  effectiveFrom   DateTime               @map("effective_from") @db.Date
+  effectiveTo     DateTime?              @map("effective_to") @db.Date
+  // users.user_id — owned by another service, no cross-service relation.
+  changedByUserId String                 @map("changed_by_user_id")
+  changeReason    String?                @map("change_reason")
+  createdAt       DateTime               @default(now()) @map("created_at")
+  createdByUserId String?                @map("created_by_user_id")
+  updatedAt       DateTime               @updatedAt @map("updated_at")
+  updatedByUserId String?                @map("updated_by_user_id")
+  isDeleted       Boolean                @default(false) @map("is_deleted")
+  deletedAt       DateTime?              @map("deleted_at")
+
+  incentiveEvents IncentiveEvent[]
+
+  @@map("incentive_rates")
+}
+
 model IncentiveEvent {
-  id        String   @id @default(uuid())
-  name      String
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id                String                     @id @default(uuid()) @map("incentive_event_id")
+  // sakhi_profiles.sakhi_id — owned by another service, no cross-service relation.
+  sakhiId           String                     @map("sakhi_id")
+  sourceEntityType  IncentiveRateType          @map("source_entity_type")
+  sourceEntityId    String?                    @map("source_entity_id")
+  eventMonth        DateTime                   @map("event_month") @db.Date
+  rateId            String                     @map("rate_id")
+  quantity          Decimal                    @default(1) @map("quantity") @db.Decimal(10, 2)
+  amountInr         Decimal                    @map("amount_inr") @db.Decimal(10, 2)
+  eligibilityStatus IncentiveEligibilityStatus @map("eligibility_status")
+  calculatedAt      DateTime                   @map("calculated_at")
+  createdAt         DateTime                   @default(now()) @map("created_at")
+  createdByUserId   String?                    @map("created_by_user_id")
+  updatedAt         DateTime                   @updatedAt @map("updated_at")
+  updatedByUserId   String?                    @map("updated_by_user_id")
+  isDeleted         Boolean                    @default(false) @map("is_deleted")
+  deletedAt         DateTime?                  @map("deleted_at")
+
+  rate IncentiveRate @relation(fields: [rateId], references: [id])
 
   @@map("incentive_events")
+}
+
+model PayoutBatch {
+  id                String            @id @default(uuid()) @map("payout_batch_id")
+  // projects.project_id — owned by another service, no cross-service relation.
+  projectId         String            @map("project_id")
+  voucherMonth      DateTime          @map("voucher_month") @db.Date
+  batchStatus       PayoutBatchStatus @map("batch_status")
+  generatedAt       DateTime?         @map("generated_at")
+  // users.user_id — owned by another service, no cross-service relation.
+  generatedByUserId String?           @map("generated_by_user_id")
+  approvedAt        DateTime?         @map("approved_at")
+  // users.user_id — owned by another service, no cross-service relation.
+  approvedByUserId  String?           @map("approved_by_user_id")
+  createdAt         DateTime          @default(now()) @map("created_at")
+  createdByUserId   String?           @map("created_by_user_id")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+  updatedByUserId   String?           @map("updated_by_user_id")
+  isDeleted         Boolean           @default(false) @map("is_deleted")
+  deletedAt         DateTime?         @map("deleted_at")
+
+  payoutLines PayoutLine[]
+
+  @@map("payout_batches")
+}
+
+model PayoutLine {
+  id                  String    @id @default(uuid()) @map("payout_line_id")
+  payoutBatchId       String    @map("payout_batch_id")
+  // sakhi_profiles.sakhi_id — owned by another service, no cross-service relation.
+  sakhiId             String    @map("sakhi_id")
+  visitAmount         Decimal   @default(0) @map("visit_amount") @db.Decimal(10, 2)
+  referralAmount      Decimal   @default(0) @map("referral_amount") @db.Decimal(10, 2)
+  monthlyVisitCharges Decimal   @default(0) @map("monthly_visit_charges") @db.Decimal(10, 2)
+  meetingHonorarium   Decimal   @default(0) @map("meeting_honorarium") @db.Decimal(10, 2)
+  trainingHonorarium  Decimal   @default(0) @map("training_honorarium") @db.Decimal(10, 2)
+  retainerAmount      Decimal   @default(0) @map("retainer_amount") @db.Decimal(10, 2)
+  totalPayout         Decimal   @default(0) @map("total_payout") @db.Decimal(10, 2)
+  bankSnapshotJson    Json?     @map("bank_snapshot_json")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  createdByUserId     String?   @map("created_by_user_id")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+  updatedByUserId     String?   @map("updated_by_user_id")
+  isDeleted           Boolean   @default(false) @map("is_deleted")
+  deletedAt           DateTime? @map("deleted_at")
+
+  payoutBatch PayoutBatch @relation(fields: [payoutBatchId], references: [id])
+
+  @@map("payout_lines")
 }

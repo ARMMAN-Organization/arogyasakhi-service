@@ -20,15 +20,41 @@ describe('VisitInstanceService', () => {
     expect(repository.findMany).toHaveBeenCalledTimes(1);
   });
 
+  const sampleRow = {
+    id: '1',
+    scheduleId: '11111111-1111-1111-1111-111111111111',
+    beneficiaryId: '22222222-2222-2222-2222-222222222222',
+    sakhiId: '33333333-3333-3333-3333-333333333333',
+    localVisitUuid: 'local-visit-1',
+    actualVisitDate: null,
+    status: 'STARTED' as const,
+    meetBeneficiaryFlag: null,
+    notMetReason: null,
+    completedAt: null,
+    syncedAt: null,
+    createdAt: new Date(),
+    createdByUserId: null,
+    updatedAt: new Date(),
+    updatedByUserId: null,
+    isDeleted: false,
+    deletedAt: null,
+  };
+
   it('returns the repository list unchanged', async () => {
-    const rows = [{ id: '1', name: 'a', createdAt: new Date(), updatedAt: new Date() }];
+    const rows = [sampleRow];
     repository.findMany.mockResolvedValue(rows);
     await expect(service.list()).resolves.toBe(rows);
   });
 
   it('creates via repository with the given data', async () => {
-    const dto: CreateVisitInstanceInput = { name: 'device-1' };
-    const created = { id: '1', name: 'device-1', createdAt: new Date(), updatedAt: new Date() };
+    const dto: CreateVisitInstanceInput = {
+      scheduleId: '11111111-1111-1111-1111-111111111111',
+      beneficiaryId: '22222222-2222-2222-2222-222222222222',
+      sakhiId: '33333333-3333-3333-3333-333333333333',
+      localVisitUuid: 'local-visit-1',
+      status: 'STARTED',
+    };
+    const created = sampleRow;
     repository.create.mockResolvedValue(created);
     await expect(service.create(dto)).resolves.toBe(created);
     expect(repository.create).toHaveBeenCalledWith(dto);
@@ -36,6 +62,14 @@ describe('VisitInstanceService', () => {
 
   it('propagates repository errors on create', async () => {
     repository.create.mockRejectedValue(new Error('db down'));
-    await expect(service.create({ name: 'x' })).rejects.toThrow('db down');
+    await expect(
+      service.create({
+        scheduleId: '11111111-1111-1111-1111-111111111111',
+        beneficiaryId: '22222222-2222-2222-2222-222222222222',
+        sakhiId: '33333333-3333-3333-3333-333333333333',
+        localVisitUuid: 'local-visit-1',
+        status: 'STARTED',
+      }),
+    ).rejects.toThrow('db down');
   });
 });

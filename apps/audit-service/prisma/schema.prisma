@@ -4,17 +4,34 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider  = "postgresql"
   directUrl = env("DIRECT_URL")
-  url      = env("DATABASE_URL")
+  url       = env("DATABASE_URL")
 }
 
 // audit-service owns these tables only (forklift rule).
+// Field/table definitions sourced from docs/Arogya_Sakhi_Database_Design_ERD_Table_Definitions.docx.md
+// section "audit_log" (Appendix A.1).
+// actor_user_id / device_id are plain scalar columns, not Prisma relations, because
+// users / device_registry are owned by other services (no cross-service joins per
+// the forklift rule).
+//
+// audit_log is explicitly documented as an immutable, append-only table: unlike
+// every other table in the doc, it does NOT carry updated_at / updated_by_user_id /
+// is_deleted / deleted_at columns, and that is intentional — do not add them here.
+
 model AuditLog {
-  id        String   @id @default(uuid())
-  name      String
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id          String   @id @default(uuid()) @map("audit_id")
+  actorUserId String?  @map("actor_user_id")
+  action      String   @db.VarChar(120)
+  entityType  String   @map("entity_type") @db.VarChar(80)
+  entityId    String?  @map("entity_id")
+  beforeJson  Json?    @map("before_json")
+  afterJson   Json?    @map("after_json")
+  ipAddress   String?  @map("ip_address") @db.VarChar(45)
+  // device_registry.device_id — owned by another service, no cross-service relation.
+  deviceId    String?  @map("device_id")
+  createdAt   DateTime @default(now()) @map("created_at")
 
   @@map("audit_log")
 }

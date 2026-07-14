@@ -4,17 +4,127 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider  = "postgresql"
   directUrl = env("DIRECT_URL")
-  url      = env("DATABASE_URL")
+  url       = env("DATABASE_URL")
 }
 
 // notification-escalation-service owns these tables only (forklift rule).
+// Field/table definitions sourced from docs/Arogya_Sakhi_Database_Design_ERD_Table_Definitions.docx.md
+// section "escalation_events", "notifications" (Appendix A).
+// beneficiary_id / visit_id / referral_id / trigger_rule_version_id / assigned_supervisor_id /
+// recipient_user_id / linked_entity_id are plain scalar columns, not Prisma relations, because
+// beneficiary_cases, visit_instances, referrals, rule_versions, supervisor_profiles, and users
+// are owned by other services (no cross-service joins per the forklift rule).
+
+enum EscalationType {
+  ANC_2_MISSED
+  ANC_HR_MISSED
+  PP_MISSED
+  PP_HR_MISSED
+  NN_MISSED
+  NN_HR_MISSED
+  INC_2_MISSED
+  INC_HR_MISSED
+  CCV_MISSED
+  CCV_HR_MISSED
+  POST_EDD_MISSED
+  DELIVERY_FORM_PENDING
+  REFERRAL_FOLLOWUP_MISSED
+  REFERRAL_INCOMPLETE
+  TRANSFER_PENDING
+  TRANSFER_APPROVAL_PENDING
+  SYNC_DELAY
+  CLOSURE_PENDING
+  REOPEN_PENDING
+}
+
+enum EscalationStatus {
+  OPEN
+  ACKNOWLEDGED
+  TRANSFER_REQUESTED
+  CLOSE_REQUESTED
+  RESOLVED
+  DISMISSED
+}
+
+enum NotificationType {
+  MISSED_VISIT_ESCALATION
+  REFERRAL_UPDATE
+  REFERRAL_FOLLOWUP_DUE
+  REFERRAL_FOLLOWUP_OVERDUE
+  REOPEN_UPDATE
+  CLOSURE_UPDATE
+  LMP_CHANGE_UPDATE
+  FORM_UPDATE
+  DATA_SYNC_STATUS
+  VISIT_NEAR_MISS
+  EDD_APPROACHING
+  EDD_OVERDUE
+  SUPERVISOR_APPROVAL_REQUESTED
+  SUPERVISOR_APPROVAL_DECISION
+  APP_UPDATE_REQUIRED
+  MEETING_REMINDER
+  TRAINING_REMINDER
+  MEETING_UPDATE
+  TRAINING_UPDATE
+}
+
+enum NotificationStatus {
+  UNREAD
+  READ
+  DISMISSED
+  EXPIRED
+}
+
+model EscalationEvent {
+  id                   String           @id @default(uuid()) @map("escalation_id")
+  // beneficiary_cases.beneficiary_id — owned by another service, no cross-service relation.
+  beneficiaryId        String           @map("beneficiary_id")
+  // visit_instances.visit_id — owned by another service, no cross-service relation.
+  visitId              String?          @map("visit_id")
+  // referrals.referral_id — owned by another service, no cross-service relation.
+  referralId           String?          @map("referral_id")
+  escalationType       EscalationType   @map("escalation_type")
+  // rule_versions.rule_version_id — owned by another service, no cross-service relation.
+  triggerRuleVersionId String?          @map("trigger_rule_version_id")
+  status               EscalationStatus @map("status")
+  // supervisor_profiles.supervisor_id — owned by another service, no cross-service relation.
+  assignedSupervisorId String?          @map("assigned_supervisor_id")
+  resolvedAt           DateTime?        @map("resolved_at")
+  actionTaken          String?          @map("action_taken") @db.VarChar(80)
+  createdAt            DateTime         @default(now()) @map("created_at")
+  createdByUserId      String?          @map("created_by_user_id")
+  updatedAt            DateTime         @updatedAt @map("updated_at")
+  updatedByUserId      String?          @map("updated_by_user_id")
+  isDeleted            Boolean          @default(false) @map("is_deleted")
+  deletedAt            DateTime?        @map("deleted_at")
+
+  @@map("escalation_events")
+}
+
 model Notification {
-  id        String   @id @default(uuid())
-  name      String
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id               String             @id @default(uuid()) @map("notification_id")
+  // users.user_id — owned by another service, no cross-service relation.
+  recipientUserId  String             @map("recipient_user_id")
+  notificationType NotificationType   @map("notification_type")
+  title            String             @db.VarChar(180)
+  body             String?
+  priority         Int                @default(5)
+  ctaType          String?            @map("cta_type") @db.VarChar(80)
+  linkedEntityType String?            @map("linked_entity_type") @db.VarChar(80)
+  // Generic polymorphic reference (linked_entity_type names the owning table); no
+  // cross-service relation regardless of which service owns that entity type.
+  linkedEntityId   String?            @map("linked_entity_id")
+  status           NotificationStatus @map("status")
+  readAt           DateTime?          @map("read_at")
+  dismissedAt      DateTime?          @map("dismissed_at")
+  createdAt        DateTime           @default(now()) @map("created_at")
+  createdByUserId  String?            @map("created_by_user_id")
+  updatedAt        DateTime           @updatedAt @map("updated_at")
+  updatedByUserId  String?            @map("updated_by_user_id")
+  isDeleted        Boolean            @default(false) @map("is_deleted")
+  deletedAt        DateTime?          @map("deleted_at")
 
   @@map("notifications")
 }

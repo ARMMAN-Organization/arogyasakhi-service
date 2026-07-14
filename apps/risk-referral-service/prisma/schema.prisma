@@ -4,17 +4,264 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider  = "postgresql"
   directUrl = env("DIRECT_URL")
-  url      = env("DATABASE_URL")
+  url       = env("DATABASE_URL")
 }
 
 // risk-referral-service owns these tables only (forklift rule).
-model Referral {
-  id        String   @id @default(uuid())
-  name      String
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+// Field/table definitions sourced from docs/Arogya_Sakhi_Database_Design_ERD_Table_Definitions.docx.md
+// sections "risk_conditions", "risk_assessments", "risk_state_snapshots",
+// "Referral_trigger_sources", "referral_followups" (Appendix A), and the
+// "referrals" definition per section 4.5 summary table (no dedicated Appendix A
+// detail block exists for referrals in the doc; per explicit user instruction,
+// the section 4.5 summary columns are used, with standard audit columns added
+// to match every other table in the doc).
+//
+// beneficiary_id / visit_id / submission_id / rule_version_id / user_id /
+// media_asset_id are plain scalar columns (no Prisma relation), because
+// beneficiary_cases, visit_instances, form_submissions, rule_versions, users,
+// and media_assets are owned by other services (no cross-service joins per the
+// forklift rule). risk_flag_id (on Referral_trigger_sources) is likewise a
+// plain scalar column: risk_flags is not one of the tables this service's
+// Prisma schema is scoped to model in this change.
+//
+// Special override (confirmed by user): risk_state_snapshots.ccv_state uses 5
+// values instead of the doc's literal 4, per SRS: NEVER_HR,
+// CURRENTLY_HR_SAM_DANGER, CURRENTLY_HR_OTHER, RECENTLY_RECOVERED,
+// STABLE_LOW_RISK.
 
+enum RiskEntityType {
+  MOTHER
+  CHILD
+}
+
+enum RiskPhase {
+  REGISTRATION
+  ANC
+  DELIVERY
+  PP
+  NN
+  INC
+  CCV
+}
+
+enum RiskGradeScale {
+  BINARY
+  NORMAL_MILD_MODERATE_SEVERE
+  NORMAL_LOW_MEDIUM_HIGH
+}
+
+enum RiskConditionStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum OverallRiskCategory {
+  NORMAL
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum RiskStatePhase {
+  ANC
+  PP
+  NN
+  INC
+  CCV
+  ANC_REGISTRATION
+  INC_REGISTRATION
+}
+
+// Override confirmed by user: 5 values instead of the doc's 4 (SRS override).
+enum CcvState {
+  NEVER_HR
+  CURRENTLY_HR_SAM_DANGER
+  CURRENTLY_HR_OTHER
+  RECENTLY_RECOVERED
+  STABLE_LOW_RISK
+}
+
+enum ReferralType {
+  STANDARD
+  ACCOMPANIED
+}
+
+enum FacilityType {
+  PUBLIC
+  PRIVATE
+  PHC
+  RH
+  DH
+  OTHER
+}
+
+enum ReferralStatus {
+  INITIATED
+  PENDING_FOLLOWUP
+  COMPLETED
+  LAPSED
+  SKIPPED
+  CANCELLED
+}
+
+enum SupervisorApprovalStatus {
+  NOT_REQUIRED
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum ReferralFollowupStatus {
+  PENDING
+  COMPLETED
+  INCOMPLETE
+  LAPSED
+}
+
+model RiskCondition {
+  id                       String              @id @default(uuid()) @map("risk_condition_id")
+  conditionCode            String              @unique @map("condition_code") @db.VarChar(80)
+  conditionName            String              @map("condition_name") @db.VarChar(180)
+  entityType               RiskEntityType      @map("entity_type")
+  phase                    RiskPhase
+  gradeScale               RiskGradeScale      @map("grade_scale")
+  referralRequiredDefault  Boolean             @default(false) @map("referral_required_default")
+  educationRequiredDefault Boolean             @default(false) @map("education_required_default")
+  status                   RiskConditionStatus
+  createdAt                DateTime            @default(now()) @map("created_at")
+  createdByUserId          String?             @map("created_by_user_id")
+  updatedAt                DateTime            @updatedAt @map("updated_at")
+  updatedByUserId          String?             @map("updated_by_user_id")
+  isDeleted                Boolean             @default(false) @map("is_deleted")
+  deletedAt                DateTime?           @map("deleted_at")
+
+  @@map("risk_conditions")
+}
+
+model RiskAssessment {
+  id                  String              @id @default(uuid()) @map("risk_assessment_id")
+  // beneficiary_cases.beneficiary_id — owned by another service, no cross-service relation.
+  beneficiaryId       String              @map("beneficiary_id")
+  // visit_instances.visit_id — owned by another service, no cross-service relation.
+  visitId             String?             @map("visit_id")
+  // form_submissions.submission_id — owned by another service, no cross-service relation.
+  submissionId        String              @map("submission_id")
+  // rule_versions.rule_version_id — owned by another service, no cross-service relation.
+  ruleVersionId       String              @map("rule_version_id")
+  evaluatedAt         DateTime            @map("evaluated_at")
+  overallRiskCategory OverallRiskCategory @map("overall_risk_category")
+  overallHighRiskFlag Boolean             @default(false) @map("overall_high_risk_flag")
+  hrDetectedFlag      Boolean             @default(false) @map("hr_detected_flag")
+  createdAt           DateTime            @default(now()) @map("created_at")
+  createdByUserId     String?             @map("created_by_user_id")
+  updatedAt           DateTime            @updatedAt @map("updated_at")
+  updatedByUserId     String?             @map("updated_by_user_id")
+  isDeleted           Boolean             @default(false) @map("is_deleted")
+  deletedAt           DateTime?           @map("deleted_at")
+
+  @@map("risk_assessments")
+}
+
+model RiskStateSnapshot {
+  id               String         @id @default(uuid()) @map("risk_state_id")
+  // beneficiary_cases.beneficiary_id — owned by another service, no cross-service relation.
+  beneficiaryId    String         @map("beneficiary_id")
+  phase            RiskStatePhase
+  asOfDate         DateTime       @map("as_of_date") @db.Date
+  baselineRiskJson Json?          @map("baseline_risk_json")
+  latestRiskJson   Json?          @map("latest_risk_json")
+  everAtRiskJson   Json?          @map("ever_at_risk_json")
+  // visit_instances.visit_id — owned by another service, no cross-service relation.
+  sourceVisitId    String?        @map("source_visit_id")
+  // Override confirmed by user (SRS): 5 values instead of doc's 4.
+  ccvState         CcvState?      @map("ccv_state")
+  createdAt        DateTime       @default(now()) @map("created_at")
+  createdByUserId  String?        @map("created_by_user_id")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
+  updatedByUserId  String?        @map("updated_by_user_id")
+  isDeleted        Boolean        @default(false) @map("is_deleted")
+  deletedAt        DateTime?      @map("deleted_at")
+
+  @@map("risk_state_snapshots")
+}
+
+// Doc has no dedicated Appendix A detail block for "referrals"; per explicit
+// user override, columns are taken from the section 4.5 summary table, with
+// standard audit columns added to match every other Appendix A table.
+model Referral {
+  id                       String                   @id @default(uuid()) @map("referral_id")
+  // beneficiary_cases.beneficiary_id — owned by another service, no cross-service relation.
+  beneficiaryId            String                   @map("beneficiary_id")
+  // visit_instances.visit_id — owned by another service, no cross-service relation.
+  // Nullable per the referrals override spec's partial-unique constraint
+  // "UNIQUE on visit_id where visit_id IS NOT NULL" (visit_referral_once).
+  visitId                  String?                  @map("visit_id")
+  // form_submissions.submission_id — owned by another service, no cross-service relation.
+  sourceSubmissionId       String?                  @map("source_submission_id")
+  referralType             ReferralType             @map("referral_type")
+  referralDate             DateTime                 @map("referral_date") @db.Date
+  triggerConditionListJson Json?                    @map("trigger_condition_list_json")
+  facilityType             FacilityType?            @map("facility_type")
+  facilityName             String?                  @map("facility_name") @db.VarChar(200)
+  status                   ReferralStatus
+  validTill                DateTime?                @map("valid_till") @db.Date
+  supervisorApprovalStatus SupervisorApprovalStatus @default(NOT_REQUIRED) @map("supervisor_approval_status")
+  createdAt                DateTime                 @default(now()) @map("created_at")
+  createdByUserId          String?                  @map("created_by_user_id")
+  updatedAt                DateTime                 @updatedAt @map("updated_at")
+  updatedByUserId          String?                  @map("updated_by_user_id")
+  isDeleted                Boolean                  @default(false) @map("is_deleted")
+  deletedAt                DateTime?                @map("deleted_at")
+
+  referralTriggerSources ReferralTriggerSource[]
+  referralFollowups      ReferralFollowup[]
+
+  @@unique([visitId], map: "visit_referral_once")
   @@map("referrals")
+}
+
+model ReferralTriggerSource {
+  id                 String   @id @default(uuid()) @map("referral_trigger_source_id")
+  referralId         String   @map("referral_id")
+  // risk_flags.risk_flag_id — not modeled in this schema's scope, no cross-service relation.
+  riskFlagId         String?  @map("risk_flag_id")
+  // risk_conditions.risk_condition_id — same-service table, but relation intentionally
+  // omitted per task scope (reporting-only reference); kept as scalar to mirror doc usage.
+  riskConditionId    String?  @map("risk_condition_id")
+  // form_submissions.submission_id — owned by another service, no cross-service relation.
+  sourceSubmissionId String   @map("source_submission_id")
+  sourceFieldCode    String?  @map("source_field_code") @db.VarChar(100)
+  triggerReason      String?  @map("trigger_reason") @db.VarChar(255)
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  referral Referral @relation(fields: [referralId], references: [id])
+
+  @@map("Referral_trigger_sources")
+}
+
+model ReferralFollowup {
+  id                  String                 @id @default(uuid()) @map("followup_id")
+  referralId          String                 @map("referral_id")
+  followupDate        DateTime               @map("followup_date") @db.Date
+  visitedFacilityFlag Boolean?               @map("visited_facility_flag")
+  notVisitedReason    String?                @map("not_visited_reason") @db.VarChar(255)
+  diagnosis           String?                @map("diagnosis")
+  treatmentGiven      String?                @map("treatment_given")
+  outcome             String?                @map("outcome") @db.VarChar(255)
+  // media_assets.media_asset_id — owned by another service, no cross-service relation.
+  casePaperMediaId    String?                @map("case_paper_media_id")
+  followupStatus      ReferralFollowupStatus @map("followup_status")
+  createdAt           DateTime               @default(now()) @map("created_at")
+  createdByUserId     String?                @map("created_by_user_id")
+  updatedAt           DateTime               @updatedAt @map("updated_at")
+  updatedByUserId     String?                @map("updated_by_user_id")
+  isDeleted           Boolean                @default(false) @map("is_deleted")
+  deletedAt           DateTime?              @map("deleted_at")
+
+  referral Referral @relation(fields: [referralId], references: [id])
+
+  @@map("referral_followups")
 }

@@ -16,6 +16,15 @@ const schema = z.object({
         .filter(Boolean),
     ),
 
+  // Public half of the RS256 keypair used to sign access tokens (see
+  // auth-service). Only the public key is needed here — the gateway verifies
+  // tokens, it never issues them. `.env` files don't unescape literal `\n` in
+  // double-quoted values, so we normalize regardless of how it arrives.
+  JWT_PUBLIC_KEY: z
+    .string()
+    .min(1)
+    .transform((v) => v.replace(/\\n/g, '\n')),
+
   // Downstream service base URLs. The gateway reaches every service ONLY via
   // these URLs (HTTP) — it never imports another service's code. In production
   // these become internal DNS names (e.g. http://auth-service.internal:3002).

@@ -1,13 +1,27 @@
 import express, { type Application } from 'express';
 import helmet from 'helmet';
 import { pinoHttp } from 'pino-http';
-import { buildLoggerOptions, errorHandler, notFoundHandler, requestId } from '@armman/service-commons';
+import {
+  buildLoggerOptions,
+  errorHandler,
+  notFoundHandler,
+  requestId,
+} from '@armman/service-commons';
 import { appConfig } from './config/app-config';
 import { PrismaService } from './prisma/prisma.service';
 import { createHealthRouter } from './health/health.controller';
 import { createBeneficiaryModule } from './beneficiary/beneficiary.module';
 
-export { asyncHandler, ok, fail, validateBody, requireRoles, HttpError, ErrorCode } from '@armman/service-commons';
+export {
+  asyncHandler,
+  ok,
+  fail,
+  validateBody,
+  requireRoles,
+  trustGatewayIdentity,
+  HttpError,
+  ErrorCode,
+} from '@armman/service-commons';
 
 /** Builds the Express application: security headers, logging, request-id, routes, error handling. */
 export function createApp(prisma: PrismaService): Application {

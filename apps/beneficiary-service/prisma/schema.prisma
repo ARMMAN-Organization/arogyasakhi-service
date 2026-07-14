@@ -1,22 +1,386 @@
 // Beneficiary domain owns these tables only (forklift rule: no cross-service tables).
+// Field/table definitions sourced from docs/Arogya_Sakhi_Database_Design_ERD_Table_Definitions.docx.md
+// sections "beneficiary_pii", "Beneficiary_search_tokens" (Appendix A, ~lines 589-634),
+// "beneficiary_cases", "mother_case_details", "child_case_details", "consent_records",
+// "Beneficiary_risk_condition_summary", "beneficiary_status_history",
+// "Beneficiary_current_summary" (Appendix A, ~lines 824-1002).
+//
+// Cross-service FK columns (users.user_id, projects.project_id, sakhi_profiles.sakhi_id,
+// lookup_values.lookup_value_id, media_assets.media_asset_id, form_submissions.submission_id,
+// risk_conditions.risk_condition_id, visit_instances.visit_id, rule_versions.rule_version_id,
+// village/pada/health_sub_centre/phc/health_block/states/district/taluka/geography_units/
+// panchayats identifiers) are owned by other services and are therefore plain scalar
+// columns here (String), with NO Prisma @relation, per the forklift / no-cross-service-joins
+// rule (see auth-service/prisma/schema.prisma for the same convention).
+//
+// Tables owned by this service (beneficiary_pii, beneficiary_search_tokens, beneficiary_cases,
+// mother_case_details, child_case_details, consent_records,
+// beneficiary_risk_condition_summary, beneficiary_status_history,
+// beneficiary_current_summary) DO get proper Prisma @relation edges between each other.
+
 generator client {
   provider = "prisma-client-js"
   output   = "../../../node_modules/.prisma/client-beneficiary-service"
 }
 
 datasource db {
-  provider = "postgresql"
+  provider  = "postgresql"
   directUrl = env("DIRECT_URL")
-  url      = env("DATABASE_URL")
+  url       = env("DATABASE_URL")
+}
+
+enum Sex {
+  FEMALE
+  MALE
+  OTHER
+  UNKNOWN
+}
+
+enum ChildSex {
+  FEMALE
+  MALE
+  OTHER
+  INTERSEX
+}
+
+enum CaseType {
+  MOTHER
+  CHILD
+}
+
+enum BeneficiaryStatus {
+  ACTIVE
+  JOURNEY_COMPLETE
+  CLOSED
+  TRANSFERRED
+  REOPEN_REQUESTED
+}
+
+enum CasePhase {
+  ANC
+  DELIVERY
+  PP
+  NN
+  INC
+  CCV
+  CLOSED
+}
+
+enum MotherCasePhase {
+  ANC
+  DELIVERY
+  PP
+  CLOSED
+}
+
+enum ChildCasePhase {
+  NN
+  INC
+  CCV
+  CLOSED
+}
+
+// SRS override (confirmed by user): 5 enum values instead of the doc's 4 for
+// child_case_details.ccv_opening_risk_state.
+enum CcvOpeningRiskState {
+  NEVER_HR
+  CURRENTLY_HR_SAM_DANGER
+  CURRENTLY_HR_OTHER
+  RECENTLY_RECOVERED
+  STABLE_LOW_RISK
+}
+
+enum ConsentType {
+  PROGRAM_ENROLLMENT
+}
+
+enum ConsentStatus {
+  GIVEN
+  REFUSED
+  WITHDRAWN
+}
+
+enum SummaryPhase {
+  REGISTRATION
+  ANC
+  DELIVERY
+  PP
+  NN
+  INFANT_FOLLOWUP
+  CLOSURE
+}
+
+model BeneficiaryPii {
+  id                 String    @id @default(uuid()) @map("pii_id")
+  fullNameEnc        Bytes     @map("full_name_enc")
+  fullNameSearchHash Bytes     @map("full_name_search_hash")
+  phoneEnc           Bytes?    @map("phone_enc")
+  phoneSearchHash    Bytes?    @map("phone_search_hash")
+  alternatePhoneEnc  Bytes?    @map("alternate_phone_enc")
+  // village.village_id — owned by another service.
+  villageId          String?   @map("village_id")
+  // pada.pada_id — owned by another service.
+  padaId             String?   @map("pada_id")
+  // health_sub_centre.health_sub_centre_id — owned by another service.
+  healthSubCentreId  String?   @map("health_sub_centre_id")
+  // phc.phc_id — owned by another service.
+  phcId              String?   @map("phc_id")
+  // health_block.health_block_id — owned by another service.
+  healthBlockId      String?   @map("health_block_id")
+  dateOfBirth        DateTime? @map("date_of_birth") @db.Date
+  sex                Sex?
+  addressLineEnc     String?   @map("address_line_enc")
+  // states.state_id — owned by another service.
+  stateId            String?   @map("state_id")
+  // district.district_id — owned by another service.
+  districtId         String?   @map("district_id")
+  // taluka.taluka_id — owned by another service.
+  talukaId           String?   @map("taluka_id")
+  rchNumberEnc       Bytes?    @map("rch_number_enc")
+  rchNumberHash      Bytes?    @map("rch_number_hash")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  createdByUserId    String?   @map("created_by_user_id")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+  updatedByUserId    String?   @map("updated_by_user_id")
+  isDeleted          Boolean   @default(false) @map("is_deleted")
+  deletedAt          DateTime? @map("deleted_at")
+
+  beneficiaryCases BeneficiaryCase[]
+
+  @@index([fullNameSearchHash])
+  @@index([phoneSearchHash])
+  @@index([dateOfBirth])
+  @@index([rchNumberHash])
+  @@map("beneficiary_pii")
+}
+
+model BeneficiarySearchToken {
+  id               String   @id @default(uuid()) @map("search_token_id")
+  beneficiaryId    String   @map("beneficiary_id")
+  nameToken        String?  @map("name_token") @db.VarChar(128)
+  dobToken         String?  @map("dob_token") @db.VarChar(128)
+  lmpDateToken     String?  @map("lmp_date_token") @db.VarChar(128)
+  geographyToken   String?  @map("geography_token") @db.VarChar(128)
+  // lookup_values.lookup_value_id — owned by another service.
+  caseTypeLookupId String   @map("case_type_lookup_id")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  beneficiaryCase BeneficiaryCase @relation(fields: [beneficiaryId], references: [id])
+
+  @@map("Beneficiary_search_tokens")
 }
 
 model BeneficiaryCase {
-  id         String   @id @default(uuid())
-  caseType   String   @map("case_type") // MOTHER | CHILD
-  name       String
-  projectId  String   @map("project_id")
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @updatedAt @map("updated_at")
+  id                      String            @id @default(uuid()) @map("beneficiary_id")
+  piiId                   String            @map("pii_id")
+  // projects.project_id — owned by another service.
+  projectId               String            @map("project_id")
+  caseType                CaseType          @map("case_type")
+  pregnancySequenceNo     Int?              @map("pregnancy_sequence_no")
+  previousBeneficiaryId   String?           @map("previous_beneficiary_id")
+  motherBeneficiaryId     String?           @map("mother_beneficiary_id")
+  // sakhi_profiles.sakhi_id — owned by another service.
+  sakhiId                 String            @map("sakhi_id")
+  registrationDate        DateTime          @map("registration_date") @db.Date
+  currentStatus           BeneficiaryStatus @default(ACTIVE) @map("current_status")
+  currentPhase            CasePhase         @map("current_phase")
+  // lookup_values.lookup_value_id — owned by another service.
+  beneficiaryTypeLookupId String            @map("beneficiary_type_lookup_id")
+  // lookup_values.lookup_value_id — owned by another service.
+  caseTypeLookupId        String            @map("case_type_lookup_id")
+  journeyStartDate        DateTime          @map("journey_start_date") @db.Date
+  journeyEndDate          DateTime?         @map("journey_end_date") @db.Date
+  createdAt               DateTime          @default(now()) @map("created_at")
+  createdByUserId         String?           @map("created_by_user_id")
+  updatedAt               DateTime          @updatedAt @map("updated_at")
+  updatedByUserId         String?           @map("updated_by_user_id")
+  isDeleted               Boolean           @default(false) @map("is_deleted")
+  deletedAt               DateTime?         @map("deleted_at")
+
+  pii                    BeneficiaryPii                    @relation(fields: [piiId], references: [id])
+  previousBeneficiary    BeneficiaryCase?                  @relation("PreviousPregnancyCase", fields: [previousBeneficiaryId], references: [id])
+  nextPregnancyCases     BeneficiaryCase[]                 @relation("PreviousPregnancyCase")
+  motherCase             BeneficiaryCase?                  @relation("MotherChildCase", fields: [motherBeneficiaryId], references: [id])
+  childCases             BeneficiaryCase[]                 @relation("MotherChildCase")
+  searchTokens           BeneficiarySearchToken[]
+  motherCaseDetails      MotherCaseDetails?
+  childCaseDetails       ChildCaseDetails?
+  consentRecords         ConsentRecord[]
+  riskConditionSummaries BeneficiaryRiskConditionSummary[]
+  statusHistory          BeneficiaryStatusHistory[]
+  currentSummary         BeneficiaryCurrentSummary?
 
   @@map("beneficiary_cases")
+}
+
+model MotherCaseDetails {
+  id                       String          @id @default(uuid()) @map("mother_case_id")
+  beneficiaryId            String          @unique @map("beneficiary_id")
+  lmpDate                  DateTime        @map("lmp_date") @db.Date
+  eddDate                  DateTime        @map("edd_date") @db.Date
+  gravida                  Int?
+  parity                   Int?
+  heightCm                 Decimal?        @map("height_cm") @db.Decimal(5, 2)
+  // form_submissions.submission_id — owned by another service.
+  registrationSubmissionId String?         @map("registration_submission_id")
+  bmiAtRegistration        Decimal?        @map("bmi_at_registration") @db.Decimal(5, 2)
+  baselineRiskFlag         Boolean         @default(false) @map("baseline_risk_flag")
+  currentPhase             MotherCasePhase @default(ANC) @map("current_phase")
+  createdAt                DateTime        @default(now()) @map("created_at")
+  createdByUserId          String?         @map("created_by_user_id")
+  updatedAt                DateTime        @updatedAt @map("updated_at")
+  updatedByUserId          String?         @map("updated_by_user_id")
+  isDeleted                Boolean         @default(false) @map("is_deleted")
+  deletedAt                DateTime?       @map("deleted_at")
+
+  beneficiaryCase BeneficiaryCase @relation(fields: [beneficiaryId], references: [id])
+
+  @@map("mother_case_details")
+}
+
+model ChildCaseDetails {
+  id                  String               @id @default(uuid()) @map("child_case_id")
+  beneficiaryId       String               @unique @map("beneficiary_id")
+  motherBeneficiaryId String?              @map("mother_beneficiary_id")
+  dateOfBirth         DateTime             @map("date_of_birth") @db.Date
+  sex                 ChildSex?
+  birthWeightKg       Decimal?             @map("birth_weight_kg") @db.Decimal(5, 2)
+  birthLengthCm       Decimal?             @map("birth_length_cm") @db.Decimal(5, 2)
+  prematureFlag       Boolean?             @map("premature_flag")
+  linkedAncCase       Boolean              @default(false) @map("linked_anc_case")
+  currentPhase        ChildCasePhase       @default(NN) @map("current_phase")
+  ccvOpeningRiskState CcvOpeningRiskState? @map("ccv_opening_risk_state")
+  createdAt           DateTime             @default(now()) @map("created_at")
+  createdByUserId     String?              @map("created_by_user_id")
+  updatedAt           DateTime             @updatedAt @map("updated_at")
+  updatedByUserId     String?              @map("updated_by_user_id")
+  isDeleted           Boolean              @default(false) @map("is_deleted")
+  deletedAt           DateTime?            @map("deleted_at")
+
+  beneficiaryCase BeneficiaryCase @relation(fields: [beneficiaryId], references: [id])
+
+  @@map("child_case_details")
+}
+
+model ConsentRecord {
+  id               String        @id @default(uuid()) @map("consent_id")
+  beneficiaryId    String        @map("beneficiary_id")
+  consentType      ConsentType   @map("consent_type")
+  consentStatus    ConsentStatus @map("consent_status")
+  consentDate      DateTime      @map("consent_date") @db.Date
+  // media_assets.media_asset_id — owned by another service.
+  mediaAssetId     String?       @map("media_asset_id")
+  // users.user_id — owned by another service (auth-service).
+  capturedByUserId String        @map("captured_by_user_id")
+  createdAt        DateTime      @default(now()) @map("created_at")
+  createdByUserId  String?       @map("created_by_user_id")
+  updatedAt        DateTime      @updatedAt @map("updated_at")
+  updatedByUserId  String?       @map("updated_by_user_id")
+  isDeleted        Boolean       @default(false) @map("is_deleted")
+  deletedAt        DateTime?     @map("deleted_at")
+
+  beneficiaryCase BeneficiaryCase @relation(fields: [beneficiaryId], references: [id])
+
+  @@map("consent_records")
+}
+
+model BeneficiaryRiskConditionSummary {
+  id                           String       @id @default(uuid()) @map("beneficiary_risk_condition_summary_id")
+  beneficiaryId                String       @map("beneficiary_id")
+  // risk_conditions.risk_condition_id — owned by another service.
+  riskConditionId              String       @map("risk_condition_id")
+  phase                        SummaryPhase
+  baselineGrade                String?      @map("baseline_grade") @db.VarChar(50)
+  baselineObservedValueJson    Json?        @map("baseline_observed_value_json")
+  // visit_instances.visit_id — owned by another service.
+  baselineVisitId              String?      @map("baseline_visit_id")
+  // form_submissions.submission_id — owned by another service.
+  baselineSubmissionId         String?      @map("baseline_submission_id")
+  baselineAssessedAt           DateTime?    @map("baseline_assessed_at")
+  latestGrade                  String?      @map("latest_grade") @db.VarChar(50)
+  latestObservedValueJson      Json?        @map("latest_observed_value_json")
+  // visit_instances.visit_id — owned by another service.
+  latestVisitId                String?      @map("latest_visit_id")
+  // form_submissions.submission_id — owned by another service.
+  latestSubmissionId           String?      @map("latest_submission_id")
+  latestAssessedAt             DateTime?    @map("latest_assessed_at")
+  everHighestGrade             String?      @map("ever_highest_grade") @db.VarChar(50)
+  everHighestObservedValueJson Json?        @map("ever_highest_observed_value_json")
+  // visit_instances.visit_id — owned by another service.
+  everHighestVisitId           String?      @map("ever_highest_visit_id")
+  // form_submissions.submission_id — owned by another service.
+  everHighestSubmissionId      String?      @map("ever_highest_submission_id")
+  everHighestAssessedAt        DateTime?    @map("ever_highest_assessed_at")
+  everAtRiskFlag               Boolean      @default(false) @map("ever_at_risk_flag")
+  currentReferralTriggerFlag   Boolean      @default(false) @map("current_referral_trigger_flag")
+  currentHrVisitTriggerFlag    Boolean      @default(false) @map("current_hr_visit_trigger_flag")
+  // rule_versions.rule_version_id — owned by another service (rules-service).
+  sourceRuleVersionId          String?      @map("source_rule_version_id")
+  updatedAt                    DateTime     @updatedAt @map("updated_at")
+
+  beneficiaryCase BeneficiaryCase @relation(fields: [beneficiaryId], references: [id])
+
+  @@map("Beneficiary_risk_condition_summary")
+}
+
+model BeneficiaryStatusHistory {
+  id              String             @id @default(uuid()) @map("status_history_id")
+  beneficiaryId   String             @map("beneficiary_id")
+  fromStatus      BeneficiaryStatus? @map("from_status")
+  toStatus        BeneficiaryStatus  @map("to_status")
+  reasonCode      String?            @map("reason_code") @db.VarChar(80)
+  // users.user_id — owned by another service (auth-service).
+  changedByUserId String             @map("changed_by_user_id")
+  changedAt       DateTime           @map("changed_at")
+  notes           String?
+  createdAt       DateTime           @default(now()) @map("created_at")
+  createdByUserId String?            @map("created_by_user_id")
+  updatedAt       DateTime           @updatedAt @map("updated_at")
+  updatedByUserId String?            @map("updated_by_user_id")
+  isDeleted       Boolean            @default(false) @map("is_deleted")
+  deletedAt       DateTime?          @map("deleted_at")
+
+  beneficiaryCase BeneficiaryCase @relation(fields: [beneficiaryId], references: [id])
+
+  @@map("beneficiary_status_history")
+}
+
+model BeneficiaryCurrentSummary {
+  beneficiaryId           String    @id @map("beneficiary_id")
+  piiId                   String    @map("pii_id")
+  // projects.project_id — owned by another service.
+  projectId               String    @map("project_id")
+  // sakhi_profiles.sakhi_id — owned by another service.
+  sakhiId                 String    @map("sakhi_id")
+  // lookup_values.lookup_value_id — owned by another service.
+  caseTypeLookupId        String    @map("case_type_lookup_id")
+  // lookup_values.lookup_value_id — owned by another service.
+  currentStatusLookupId   String    @map("current_status_lookup_id")
+  dob                     DateTime? @db.Date
+  lmpDate                 DateTime? @map("lmp_date") @db.Date
+  eddDate                 DateTime? @map("edd_date") @db.Date
+  dateOfDelivery          DateTime? @map("date_of_delivery") @db.Date
+  closureDate             DateTime? @map("closure_date") @db.Date
+  activeFlag              Boolean   @default(true) @map("active_flag")
+  overallEverAtRiskFlag   Boolean   @default(false) @map("overall_ever_at_risk_flag")
+  latestVisitHighRiskFlag Boolean   @default(false) @map("latest_visit_high_risk_flag")
+  referralActiveFlag      Boolean   @default(false) @map("referral_active_flag")
+  // visit_instances.visit_id — owned by another service.
+  lastVisitId             String?   @map("last_visit_id")
+  lastVisitDate           DateTime? @map("last_visit_date") @db.Date
+  // states.state_id — owned by another service.
+  stateId                 String?   @map("state_id")
+  // districts.district_id — owned by another service.
+  districtId              String?   @map("district_id")
+  // geography_units.geography_unit_id — owned by another service.
+  blockGeographyUnitId    String?   @map("block_geography_unit_id")
+  // panchayats.panchayat_id — owned by another service.
+  panchayatId             String?   @map("panchayat_id")
+  // geography_units.geography_unit_id — owned by another service.
+  villageGeographyUnitId  String?   @map("village_geography_unit_id")
+  updatedAt               DateTime  @updatedAt @map("updated_at")
+
+  beneficiaryCase BeneficiaryCase @relation(fields: [beneficiaryId], references: [id])
+
+  @@map("Beneficiary_current_summary")
 }

@@ -4,17 +4,84 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider  = "postgresql"
   directUrl = env("DIRECT_URL")
-  url      = env("DATABASE_URL")
+  url       = env("DATABASE_URL")
 }
 
 // media-service owns these tables only (forklift rule).
+// Field/table definitions sourced from docs/Arogya_Sakhi_Database_Design_ERD_Table_Definitions.docx.md
+// section "media_assets" (~1162-1192) and "referral_followup_media" (~1194-1203) (Appendix A).
+// uploaded_by_user_id / created_by_user_id / updated_by_user_id (users.user_id), beneficiary_id
+// (beneficiary_cases.beneficiary_id), visit_id (visit_instances.visit_id), submission_id
+// (form_submissions.submission_id), referral_id (referrals.referral_id), followup_id
+// (referral_followups.followup_id), event_id (supervisor_events.event_id), and
+// asset_type_lookup_id (lookup_values.lookup_value_id) are plain scalar columns, not Prisma
+// relations, because those tables are owned by other services (no cross-service joins per the
+// forklift rule). MediaAsset and ReferralFollowupMedia are both owned by this service, so a
+// proper Prisma relation is declared between them via media_asset_id.
+
+enum MediaAssetType {
+  CONSENT_PHOTO
+  REFERRAL_CASE_PAPER
+  REFERRAL_DISCHARGE_SUMMARY
+  REFERRAL_HEALTH_FACILITY_PHOTO
+  REFERRAL_SAKHI_BENEFICIARY_PHOTO
+  REFERRAL_INVESTIGATION_REPORT
+  TRAINING_PHOTO
+  HEALTH_EDUCATION
+  FAQ
+  REPORT_EXPORT
+  OTHER
+}
+
 model MediaAsset {
-  id        String   @id @default(uuid())
-  name      String
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id               String         @id @default(uuid()) @map("media_asset_id")
+  assetType        MediaAssetType @map("asset_type")
+  storageUri       String         @map("storage_uri") @db.VarChar(512)
+  checksum         Bytes
+  mimeType         String         @map("mime_type") @db.VarChar(120)
+  sizeBytes        BigInt         @map("size_bytes")
+  // users.user_id — owned by another service, no cross-service relation.
+  uploadedByUserId String?        @map("uploaded_by_user_id")
+  uploadedAt       DateTime       @map("uploaded_at")
+  linkedEntityType String?        @map("linked_entity_type") @db.VarChar(80)
+  linkedEntityId   String?        @map("linked_entity_id")
+  encryptedFlag    Boolean        @default(true) @map("encrypted_flag")
+  // beneficiary_cases.beneficiary_id — owned by another service, no cross-service relation.
+  beneficiaryId    String?        @map("beneficiary_id")
+  // visit_instances.visit_id — owned by another service, no cross-service relation.
+  visitId          String?        @map("visit_id")
+  // form_submissions.submission_id — owned by another service, no cross-service relation.
+  submissionId     String?        @map("submission_id")
+  // referrals.referral_id — owned by another service, no cross-service relation.
+  referralId       String?        @map("referral_id")
+  // referral_followups.followup_id — owned by another service, no cross-service relation.
+  followupId       String?        @map("followup_id")
+  // supervisor_events.event_id — owned by another service, no cross-service relation.
+  eventId          String?        @map("event_id")
+  createdAt        DateTime       @default(now()) @map("created_at")
+  createdByUserId  String?        @map("created_by_user_id")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
+  updatedByUserId  String?        @map("updated_by_user_id")
+  isDeleted        Boolean        @default(false) @map("is_deleted")
+  deletedAt        DateTime?      @map("deleted_at")
+
+  referralFollowupMedia ReferralFollowupMedia[]
 
   @@map("media_assets")
+}
+
+model ReferralFollowupMedia {
+  id                String   @id @default(uuid()) @map("referral_followup_media_id")
+  // referral_followups.followup_id — owned by another service, no cross-service relation.
+  followupId        String   @map("followup_id")
+  mediaAssetId      String   @map("media_asset_id")
+  // lookup_values.lookup_value_id — owned by another service, no cross-service relation.
+  assetTypeLookupId String   @map("asset_type_lookup_id")
+  createdAt         DateTime @map("created_at")
+
+  mediaAsset MediaAsset @relation(fields: [mediaAssetId], references: [id])
+
+  @@map("referral_followup_media")
 }

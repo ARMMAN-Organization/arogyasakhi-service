@@ -4,17 +4,96 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider  = "postgresql"
   directUrl = env("DIRECT_URL")
-  url      = env("DATABASE_URL")
+  url       = env("DATABASE_URL")
 }
 
 // sync-service owns these tables only (forklift rule).
+// Field/table definitions sourced from docs/Arogya_Sakhi_Database_Design_ERD_Table_Definitions.docx.md
+// section "sync_batches", "sync_items" (Appendix A).
+// device_id / user_id are plain scalar columns, not Prisma relations, because
+// device_registry / users are owned by other services (no cross-service joins
+// per the forklift rule).
+
+enum SyncDirection {
+  UPLOAD
+  DOWNLOAD
+}
+
+enum SyncBatchStatus {
+  STARTED
+  COMPLETED
+  FAILED
+  PARTIAL
+  CANCELLED
+}
+
+enum SyncNetworkType {
+  WIFI
+  MOBILE
+  OFFLINE
+  UNKNOWN
+}
+
+enum SyncOperation {
+  CREATE
+  UPDATE
+  DELETE
+  UPSERT
+}
+
+enum SyncItemStatus {
+  QUEUED
+  SUCCESS
+  FAILED
+  SKIPPED
+}
+
 model SyncBatch {
-  id        String   @id @default(uuid())
-  name      String
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id          String           @id @default(uuid()) @map("sync_batch_id")
+  // device_registry.device_id — owned by another service, no cross-service relation.
+  deviceId    String           @map("device_id")
+  // users.user_id — owned by another service, no cross-service relation.
+  userId      String           @map("user_id")
+  direction   SyncDirection
+  startedAt   DateTime         @map("started_at")
+  completedAt DateTime?        @map("completed_at")
+  status      SyncBatchStatus
+  appVersion  String?          @map("app_version") @db.VarChar(40)
+  networkType SyncNetworkType? @map("network_type")
+
+  createdAt       DateTime  @default(now()) @map("created_at")
+  createdByUserId String?   @map("created_by_user_id")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  updatedByUserId String?   @map("updated_by_user_id")
+  isDeleted       Boolean   @default(false) @map("is_deleted")
+  deletedAt       DateTime? @map("deleted_at")
+
+  syncItems SyncItem[]
 
   @@map("sync_batches")
+}
+
+model SyncItem {
+  id              String         @id @default(uuid()) @map("sync_item_id")
+  syncBatchId     String         @map("sync_batch_id")
+  localEntityUuid String         @map("local_entity_uuid") @db.VarChar(80)
+  entityType      String         @map("entity_type") @db.VarChar(80)
+  entityId        String?        @map("entity_id")
+  operation       SyncOperation
+  status          SyncItemStatus
+  errorCode       String?        @map("error_code") @db.VarChar(80)
+  retryCount      Int            @default(0) @map("retry_count")
+
+  createdAt       DateTime  @default(now()) @map("created_at")
+  createdByUserId String?   @map("created_by_user_id")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  updatedByUserId String?   @map("updated_by_user_id")
+  isDeleted       Boolean   @default(false) @map("is_deleted")
+  deletedAt       DateTime? @map("deleted_at")
+
+  syncBatch SyncBatch @relation(fields: [syncBatchId], references: [id])
+
+  @@map("sync_items")
 }

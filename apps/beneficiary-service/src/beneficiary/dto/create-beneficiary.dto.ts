@@ -6,9 +6,22 @@ import { z } from 'zod';
  */
 export const createBeneficiarySchema = z
   .object({
-    caseType: z.enum(['MOTHER', 'CHILD']),
-    name: z.string().trim().min(1).max(120),
+    piiId: z.string().uuid(),
     projectId: z.string().uuid(),
+    caseType: z.enum(['MOTHER', 'CHILD']),
+    pregnancySequenceNo: z.number().int().optional(),
+    previousBeneficiaryId: z.string().uuid().optional(),
+    motherBeneficiaryId: z.string().uuid().optional(),
+    sakhiId: z.string().uuid(),
+    registrationDate: z.coerce.date(),
+    currentStatus: z
+      .enum(['ACTIVE', 'JOURNEY_COMPLETE', 'CLOSED', 'TRANSFERRED', 'REOPEN_REQUESTED'])
+      .default('ACTIVE'),
+    currentPhase: z.enum(['ANC', 'DELIVERY', 'PP', 'NN', 'INC', 'CCV', 'CLOSED']),
+    beneficiaryTypeLookupId: z.string().uuid(),
+    caseTypeLookupId: z.string().uuid(),
+    journeyStartDate: z.coerce.date(),
+    journeyEndDate: z.coerce.date().optional(),
   })
   .strict();
 
