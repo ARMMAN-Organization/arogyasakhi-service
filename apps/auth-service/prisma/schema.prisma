@@ -122,3 +122,53 @@ model UserSession {
 
   @@map("user_sessions")
 }
+
+// Column set matches ERD Appendix A.1 (funders, projects) exactly.
+
+enum FunderStatus {
+  ACTIVE
+  INACTIVE
+}
+
+model Funder {
+  funderId        String       @id @default(uuid()) @map("funder_id")
+  funderCode      String       @unique @map("funder_code") @db.VarChar(50)
+  funderName      String       @map("funder_name") @db.VarChar(40)
+  status          FunderStatus @default(ACTIVE)
+  createdAt       DateTime     @default(now()) @map("created_at")
+  createdByUserId String?      @map("created_by_user_id")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+  updatedByUserId String?      @map("updated_by_user_id")
+  isDeleted       Boolean      @default(false) @map("is_deleted")
+  deletedAt       DateTime?    @map("deleted_at")
+
+  projects Project[]
+
+  @@map("funders")
+}
+
+enum ProjectStatus {
+  ACTIVE
+  PAUSED
+  CLOSED
+}
+
+model Project {
+  projectId       String        @id @default(uuid()) @map("project_id")
+  funderId        String?       @map("funder_id")
+  funder          Funder?       @relation(fields: [funderId], references: [funderId])
+  projectCode     String        @unique @map("project_code") @db.VarChar(80)
+  projectName     String        @map("project_name") @db.VarChar(80)
+  financialYear   String        @map("financial_year") @db.VarChar(9)
+  startDate       DateTime      @map("start_date") @db.Date
+  endDate         DateTime?     @map("end_date") @db.Date
+  status          ProjectStatus @default(ACTIVE)
+  createdAt       DateTime      @default(now()) @map("created_at")
+  createdByUserId String?       @map("created_by_user_id")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+  updatedByUserId String?       @map("updated_by_user_id")
+  isDeleted       Boolean       @default(false) @map("is_deleted")
+  deletedAt       DateTime?     @map("deleted_at")
+
+  @@map("projects")
+}
