@@ -20,15 +20,37 @@ describe('SessionService', () => {
     expect(repository.findMany).toHaveBeenCalledTimes(1);
   });
 
+  const sampleRow = {
+    id: '1',
+    userId: '11111111-1111-1111-1111-111111111111',
+    refreshTokenHash: 'hash-1',
+    deviceId: null,
+    issuedAt: new Date(),
+    expiresAt: new Date(),
+    revokedAt: null,
+    ipAddress: null,
+    createdAt: new Date(),
+    createdByUserId: null,
+    updatedAt: new Date(),
+    updatedByUserId: null,
+    isDeleted: false,
+    deletedAt: null,
+  };
+
   it('returns the repository list unchanged', async () => {
-    const rows = [{ id: '1', name: 'a', createdAt: new Date(), updatedAt: new Date() }];
+    const rows = [sampleRow];
     repository.findMany.mockResolvedValue(rows);
     await expect(service.list()).resolves.toBe(rows);
   });
 
   it('creates via repository with the given data', async () => {
-    const dto: CreateSessionInput = { name: 'device-1' };
-    const created = { id: '1', name: 'device-1', createdAt: new Date(), updatedAt: new Date() };
+    const dto: CreateSessionInput = {
+      userId: '11111111-1111-1111-1111-111111111111',
+      refreshTokenHash: 'hash-1',
+      issuedAt: new Date(),
+      expiresAt: new Date(),
+    };
+    const created = sampleRow;
     repository.create.mockResolvedValue(created);
     await expect(service.create(dto)).resolves.toBe(created);
     expect(repository.create).toHaveBeenCalledWith(dto);
@@ -36,6 +58,13 @@ describe('SessionService', () => {
 
   it('propagates repository errors on create', async () => {
     repository.create.mockRejectedValue(new Error('db down'));
-    await expect(service.create({ name: 'x' })).rejects.toThrow('db down');
+    await expect(
+      service.create({
+        userId: '11111111-1111-1111-1111-111111111111',
+        refreshTokenHash: 'hash-1',
+        issuedAt: new Date(),
+        expiresAt: new Date(),
+      }),
+    ).rejects.toThrow('db down');
   });
 });

@@ -6,7 +6,13 @@ import { z } from 'zod';
  */
 export const createSessionSchema = z
   .object({
-    name: z.string().trim().min(1).max(200),
+    userId: z.string().uuid(),
+    refreshTokenHash: z.string().trim().min(1).max(255),
+    deviceId: z.string().uuid().optional(),
+    issuedAt: z.coerce.date(),
+    expiresAt: z.coerce.date(),
+    revokedAt: z.coerce.date().optional(),
+    ipAddress: z.string().trim().min(1).max(45).optional(),
   })
   .strict();
 
