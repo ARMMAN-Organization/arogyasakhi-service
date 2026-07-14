@@ -11,23 +11,40 @@ import { appConfig } from '../config/app-config';
  * No other gateway change is required.
  */
 export interface ServiceRoute {
-  /** Path prefix exposed to clients, e.g. `/sessions` → `/api/v1/sessions/...`. */
+  /** Path prefix exposed to clients, e.g. `/beneficiaries` → `/api/v1/beneficiaries/...`. */
   readonly prefix: string;
   /** Base URL of the downstream service (host only — path is preserved). */
   readonly target: string;
+  /**
+   * Whether the gateway must verify a bearer token before proxying this
+   * prefix. `false` only for the small set of routes that must be reachable
+   * without a token (login, refresh — you cannot require a token to obtain
+   * one). All routes on a service still enforce per-route roles themselves
+   * via `requireRoles(...)`, trusting the identity the gateway forwards.
+   */
+  readonly requiresAuth: boolean;
 }
 
 export const SERVICE_ROUTES: readonly ServiceRoute[] = [
-  { prefix: '/sessions', target: appConfig.AUTH_SERVICE_URL },
-  { prefix: '/beneficiaries', target: appConfig.BENEFICIARY_SERVICE_URL },
-  { prefix: '/visits', target: appConfig.VISIT_FORM_SERVICE_URL },
-  { prefix: '/rules', target: appConfig.RULES_SERVICE_URL },
-  { prefix: '/referrals', target: appConfig.RISK_REFERRAL_SERVICE_URL },
-  { prefix: '/closures', target: appConfig.CLOSURE_REOPEN_SERVICE_URL },
-  { prefix: '/approvals', target: appConfig.APPROVAL_SERVICE_URL },
-  { prefix: '/incentives', target: appConfig.INCENTIVE_WAGES_SERVICE_URL },
-  { prefix: '/notifications', target: appConfig.NOTIFICATION_ESCALATION_SERVICE_URL },
-  { prefix: '/sync', target: appConfig.SYNC_SERVICE_URL },
-  { prefix: '/media', target: appConfig.MEDIA_SERVICE_URL },
-  { prefix: '/audit', target: appConfig.AUDIT_SERVICE_URL },
+  // auth-service's /auth/login and /auth/refresh are unauthenticated by
+  // nature; /auth/logout and /me require a token, but auth-service itself
+  // enforces that check — the gateway leaves the whole prefix unauthenticated
+  // rather than parsing which /auth/* sub-path needs a token.
+  { prefix: '/auth', target: appConfig.AUTH_SERVICE_URL, requiresAuth: false },
+  { prefix: '/me', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
+  { prefix: '/beneficiaries', target: appConfig.BENEFICIARY_SERVICE_URL, requiresAuth: true },
+  { prefix: '/visits', target: appConfig.VISIT_FORM_SERVICE_URL, requiresAuth: true },
+  { prefix: '/rules', target: appConfig.RULES_SERVICE_URL, requiresAuth: true },
+  { prefix: '/referrals', target: appConfig.RISK_REFERRAL_SERVICE_URL, requiresAuth: true },
+  { prefix: '/closures', target: appConfig.CLOSURE_REOPEN_SERVICE_URL, requiresAuth: true },
+  { prefix: '/approvals', target: appConfig.APPROVAL_SERVICE_URL, requiresAuth: true },
+  { prefix: '/incentives', target: appConfig.INCENTIVE_WAGES_SERVICE_URL, requiresAuth: true },
+  {
+    prefix: '/notifications',
+    target: appConfig.NOTIFICATION_ESCALATION_SERVICE_URL,
+    requiresAuth: true,
+  },
+  { prefix: '/sync', target: appConfig.SYNC_SERVICE_URL, requiresAuth: true },
+  { prefix: '/media', target: appConfig.MEDIA_SERVICE_URL, requiresAuth: true },
+  { prefix: '/audit', target: appConfig.AUDIT_SERVICE_URL, requiresAuth: true },
 ];

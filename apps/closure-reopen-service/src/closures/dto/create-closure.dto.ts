@@ -1,8 +1,12 @@
 import { z } from 'zod';
 
 /**
- * Validation schema for creating a closure. `.strict()` rejects unknown fields,
- * matching the previous global ValidationPipe `forbidNonWhitelisted: true`.
+ * Validation schema for creating a closure. Fields match `closures` exactly
+ * (prisma/schema.prisma model Closure) — no invented fields. Audit/soft-delete
+ * columns (createdByUserId, updatedByUserId, isDeleted, deletedAt) are
+ * server-set and excluded from client input.
+ * `.strict()` rejects unknown fields, matching the previous global
+ * ValidationPipe `forbidNonWhitelisted: true`.
  */
 export const createClosureSchema = z
   .object({

@@ -1,13 +1,27 @@
 import express, { type Application } from 'express';
 import helmet from 'helmet';
 import { pinoHttp } from 'pino-http';
-import { buildLoggerOptions, errorHandler, notFoundHandler, requestId } from '@armman/service-commons';
+import {
+  buildLoggerOptions,
+  errorHandler,
+  notFoundHandler,
+  requestId,
+  type TokenSigner,
+} from '@armman/service-commons';
 import { appConfig } from './config/app-config';
 import { createHealthRouter } from './health/health.controller';
 import { createInfoRouter } from './info/info.controller';
 import { registerProxies } from './proxy/register-proxies';
 
-export { asyncHandler, ok, fail, validateBody, requireRoles, HttpError, ErrorCode } from '@armman/service-commons';
+export {
+  asyncHandler,
+  ok,
+  fail,
+  validateBody,
+  requireRoles,
+  HttpError,
+  ErrorCode,
+} from '@armman/service-commons';
 
 /**
  * Builds and wires the gateway's Express application.
@@ -19,7 +33,7 @@ export { asyncHandler, ok, fail, validateBody, requireRoles, HttpError, ErrorCod
  * JSON-parsed or wrapped in the success envelope. Only the gateway's own
  * info/health routes go through that pipeline.
  */
-export function createApp(): Application {
+export function createApp(signer: Pick<TokenSigner, 'verify'>): Application {
   const app = express();
 
   app.use(pinoHttp(buildLoggerOptions(appConfig.LOG_LEVEL)));
@@ -38,7 +52,7 @@ export function createApp(): Application {
   });
   app.use(requestId);
 
-  registerProxies(app);
+  registerProxies(app, signer);
 
   const api = express.Router();
   api.use(express.json());

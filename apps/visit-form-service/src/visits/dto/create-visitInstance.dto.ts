@@ -1,8 +1,14 @@
 import { z } from 'zod';
 
 /**
- * Validation schema for creating a visit instance. `.strict()` rejects unknown
- * fields, matching the previous global ValidationPipe `forbidNonWhitelisted: true`.
+ * Validation schema for creating a visit instance. Fields match
+ * visit_instances exactly (docs/Arogya_Sakhi_Database_Design_ERD_Table_Definitions.docx.md,
+ * Appendix A) — no invented fields. scheduleId/beneficiaryId/sakhiId are plain
+ * scalar foreign keys (beneficiary_cases and sakhi_profiles are owned by other
+ * services per the forklift rule), but they are still UUID-shaped ids so we
+ * validate them as such.
+ * `.strict()` rejects unknown fields, matching the previous global
+ * ValidationPipe `forbidNonWhitelisted: true`.
  */
 export const createVisitInstanceSchema = z
   .object({

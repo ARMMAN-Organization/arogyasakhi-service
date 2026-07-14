@@ -10,8 +10,12 @@
     "express": "^4.19.2"
   },
   "dependencies": {
+    "express-rate-limit": "^8.5.2",
+    "ioredis": "^5.11.1",
+    "jose": "^6.2.3",
     "pino": "^9.3.2",
     "pino-http": "^10.2.0",
+    "rate-limit-redis": "^5.0.0",
     "zod": "^3.23.8"
   }
 }
