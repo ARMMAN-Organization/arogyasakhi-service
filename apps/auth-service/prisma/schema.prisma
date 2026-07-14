@@ -198,3 +198,43 @@ model Project {
   @@map("projects")
   @@schema("auth_service")
 }
+
+// Column set matches ERD Appendix A.1 (geography_units) exactly. Scoped to the
+// SRS's 7-level hierarchy only (State > District > Block > PHC > Sub-centre >
+// Village > Pada) — no Taluka, no Panchayat (SRS treated as final over the
+// ERD's alternate, per-level table design).
+
+enum GeoType {
+  STATE
+  DISTRICT
+  BLOCK
+  PHC
+  SUBCENTRE
+  VILLAGE
+  PADA
+}
+
+enum GeographyUnitStatus {
+  ACTIVE
+  INACTIVE
+}
+
+model GeographyUnit {
+  geographyUnitId String              @id @default(uuid()) @map("geography_unit_id")
+  parentId        String?             @map("parent_id")
+  parent          GeographyUnit?      @relation("GeographyUnitHierarchy", fields: [parentId], references: [geographyUnitId])
+  children        GeographyUnit[]     @relation("GeographyUnitHierarchy")
+  geoType         GeoType             @map("geo_type")
+  geoCode         String?             @map("geo_code") @db.VarChar(80)
+  name            String              @db.VarChar(180)
+  status          GeographyUnitStatus @default(ACTIVE)
+  createdAt       DateTime            @default(now()) @map("created_at")
+  createdByUserId String?             @map("created_by_user_id")
+  updatedAt       DateTime            @updatedAt @map("updated_at")
+  updatedByUserId String?             @map("updated_by_user_id")
+  isDeleted       Boolean             @default(false) @map("is_deleted")
+  deletedAt       DateTime?           @map("deleted_at")
+
+  @@unique([parentId, geoType, geoCode])
+  @@map("geography_units")
+}
