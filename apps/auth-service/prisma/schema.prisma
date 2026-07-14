@@ -4,17 +4,116 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider  = "postgresql"
   directUrl = env("DIRECT_URL")
-  url      = env("DATABASE_URL")
+  url       = env("DATABASE_URL")
 }
 
 // auth-service owns these tables only (forklift rule).
-model Session {
-  id        String   @id @default(uuid())
-  name      String
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+// Field/table definitions sourced from docs/Arogya_Sakhi_Database_Design_ERD_Table_Definitions.docx.md
+// section "users", "roles", "user_roles", "user_sessions" (Appendix A.1).
+// project_id / geography_unit_id / device_id are plain scalar columns, not Prisma
+// relations, because projects/geography_units/device_registry are owned by other
+// services (no cross-service joins per the forklift rule).
 
-  @@map("sessions")
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  LOCKED
+  PAUSED
+  DELETED
+}
+
+enum UserRoleStatus {
+  ACTIVE
+  EXPIRED
+  REVOKED
+  INACTIVE
+}
+
+model User {
+  id                String     @id @default(uuid()) @map("user_id")
+  mobileNumber      String     @unique @map("mobile_number") @db.VarChar(13)
+  passwordHash      String     @map("password_hash") @db.VarChar(255)
+  displayName       String     @map("display_name") @db.VarChar(160)
+  email             String?    @unique @db.VarChar(254)
+  status            UserStatus @default(ACTIVE)
+  lastLoginAt       DateTime?  @map("last_login_at")
+  failedLoginCount  Int        @default(0) @map("failed_login_count")
+  passwordChangedAt DateTime?  @map("password_changed_at")
+  createdAt         DateTime   @default(now()) @map("created_at")
+  createdByUserId   String?    @map("created_by_user_id")
+  updatedAt         DateTime   @updatedAt @map("updated_at")
+  updatedByUserId   String?    @map("updated_by_user_id")
+  isDeleted         Boolean    @default(false) @map("is_deleted")
+  deletedAt         DateTime?  @map("deleted_at")
+
+  userRoles    UserRole[]
+  userSessions UserSession[]
+
+  @@map("users")
+}
+
+model Role {
+  id              String    @id @default(uuid()) @map("role_id")
+  roleCode        String    @unique @map("role_code") @db.VarChar(50)
+  roleName        String    @map("role_name") @db.VarChar(120)
+  description     String?
+  isActive        Boolean   @default(true) @map("is_active")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  createdByUserId String?   @map("created_by_user_id")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  updatedByUserId String?   @map("updated_by_user_id")
+  isDeleted       Boolean   @default(false) @map("is_deleted")
+  deletedAt       DateTime? @map("deleted_at")
+
+  userRoles UserRole[]
+
+  @@map("roles")
+}
+
+model UserRole {
+  id              String         @id @default(uuid()) @map("user_role_id")
+  userId          String         @map("user_id")
+  roleId          String         @map("role_id")
+  // projects.project_id — owned by another service, no cross-service relation.
+  projectId       String?        @map("project_id")
+  // geography_units.geography_unit_id — owned by another service, no cross-service relation.
+  geographyUnitId String?        @map("geography_unit_id")
+  effectiveFrom   DateTime       @map("effective_from")
+  effectiveTo     DateTime?      @map("effective_to")
+  status          UserRoleStatus @default(ACTIVE)
+  createdAt       DateTime       @default(now()) @map("created_at")
+  createdByUserId String?        @map("created_by_user_id")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+  updatedByUserId String?        @map("updated_by_user_id")
+  isDeleted       Boolean        @default(false) @map("is_deleted")
+  deletedAt       DateTime?      @map("deleted_at")
+
+  user User @relation(fields: [userId], references: [id])
+  role Role @relation(fields: [roleId], references: [id])
+
+  @@map("user_roles")
+}
+
+model UserSession {
+  id               String    @id @default(uuid()) @map("session_id")
+  userId           String    @map("user_id")
+  refreshTokenHash String    @unique @map("refresh_token_hash") @db.VarChar(255)
+  // device_registry.device_id — deferred; not modeled yet per current scope.
+  deviceId         String?   @map("device_id")
+  issuedAt         DateTime  @map("issued_at")
+  expiresAt        DateTime  @map("expires_at")
+  revokedAt        DateTime? @map("revoked_at")
+  ipAddress        String?   @map("ip_address") @db.VarChar(45)
+  createdAt        DateTime  @default(now()) @map("created_at")
+  createdByUserId  String?   @map("created_by_user_id")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+  updatedByUserId  String?   @map("updated_by_user_id")
+  isDeleted        Boolean   @default(false) @map("is_deleted")
+  deletedAt        DateTime? @map("deleted_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("user_sessions")
 }

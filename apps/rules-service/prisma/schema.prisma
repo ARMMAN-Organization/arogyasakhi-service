@@ -4,17 +4,79 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider  = "postgresql"
   directUrl = env("DIRECT_URL")
-  url      = env("DATABASE_URL")
+  url       = env("DATABASE_URL")
 }
 
 // rules-service owns these tables only (forklift rule).
+// Field/table definitions sourced from docs/Arogya_Sakhi_Database_Design_ERD_Table_Definitions.docx.md
+// section "rule_sets", "rule_versions" (Appendix A, section 4.4 Rules and Risk).
+// published_by_user_id / created_by_user_id / updated_by_user_id are plain scalar
+// columns, not Prisma relations, because users is owned by another service
+// (no cross-service joins per the forklift rule).
+
+enum RuleCategory {
+  SCHEDULE
+  RISK
+  ESCALATION
+  INCENTIVE
+  CLOSURE
+  NOTIFICATION
+}
+
+enum RuleSetStatus {
+  DRAFT
+  ACTIVE
+  RETIRED
+}
+
+enum RuleVersionStatus {
+  DRAFT
+  PUBLISHED
+  RETIRED
+}
+
 model RuleSet {
-  id        String   @id @default(uuid())
-  name      String
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id              String        @id @default(uuid()) @map("rule_set_id")
+  ruleCategory    RuleCategory  @map("rule_category")
+  ruleSetName     String        @map("rule_set_name") @db.VarChar(160)
+  status          RuleSetStatus
+  createdAt       DateTime      @default(now()) @map("created_at")
+  createdByUserId String?       @map("created_by_user_id")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+  updatedByUserId String?       @map("updated_by_user_id")
+  isDeleted       Boolean       @default(false) @map("is_deleted")
+  deletedAt       DateTime?     @map("deleted_at")
+
+  ruleVersions RuleVersion[]
 
   @@map("rule_sets")
+}
+
+model RuleVersion {
+  id        String @id @default(uuid()) @map("rule_version_id")
+  ruleSetId String @map("rule_set_id")
+  versionNo String @map("version_no") @db.VarChar(40)
+  rulesJson Json   @map("rules_json")
+
+  effectiveFrom DateTime  @map("effective_from")
+  effectiveTo   DateTime? @map("effective_to")
+
+  // users.user_id — owned by another service, no cross-service relation.
+  publishedByUserId String?           @map("published_by_user_id")
+  checksum          Bytes             @map("checksum")
+  status            RuleVersionStatus
+
+  createdAt       DateTime  @default(now()) @map("created_at")
+  createdByUserId String?   @map("created_by_user_id")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  updatedByUserId String?   @map("updated_by_user_id")
+  isDeleted       Boolean   @default(false) @map("is_deleted")
+  deletedAt       DateTime? @map("deleted_at")
+
+  ruleSet RuleSet @relation(fields: [ruleSetId], references: [id])
+
+  @@unique([ruleSetId, versionNo])
+  @@map("rule_versions")
 }

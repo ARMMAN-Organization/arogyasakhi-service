@@ -4,17 +4,263 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider  = "postgresql"
   directUrl = env("DIRECT_URL")
-  url      = env("DATABASE_URL")
+  url       = env("DATABASE_URL")
 }
 
 // visit-form-service owns these tables only (forklift rule).
+// Field/table definitions sourced from docs/Arogya_Sakhi_Database_Design_ERD_Table_Definitions.docx.md
+// sections "visit_schedules", "visit_instances", "visit_status_history", "form_definitions",
+// "form_versions", "form_submissions", "form_answers" (Appendix A).
+// beneficiary_id / sakhi_id / rule_version_id / sync_batch_id / trigger_source_visit_id /
+// trigger_risk_assessment_id are plain scalar columns, not Prisma relations, because
+// beneficiary_cases, sakhi_profiles, rule_versions, sync_batches, and the legacy
+// visits/risk_assessments tables referenced by the trigger_* columns are owned by other
+// services (no cross-service joins per the forklift rule). created_by_user_id /
+// updated_by_user_id / changed_by_user_id / submitted_by_user_id / published_by_user_id are
+// likewise plain scalars pointing at users.user_id (owned by auth-service).
+// Within this service, visit_schedules -> visit_instances -> visit_status_history and
+// form_definitions -> form_versions -> form_submissions -> form_answers are modeled with
+// proper Prisma relations since both sides live in this schema.
+
+enum VisitCodeType {
+  ANC
+  ANC_HR
+  ANC_POST_EDD
+  DELIVERY
+  PP
+  NN
+  INC
+  INC_HR
+  CCV
+  CCV_HR
+}
+
+enum AnchorType {
+  REGISTRATION
+  LMP
+  EDD
+  DELIVERY_DATE
+  DOB
+  ACTUAL_VISIT
+  CCV_TRANSITION
+}
+
+enum VisitScheduleStatus {
+  GENERATED
+  OPEN
+  MISSED
+  COMPLETED
+  SUPERSEDED
+  CANCELLED
+}
+
+enum VisitInstanceStatus {
+  STARTED
+  PENDING
+  MISSED
+  COMPLETED
+  DISCARDED
+}
+
+enum FormEntityType {
+  MOTHER
+  CHILD
+  REFERRAL
+  SUPERVISOR
+  SYSTEM
+}
+
+enum FormDefinitionStatus {
+  DRAFT
+  ACTIVE
+  RETIRED
+}
+
+enum FormVersionStatus {
+  DRAFT
+  PUBLISHED
+  RETIRED
+}
+
+enum FormValidationStatus {
+  VALID
+  INVALID
+  WARNING
+}
+
+model VisitSchedule {
+  id                       String              @id @default(uuid()) @map("schedule_id")
+  // beneficiary_cases.beneficiary_id — owned by another service, no cross-service relation.
+  beneficiaryId            String              @map("beneficiary_id")
+  visitCode                String              @map("visit_code") @db.VarChar(40)
+  visitType                VisitCodeType       @map("visit_type")
+  sequenceNo               Int?                @map("sequence_no")
+  scheduledDate            DateTime            @map("scheduled_date") @db.Date
+  windowStartDate          DateTime            @map("window_start_date") @db.Date
+  windowEndDate            DateTime            @map("window_end_date") @db.Date
+  anchorType               AnchorType          @map("anchor_type")
+  anchorVisitId            String?             @map("anchor_visit_id")
+  // rule_versions.rule_version_id — owned by another service, no cross-service relation.
+  generatedByRuleVersionId String              @map("generated_by_rule_version_id")
+  status                   VisitScheduleStatus @default(GENERATED)
+  // visits/risk_assessments — legacy tables not owned by this service, no cross-service relation.
+  triggerSourceVisitId     BigInt?             @map("trigger_source_visit_id")
+  triggerRiskAssessmentId  BigInt?             @map("trigger_risk_assessment_id")
+  createdAt                DateTime            @default(now()) @map("created_at")
+  createdByUserId          String?             @map("created_by_user_id")
+  updatedAt                DateTime            @updatedAt @map("updated_at")
+  updatedByUserId          String?             @map("updated_by_user_id")
+  isDeleted                Boolean             @default(false) @map("is_deleted")
+  deletedAt                DateTime?           @map("deleted_at")
+
+  visitInstances VisitInstance[]
+
+  @@map("visit_schedules")
+}
+
 model VisitInstance {
-  id        String   @id @default(uuid())
-  name      String
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id                  String              @id @default(uuid()) @map("visit_id")
+  scheduleId          String              @map("schedule_id")
+  // beneficiary_cases.beneficiary_id — owned by another service, no cross-service relation.
+  beneficiaryId       String              @map("beneficiary_id")
+  // sakhi_profiles.sakhi_id — owned by another service, no cross-service relation.
+  sakhiId             String              @map("sakhi_id")
+  localVisitUuid      String              @unique @map("local_visit_uuid") @db.VarChar(80)
+  actualVisitDate     DateTime?           @map("actual_visit_date") @db.Date
+  status              VisitInstanceStatus
+  meetBeneficiaryFlag Boolean?            @map("meet_beneficiary_flag")
+  notMetReason        String?             @map("not_met_reason") @db.VarChar(255)
+  completedAt         DateTime?           @map("completed_at")
+  syncedAt            DateTime?           @map("synced_at")
+  createdAt           DateTime            @default(now()) @map("created_at")
+  createdByUserId     String?             @map("created_by_user_id")
+  updatedAt           DateTime            @updatedAt @map("updated_at")
+  updatedByUserId     String?             @map("updated_by_user_id")
+  isDeleted           Boolean             @default(false) @map("is_deleted")
+  deletedAt           DateTime?           @map("deleted_at")
+
+  schedule           VisitSchedule        @relation(fields: [scheduleId], references: [id])
+  visitStatusHistory VisitStatusHistory[]
+  formSubmissions    FormSubmission[]
 
   @@map("visit_instances")
+}
+
+model VisitStatusHistory {
+  id              String               @id @default(uuid()) @map("visit_status_history_id")
+  visitId         String               @map("visit_id")
+  fromStatus      VisitInstanceStatus? @map("from_status")
+  toStatus        VisitInstanceStatus  @map("to_status")
+  reasonCode      String?              @map("reason_code") @db.VarChar(80)
+  // users.user_id — owned by auth-service, no cross-service relation.
+  changedByUserId String               @map("changed_by_user_id")
+  changedAt       DateTime             @map("changed_at")
+  createdAt       DateTime             @default(now()) @map("created_at")
+  createdByUserId String?              @map("created_by_user_id")
+  updatedAt       DateTime             @updatedAt @map("updated_at")
+  updatedByUserId String?              @map("updated_by_user_id")
+  isDeleted       Boolean              @default(false) @map("is_deleted")
+  deletedAt       DateTime?            @map("deleted_at")
+
+  visit VisitInstance @relation(fields: [visitId], references: [id])
+
+  @@map("visit_status_history")
+}
+
+model FormDefinition {
+  id              String               @id @default(uuid()) @map("form_definition_id")
+  formCode        String               @unique @map("form_code") @db.VarChar(60)
+  formName        String               @map("form_name") @db.VarChar(80)
+  entityType      FormEntityType       @map("entity_type")
+  status          FormDefinitionStatus
+  createdAt       DateTime             @default(now()) @map("created_at")
+  createdByUserId String?              @map("created_by_user_id")
+  updatedAt       DateTime             @updatedAt @map("updated_at")
+  updatedByUserId String?              @map("updated_by_user_id")
+  isDeleted       Boolean              @default(false) @map("is_deleted")
+  deletedAt       DateTime?            @map("deleted_at")
+
+  formVersions FormVersion[]
+
+  @@map("form_definitions")
+}
+
+model FormVersion {
+  id                String            @id @default(uuid()) @map("form_version_id")
+  formDefinitionId  String            @map("form_definition_id")
+  versionNo         String            @map("version_no") @db.VarChar(40)
+  schemaJson        Json              @map("schema_json")
+  validationJson    Json?             @map("validation_json")
+  effectiveFrom     DateTime          @map("effective_from")
+  effectiveTo       DateTime?         @map("effective_to")
+  // users.user_id — owned by auth-service, no cross-service relation.
+  publishedByUserId String?           @map("published_by_user_id")
+  status            FormVersionStatus
+  checksum          Bytes             @map("checksum")
+  createdAt         DateTime          @default(now()) @map("created_at")
+  createdByUserId   String?           @map("created_by_user_id")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+  updatedByUserId   String?           @map("updated_by_user_id")
+  isDeleted         Boolean           @default(false) @map("is_deleted")
+  deletedAt         DateTime?         @map("deleted_at")
+
+  formDefinition  FormDefinition   @relation(fields: [formDefinitionId], references: [id])
+  formSubmissions FormSubmission[]
+
+  @@unique([formDefinitionId, versionNo])
+  @@map("form_versions")
+}
+
+model FormSubmission {
+  id                  String               @id @default(uuid()) @map("submission_id")
+  formVersionId       String               @map("form_version_id")
+  // beneficiary_cases.beneficiary_id — owned by another service, no cross-service relation.
+  beneficiaryId       String               @map("beneficiary_id")
+  visitId             String?              @map("visit_id")
+  // users.user_id — owned by auth-service, no cross-service relation.
+  submittedByUserId   String               @map("submitted_by_user_id")
+  submittedAt         DateTime             @map("submitted_at")
+  localSubmissionUuid String               @unique @map("local_submission_uuid") @db.VarChar(80)
+  formDataJson        Json                 @map("form_data_json")
+  validationStatus    FormValidationStatus @map("validation_status")
+  // rule_versions.rule_version_id — owned by another service, no cross-service relation.
+  ruleVersionId       String?              @map("rule_version_id")
+  // sync_batches.sync_batch_id — owned by another service, no cross-service relation.
+  syncBatchId         String?              @map("sync_batch_id")
+  createdAt           DateTime             @default(now()) @map("created_at")
+  createdByUserId     String?              @map("created_by_user_id")
+  updatedAt           DateTime             @updatedAt @map("updated_at")
+  updatedByUserId     String?              @map("updated_by_user_id")
+  isDeleted           Boolean              @default(false) @map("is_deleted")
+  deletedAt           DateTime?            @map("deleted_at")
+
+  formVersion FormVersion    @relation(fields: [formVersionId], references: [id])
+  visit       VisitInstance? @relation(fields: [visitId], references: [id])
+  formAnswers FormAnswer[]
+
+  @@map("form_submissions")
+}
+
+model FormAnswer {
+  id                String    @id @default(uuid()) @map("answer_id")
+  submissionId      String    @map("submission_id")
+  fieldCode         String    @map("field_code") @db.VarChar(120)
+  answerValueText   String?   @map("answer_value_text")
+  answerValueNumber Decimal?  @map("answer_value_number") @db.Decimal(18, 4)
+  answerValueDate   DateTime? @map("answer_value_date") @db.Date
+  answerValueBool   Boolean?  @map("answer_value_bool")
+  answerValueJson   Json?     @map("answer_value_json")
+  isIndexed         Boolean   @default(false) @map("is_indexed")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  createdByUserId   String?   @map("created_by_user_id")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+  updatedByUserId   String?   @map("updated_by_user_id")
+  isDeleted         Boolean   @default(false) @map("is_deleted")
+  deletedAt         DateTime? @map("deleted_at")
+
+  formSubmission FormSubmission @relation(fields: [submissionId], references: [id])
+
+  @@map("form_answers")
 }
