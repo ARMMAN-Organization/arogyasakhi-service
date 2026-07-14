@@ -6,7 +6,16 @@ import { z } from 'zod';
  */
 export const createVisitInstanceSchema = z
   .object({
-    name: z.string().trim().min(1).max(200),
+    scheduleId: z.string().uuid(),
+    beneficiaryId: z.string().uuid(),
+    sakhiId: z.string().uuid(),
+    localVisitUuid: z.string().trim().min(1).max(80),
+    status: z.enum(['STARTED', 'PENDING', 'MISSED', 'COMPLETED', 'DISCARDED']),
+    actualVisitDate: z.coerce.date().optional(),
+    meetBeneficiaryFlag: z.boolean().optional(),
+    notMetReason: z.string().trim().min(1).max(255).optional(),
+    completedAt: z.coerce.date().optional(),
+    syncedAt: z.coerce.date().optional(),
   })
   .strict();
 
