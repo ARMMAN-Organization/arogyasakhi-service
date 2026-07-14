@@ -6,7 +6,16 @@ import { z } from 'zod';
  */
 export const createRuleSetSchema = z
   .object({
-    name: z.string().trim().min(1).max(200),
+    ruleCategory: z.enum([
+      'SCHEDULE',
+      'RISK',
+      'ESCALATION',
+      'INCENTIVE',
+      'CLOSURE',
+      'NOTIFICATION',
+    ]),
+    ruleSetName: z.string().trim().min(1).max(160),
+    status: z.enum(['DRAFT', 'ACTIVE', 'RETIRED']).default('DRAFT'),
   })
   .strict();
 

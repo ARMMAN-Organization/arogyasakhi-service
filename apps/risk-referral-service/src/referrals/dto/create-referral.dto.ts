@@ -1,12 +1,59 @@
 import { z } from 'zod';
 
+/** Recursive JSON value type usable inside nested objects/arrays (nulls allowed here). */
+type NestedJsonValue =
+  string | number | boolean | null | NestedJsonValue[] | { [key: string]: NestedJsonValue };
+
+const nestedJsonValueSchema: z.ZodType<NestedJsonValue> = z.lazy(() =>
+  z.union([
+    z.string(),
+    z.number(),
+    z.boolean(),
+    z.null(),
+    z.array(nestedJsonValueSchema),
+    z.record(nestedJsonValueSchema),
+  ]),
+);
+
+/**
+ * Top-level JSON value schema matching Prisma's `InputJsonValue`, which — unlike
+ * nested positions — does not accept a bare `null` (use `NullableJsonNullValueInput`
+ * for that, not needed here since the field is simply omitted when absent).
+ */
+const jsonValueSchema = z.union([
+  z.string(),
+  z.number(),
+  z.boolean(),
+  z.array(nestedJsonValueSchema),
+  z.record(nestedJsonValueSchema),
+]);
+
 /**
  * Validation schema for creating a referral. `.strict()` rejects unknown fields,
  * matching the previous global ValidationPipe `forbidNonWhitelisted: true`.
  */
 export const createReferralSchema = z
   .object({
-    name: z.string().trim().min(1).max(200),
+    beneficiaryId: z.string().uuid(),
+    visitId: z.string().uuid().optional(),
+    sourceSubmissionId: z.string().uuid().optional(),
+    referralType: z.enum(['STANDARD', 'ACCOMPANIED']),
+    referralDate: z.coerce.date(),
+    triggerConditionListJson: jsonValueSchema.optional(),
+    facilityType: z.enum(['PUBLIC', 'PRIVATE', 'PHC', 'RH', 'DH', 'OTHER']).optional(),
+    facilityName: z.string().trim().min(1).max(200).optional(),
+    status: z.enum([
+      'INITIATED',
+      'PENDING_FOLLOWUP',
+      'COMPLETED',
+      'LAPSED',
+      'SKIPPED',
+      'CANCELLED',
+    ]),
+    validTill: z.coerce.date().optional(),
+    supervisorApprovalStatus: z
+      .enum(['NOT_REQUIRED', 'PENDING', 'APPROVED', 'REJECTED'])
+      .default('NOT_REQUIRED'),
   })
   .strict();
 
