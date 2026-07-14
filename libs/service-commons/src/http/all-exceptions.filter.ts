@@ -1,65 +1,41 @@
-import {
-  type ArgumentsHost,
-  Catch,
-  type ExceptionFilter,
-  HttpException,
-  HttpStatus,
-  Logger,
-} from '@nestjs/common';
-import type { Request, Response } from 'express';
-
-import { type ApiFailure, ErrorCode } from './api-response';
+import type { NextFunction, Request, Response } from 'express';
+import { type ApiFailure, ErrorCode, fail } from './api-response';
+import { HttpError } from './http-error';
 
 const STATUS_TO_CODE: Record<number, ErrorCode> = {
-  [HttpStatus.BAD_REQUEST]: ErrorCode.VALIDATION_ERROR,
-  [HttpStatus.UNAUTHORIZED]: ErrorCode.UNAUTHENTICATED,
-  [HttpStatus.FORBIDDEN]: ErrorCode.FORBIDDEN,
-  [HttpStatus.NOT_FOUND]: ErrorCode.NOT_FOUND,
-  [HttpStatus.CONFLICT]: ErrorCode.CONFLICT,
+  400: ErrorCode.VALIDATION_ERROR,
+  401: ErrorCode.UNAUTHENTICATED,
+  403: ErrorCode.FORBIDDEN,
+  404: ErrorCode.NOT_FOUND,
+  409: ErrorCode.CONFLICT,
 };
 
-/**
- * Converts any thrown error into the standard failure envelope.
- * Logs the full technical error server-side; never leaks internals to clients.
- */
-@Catch()
-export class AllExceptionsFilter implements ExceptionFilter {
-  private readonly logger = new Logger(AllExceptionsFilter.name);
-
-  catch(exception: unknown, host: ArgumentsHost): void {
-    const ctx = host.switchToHttp();
-    const response = ctx.getResponse<Response>();
-    const request = ctx.getRequest<Request>();
-
-    const isHttp = exception instanceof HttpException;
-    const status = isHttp ? exception.getStatus() : HttpStatus.INTERNAL_SERVER_ERROR;
-    const errorCode = STATUS_TO_CODE[status] ?? ErrorCode.INTERNAL_ERROR;
-
-    const clientMessage =
-      status === HttpStatus.INTERNAL_SERVER_ERROR
-        ? 'Something went wrong. Please try again.'
-        : extractMessage(exception);
-
-    if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
-      this.logger.error(
-        { requestId: request.header('x-request-id'), path: request.url, err: exception },
-        'Unhandled server error',
-      );
-    }
-
-    const body: ApiFailure = { success: false, message: clientMessage, errorCode };
-    response.status(status).json(body);
-  }
+/** 404 handler for unmatched routes; returns the standard failure envelope. */
+export function notFoundHandler(_req: Request, res: Response): void {
+  res.status(404).json(fail('Not found.', ErrorCode.NOT_FOUND));
 }
 
-function extractMessage(exception: unknown): string {
-  if (exception instanceof HttpException) {
-    const res = exception.getResponse();
-    if (typeof res === 'string') return res;
-    if (typeof res === 'object' && res !== null && 'message' in res) {
-      const message = (res as { message: unknown }).message;
-      return Array.isArray(message) ? message.join('; ') : String(message);
-    }
+/**
+ * Express error middleware. Converts any thrown error into the standard failure
+ * envelope. Logs the full technical error server-side (5xx); never leaks
+ * internals to clients. Must be registered last, with its 4-arg signature.
+ */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- Express detects error middleware by its 4-arg arity
+export function errorHandler(err: unknown, req: Request, res: Response, _next: NextFunction): void {
+  const status = err instanceof HttpError ? err.status : 500;
+  const errorCode = STATUS_TO_CODE[status] ?? ErrorCode.INTERNAL_ERROR;
+  const clientMessage =
+    status >= 500
+      ? 'Something went wrong. Please try again.'
+      : err instanceof Error
+        ? err.message
+        : 'Request failed.';
+
+  if (status >= 500) {
+    req.log?.error({ requestId: req.header('x-request-id'), path: req.url, err }, 'Unhandled server error');
   }
-  return 'Request failed.';
+
+  const details = err instanceof HttpError ? err.details : undefined;
+  const body: ApiFailure = fail(clientMessage, errorCode, details);
+  res.status(status).json(body);
 }

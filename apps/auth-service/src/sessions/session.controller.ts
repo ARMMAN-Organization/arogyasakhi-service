@@ -1,10 +1,27 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Post } from '@nestjs/common';
-import { SessionService } from './session.service';
-import { CreateSessionDto } from './dto/create-session.dto';
+import { Router } from 'express';
+import type { SessionService } from './session.service';
+import { createSessionSchema } from './dto/create-session.dto';
+import { asyncHandler, ok, validateBody } from '../app.module';
 
-@Controller('sessions')
-export class SessionController {
-  constructor(private readonly service: SessionService) {}
-  @Get() list() { return this.service.list(); }
-  @Post() @HttpCode(HttpStatus.CREATED) create(@Body() dto: CreateSessionDto) { return this.service.create(dto); }
+/** Session HTTP routes. Mounted under the global `api/v1` prefix. */
+export function createSessionRouter(service: SessionService): Router {
+  const router = Router();
+
+  router.get(
+    '/sessions',
+    asyncHandler(async (_req, res) => {
+      res.json(ok(await service.list()));
+    }),
+  );
+
+  router.post(
+    '/sessions',
+    validateBody(createSessionSchema),
+    asyncHandler(async (req, res) => {
+      const created = await service.create(req.body);
+      res.status(201).json(ok(created));
+    }),
+  );
+
+  return router;
 }

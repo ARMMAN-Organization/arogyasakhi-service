@@ -1,7 +1,14 @@
-import { Controller, Get } from '@nestjs/common';
+import { Router } from 'express';
+import { ok } from '../app.module';
 
-@Controller('health')
-export class HealthController {
-  @Get('live') live(): { status: string } { return { status: 'ok' }; }
-  @Get('ready') ready(): { status: string } { return { status: 'ok' }; }
+/** Liveness/readiness endpoints for the gateway itself (it owns no data). */
+export function createHealthRouter(): Router {
+  const router = Router();
+  router.get('/health/live', (_req, res) => {
+    res.json(ok({ status: 'ok' }));
+  });
+  router.get('/health/ready', (_req, res) => {
+    res.json(ok({ status: 'ok' }));
+  });
+  return router;
 }

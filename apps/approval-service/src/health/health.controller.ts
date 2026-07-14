@@ -1,9 +1,22 @@
-import { Controller, Get } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
+import { Router } from 'express';
+import type { PrismaService } from '../prisma/prisma.service';
+import { asyncHandler, ok } from '../app.module';
 
-@Controller('health')
-export class HealthController {
-  constructor(private readonly prisma: PrismaService) {}
-  @Get('live') live(): { status: string } { return { status: 'ok' }; }
-  @Get('ready') async ready(): Promise<{ status: string }> { await this.prisma.$queryRaw`SELECT 1`; return { status: 'ok' }; }
+/** Liveness/readiness endpoints. Mounted under the global `api/v1` prefix. */
+export function createHealthRouter(prisma: PrismaService): Router {
+  const router = Router();
+
+  router.get('/health/live', (_req, res) => {
+    res.json(ok({ status: 'ok' }));
+  });
+
+  router.get(
+    '/health/ready',
+    asyncHandler(async (_req, res) => {
+      await prisma.$queryRaw`SELECT 1`;
+      res.json(ok({ status: 'ok' }));
+    }),
+  );
+
+  return router;
 }

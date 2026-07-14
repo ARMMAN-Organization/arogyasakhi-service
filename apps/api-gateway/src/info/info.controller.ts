@@ -1,8 +1,11 @@
-import { Controller, Get } from '@nestjs/common';
+import { Router } from 'express';
+import { ok } from '../app.module';
 
-@Controller()
-export class InfoController {
-  @Get() info(): { service: string; status: string } {
-    return { service: 'api-gateway', status: 'running' };
-  }
+/** Basic service identity endpoint. */
+export function createInfoRouter(): Router {
+  const router = Router();
+  router.get('/', (_req, res) => {
+    res.json(ok({ service: 'api-gateway', status: 'running' }));
+  });
+  return router;
 }

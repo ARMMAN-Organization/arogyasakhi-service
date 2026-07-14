@@ -1,10 +1,15 @@
-import { Injectable } from '@nestjs/common';
-import { IncentiveEventRepository } from './incentiveEvent.repository';
-import type { CreateIncentiveEventDto } from './dto/create-incentiveEvent.dto';
+import type { IncentiveEventRepository } from './incentiveEvent.repository';
+import type { CreateIncentiveEventInput } from './dto/create-incentiveEvent.dto';
 
-@Injectable()
+/** Incentive event domain logic. Data access is delegated to the repository. */
 export class IncentiveEventService {
   constructor(private readonly repository: IncentiveEventRepository) {}
-  list() { return this.repository.findMany(); }
-  create(dto: CreateIncentiveEventDto) { return this.repository.create(dto); }
+
+  list() {
+    return this.repository.findMany();
+  }
+
+  create(dto: CreateIncentiveEventInput) {
+    return this.repository.create(dto);
+  }
 }

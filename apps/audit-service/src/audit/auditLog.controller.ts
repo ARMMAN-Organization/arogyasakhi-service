@@ -1,10 +1,27 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Post } from '@nestjs/common';
-import { AuditLogService } from './auditLog.service';
-import { CreateAuditLogDto } from './dto/create-auditLog.dto';
+import { Router } from 'express';
+import type { AuditLogService } from './auditLog.service';
+import { createAuditLogSchema } from './dto/create-auditLog.dto';
+import { asyncHandler, ok, validateBody } from '../app.module';
 
-@Controller('audit')
-export class AuditLogController {
-  constructor(private readonly service: AuditLogService) {}
-  @Get() list() { return this.service.list(); }
-  @Post() @HttpCode(HttpStatus.CREATED) create(@Body() dto: CreateAuditLogDto) { return this.service.create(dto); }
+/** Audit log HTTP routes. Mounted under the global `api/v1` prefix. */
+export function createAuditLogRouter(service: AuditLogService): Router {
+  const router = Router();
+
+  router.get(
+    '/audit',
+    asyncHandler(async (_req, res) => {
+      res.json(ok(await service.list()));
+    }),
+  );
+
+  router.post(
+    '/audit',
+    validateBody(createAuditLogSchema),
+    asyncHandler(async (req, res) => {
+      const created = await service.create(req.body);
+      res.status(201).json(ok(created));
+    }),
+  );
+
+  return router;
 }

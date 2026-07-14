@@ -1,10 +1,15 @@
-import { Injectable } from '@nestjs/common';
-import { ClosureRepository } from './closure.repository';
-import type { CreateClosureDto } from './dto/create-closure.dto';
+import type { ClosureRepository } from './closure.repository';
+import type { CreateClosureInput } from './dto/create-closure.dto';
 
-@Injectable()
+/** Closure domain logic. Data access is delegated to the repository. */
 export class ClosureService {
   constructor(private readonly repository: ClosureRepository) {}
-  list() { return this.repository.findMany(); }
-  create(dto: CreateClosureDto) { return this.repository.create(dto); }
+
+  list() {
+    return this.repository.findMany();
+  }
+
+  create(dto: CreateClosureInput) {
+    return this.repository.create(dto);
+  }
 }

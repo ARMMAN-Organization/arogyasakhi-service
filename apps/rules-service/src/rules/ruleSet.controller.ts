@@ -1,10 +1,27 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Post } from '@nestjs/common';
-import { RuleSetService } from './ruleSet.service';
-import { CreateRuleSetDto } from './dto/create-ruleSet.dto';
+import { Router } from 'express';
+import type { RuleSetService } from './ruleSet.service';
+import { createRuleSetSchema } from './dto/create-ruleSet.dto';
+import { asyncHandler, ok, validateBody } from '../app.module';
 
-@Controller('rules')
-export class RuleSetController {
-  constructor(private readonly service: RuleSetService) {}
-  @Get() list() { return this.service.list(); }
-  @Post() @HttpCode(HttpStatus.CREATED) create(@Body() dto: CreateRuleSetDto) { return this.service.create(dto); }
+/** Rule set HTTP routes. Mounted under the global `api/v1` prefix. */
+export function createRuleSetRouter(service: RuleSetService): Router {
+  const router = Router();
+
+  router.get(
+    '/rules',
+    asyncHandler(async (_req, res) => {
+      res.json(ok(await service.list()));
+    }),
+  );
+
+  router.post(
+    '/rules',
+    validateBody(createRuleSetSchema),
+    asyncHandler(async (req, res) => {
+      const created = await service.create(req.body);
+      res.status(201).json(ok(created));
+    }),
+  );
+
+  return router;
 }

@@ -1,8 +1,15 @@
-import { Module } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import { NotificationController } from './notification.controller';
+import type { Router } from 'express';
+import type { PrismaService } from '../prisma/prisma.service';
 import { NotificationRepository } from './notification.repository';
 import { NotificationService } from './notification.service';
+import { createNotificationRouter } from './notification.controller';
 
-@Module({ controllers: [NotificationController], providers: [NotificationService, NotificationRepository, PrismaService] })
-export class NotificationModule {}
+/**
+ * Composition root for the notifications feature: wires repository → service → router.
+ * Replaces the former NestJS module + DI container.
+ */
+export function createNotificationModule(prisma: PrismaService): Router {
+  const repository = new NotificationRepository(prisma);
+  const service = new NotificationService(repository);
+  return createNotificationRouter(service);
+}

@@ -1,21 +1,27 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Post } from '@nestjs/common';
+import { Router } from 'express';
+import type { BeneficiaryService } from './beneficiary.service';
+import { createBeneficiarySchema } from './dto/create-beneficiary.dto';
+import { asyncHandler, ok, validateBody } from '../app.module';
 
-import { BeneficiaryService } from './beneficiary.service';
-import { CreateBeneficiaryDto } from './dto/create-beneficiary.dto';
+/** Beneficiary HTTP routes. Mounted under the global `api/v1` prefix. */
+export function createBeneficiaryRouter(service: BeneficiaryService): Router {
+  const router = Router();
 
-/** Thin HTTP layer — validation + delegation only. */
-@Controller('beneficiaries')
-export class BeneficiaryController {
-  constructor(private readonly beneficiaryService: BeneficiaryService) {}
+  router.get(
+    '/beneficiaries',
+    asyncHandler(async (_req, res) => {
+      res.json(ok(await service.list()));
+    }),
+  );
 
-  @Get()
-  list() {
-    return this.beneficiaryService.list();
-  }
+  router.post(
+    '/beneficiaries',
+    validateBody(createBeneficiarySchema),
+    asyncHandler(async (req, res) => {
+      const created = await service.create(req.body);
+      res.status(201).json(ok(created));
+    }),
+  );
 
-  @Post()
-  @HttpCode(HttpStatus.CREATED)
-  create(@Body() dto: CreateBeneficiaryDto) {
-    return this.beneficiaryService.create(dto);
-  }
+  return router;
 }

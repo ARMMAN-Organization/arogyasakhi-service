@@ -1,10 +1,27 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Post } from '@nestjs/common';
-import { ReferralService } from './referral.service';
-import { CreateReferralDto } from './dto/create-referral.dto';
+import { Router } from 'express';
+import type { ReferralService } from './referral.service';
+import { createReferralSchema } from './dto/create-referral.dto';
+import { asyncHandler, ok, validateBody } from '../app.module';
 
-@Controller('referrals')
-export class ReferralController {
-  constructor(private readonly service: ReferralService) {}
-  @Get() list() { return this.service.list(); }
-  @Post() @HttpCode(HttpStatus.CREATED) create(@Body() dto: CreateReferralDto) { return this.service.create(dto); }
+/** Referral HTTP routes. Mounted under the global `api/v1` prefix. */
+export function createReferralRouter(service: ReferralService): Router {
+  const router = Router();
+
+  router.get(
+    '/referrals',
+    asyncHandler(async (_req, res) => {
+      res.json(ok(await service.list()));
+    }),
+  );
+
+  router.post(
+    '/referrals',
+    validateBody(createReferralSchema),
+    asyncHandler(async (req, res) => {
+      const created = await service.create(req.body);
+      res.status(201).json(ok(created));
+    }),
+  );
+
+  return router;
 }
