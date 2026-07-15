@@ -34,6 +34,11 @@ enum UserRoleStatus {
 model User {
   id                String     @id @default(uuid()) @map("user_id")
   mobileNumber      String     @unique @map("mobile_number") @db.VarChar(13)
+  // Alternate login identifier per SRS FR-S-1.1 ("Sakhi must authenticate
+  // using Username and password"). Optional and unique; login accepts either
+  // mobileNumber or username. Not in the ERD's users table — added because
+  // the SRS is authoritative over the ERD/HLD for this project.
+  username          String?    @unique @db.VarChar(50)
   passwordHash      String     @map("password_hash") @db.VarChar(255)
   displayName       String     @map("display_name") @db.VarChar(160)
   email             String?    @unique @db.VarChar(254)
