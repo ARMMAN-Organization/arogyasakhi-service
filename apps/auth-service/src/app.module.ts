@@ -5,6 +5,7 @@ import type Redis from 'ioredis';
 import {
   buildLoggerOptions,
   createAuthRateLimiter,
+  createSwaggerRouter,
   errorHandler,
   notFoundHandler,
   requestId,
@@ -14,6 +15,7 @@ import { appConfig } from './config/app-config';
 import { PrismaService } from './prisma/prisma.service';
 import { createHealthRouter } from './health/health.controller';
 import { createAuthModule } from './auth/auth.module';
+import { buildAuthServiceOpenApiDocument } from './docs/openapi';
 
 // Re-export shared HTTP helpers so feature routers can import from a single place.
 export {
@@ -33,7 +35,23 @@ export function createApp(prisma: PrismaService, signer: TokenSigner, redis: Red
   const app = express();
 
   app.use(pinoHttp(buildLoggerOptions(appConfig.LOG_LEVEL)));
-  app.use(helmet());
+  // Swagger UI's HTML injects inline <script>/<style> tags, so the default CSP
+  // (which forbids 'unsafe-inline') is relaxed only for the /docs path below.
+  app.use((req, res, next) => {
+    if (req.path === '/api/v1/docs' || req.path.startsWith('/api/v1/docs/')) {
+      return helmet({
+        contentSecurityPolicy: {
+          directives: {
+            ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+            'script-src': ["'self'", "'unsafe-inline'"],
+            'style-src': ["'self'", "'unsafe-inline'"],
+            'img-src': ["'self'", 'data:'],
+          },
+        },
+      })(req, res, next);
+    }
+    return helmet()(req, res, next);
+  });
   app.use(express.json());
   app.use((req, res, next) => {
     const origin = req.header('origin');
@@ -52,6 +70,7 @@ export function createApp(prisma: PrismaService, signer: TokenSigner, redis: Red
   // All routes live under the global `api/v1` prefix.
   const api = express.Router();
   api.use(createHealthRouter(prisma));
+  api.use(createSwaggerRouter(buildAuthServiceOpenApiDocument()));
   // Rate limit applies to every /auth/* route per the HLD (100 req/min/IP).
   api.use('/auth', createAuthRateLimiter(redis));
   api.use(
