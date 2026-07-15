@@ -4,9 +4,14 @@ import { PrismaService } from './prisma.service';
  * Verifies the funders/projects migration itself (constraints, defaults, FK
  * behaviour) — there is no API layer for this domain yet (deferred to the
  * "Project APIs" sprint task), so these tests exercise the Prisma client
- * directly against the real schema.
+ * directly against the real schema. This requires a real, migrated database
+ * (DATABASE_URL/DIRECT_URL), which CI does not currently provision — skipped
+ * there rather than failing the pipeline; runs normally for any developer
+ * with a local .env pointing at a migrated database.
  */
-describe('master data schema (funders, projects)', () => {
+const describeIfDatabaseConfigured = process.env.DATABASE_URL ? describe : describe.skip;
+
+describeIfDatabaseConfigured('master data schema (funders, projects)', () => {
   const prisma = new PrismaService();
   const createdFunderIds: string[] = [];
   const createdProjectIds: string[] = [];
