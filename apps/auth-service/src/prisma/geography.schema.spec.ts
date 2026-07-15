@@ -6,8 +6,15 @@ import { PrismaService } from './prisma.service';
  * domain yet, so these tests exercise the Prisma client directly against the
  * real schema. Scoped to the SRS's 7-level hierarchy only (State > District >
  * Block > PHC > Sub-centre > Village > Pada) — no Taluka, no Panchayat.
+ *
+ * Requires a real, migrated database (DATABASE_URL/DIRECT_URL), which CI does
+ * not currently provision — skipped there rather than failing the pipeline;
+ * runs normally for any developer with a local .env pointing at a migrated
+ * database.
  */
-describe('geography schema (geography_units)', () => {
+const describeIfDatabaseConfigured = process.env.DATABASE_URL ? describe : describe.skip;
+
+describeIfDatabaseConfigured('geography schema (geography_units)', () => {
   const prisma = new PrismaService();
   const createdIds: string[] = [];
 
