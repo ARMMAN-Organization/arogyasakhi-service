@@ -58,12 +58,13 @@ async function seedRoles(): Promise<SeedResult> {
  * Bootstraps the initial ADMIN user from environment variables so no admin
  * credential is ever hardcoded in the repo. Runs in every environment
  * (including production) when ADMIN_USERNAME, ADMIN_MOBILE_NUMBER, and
- * ADMIN_PASSWORD are all set; if any is missing it logs a notice and skips,
+ * ADMIN_PASSWORD are all set; if any is missing it returns a skipped result,
  * so a fresh env is never blocked from seeding. Only creates the admin when
  * no user with that username exists yet — an existing user is left
  * untouched (never re-created and never has its password rotated by the
- * seed). Login is username + password only; mobileNumber is stored as a
- * real `users` column (per the ERD) but never used to authenticate.
+ * seed). Login is username + password only, for every role; mobileNumber is
+ * stored as a real `users` column (per the ERD) but never used to
+ * authenticate.
  */
 async function seedAdminUser(): Promise<SeedResult> {
   const username = process.env.ADMIN_USERNAME;

@@ -42,7 +42,7 @@ export class AuthService {
   ) {}
 
   async login(input: LoginInput, ipAddress: string | null): Promise<AuthTokens> {
-    const user = await this.repository.findUserByIdentifier(input.username);
+    const user = await this.repository.findUserByUsername(input.username);
 
     // Same generic failure for "no such user" and "wrong password" — never
     // reveal which one it was.

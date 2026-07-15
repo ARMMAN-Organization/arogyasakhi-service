@@ -5,7 +5,7 @@ export class AuthRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   /** Looks up a user by username — the sole login identifier for every role. */
-  findUserByIdentifier(username: string) {
+  findUserByUsername(username: string) {
     return this.prisma.user.findUnique({
       where: { username },
       include: {
