@@ -1,10 +1,11 @@
 import type { TokenSigner } from '@armman/service-commons';
-import { unauthorized } from '@armman/service-commons';
+import { conflict, notFound, unauthorized } from '@armman/service-commons';
 import type { AuthRepository } from './auth.repository';
 import { hashPassword, verifyPassword } from './password';
 import { generateRefreshToken, hashRefreshToken } from './refresh-token';
 import { parseDurationMs } from './duration';
 import type { LoginInput } from './dto/login.dto';
+import type { CreateUserInput } from './dto/create-user.dto';
 
 export interface AuthTokens {
   accessToken: string;
@@ -17,6 +18,18 @@ export interface UserProfile {
   mobileNumber: string;
   roles: { roleCode: string; projectId: string | null; geographyUnitId: string | null }[];
 }
+
+export interface CreatedUser {
+  id: string;
+  mobileNumber: string;
+  displayName: string;
+  email: string | null;
+  status: string;
+  createdAt: Date;
+}
+
+/** Prisma unique-constraint violation code (mobileNumber/email/roleCode etc). */
+const PRISMA_UNIQUE_CONSTRAINT_CODE = 'P2002';
 
 export class AuthService {
   constructor(
@@ -69,6 +82,43 @@ export class AuthService {
     // Idempotent by design — revoking an already-revoked/non-existent session
     // is a no-op (updateMany matches zero rows), not an error.
     await this.repository.revokeSessionByRefreshTokenHash(tokenHash);
+  }
+
+  /**
+   * Admin-provisioned account creation (no self-service signup exists per
+   * the HLD §4.2 auth flow — only /auth/login, /auth/refresh, /auth/logout,
+   * /me are public/self-service endpoints).
+   */
+  async createUser(input: CreateUserInput): Promise<CreatedUser> {
+    const role = await this.repository.findRoleByCode(input.roleCode);
+    if (!role || !role.isActive) throw notFound(`Unknown role code: ${input.roleCode}`);
+
+    const passwordHash = await hashPassword(input.password);
+
+    try {
+      const user = await this.repository.createUserWithRole({
+        mobileNumber: input.mobileNumber,
+        passwordHash,
+        displayName: input.displayName,
+        email: input.email ?? null,
+        roleId: role.id,
+        projectId: input.projectId ?? null,
+        geographyUnitId: input.geographyUnitId ?? null,
+      });
+      return {
+        id: user.id,
+        mobileNumber: user.mobileNumber,
+        displayName: user.displayName,
+        email: user.email,
+        status: user.status,
+        createdAt: user.createdAt,
+      };
+    } catch (err) {
+      if (isUniqueConstraintViolation(err)) {
+        throw conflict('A user with this mobile number or email already exists.');
+      }
+      throw err;
+    }
   }
 
   async getProfile(userId: string): Promise<UserProfile | null> {
@@ -125,6 +175,16 @@ export class AuthService {
 
     return { accessToken, refreshToken };
   }
+}
+
+/** Narrows a caught Prisma error to a unique-constraint violation (P2002). */
+function isUniqueConstraintViolation(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'code' in err &&
+    (err as { code: unknown }).code === PRISMA_UNIQUE_CONSTRAINT_CODE
+  );
 }
 
 export { hashPassword };

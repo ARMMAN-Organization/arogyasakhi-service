@@ -4,6 +4,7 @@ import type { TokenSigner } from '@armman/service-commons';
 
 jest.mock('./password', () => ({
   verifyPassword: jest.fn(),
+  hashPassword: jest.fn((plain: string) => Promise.resolve(`hashed(${plain})`)),
 }));
 jest.mock('./refresh-token', () => ({
   generateRefreshToken: jest.fn(() => 'plain-refresh-token'),
@@ -38,6 +39,8 @@ describe('AuthService', () => {
     findActiveSessionByRefreshTokenHash: jest.fn(),
     revokeSession: jest.fn(),
     revokeSessionByRefreshTokenHash: jest.fn(),
+    findRoleByCode: jest.fn(),
+    createUserWithRole: jest.fn(),
   } as unknown as jest.Mocked<AuthRepository>;
 
   const signer = {
@@ -193,6 +196,104 @@ describe('AuthService', () => {
     it('is idempotent when the token is already revoked or unknown', async () => {
       repository.revokeSessionByRefreshTokenHash.mockResolvedValue({ count: 0 } as never);
       await expect(service.logout('already-logged-out-token')).resolves.toBeUndefined();
+    });
+  });
+
+  describe('createUser', () => {
+    const ACTIVE_ROLE = { id: 'role-1', roleCode: 'SAKHI', isActive: true };
+    const CREATED_USER = {
+      id: 'user-2',
+      mobileNumber: '+919876543211',
+      displayName: 'New Sakhi',
+      email: null,
+      status: 'ACTIVE' as const,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    };
+
+    it('hashes the password, creates the user and role assignment', async () => {
+      repository.findRoleByCode.mockResolvedValue(ACTIVE_ROLE as never);
+      repository.createUserWithRole.mockResolvedValue(CREATED_USER as never);
+
+      const result = await service.createUser({
+        mobileNumber: '+919876543211',
+        password: 'Str0ngPass!',
+        displayName: 'New Sakhi',
+        roleCode: 'SAKHI',
+      });
+
+      expect(repository.findRoleByCode).toHaveBeenCalledWith('SAKHI');
+      expect(repository.createUserWithRole).toHaveBeenCalledWith({
+        mobileNumber: '+919876543211',
+        passwordHash: 'hashed(Str0ngPass!)',
+        displayName: 'New Sakhi',
+        email: null,
+        roleId: 'role-1',
+        projectId: null,
+        geographyUnitId: null,
+      });
+      expect(result).toEqual({
+        id: 'user-2',
+        mobileNumber: '+919876543211',
+        displayName: 'New Sakhi',
+        email: null,
+        status: 'ACTIVE',
+        createdAt: CREATED_USER.createdAt,
+      });
+    });
+
+    it('rejects an unknown role code without creating a user', async () => {
+      repository.findRoleByCode.mockResolvedValue(null);
+
+      await expect(
+        service.createUser({
+          mobileNumber: '+919876543211',
+          password: 'Str0ngPass!',
+          displayName: 'New Sakhi',
+          roleCode: 'NOT_A_ROLE',
+        }),
+      ).rejects.toMatchObject({ status: 404 });
+      expect(repository.createUserWithRole).not.toHaveBeenCalled();
+    });
+
+    it('rejects an inactive role code', async () => {
+      repository.findRoleByCode.mockResolvedValue({ ...ACTIVE_ROLE, isActive: false } as never);
+
+      await expect(
+        service.createUser({
+          mobileNumber: '+919876543211',
+          password: 'Str0ngPass!',
+          displayName: 'New Sakhi',
+          roleCode: 'SAKHI',
+        }),
+      ).rejects.toMatchObject({ status: 404 });
+    });
+
+    it('maps a duplicate mobile number/email to a 409 conflict', async () => {
+      repository.findRoleByCode.mockResolvedValue(ACTIVE_ROLE as never);
+      repository.createUserWithRole.mockRejectedValue({ code: 'P2002' });
+
+      await expect(
+        service.createUser({
+          mobileNumber: '+919876543211',
+          password: 'Str0ngPass!',
+          displayName: 'New Sakhi',
+          roleCode: 'SAKHI',
+        }),
+      ).rejects.toMatchObject({ status: 409 });
+    });
+
+    it('propagates unrelated repository errors unchanged', async () => {
+      repository.findRoleByCode.mockResolvedValue(ACTIVE_ROLE as never);
+      repository.createUserWithRole.mockRejectedValue(new Error('db down'));
+
+      await expect(
+        service.createUser({
+          mobileNumber: '+919876543211',
+          password: 'Str0ngPass!',
+          displayName: 'New Sakhi',
+          roleCode: 'SAKHI',
+        }),
+      ).rejects.toThrow('db down');
     });
   });
 

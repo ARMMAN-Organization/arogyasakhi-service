@@ -2,7 +2,15 @@ import { Router } from 'express';
 import type { AuthService } from './auth.service';
 import { loginSchema } from './dto/login.dto';
 import { refreshSchema } from './dto/refresh.dto';
-import { asyncHandler, authenticate, ok, unauthorized, validateBody } from '../app.module';
+import { createUserSchema } from './dto/create-user.dto';
+import {
+  asyncHandler,
+  authenticate,
+  ok,
+  requireRoles,
+  unauthorized,
+  validateBody,
+} from '../app.module';
 import type { TokenSigner } from '@armman/service-commons';
 
 /** Auth HTTP routes. Mounted under the global `api/v1` prefix. */
@@ -34,6 +42,17 @@ export function createAuthRouter(service: AuthService, signer: TokenSigner): Rou
     asyncHandler(async (req, res) => {
       await service.logout(req.body.refreshToken);
       res.status(200).json(ok({ loggedOut: true }));
+    }),
+  );
+
+  router.post(
+    '/users',
+    authenticate(signer),
+    requireRoles('ADMIN'),
+    validateBody(createUserSchema),
+    asyncHandler(async (req, res) => {
+      const user = await service.createUser(req.body);
+      res.status(201).json(ok(user));
     }),
   );
 

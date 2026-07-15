@@ -71,4 +71,40 @@ export class AuthRepository {
       data: { revokedAt: new Date() },
     });
   }
+
+  findRoleByCode(roleCode: string) {
+    return this.prisma.role.findUnique({ where: { roleCode } });
+  }
+
+  /** Creates the user and their initial role assignment atomically. */
+  createUserWithRole(data: {
+    mobileNumber: string;
+    passwordHash: string;
+    displayName: string;
+    email: string | null;
+    roleId: string;
+    projectId: string | null;
+    geographyUnitId: string | null;
+  }) {
+    return this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          mobileNumber: data.mobileNumber,
+          passwordHash: data.passwordHash,
+          displayName: data.displayName,
+          email: data.email,
+        },
+      });
+      await tx.userRole.create({
+        data: {
+          userId: user.id,
+          roleId: data.roleId,
+          projectId: data.projectId,
+          geographyUnitId: data.geographyUnitId,
+          effectiveFrom: new Date(),
+        },
+      });
+      return user;
+    });
+  }
 }
