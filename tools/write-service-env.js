@@ -7,7 +7,7 @@
  *
  * Usage: node tools/write-service-env.js <service-name>
  */
-const { existsSync, readFileSync, writeFileSync } = require('node:fs');
+const { chmodSync, existsSync, readFileSync, writeFileSync } = require('node:fs');
 const { join } = require('node:path');
 
 const service = process.argv[2];
@@ -57,4 +57,8 @@ const contents = [
 ].join('\n');
 
 writeFileSync(outPath, contents, { mode: 0o600 });
+// `mode` on writeFileSync only applies when the file is created; if outPath
+// already existed, its prior permissions are left untouched. Since this file
+// holds credentials, chmod explicitly so it's always 0600 either way.
+chmodSync(outPath, 0o600);
 console.log(`Wrote ${outPath} (schema=${schema}) — credential not printed.`);
