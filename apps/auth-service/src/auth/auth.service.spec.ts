@@ -15,6 +15,7 @@ import { verifyPassword } from './password';
 
 const ACTIVE_USER = {
   id: 'user-1',
+  username: 'test.sakhi',
   mobileNumber: '+919876543210',
   passwordHash: 'hashed-password',
   displayName: 'Test Sakhi',
@@ -31,7 +32,7 @@ const ACTIVE_USER = {
 
 describe('AuthService', () => {
   const repository = {
-    findUserByMobileNumber: jest.fn(),
+    findUserByIdentifier: jest.fn(),
     findUserById: jest.fn(),
     incrementFailedLoginCount: jest.fn(),
     recordSuccessfulLogin: jest.fn(),
@@ -57,12 +58,12 @@ describe('AuthService', () => {
   });
 
   describe('login', () => {
-    it('issues tokens on correct mobile number and password', async () => {
-      repository.findUserByMobileNumber.mockResolvedValue(ACTIVE_USER as never);
+    it('issues tokens on correct username and password', async () => {
+      repository.findUserByIdentifier.mockResolvedValue(ACTIVE_USER as never);
       (verifyPassword as jest.Mock).mockResolvedValue(true);
 
       const tokens = await service.login(
-        { mobileNumber: '+919876543210', password: 'correct' },
+        { username: 'test.sakhi', password: 'correct' },
         '127.0.0.1',
       );
 
@@ -83,47 +84,47 @@ describe('AuthService', () => {
       );
     });
 
-    it('rejects with a generic error for a non-existent mobile number', async () => {
-      repository.findUserByMobileNumber.mockResolvedValue(null);
+    it('rejects with a generic error for a non-existent username', async () => {
+      repository.findUserByIdentifier.mockResolvedValue(null);
 
       await expect(
-        service.login({ mobileNumber: '+919999999999', password: 'anything' }, null),
-      ).rejects.toMatchObject({ status: 401, message: 'Invalid mobile number or password.' });
+        service.login({ username: 'nobody', password: 'anything' }, null),
+      ).rejects.toMatchObject({ status: 401, message: 'Invalid credentials.' });
       expect(repository.incrementFailedLoginCount).not.toHaveBeenCalled();
     });
 
     it('increments failedLoginCount and rejects on wrong password', async () => {
-      repository.findUserByMobileNumber.mockResolvedValue(ACTIVE_USER as never);
+      repository.findUserByIdentifier.mockResolvedValue(ACTIVE_USER as never);
       (verifyPassword as jest.Mock).mockResolvedValue(false);
 
       await expect(
-        service.login({ mobileNumber: '+919876543210', password: 'wrong' }, null),
+        service.login({ username: 'test.sakhi', password: 'wrong' }, null),
       ).rejects.toMatchObject({ status: 401 });
       expect(repository.incrementFailedLoginCount).toHaveBeenCalledWith('user-1');
       expect(repository.recordSuccessfulLogin).not.toHaveBeenCalled();
     });
 
     it('rejects a LOCKED user regardless of password correctness', async () => {
-      repository.findUserByMobileNumber.mockResolvedValue({
+      repository.findUserByIdentifier.mockResolvedValue({
         ...ACTIVE_USER,
         status: 'LOCKED',
       } as never);
 
       await expect(
-        service.login({ mobileNumber: '+919876543210', password: 'correct' }, null),
+        service.login({ username: 'test.sakhi', password: 'correct' }, null),
       ).rejects.toMatchObject({ status: 401 });
       expect(verifyPassword).not.toHaveBeenCalled();
       expect(repository.incrementFailedLoginCount).toHaveBeenCalledWith('user-1');
     });
 
     it('rejects a soft-deleted user', async () => {
-      repository.findUserByMobileNumber.mockResolvedValue({
+      repository.findUserByIdentifier.mockResolvedValue({
         ...ACTIVE_USER,
         isDeleted: true,
       } as never);
 
       await expect(
-        service.login({ mobileNumber: '+919876543210', password: 'correct' }, null),
+        service.login({ username: 'test.sakhi', password: 'correct' }, null),
       ).rejects.toMatchObject({ status: 401 });
     });
   });
@@ -203,6 +204,7 @@ describe('AuthService', () => {
     const ACTIVE_ROLE = { id: 'role-1', roleCode: 'SAKHI', isActive: true };
     const CREATED_USER = {
       id: 'user-2',
+      username: 'new.sakhi',
       mobileNumber: '+919876543211',
       displayName: 'New Sakhi',
       email: null,
@@ -215,6 +217,7 @@ describe('AuthService', () => {
       repository.createUserWithRole.mockResolvedValue(CREATED_USER as never);
 
       const result = await service.createUser({
+        username: 'new.sakhi',
         mobileNumber: '+919876543211',
         password: 'Str0ngPass!',
         displayName: 'New Sakhi',
@@ -223,6 +226,7 @@ describe('AuthService', () => {
 
       expect(repository.findRoleByCode).toHaveBeenCalledWith('SAKHI');
       expect(repository.createUserWithRole).toHaveBeenCalledWith({
+        username: 'new.sakhi',
         mobileNumber: '+919876543211',
         passwordHash: 'hashed(Str0ngPass!)',
         displayName: 'New Sakhi',
@@ -233,6 +237,7 @@ describe('AuthService', () => {
       });
       expect(result).toEqual({
         id: 'user-2',
+        username: 'new.sakhi',
         mobileNumber: '+919876543211',
         displayName: 'New Sakhi',
         email: null,
@@ -246,6 +251,7 @@ describe('AuthService', () => {
 
       await expect(
         service.createUser({
+          username: 'new.sakhi',
           mobileNumber: '+919876543211',
           password: 'Str0ngPass!',
           displayName: 'New Sakhi',
@@ -260,6 +266,7 @@ describe('AuthService', () => {
 
       await expect(
         service.createUser({
+          username: 'new.sakhi',
           mobileNumber: '+919876543211',
           password: 'Str0ngPass!',
           displayName: 'New Sakhi',
@@ -268,12 +275,13 @@ describe('AuthService', () => {
       ).rejects.toMatchObject({ status: 404 });
     });
 
-    it('maps a duplicate mobile number/email to a 409 conflict', async () => {
+    it('maps a duplicate username, mobile number, or email to a 409 conflict', async () => {
       repository.findRoleByCode.mockResolvedValue(ACTIVE_ROLE as never);
       repository.createUserWithRole.mockRejectedValue({ code: 'P2002' });
 
       await expect(
         service.createUser({
+          username: 'new.sakhi',
           mobileNumber: '+919876543211',
           password: 'Str0ngPass!',
           displayName: 'New Sakhi',
@@ -288,6 +296,7 @@ describe('AuthService', () => {
 
       await expect(
         service.createUser({
+          username: 'new.sakhi',
           mobileNumber: '+919876543211',
           password: 'Str0ngPass!',
           displayName: 'New Sakhi',
@@ -303,6 +312,7 @@ describe('AuthService', () => {
 
       await expect(service.getProfile('user-1')).resolves.toEqual({
         id: 'user-1',
+        username: 'test.sakhi',
         displayName: 'Test Sakhi',
         mobileNumber: '+919876543210',
         roles: [{ roleCode: 'SAKHI', projectId: 'project-1', geographyUnitId: 'geo-1' }],
