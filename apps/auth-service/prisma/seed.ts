@@ -48,18 +48,24 @@ async function seedRoles(): Promise<void> {
 /**
  * Bootstraps the initial ADMIN user from environment variables so no admin
  * credential is ever hardcoded in the repo. Runs in every environment
- * (including production) when both ADMIN_MOBILE_NUMBER and ADMIN_PASSWORD are
- * set; if either is missing it logs a notice and skips, so a fresh env is
- * never blocked from seeding. Only creates the admin when no user with that
- * mobile number exists yet — an existing user is left untouched (never
- * re-created and never has its password rotated by the seed).
+ * (including production) when ADMIN_USERNAME, ADMIN_MOBILE_NUMBER, and
+ * ADMIN_PASSWORD are all set; if any is missing it logs a notice and skips,
+ * so a fresh env is never blocked from seeding. Only creates the admin when
+ * no user with that username exists yet — an existing user is left
+ * untouched (never re-created and never has its password rotated by the
+ * seed). Login is username + password only, for every role; mobileNumber is
+ * stored as a real `users` column (per the ERD) but never used to
+ * authenticate.
  */
 async function seedAdminUser(): Promise<void> {
+  const username = process.env.ADMIN_USERNAME;
   const mobileNumber = process.env.ADMIN_MOBILE_NUMBER;
   const password = process.env.ADMIN_PASSWORD;
 
-  if (!mobileNumber || !password) {
-    console.log('ADMIN_MOBILE_NUMBER / ADMIN_PASSWORD not set — skipping admin bootstrap.');
+  if (!username || !mobileNumber || !password) {
+    console.log(
+      'ADMIN_USERNAME / ADMIN_MOBILE_NUMBER / ADMIN_PASSWORD not set — skipping admin bootstrap.',
+    );
     return;
   }
 
@@ -68,9 +74,9 @@ async function seedAdminUser(): Promise<void> {
   }
 
   // Seed only when this admin does not already exist.
-  const existing = await prisma.user.findUnique({ where: { mobileNumber } });
+  const existing = await prisma.user.findUnique({ where: { username } });
   if (existing) {
-    console.log(`Admin user ${mobileNumber} already exists — skipping admin bootstrap.`);
+    console.log(`Admin user ${username} already exists — skipping admin bootstrap.`);
     return;
   }
 
@@ -81,6 +87,7 @@ async function seedAdminUser(): Promise<void> {
   await prisma.$transaction(async (tx) => {
     const user = await tx.user.create({
       data: {
+        username,
         mobileNumber,
         passwordHash,
         displayName: 'System Administrator',
@@ -92,7 +99,7 @@ async function seedAdminUser(): Promise<void> {
     });
   });
 
-  console.log(`Seeded ADMIN user ${mobileNumber}.`);
+  console.log(`Seeded ADMIN user ${username}.`);
 }
 
 /**
@@ -105,12 +112,13 @@ async function seedTestUser(): Promise<void> {
     return;
   }
 
+  const username = 'test.sakhi';
   const mobileNumber = '+919000000001';
 
   // Seed only when this test user does not already exist.
-  const existing = await prisma.user.findUnique({ where: { mobileNumber } });
+  const existing = await prisma.user.findUnique({ where: { username } });
   if (existing) {
-    console.log(`Test user ${mobileNumber} already exists — skipping test user seed.`);
+    console.log(`Test user ${username} already exists — skipping test user seed.`);
     return;
   }
 
@@ -120,6 +128,7 @@ async function seedTestUser(): Promise<void> {
   await prisma.$transaction(async (tx) => {
     const user = await tx.user.create({
       data: {
+        username,
         mobileNumber,
         passwordHash,
         displayName: 'Test Sakhi',
@@ -131,7 +140,7 @@ async function seedTestUser(): Promise<void> {
     });
   });
 
-  console.log(`Seeded test user ${mobileNumber} (password: Test@1234) with SAKHI role.`);
+  console.log(`Seeded test user ${username} (password: Test@1234) with SAKHI role.`);
 }
 
 async function main(): Promise<void> {

@@ -4,10 +4,10 @@ import type { PrismaService } from '../prisma/prisma.service';
 export class AuthRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** Looks up a user by mobile number or username — login accepts either. */
-  findUserByIdentifier(identifier: string) {
-    return this.prisma.user.findFirst({
-      where: { OR: [{ mobileNumber: identifier }, { username: identifier }] },
+  /** Looks up a user by username — the sole login identifier for every role. */
+  findUserByIdentifier(username: string) {
+    return this.prisma.user.findUnique({
+      where: { username },
       include: {
         userRoles: {
           where: { status: 'ACTIVE', isDeleted: false },
