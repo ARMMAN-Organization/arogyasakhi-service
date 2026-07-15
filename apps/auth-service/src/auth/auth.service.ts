@@ -1,5 +1,5 @@
 import type { TokenSigner } from '@armman/service-commons';
-import { conflict, notFound, unauthorized } from '@armman/service-commons';
+import { conflict, forbidden, notFound, unauthorized } from '@armman/service-commons';
 import type { AuthRepository } from './auth.repository';
 import { hashPassword, verifyPassword } from './password';
 import { generateRefreshToken, hashRefreshToken } from './refresh-token';
@@ -90,8 +90,21 @@ export class AuthService {
    * Admin-provisioned account creation (no self-service signup exists per
    * the HLD §4.2 auth flow — only /auth/login, /auth/refresh, /auth/logout,
    * /me are public/self-service endpoints).
+   *
+   * Who can create whom: ADMIN can create any role (ADMIN, MANAGER,
+   * SUPERVISOR, SAKHI); SUPERVISOR can create SAKHI only. The route allows
+   * both ADMIN and SUPERVISOR to call this endpoint (requireRoles('ADMIN',
+   * 'SUPERVISOR')) — this method enforces the finer-grained restriction on
+   * which target roleCode each caller is allowed to assign.
    */
-  async createUser(input: CreateUserInput): Promise<CreatedUser> {
+  async createUser(input: CreateUserInput, callerRoles: string[]): Promise<CreatedUser> {
+    if (!callerRoles.includes('ADMIN')) {
+      const allowedTargetRoles = callerRoles.includes('SUPERVISOR') ? ['SAKHI'] : [];
+      if (!allowedTargetRoles.includes(input.roleCode)) {
+        throw forbidden(`You are not allowed to create a user with role ${input.roleCode}.`);
+      }
+    }
+
     const role = await this.repository.findRoleByCode(input.roleCode);
     if (!role || !role.isActive) throw notFound(`Unknown role code: ${input.roleCode}`);
 
