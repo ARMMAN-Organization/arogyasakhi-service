@@ -1,12 +1,22 @@
 generator client {
-  provider = "prisma-client-js"
-  output   = "../../../node_modules/.prisma/client-auth-service"
+  provider        = "prisma-client-js"
+  output          = "../../../node_modules/.prisma/client-auth-service"
+  previewFeatures = ["multiSchema"]
 }
 
+// schemas is set explicitly (rather than relying on the connection URL's
+// ?schema= param) because Supabase's transaction pooler (port 6543, used for
+// DATABASE_URL at runtime) does not honor per-session search_path changes —
+// confirmed live: `show search_path` stays "public" over the pooler even with
+// ?schema=auth_service in the URL, but correctly becomes "auth_service" over
+// the session pooler (port 5432, used only for DIRECT_URL/migrations). Baking
+// the schema into every generated query via @@schema(...) works regardless of
+// which pooler mode is used.
 datasource db {
   provider  = "postgresql"
   directUrl = env("DIRECT_URL")
   url       = env("DATABASE_URL")
+  schemas   = ["auth_service"]
 }
 
 // auth-service owns these tables only (forklift rule).
@@ -22,6 +32,8 @@ enum UserStatus {
   LOCKED
   PAUSED
   DELETED
+
+  @@schema("auth_service")
 }
 
 enum UserRoleStatus {
@@ -29,6 +41,8 @@ enum UserRoleStatus {
   EXPIRED
   REVOKED
   INACTIVE
+
+  @@schema("auth_service")
 }
 
 model User {
@@ -57,6 +71,7 @@ model User {
   userSessions UserSession[]
 
   @@map("users")
+  @@schema("auth_service")
 }
 
 model Role {
@@ -75,6 +90,7 @@ model Role {
   userRoles UserRole[]
 
   @@map("roles")
+  @@schema("auth_service")
 }
 
 model UserRole {
@@ -99,6 +115,7 @@ model UserRole {
   role Role @relation(fields: [roleId], references: [id])
 
   @@map("user_roles")
+  @@schema("auth_service")
 }
 
 model UserSession {
@@ -121,6 +138,7 @@ model UserSession {
   user User @relation(fields: [userId], references: [id])
 
   @@map("user_sessions")
+  @@schema("auth_service")
 }
 
 // Column set matches ERD Appendix A.1 (funders, projects) exactly.
@@ -128,6 +146,8 @@ model UserSession {
 enum FunderStatus {
   ACTIVE
   INACTIVE
+
+  @@schema("auth_service")
 }
 
 model Funder {
@@ -145,12 +165,15 @@ model Funder {
   projects Project[]
 
   @@map("funders")
+  @@schema("auth_service")
 }
 
 enum ProjectStatus {
   ACTIVE
   PAUSED
   CLOSED
+
+  @@schema("auth_service")
 }
 
 model Project {
@@ -171,4 +194,5 @@ model Project {
   deletedAt       DateTime?     @map("deleted_at")
 
   @@map("projects")
+  @@schema("auth_service")
 }
