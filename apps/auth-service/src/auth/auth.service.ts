@@ -14,7 +14,7 @@ export interface AuthTokens {
 
 export interface UserProfile {
   id: string;
-  username: string | null;
+  username: string;
   displayName: string;
   mobileNumber: string;
   roles: { roleCode: string; projectId: string | null; geographyUnitId: string | null }[];
@@ -22,7 +22,7 @@ export interface UserProfile {
 
 export interface CreatedUser {
   id: string;
-  username: string | null;
+  username: string;
   mobileNumber: string;
   displayName: string;
   email: string | null;
