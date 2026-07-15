@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { usernameSchema } from './username';
 
 /**
  * Login is username + password for every role, per SRS FR-S-1.1 ("Sakhi must
@@ -8,7 +9,7 @@ import { z } from 'zod';
  */
 export const loginSchema = z
   .object({
-    username: z.string().trim().min(1).max(50),
+    username: usernameSchema,
     password: z.string().min(1),
   })
   .strict();

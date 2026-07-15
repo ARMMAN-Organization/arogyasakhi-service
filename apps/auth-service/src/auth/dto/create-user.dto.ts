@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { mobileNumberSchema } from './mobile-number';
+import { usernameSchema } from './username';
 
 /**
  * Validation schema for creating a user. Fields match `users`
@@ -18,7 +19,7 @@ import { mobileNumberSchema } from './mobile-number';
  */
 export const createUserSchema = z
   .object({
-    username: z.string().trim().min(1).max(50),
+    username: usernameSchema,
     mobileNumber: mobileNumberSchema,
     password: z.string().min(8).max(200),
     displayName: z.string().trim().min(1).max(160),
