@@ -86,7 +86,6 @@ describe('AuthService', () => {
 
     it('rejects with a generic error for a non-existent username', async () => {
       repository.findUserByUsername.mockResolvedValue(null);
-
       await expect(
         service.login({ username: 'nobody', password: 'anything' }, null),
       ).rejects.toMatchObject({ status: 401, message: 'Invalid credentials.' });
@@ -118,10 +117,7 @@ describe('AuthService', () => {
     });
 
     it('rejects a soft-deleted user', async () => {
-      repository.findUserByUsername.mockResolvedValue({
-        ...ACTIVE_USER,
-        isDeleted: true,
-      } as never);
+      repository.findUserByUsername.mockResolvedValue({ ...ACTIVE_USER, isDeleted: true } as never);
 
       await expect(
         service.login({ username: 'test.sakhi', password: 'correct' }, null),
@@ -216,13 +212,16 @@ describe('AuthService', () => {
       repository.findRoleByCode.mockResolvedValue(ACTIVE_ROLE as never);
       repository.createUserWithRole.mockResolvedValue(CREATED_USER as never);
 
-      const result = await service.createUser({
-        username: 'new.sakhi',
-        mobileNumber: '+919876543211',
-        password: 'Str0ngPass!',
-        displayName: 'New Sakhi',
-        roleCode: 'SAKHI',
-      });
+      const result = await service.createUser(
+        {
+          username: 'new.sakhi',
+          mobileNumber: '+919876543211',
+          password: 'Str0ngPass!',
+          displayName: 'New Sakhi',
+          roleCode: 'SAKHI',
+        },
+        ['ADMIN'],
+      );
 
       expect(repository.findRoleByCode).toHaveBeenCalledWith('SAKHI');
       expect(repository.createUserWithRole).toHaveBeenCalledWith({
@@ -250,13 +249,16 @@ describe('AuthService', () => {
       repository.findRoleByCode.mockResolvedValue(null);
 
       await expect(
-        service.createUser({
-          username: 'new.sakhi',
-          mobileNumber: '+919876543211',
-          password: 'Str0ngPass!',
-          displayName: 'New Sakhi',
-          roleCode: 'NOT_A_ROLE',
-        }),
+        service.createUser(
+          {
+            username: 'new.sakhi',
+            mobileNumber: '+919876543211',
+            password: 'Str0ngPass!',
+            displayName: 'New Sakhi',
+            roleCode: 'NOT_A_ROLE',
+          },
+          ['ADMIN'],
+        ),
       ).rejects.toMatchObject({ status: 404 });
       expect(repository.createUserWithRole).not.toHaveBeenCalled();
     });
@@ -265,13 +267,16 @@ describe('AuthService', () => {
       repository.findRoleByCode.mockResolvedValue({ ...ACTIVE_ROLE, isActive: false } as never);
 
       await expect(
-        service.createUser({
-          username: 'new.sakhi',
-          mobileNumber: '+919876543211',
-          password: 'Str0ngPass!',
-          displayName: 'New Sakhi',
-          roleCode: 'SAKHI',
-        }),
+        service.createUser(
+          {
+            username: 'new.sakhi',
+            mobileNumber: '+919876543211',
+            password: 'Str0ngPass!',
+            displayName: 'New Sakhi',
+            roleCode: 'SAKHI',
+          },
+          ['ADMIN'],
+        ),
       ).rejects.toMatchObject({ status: 404 });
     });
 
@@ -280,13 +285,16 @@ describe('AuthService', () => {
       repository.createUserWithRole.mockRejectedValue({ code: 'P2002' });
 
       await expect(
-        service.createUser({
-          username: 'new.sakhi',
-          mobileNumber: '+919876543211',
-          password: 'Str0ngPass!',
-          displayName: 'New Sakhi',
-          roleCode: 'SAKHI',
-        }),
+        service.createUser(
+          {
+            username: 'new.sakhi',
+            mobileNumber: '+919876543211',
+            password: 'Str0ngPass!',
+            displayName: 'New Sakhi',
+            roleCode: 'SAKHI',
+          },
+          ['ADMIN'],
+        ),
       ).rejects.toMatchObject({ status: 409 });
     });
 
@@ -295,14 +303,83 @@ describe('AuthService', () => {
       repository.createUserWithRole.mockRejectedValue(new Error('db down'));
 
       await expect(
-        service.createUser({
-          username: 'new.sakhi',
-          mobileNumber: '+919876543211',
-          password: 'Str0ngPass!',
-          displayName: 'New Sakhi',
-          roleCode: 'SAKHI',
-        }),
+        service.createUser(
+          {
+            username: 'new.sakhi',
+            mobileNumber: '+919876543211',
+            password: 'Str0ngPass!',
+            displayName: 'New Sakhi',
+            roleCode: 'SAKHI',
+          },
+          ['ADMIN'],
+        ),
       ).rejects.toThrow('db down');
+    });
+
+    it('allows a SUPERVISOR to create a SAKHI', async () => {
+      repository.findRoleByCode.mockResolvedValue(ACTIVE_ROLE as never);
+      repository.createUserWithRole.mockResolvedValue(CREATED_USER as never);
+
+      await expect(
+        service.createUser(
+          {
+            username: 'new.sakhi',
+            mobileNumber: '+919876543211',
+            password: 'Str0ngPass!',
+            displayName: 'New Sakhi',
+            roleCode: 'SAKHI',
+          },
+          ['SUPERVISOR'],
+        ),
+      ).resolves.toBeDefined();
+      expect(repository.createUserWithRole).toHaveBeenCalled();
+    });
+
+    it('rejects a SUPERVISOR trying to create a SUPERVISOR', async () => {
+      await expect(
+        service.createUser(
+          {
+            username: 'new.supervisor',
+            mobileNumber: '+919876543212',
+            password: 'Str0ngPass!',
+            displayName: 'New Supervisor',
+            roleCode: 'SUPERVISOR',
+          },
+          ['SUPERVISOR'],
+        ),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(repository.findRoleByCode).not.toHaveBeenCalled();
+      expect(repository.createUserWithRole).not.toHaveBeenCalled();
+    });
+
+    it('rejects a SUPERVISOR trying to create an ADMIN', async () => {
+      await expect(
+        service.createUser(
+          {
+            username: 'new.admin',
+            mobileNumber: '+919876543213',
+            password: 'Str0ngPass!',
+            displayName: 'New Admin',
+            roleCode: 'ADMIN',
+          },
+          ['SUPERVISOR'],
+        ),
+      ).rejects.toMatchObject({ status: 403 });
+    });
+
+    it('rejects a caller with neither ADMIN nor SUPERVISOR', async () => {
+      await expect(
+        service.createUser(
+          {
+            username: 'new.sakhi',
+            mobileNumber: '+919876543214',
+            password: 'Str0ngPass!',
+            displayName: 'New Sakhi',
+            roleCode: 'SAKHI',
+          },
+          ['SAKHI'],
+        ),
+      ).rejects.toMatchObject({ status: 403 });
     });
   });
 

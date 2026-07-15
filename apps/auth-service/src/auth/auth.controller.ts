@@ -48,10 +48,13 @@ export function createAuthRouter(service: AuthService, signer: TokenSigner): Rou
   router.post(
     '/users',
     authenticate(signer),
-    requireRoles('ADMIN'),
+    requireRoles('ADMIN', 'SUPERVISOR'),
     validateBody(createUserSchema),
-    asyncHandler(async (req, res) => {
-      const user = await service.createUser(req.body);
+    asyncHandler(async (req, res, next) => {
+      // authenticate(signer) runs first and calls next(unauthorized()) if it
+      // fails, so req.user is always populated by the time this handler runs.
+      if (!req.user) return next(unauthorized());
+      const user = await service.createUser(req.body, req.user.roles);
       res.status(201).json(ok(user));
     }),
   );
