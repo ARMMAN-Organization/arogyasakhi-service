@@ -1,12 +1,20 @@
 generator client {
-  provider = "prisma-client-js"
-  output   = "../../../node_modules/.prisma/client-sync-service"
+  provider        = "prisma-client-js"
+  output          = "../../../node_modules/.prisma/client-sync-service"
+  previewFeatures = ["multiSchema"]
 }
 
+// schemas is set explicitly (rather than relying on the connection URL's
+// ?schema= param) because Supabase's transaction pooler (port 6543, used for
+// DATABASE_URL at runtime) does not honor per-session search_path changes —
+// see apps/auth-service/prisma/schema.prisma for the confirmed root cause.
+// Baking the schema into every generated query via @@schema(...) works
+// regardless of which pooler mode is used.
 datasource db {
   provider  = "postgresql"
   directUrl = env("DIRECT_URL")
   url       = env("DATABASE_URL")
+  schemas   = ["sync_service"]
 }
 
 // sync-service owns these tables only (forklift rule).
@@ -19,6 +27,8 @@ datasource db {
 enum SyncDirection {
   UPLOAD
   DOWNLOAD
+
+  @@schema("sync_service")
 }
 
 enum SyncBatchStatus {
@@ -27,6 +37,8 @@ enum SyncBatchStatus {
   FAILED
   PARTIAL
   CANCELLED
+
+  @@schema("sync_service")
 }
 
 enum SyncNetworkType {
@@ -34,6 +46,8 @@ enum SyncNetworkType {
   MOBILE
   OFFLINE
   UNKNOWN
+
+  @@schema("sync_service")
 }
 
 enum SyncOperation {
@@ -41,6 +55,8 @@ enum SyncOperation {
   UPDATE
   DELETE
   UPSERT
+
+  @@schema("sync_service")
 }
 
 enum SyncItemStatus {
@@ -48,6 +64,8 @@ enum SyncItemStatus {
   SUCCESS
   FAILED
   SKIPPED
+
+  @@schema("sync_service")
 }
 
 model SyncBatch {
@@ -73,6 +91,7 @@ model SyncBatch {
   syncItems SyncItem[]
 
   @@map("sync_batches")
+  @@schema("sync_service")
 }
 
 model SyncItem {
@@ -96,4 +115,5 @@ model SyncItem {
   syncBatch SyncBatch @relation(fields: [syncBatchId], references: [id])
 
   @@map("sync_items")
+  @@schema("sync_service")
 }

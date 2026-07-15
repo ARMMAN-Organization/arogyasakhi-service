@@ -1,5 +1,5 @@
 import type { TokenSigner } from '@armman/service-commons';
-import { conflict, notFound, unauthorized } from '@armman/service-commons';
+import { conflict, forbidden, notFound, unauthorized } from '@armman/service-commons';
 import type { AuthRepository } from './auth.repository';
 import { hashPassword, verifyPassword } from './password';
 import { generateRefreshToken, hashRefreshToken } from './refresh-token';
@@ -14,6 +14,7 @@ export interface AuthTokens {
 
 export interface UserProfile {
   id: string;
+  username: string;
   displayName: string;
   mobileNumber: string;
   roles: { roleCode: string; projectId: string | null; geographyUnitId: string | null }[];
@@ -21,6 +22,7 @@ export interface UserProfile {
 
 export interface CreatedUser {
   id: string;
+  username: string;
   mobileNumber: string;
   displayName: string;
   email: string | null;
@@ -40,19 +42,19 @@ export class AuthService {
   ) {}
 
   async login(input: LoginInput, ipAddress: string | null): Promise<AuthTokens> {
-    const user = await this.repository.findUserByMobileNumber(input.mobileNumber);
+    const user = await this.repository.findUserByIdentifier(input.username);
 
     // Same generic failure for "no such user" and "wrong password" — never
     // reveal which one it was.
     if (!user || user.isDeleted || user.status !== 'ACTIVE') {
       if (user) await this.repository.incrementFailedLoginCount(user.id);
-      throw unauthorized('Invalid mobile number or password.');
+      throw unauthorized('Invalid credentials.');
     }
 
     const passwordMatches = await verifyPassword(user.passwordHash, input.password);
     if (!passwordMatches) {
       await this.repository.incrementFailedLoginCount(user.id);
-      throw unauthorized('Invalid mobile number or password.');
+      throw unauthorized('Invalid credentials.');
     }
 
     await this.repository.recordSuccessfulLogin(user.id);
@@ -88,8 +90,21 @@ export class AuthService {
    * Admin-provisioned account creation (no self-service signup exists per
    * the HLD §4.2 auth flow — only /auth/login, /auth/refresh, /auth/logout,
    * /me are public/self-service endpoints).
+   *
+   * Who can create whom: ADMIN can create any role (ADMIN, MANAGER,
+   * SUPERVISOR, SAKHI); SUPERVISOR can create SAKHI only. The route allows
+   * both ADMIN and SUPERVISOR to call this endpoint (requireRoles('ADMIN',
+   * 'SUPERVISOR')) — this method enforces the finer-grained restriction on
+   * which target roleCode each caller is allowed to assign.
    */
-  async createUser(input: CreateUserInput): Promise<CreatedUser> {
+  async createUser(input: CreateUserInput, callerRoles: string[]): Promise<CreatedUser> {
+    if (!callerRoles.includes('ADMIN')) {
+      const allowedTargetRoles = callerRoles.includes('SUPERVISOR') ? ['SAKHI'] : [];
+      if (!allowedTargetRoles.includes(input.roleCode)) {
+        throw forbidden(`You are not allowed to create a user with role ${input.roleCode}.`);
+      }
+    }
+
     const role = await this.repository.findRoleByCode(input.roleCode);
     if (!role || !role.isActive) throw notFound(`Unknown role code: ${input.roleCode}`);
 
@@ -97,6 +112,7 @@ export class AuthService {
 
     try {
       const user = await this.repository.createUserWithRole({
+        username: input.username,
         mobileNumber: input.mobileNumber,
         passwordHash,
         displayName: input.displayName,
@@ -107,6 +123,7 @@ export class AuthService {
       });
       return {
         id: user.id,
+        username: user.username,
         mobileNumber: user.mobileNumber,
         displayName: user.displayName,
         email: user.email,
@@ -115,7 +132,7 @@ export class AuthService {
       };
     } catch (err) {
       if (isUniqueConstraintViolation(err)) {
-        throw conflict('A user with this mobile number or email already exists.');
+        throw conflict('A user with this username, mobile number, or email already exists.');
       }
       throw err;
     }
@@ -126,6 +143,7 @@ export class AuthService {
     if (!user || user.isDeleted) return null;
     return {
       id: user.id,
+      username: user.username,
       displayName: user.displayName,
       mobileNumber: user.mobileNumber,
       roles: user.userRoles.map((ur) => ({

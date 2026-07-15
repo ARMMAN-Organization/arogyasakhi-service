@@ -4,9 +4,10 @@ import type { PrismaService } from '../prisma/prisma.service';
 export class AuthRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  findUserByMobileNumber(mobileNumber: string) {
+  /** Looks up a user by username — the sole login identifier for every role. */
+  findUserByIdentifier(username: string) {
     return this.prisma.user.findUnique({
-      where: { mobileNumber },
+      where: { username },
       include: {
         userRoles: {
           where: { status: 'ACTIVE', isDeleted: false },
@@ -78,6 +79,7 @@ export class AuthRepository {
 
   /** Creates the user and their initial role assignment atomically. */
   createUserWithRole(data: {
+    username: string;
     mobileNumber: string;
     passwordHash: string;
     displayName: string;
@@ -89,6 +91,7 @@ export class AuthRepository {
     return this.prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
         data: {
+          username: data.username,
           mobileNumber: data.mobileNumber,
           passwordHash: data.passwordHash,
           displayName: data.displayName,
