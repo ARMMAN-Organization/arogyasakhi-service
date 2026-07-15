@@ -212,11 +212,15 @@ enum GeoType {
   SUBCENTRE
   VILLAGE
   PADA
+
+  @@schema("auth_service")
 }
 
 enum GeographyUnitStatus {
   ACTIVE
   INACTIVE
+
+  @@schema("auth_service")
 }
 
 model GeographyUnit {
@@ -237,4 +241,5 @@ model GeographyUnit {
 
   @@unique([parentId, geoType, geoCode])
   @@map("geography_units")
+  @@schema("auth_service")
 }
