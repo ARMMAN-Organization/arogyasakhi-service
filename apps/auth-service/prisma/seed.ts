@@ -10,9 +10,14 @@ interface SeedResult {
 }
 
 /**
- * Role master data (docs/Arogya_Sakhi_Database_Design_ERD_Table_Definitions.docx.md,
- * Appendix A.1 "roles", line 337). This is real reference data required in
- * every environment, including production — not test data.
+ * Role master data — the 4 user classes defined in
+ * docs/Arogya_Sakhi_SRS_v3.0.md §2.2 "User Classes and Characteristics"
+ * (Arogya Sakhi, Supervisor, Program Manager, System Administrator). The SRS
+ * is authoritative over the ERD for this project; the ERD's roles.role_code
+ * enum lists three additional codes (CONTENT_MANAGER, ANALYST, M_AND_E) that
+ * are not SRS user classes and are intentionally excluded here. This is real
+ * reference data required in every environment, including production — not
+ * test data.
  */
 const ROLES: { roleCode: string; roleName: string; description: string }[] = [
   {
@@ -31,21 +36,6 @@ const ROLES: { roleCode: string; roleName: string; description: string }[] = [
     description: 'Program-level monitoring and reporting.',
   },
   { roleCode: 'ADMIN', roleName: 'Administrator', description: 'Platform administration.' },
-  {
-    roleCode: 'CONTENT_MANAGER',
-    roleName: 'Content Manager',
-    description: 'Manages health education / Learn More content.',
-  },
-  {
-    roleCode: 'ANALYST',
-    roleName: 'Analyst',
-    description: 'Creates/edits dashboards and reports.',
-  },
-  {
-    roleCode: 'M_AND_E',
-    roleName: 'Monitoring & Evaluation',
-    description: 'Creates/edits dashboards and reports.',
-  },
 ];
 
 async function seedRoles(): Promise<SeedResult> {

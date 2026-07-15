@@ -11,11 +11,14 @@ import { mobileNumberSchema } from './mobile-number';
  * `roleCode` is not a `users` column — it selects the `roles` row to link
  * via an initial `user_roles` assignment, mirroring how the seed script
  * provisions a user with a role in one step.
+ * `username` is required (not an ERD column) since login is username +
+ * password for every role — a user created without one could never log in.
  * `.strict()` rejects unknown fields, matching the previous global
  * ValidationPipe `forbidNonWhitelisted: true`.
  */
 export const createUserSchema = z
   .object({
+    username: z.string().trim().min(1).max(50),
     mobileNumber: mobileNumberSchema,
     password: z.string().min(8).max(200),
     displayName: z.string().trim().min(1).max(160),
