@@ -23,6 +23,12 @@ export interface ServiceRoute {
    * via `requireRoles(...)`, trusting the identity the gateway forwards.
    */
   readonly requiresAuth: boolean;
+  /**
+   * Additional exact paths (under the gateway's `api/v1` prefix) to mount the
+   * same proxy on, alongside `prefix`. Needed for sibling routes that don't
+   * live under `prefix/*` — e.g. `/docs.json` sits next to `/docs`, not under it.
+   */
+  readonly extraMountPaths?: readonly string[];
 }
 
 export const SERVICE_ROUTES: readonly ServiceRoute[] = [
@@ -32,6 +38,17 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
   // rather than parsing which /auth/* sub-path needs a token.
   { prefix: '/auth', target: appConfig.AUTH_SERVICE_URL, requiresAuth: false },
   { prefix: '/me', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
+  // Swagger UI + spec are public docs, not an authenticated API — no token
+  // required to view them. `docs.json` is a sibling of `/docs`, not a child
+  // path, so it needs its own exact mount. Currently only auth-service has
+  // published docs; extend this list as more services adopt
+  // createDocumentedRouter().
+  {
+    prefix: '/docs',
+    target: appConfig.AUTH_SERVICE_URL,
+    requiresAuth: false,
+    extraMountPaths: ['/docs.json'],
+  },
   { prefix: '/beneficiaries', target: appConfig.BENEFICIARY_SERVICE_URL, requiresAuth: true },
   { prefix: '/visits', target: appConfig.VISIT_FORM_SERVICE_URL, requiresAuth: true },
   { prefix: '/rules', target: appConfig.RULES_SERVICE_URL, requiresAuth: true },
