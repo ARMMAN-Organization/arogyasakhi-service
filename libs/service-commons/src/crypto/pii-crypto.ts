@@ -30,8 +30,15 @@ export function encryptPii(plaintext: string): Buffer {
   return Buffer.concat([iv, ciphertext, authTag]);
 }
 
+const MIN_ENVELOPE_LENGTH = IV_LENGTH + AUTH_TAG_LENGTH;
+
 /** Decrypts a buffer produced by {@link encryptPii}. Throws if the key is wrong or the data was tampered with. */
 export function decryptPii(envelope: Buffer): string {
+  if (envelope.length < MIN_ENVELOPE_LENGTH) {
+    throw new Error(
+      `decryptPii: envelope is too short (${envelope.length} bytes; need at least ${MIN_ENVELOPE_LENGTH}) — data is truncated or was never encrypted with encryptPii().`,
+    );
+  }
   const key = loadKey('PII_ENCRYPTION_KEY');
   const iv = envelope.subarray(0, IV_LENGTH);
   const authTag = envelope.subarray(envelope.length - AUTH_TAG_LENGTH);
