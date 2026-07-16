@@ -179,13 +179,16 @@ describe('FormService', () => {
       const existing = { id: 'sub-1' };
       repository.findSubmissionByLocalUuid.mockResolvedValue(existing as never);
 
-      const result = await service.createSubmission('MOTHER_REGISTRATION', {
-        formVersionId: 'version-1',
-        beneficiaryId: 'b1',
-        submittedByUserId: 'u1',
-        localSubmissionUuid: 'retry-uuid',
-        formData: {},
-      });
+      const result = await service.createSubmission(
+        'MOTHER_REGISTRATION',
+        {
+          formVersionId: 'version-1',
+          beneficiaryId: 'b1',
+          localSubmissionUuid: 'retry-uuid',
+          formData: {},
+        },
+        'u1',
+      );
 
       expect(result).toBe(existing);
       expect(repository.findVersionById).not.toHaveBeenCalled();
@@ -196,13 +199,16 @@ describe('FormService', () => {
       repository.findVersionById.mockResolvedValue(publishedVersion as never);
 
       await expect(
-        service.createSubmission('CHILD_REGISTRATION', {
-          formVersionId: 'version-1',
-          beneficiaryId: 'b1',
-          submittedByUserId: 'u1',
-          localSubmissionUuid: 'uuid-1',
-          formData: { phone_owner: 'SELF' },
-        }),
+        service.createSubmission(
+          'CHILD_REGISTRATION',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: { phone_owner: 'SELF' },
+          },
+          'u1',
+        ),
       ).rejects.toThrow(/does not belong to this form code/);
     });
 
@@ -214,13 +220,16 @@ describe('FormService', () => {
       } as never);
 
       await expect(
-        service.createSubmission('MOTHER_REGISTRATION', {
-          formVersionId: 'version-1',
-          beneficiaryId: 'b1',
-          submittedByUserId: 'u1',
-          localSubmissionUuid: 'uuid-1',
-          formData: { phone_owner: 'SELF' },
-        }),
+        service.createSubmission(
+          'MOTHER_REGISTRATION',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: { phone_owner: 'SELF' },
+          },
+          'u1',
+        ),
       ).rejects.toThrow(/not published/);
     });
 
@@ -228,13 +237,16 @@ describe('FormService', () => {
       repository.findSubmissionByLocalUuid.mockResolvedValue(null);
       repository.findVersionById.mockResolvedValue(publishedVersion as never);
 
-      const call = service.createSubmission('MOTHER_REGISTRATION', {
-        formVersionId: 'version-1',
-        beneficiaryId: 'b1',
-        submittedByUserId: 'u1',
-        localSubmissionUuid: 'uuid-1',
-        formData: {},
-      });
+      const call = service.createSubmission(
+        'MOTHER_REGISTRATION',
+        {
+          formVersionId: 'version-1',
+          beneficiaryId: 'b1',
+          localSubmissionUuid: 'uuid-1',
+          formData: {},
+        },
+        'u1',
+      );
 
       await expect(call).rejects.toMatchObject({
         details: { violations: ['Missing required field: phone_owner'] },
@@ -245,13 +257,16 @@ describe('FormService', () => {
       repository.findSubmissionByLocalUuid.mockResolvedValue(null);
       repository.findVersionById.mockResolvedValue(publishedVersion as never);
 
-      const call = service.createSubmission('MOTHER_REGISTRATION', {
-        formVersionId: 'version-1',
-        beneficiaryId: 'b1',
-        submittedByUserId: 'u1',
-        localSubmissionUuid: 'uuid-1',
-        formData: { phone_owner: 'SELF', bp_systolic: 400 },
-      });
+      const call = service.createSubmission(
+        'MOTHER_REGISTRATION',
+        {
+          formVersionId: 'version-1',
+          beneficiaryId: 'b1',
+          localSubmissionUuid: 'uuid-1',
+          formData: { phone_owner: 'SELF', bp_systolic: 400 },
+        },
+        'u1',
+      );
 
       await expect(call).rejects.toMatchObject({
         details: { violations: ['bp_systolic must be between 70 and 300'] },
@@ -269,13 +284,16 @@ describe('FormService', () => {
         validationJson: [{ rule: 'LTE', fields: ['para', 'gravida'] }],
       } as never);
 
-      const call = service.createSubmission('MOTHER_REGISTRATION', {
-        formVersionId: 'version-1',
-        beneficiaryId: 'b1',
-        submittedByUserId: 'u1',
-        localSubmissionUuid: 'uuid-1',
-        formData: { para: 5, gravida: 2 },
-      });
+      const call = service.createSubmission(
+        'MOTHER_REGISTRATION',
+        {
+          formVersionId: 'version-1',
+          beneficiaryId: 'b1',
+          localSubmissionUuid: 'uuid-1',
+          formData: { para: 5, gravida: 2 },
+        },
+        'u1',
+      );
 
       await expect(call).rejects.toMatchObject({
         details: { violations: ['para must be <= gravida'] },
@@ -298,13 +316,16 @@ describe('FormService', () => {
       } as never);
       repository.createSubmission.mockResolvedValue({ id: 'sub-1' } as never);
 
-      await service.createSubmission('MOTHER_REGISTRATION', {
-        formVersionId: 'version-1',
-        beneficiaryId: 'b1',
-        submittedByUserId: 'u1',
-        localSubmissionUuid: 'uuid-1',
-        formData: { gestational_age_weeks: 10 },
-      });
+      await service.createSubmission(
+        'MOTHER_REGISTRATION',
+        {
+          formVersionId: 'version-1',
+          beneficiaryId: 'b1',
+          localSubmissionUuid: 'uuid-1',
+          formData: { gestational_age_weeks: 10 },
+        },
+        'u1',
+      );
 
       expect(repository.createSubmission).toHaveBeenCalled();
     });
@@ -325,13 +346,16 @@ describe('FormService', () => {
       } as never);
       repository.createSubmission.mockResolvedValue({ id: 'sub-1' } as never);
 
-      await service.createSubmission('MOTHER_REGISTRATION', {
-        formVersionId: 'version-1',
-        beneficiaryId: 'b1',
-        submittedByUserId: 'u1',
-        localSubmissionUuid: 'uuid-1',
-        formData: {},
-      });
+      await service.createSubmission(
+        'MOTHER_REGISTRATION',
+        {
+          formVersionId: 'version-1',
+          beneficiaryId: 'b1',
+          localSubmissionUuid: 'uuid-1',
+          formData: {},
+        },
+        'u1',
+      );
 
       expect(repository.createSubmission).toHaveBeenCalled();
     });
@@ -341,13 +365,16 @@ describe('FormService', () => {
       repository.findVersionById.mockResolvedValue(publishedVersion as never);
       repository.createSubmission.mockResolvedValue({ id: 'sub-1' } as never);
 
-      const result = await service.createSubmission('MOTHER_REGISTRATION', {
-        formVersionId: 'version-1',
-        beneficiaryId: 'b1',
-        submittedByUserId: 'u1',
-        localSubmissionUuid: 'uuid-1',
-        formData: { phone_owner: 'SELF' },
-      });
+      const result = await service.createSubmission(
+        'MOTHER_REGISTRATION',
+        {
+          formVersionId: 'version-1',
+          beneficiaryId: 'b1',
+          localSubmissionUuid: 'uuid-1',
+          formData: { phone_owner: 'SELF' },
+        },
+        'u1',
+      );
 
       expect(repository.createSubmission).toHaveBeenCalledWith(
         expect.objectContaining({ validationStatus: 'VALID' }),

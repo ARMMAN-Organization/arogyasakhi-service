@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { badRequest, conflict, notFound } from '@armman/service-commons';
+import { badRequest, conflict, notFound, unprocessable } from '@armman/service-commons';
 import type { FormRepository } from './form.repository';
 import {
   schemaJsonSchema,
@@ -108,7 +108,7 @@ export class FormService {
     return this.repository.publish(versionId, effectiveFrom, current?.id ?? null);
   }
 
-  async createSubmission(formCode: string, dto: CreateSubmissionInput) {
+  async createSubmission(formCode: string, dto: CreateSubmissionInput, submittedByUserId: string) {
     const existing = await this.repository.findSubmissionByLocalUuid(dto.localSubmissionUuid);
     if (existing) return existing; // idempotent replay — matches sync's local_submission_uuid dedup key
 
@@ -126,14 +126,14 @@ export class FormService {
     const violations = this.validate(fields, crossFieldRules, dto.formData);
 
     if (violations.length) {
-      throw badRequest('Submission failed validation.', { violations });
+      throw unprocessable('Submission failed validation.', { violations });
     }
 
     return this.repository.createSubmission({
       formVersionId: dto.formVersionId,
       beneficiaryId: dto.beneficiaryId,
       visitId: dto.visitId ?? null,
-      submittedByUserId: dto.submittedByUserId,
+      submittedByUserId,
       localSubmissionUuid: dto.localSubmissionUuid,
       formDataJson: dto.formData,
       validationStatus: 'VALID',
@@ -183,13 +183,17 @@ export class FormService {
         const [a, b] = rule.fields;
         const va = Number(formData[a]);
         const vb = Number(formData[b]);
-        if (!Number.isNaN(va) && !Number.isNaN(vb) && va > vb) {
+        if (Number.isNaN(va) || Number.isNaN(vb)) {
+          violations.push(`${a} and ${b} must both be numeric`);
+        } else if (va > vb) {
           violations.push(`${a} must be <= ${b}`);
         }
       } else if (rule.rule === 'SUM_EQUALS') {
-        const sum = rule.fields.reduce((total, f) => total + (Number(formData[f]) || 0), 0);
+        const values = rule.fields.map((f) => Number(formData[f]));
         const target = Number(formData[rule.equals]);
-        if (!Number.isNaN(target) && sum !== target) {
+        if (values.some((v) => Number.isNaN(v)) || Number.isNaN(target)) {
+          violations.push(`${rule.fields.join(', ')} and ${rule.equals} must all be numeric`);
+        } else if (values.reduce((total, v) => total + v, 0) !== target) {
           violations.push(`${rule.fields.join(' + ')} must equal ${rule.equals}`);
         }
       }

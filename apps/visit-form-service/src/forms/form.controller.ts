@@ -9,6 +9,7 @@ import {
   ok,
   requireRoles,
   trustGatewayIdentity,
+  unauthorized,
   validate,
   validateBody,
 } from '../app.module';
@@ -87,9 +88,10 @@ export function createFormRouter(service: FormService): Router {
     trustGatewayIdentity,
     validate(formCodeParamsSchema, 'params'),
     validateBody(createSubmissionSchema),
-    asyncHandler(async (req, res) => {
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
       const { formCode } = req.params as unknown as { formCode: string };
-      const created = await service.createSubmission(formCode, req.body);
+      const created = await service.createSubmission(formCode, req.body, req.user.id);
       res.status(201).json(ok(created));
     }),
   );

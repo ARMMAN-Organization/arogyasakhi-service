@@ -45,7 +45,7 @@ export const formFieldSchema = z
       .object({
         field: z.string().trim().min(1),
         operator: z.enum(['eq', 'gte', 'lt', 'isSet']),
-        value: z.unknown().optional(),
+        value: z.any().optional(),
       })
       .optional(),
     computedFrom: z

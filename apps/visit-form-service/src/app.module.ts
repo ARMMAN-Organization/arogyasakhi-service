@@ -25,6 +25,8 @@ export {
   requireRoles,
   trustGatewayIdentity,
   createDocumentedRouter,
+  unauthorized,
+  unprocessable,
   HttpError,
   ErrorCode,
   type DocumentedRouter,
