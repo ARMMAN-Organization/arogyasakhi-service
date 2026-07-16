@@ -1,5 +1,5 @@
 import type { OpenAPIRegistry } from '@armman/service-commons';
-import { buildOpenApiDocument } from '@armman/service-commons';
+import { buildServiceOpenApiDocument } from '@armman/service-commons';
 import { appConfig } from '../config/app-config';
 
 /**
@@ -9,18 +9,10 @@ import { appConfig } from '../config/app-config';
  * to keep in sync here.
  */
 export function buildAuthServiceOpenApiDocument(registry: OpenAPIRegistry) {
-  const servers =
-    appConfig.PUBLIC_BASE_URLS.length > 0
-      ? appConfig.PUBLIC_BASE_URLS.map((url) => ({ url }))
-      : [{ url: `http://localhost:${appConfig.PORT}`, description: 'Local' }];
-
-  return buildOpenApiDocument(
-    registry,
-    {
-      title: 'Arogya Sakhi — Auth Service API',
-      version: '1.0.0',
-      description: 'Authentication, JWT/refresh tokens, sessions, and user management.',
-    },
-    servers,
-  );
+  return buildServiceOpenApiDocument(registry, {
+    title: 'Arogya Sakhi — Auth Service API',
+    description: 'Authentication, JWT/refresh tokens, sessions, and user management.',
+    port: appConfig.PORT,
+    publicBaseUrls: appConfig.PUBLIC_BASE_URLS,
+  });
 }
