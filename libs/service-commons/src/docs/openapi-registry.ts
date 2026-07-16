@@ -1,5 +1,6 @@
 import { OpenAPIRegistry, OpenAPIGenerator } from '@asteasolutions/zod-to-openapi';
 import type { AnyZodObject, ZodTypeAny } from 'zod';
+import type { OpenAPIObject } from 'openapi3-ts';
 
 export { OpenAPIRegistry };
 
@@ -13,9 +14,10 @@ export interface RouteDoc {
     params?: AnyZodObject;
     query?: AnyZodObject;
   };
-  /** Status code -> { description, schema }. 200/201 responses should carry
-   * the success envelope; error responses reuse the shared ApiError schema
-   * registered by `buildOpenApiDocument`. */
+  /** Status code -> { description, schema }. Each caller supplies its own
+   * schema per response (including error responses) — `buildOpenApiDocument`
+   * only registers the shared `bearerAuth` security scheme, not a shared
+   * error schema. */
   responses: Record<number, { description: string; schema?: ZodTypeAny }>;
   /** Set for routes behind `authenticate(...)` — adds the bearer security
    * requirement so Swagger UI shows the padlock and "Authorize" flow. */
@@ -62,7 +64,7 @@ export function buildOpenApiDocument(
   registry: OpenAPIRegistry,
   info: { title: string; version: string; description?: string },
   servers: { url: string; description?: string }[],
-) {
+): OpenAPIObject {
   registry.registerComponent('securitySchemes', 'bearerAuth', {
     type: 'http',
     scheme: 'bearer',

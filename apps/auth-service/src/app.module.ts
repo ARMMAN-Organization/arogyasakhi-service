@@ -37,20 +37,24 @@ export function createApp(prisma: PrismaService, signer: TokenSigner, redis: Red
   app.use(pinoHttp(buildLoggerOptions(appConfig.LOG_LEVEL)));
   // Swagger UI's HTML injects inline <script>/<style> tags, so the default CSP
   // (which forbids 'unsafe-inline') is relaxed only for the /docs path below.
+  // Built once (not per-request) — helmet's own docs warn against
+  // constructing new middleware instances inside a request handler.
+  const defaultHelmet = helmet();
+  const docsHelmet = helmet({
+    contentSecurityPolicy: {
+      directives: {
+        ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+        'script-src': ["'self'", "'unsafe-inline'"],
+        'style-src': ["'self'", "'unsafe-inline'"],
+        'img-src': ["'self'", 'data:'],
+      },
+    },
+  });
   app.use((req, res, next) => {
     if (req.path === '/api/v1/docs' || req.path.startsWith('/api/v1/docs/')) {
-      return helmet({
-        contentSecurityPolicy: {
-          directives: {
-            ...helmet.contentSecurityPolicy.getDefaultDirectives(),
-            'script-src': ["'self'", "'unsafe-inline'"],
-            'style-src': ["'self'", "'unsafe-inline'"],
-            'img-src': ["'self'", 'data:'],
-          },
-        },
-      })(req, res, next);
+      return docsHelmet(req, res, next);
     }
-    return helmet()(req, res, next);
+    return defaultHelmet(req, res, next);
   });
   app.use(express.json());
   app.use((req, res, next) => {
