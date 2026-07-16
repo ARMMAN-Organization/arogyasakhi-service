@@ -77,3 +77,32 @@ export function buildOpenApiDocument(
     servers,
   });
 }
+
+/**
+ * Thin wrapper around {@link buildOpenApiDocument} for the common case: a
+ * service with a fixed title/version and a `PUBLIC_BASE_URLS`-driven server
+ * list (falling back to `http://localhost:$PORT` in local dev). Collapses
+ * each service's `docs/openapi.ts` to a one-line call instead of repeating
+ * the servers-array construction everywhere.
+ */
+export function buildServiceOpenApiDocument(
+  registry: OpenAPIRegistry,
+  options: {
+    title: string;
+    version?: string;
+    description?: string;
+    port: number;
+    publicBaseUrls: readonly string[];
+  },
+): OpenAPIObject {
+  const servers =
+    options.publicBaseUrls.length > 0
+      ? options.publicBaseUrls.map((url) => ({ url }))
+      : [{ url: `http://localhost:${options.port}`, description: 'Local' }];
+
+  return buildOpenApiDocument(
+    registry,
+    { title: options.title, version: options.version ?? '1.0.0', description: options.description },
+    servers,
+  );
+}

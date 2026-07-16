@@ -1,3 +1,4 @@
+import { publicBaseUrlsSchema } from '@armman/service-commons';
 import { z } from 'zod';
 
 const schema = z.object({
@@ -14,19 +15,7 @@ const schema = z.object({
         .map((o) => o.trim())
         .filter(Boolean),
     ),
-  // Comma-separated public URLs this service is reachable at per environment
-  // (e.g. "https://staging-api.example.com,https://api.example.com"), listed
-  // in the Swagger "Servers" dropdown. Empty in local dev, where the docs
-  // fall back to `http://localhost:${PORT}`.
-  PUBLIC_BASE_URLS: z
-    .string()
-    .default('')
-    .transform((v) =>
-      v
-        .split(',')
-        .map((o) => o.trim())
-        .filter(Boolean),
-    ),
+  PUBLIC_BASE_URLS: publicBaseUrlsSchema,
   // RS256 keypair (PEM). Local keypair today; swappable for AWS KMS later behind
   // the TokenSigner interface without changing any call site. `.env` files
   // typically don't unescape literal `\n` in double-quoted values, so we

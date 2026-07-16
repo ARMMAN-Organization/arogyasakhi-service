@@ -16,6 +16,20 @@ const schema = z.object({
         .filter(Boolean),
     ),
 
+  // Public URL(s) the gateway is reached at, used only for the "Servers"
+  // dropdown of the aggregated Swagger docs so "Try it out" targets the
+  // gateway (e.g. the ngrok/staging host), not an internal service URL.
+  // Comma-separated; falls back to http://localhost:$PORT in local dev.
+  PUBLIC_BASE_URLS: z
+    .string()
+    .default('')
+    .transform((v) =>
+      v
+        .split(',')
+        .map((o) => o.trim())
+        .filter(Boolean),
+    ),
+
   // Public half of the RS256 keypair used to sign access tokens (see
   // auth-service). Only the public key is needed here — the gateway verifies
   // tokens, it never issues them. `.env` files don't unescape literal `\n` in

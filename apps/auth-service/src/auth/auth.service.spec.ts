@@ -36,6 +36,7 @@ describe('AuthService', () => {
     findUserById: jest.fn(),
     incrementFailedLoginCount: jest.fn(),
     recordSuccessfulLogin: jest.fn(),
+    recordSuccessfulLoginAndCreateSession: jest.fn(),
     createSession: jest.fn(),
     findActiveSessionByRefreshTokenHash: jest.fn(),
     revokeSession: jest.fn(),
@@ -71,13 +72,14 @@ describe('AuthService', () => {
         accessToken: 'signed-access-token',
         refreshToken: 'plain-refresh-token',
       });
-      expect(repository.recordSuccessfulLogin).toHaveBeenCalledWith('user-1');
-      expect(repository.createSession).toHaveBeenCalledWith(
+      expect(repository.recordSuccessfulLoginAndCreateSession).toHaveBeenCalledWith(
+        'user-1',
         expect.objectContaining({
           userId: 'user-1',
           refreshTokenHash: 'hashed(plain-refresh-token)',
         }),
       );
+      expect(repository.createSession).not.toHaveBeenCalled();
       expect(signer.sign).toHaveBeenCalledWith(
         { sub: 'user-1', roles: ['SAKHI'], projectId: 'project-1', geographyUnitId: 'geo-1' },
         '15m',
@@ -100,7 +102,7 @@ describe('AuthService', () => {
         service.login({ username: 'test.sakhi', password: 'wrong' }, null),
       ).rejects.toMatchObject({ status: 401 });
       expect(repository.incrementFailedLoginCount).toHaveBeenCalledWith('user-1');
-      expect(repository.recordSuccessfulLogin).not.toHaveBeenCalled();
+      expect(repository.recordSuccessfulLoginAndCreateSession).not.toHaveBeenCalled();
     });
 
     it('rejects a LOCKED user regardless of password correctness', async () => {

@@ -11,6 +11,7 @@ import {
 import { appConfig } from './config/app-config';
 import { createHealthRouter } from './health/health.controller';
 import { createInfoRouter } from './info/info.controller';
+import { createDocsRouter } from './docs/docs.controller';
 import { registerProxies } from './proxy/register-proxies';
 
 export {
@@ -55,6 +56,9 @@ export function createApp(signer: Pick<TokenSigner, 'verify'>): Application {
   registerProxies(app, signer);
 
   const api = express.Router();
+  // Aggregated Swagger docs are GET-only and public — mount before
+  // express.json() (no body to parse) and before auth (docs need no token).
+  api.use(createDocsRouter());
   api.use(express.json());
   api.use(createHealthRouter());
   api.use(createInfoRouter());

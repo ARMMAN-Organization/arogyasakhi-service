@@ -53,6 +53,31 @@ export class AuthRepository {
     return this.prisma.userSession.create({ data });
   }
 
+  /**
+   * Records the successful login and creates the new session in one
+   * round-trip instead of two sequential ones — each query pays the full
+   * network latency to the database, so batching independent writes here
+   * matters for login latency (see `AuthService.login`).
+   */
+  recordSuccessfulLoginAndCreateSession(
+    userId: string,
+    sessionData: {
+      userId: string;
+      refreshTokenHash: string;
+      issuedAt: Date;
+      expiresAt: Date;
+      ipAddress: string | null;
+    },
+  ) {
+    return this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: userId },
+        data: { failedLoginCount: 0, lastLoginAt: new Date() },
+      }),
+      this.prisma.userSession.create({ data: sessionData }),
+    ]);
+  }
+
   findActiveSessionByRefreshTokenHash(refreshTokenHash: string) {
     return this.prisma.userSession.findUnique({
       where: { refreshTokenHash },

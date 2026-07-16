@@ -129,7 +129,7 @@ model BeneficiaryPii {
   healthBlockId      String?   @map("health_block_id")
   dateOfBirth        DateTime? @map("date_of_birth") @db.Date
   sex                Sex?
-  addressLineEnc     String?   @map("address_line_enc")
+  addressLineEnc     Bytes?    @map("address_line_enc")
   // states.state_id — owned by another service.
   stateId            String?   @map("state_id")
   // district.district_id — owned by another service.
@@ -167,6 +167,11 @@ model BeneficiarySearchToken {
 
   beneficiaryCase BeneficiaryCase @relation(fields: [beneficiaryId], references: [id])
 
+  // findDuplicateCandidate always filters on nameToken, optionally narrowing
+  // by dobToken/geographyToken/lmpDateToken — a leading-column composite index
+  // serves the mandatory-nameToken lookup and its narrowed variants alike.
+  @@index([nameToken, dobToken, geographyToken, lmpDateToken])
+  @@index([beneficiaryId])
   @@map("Beneficiary_search_tokens")
 }
 

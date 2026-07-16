@@ -23,6 +23,18 @@ export interface ServiceRoute {
    * via `requireRoles(...)`, trusting the identity the gateway forwards.
    */
   readonly requiresAuth: boolean;
+  /**
+   * Additional exact paths (under the gateway's `api/v1` prefix) to mount the
+   * same proxy on, alongside `prefix`. Needed for sibling routes that don't
+   * live under `prefix/*` — e.g. `/docs.json` sits next to `/docs`, not under it.
+   */
+  readonly extraMountPaths?: readonly string[];
+  /**
+   * Downstream path to rewrite `prefix` (and each `extraMountPaths` entry) to,
+   * when it differs from the gateway-facing path. Omit when the gateway path
+   * and downstream path are identical (the common case).
+   */
+  readonly downstreamPrefix?: string;
 }
 
 export const SERVICE_ROUTES: readonly ServiceRoute[] = [
@@ -32,6 +44,11 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
   // rather than parsing which /auth/* sub-path needs a token.
   { prefix: '/auth', target: appConfig.AUTH_SERVICE_URL, requiresAuth: false },
   { prefix: '/me', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
+  // NOTE: `/docs` is NOT proxied here. The gateway serves ONE aggregated
+  // Swagger UI at `/api/v1/docs` (see docs/docs.controller.ts) that merges
+  // every service's own `/docs.json` into a single page — there is no single
+  // downstream service to proxy a bare `/docs` to, and per-service pages were
+  // replaced by the unified view.
   { prefix: '/beneficiaries', target: appConfig.BENEFICIARY_SERVICE_URL, requiresAuth: true },
   { prefix: '/visits', target: appConfig.VISIT_FORM_SERVICE_URL, requiresAuth: true },
   { prefix: '/rules', target: appConfig.RULES_SERVICE_URL, requiresAuth: true },

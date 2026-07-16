@@ -3,6 +3,7 @@ import helmet from 'helmet';
 import { pinoHttp } from 'pino-http';
 import {
   buildLoggerOptions,
+  createSwaggerRouter,
   errorHandler,
   notFoundHandler,
   requestId,
@@ -11,9 +12,20 @@ import { appConfig } from './config/app-config';
 import { PrismaService } from './prisma/prisma.service';
 import { createHealthRouter } from './health/health.controller';
 import { createVisitInstanceModule } from './visits/visitInstance.module';
+import { buildVisitFormServiceOpenApiDocument } from './docs/openapi';
 
 // Re-export shared HTTP helpers so feature routers can import from a single place.
-export { asyncHandler, ok, fail, validateBody, requireRoles, HttpError, ErrorCode } from '@armman/service-commons';
+export {
+  asyncHandler,
+  ok,
+  fail,
+  validateBody,
+  requireRoles,
+  createDocumentedRouter,
+  HttpError,
+  ErrorCode,
+  type DocumentedRouter,
+} from '@armman/service-commons';
 
 /** Builds and wires the Express application (replaces NestFactory + AppModule). */
 export function createApp(prisma: PrismaService): Application {
@@ -36,10 +48,16 @@ export function createApp(prisma: PrismaService): Application {
   });
   app.use(requestId);
 
+  const visitInstanceModule = createVisitInstanceModule(prisma);
+
   // All routes live under the global `api/v1` prefix.
   const api = express.Router();
   api.use(createHealthRouter(prisma));
-  api.use(createVisitInstanceModule(prisma));
+  // Built from visitInstanceModule.registry — every route registered via
+  // createDocumentedRouter() above is already in the spec, so this can never
+  // drift from what's actually mounted.
+  api.use(createSwaggerRouter(buildVisitFormServiceOpenApiDocument(visitInstanceModule.registry)));
+  api.use(visitInstanceModule.router);
   app.use('/api/v1', api);
 
   app.use(notFoundHandler);

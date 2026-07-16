@@ -57,8 +57,10 @@ export class AuthService {
       throw unauthorized('Invalid credentials.');
     }
 
-    await this.repository.recordSuccessfulLogin(user.id);
-    return this.issueTokens(user.id, user.userRoles, ipAddress);
+    // Batches the "record successful login" write with session creation into
+    // one round-trip (see `issueTokens`) instead of two sequential ones —
+    // each query is a separate network hop to the database.
+    return this.issueTokens(user.id, user.userRoles, ipAddress, { recordLogin: true });
   }
 
   async refresh(refreshToken: string, ipAddress: string | null): Promise<AuthTokens> {
@@ -162,6 +164,7 @@ export class AuthService {
       geographyUnitId: string | null;
     }[],
     ipAddress: string | null,
+    options?: { recordLogin?: boolean },
   ): Promise<AuthTokens> {
     // A user can hold multiple role assignments (e.g. scoped to different
     // projects); the token carries the full role-code set for requireRoles()
@@ -183,13 +186,19 @@ export class AuthService {
 
     const refreshToken = generateRefreshToken();
     const now = new Date();
-    await this.repository.createSession({
+    const sessionData = {
       userId,
       refreshTokenHash: hashRefreshToken(refreshToken),
       issuedAt: now,
       expiresAt: new Date(now.getTime() + parseDurationMs(this.refreshTokenTtl)),
       ipAddress,
-    });
+    };
+
+    if (options?.recordLogin) {
+      await this.repository.recordSuccessfulLoginAndCreateSession(userId, sessionData);
+    } else {
+      await this.repository.createSession(sessionData);
+    }
 
     return { accessToken, refreshToken };
   }
