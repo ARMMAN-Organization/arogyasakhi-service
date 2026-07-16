@@ -34,6 +34,9 @@ BEGIN
   IF EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = 'projects') THEN
     ALTER TABLE "public"."projects" SET SCHEMA "auth_service";
   END IF;
+  IF EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = 'geography_units') THEN
+    ALTER TABLE "public"."geography_units" SET SCHEMA "auth_service";
+  END IF;
 
   -- Move enum types, only if they still exist in "public".
   IF EXISTS (
@@ -59,5 +62,17 @@ BEGIN
     WHERE n.nspname = 'public' AND t.typname = 'ProjectStatus'
   ) THEN
     ALTER TYPE "public"."ProjectStatus" SET SCHEMA "auth_service";
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace
+    WHERE n.nspname = 'public' AND t.typname = 'GeoType'
+  ) THEN
+    ALTER TYPE "public"."GeoType" SET SCHEMA "auth_service";
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace
+    WHERE n.nspname = 'public' AND t.typname = 'GeographyUnitStatus'
+  ) THEN
+    ALTER TYPE "public"."GeographyUnitStatus" SET SCHEMA "auth_service";
   END IF;
 END $$;

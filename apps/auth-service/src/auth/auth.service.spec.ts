@@ -32,7 +32,7 @@ const ACTIVE_USER = {
 
 describe('AuthService', () => {
   const repository = {
-    findUserByIdentifier: jest.fn(),
+    findUserByUsername: jest.fn(),
     findUserById: jest.fn(),
     incrementFailedLoginCount: jest.fn(),
     recordSuccessfulLogin: jest.fn(),
@@ -59,7 +59,7 @@ describe('AuthService', () => {
 
   describe('login', () => {
     it('issues tokens on correct username and password', async () => {
-      repository.findUserByIdentifier.mockResolvedValue(ACTIVE_USER as never);
+      repository.findUserByUsername.mockResolvedValue(ACTIVE_USER as never);
       (verifyPassword as jest.Mock).mockResolvedValue(true);
 
       const tokens = await service.login(
@@ -85,8 +85,7 @@ describe('AuthService', () => {
     });
 
     it('rejects with a generic error for a non-existent username', async () => {
-      repository.findUserByIdentifier.mockResolvedValue(null);
-
+      repository.findUserByUsername.mockResolvedValue(null);
       await expect(
         service.login({ username: 'nobody', password: 'anything' }, null),
       ).rejects.toMatchObject({ status: 401, message: 'Invalid credentials.' });
@@ -94,7 +93,7 @@ describe('AuthService', () => {
     });
 
     it('increments failedLoginCount and rejects on wrong password', async () => {
-      repository.findUserByIdentifier.mockResolvedValue(ACTIVE_USER as never);
+      repository.findUserByUsername.mockResolvedValue(ACTIVE_USER as never);
       (verifyPassword as jest.Mock).mockResolvedValue(false);
 
       await expect(
@@ -105,7 +104,7 @@ describe('AuthService', () => {
     });
 
     it('rejects a LOCKED user regardless of password correctness', async () => {
-      repository.findUserByIdentifier.mockResolvedValue({
+      repository.findUserByUsername.mockResolvedValue({
         ...ACTIVE_USER,
         status: 'LOCKED',
       } as never);
@@ -118,10 +117,7 @@ describe('AuthService', () => {
     });
 
     it('rejects a soft-deleted user', async () => {
-      repository.findUserByIdentifier.mockResolvedValue({
-        ...ACTIVE_USER,
-        isDeleted: true,
-      } as never);
+      repository.findUserByUsername.mockResolvedValue({ ...ACTIVE_USER, isDeleted: true } as never);
 
       await expect(
         service.login({ username: 'test.sakhi', password: 'correct' }, null),
