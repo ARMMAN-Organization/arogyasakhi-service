@@ -14,7 +14,9 @@ const createClosureRequestSchema = createClosureSchema.extend({
   }),
   closureType: createClosureSchema.shape.closureType.openapi({ example: 'MEDICAL' }),
   closureReason: createClosureSchema.shape.closureReason.openapi({ example: 'MISCARRIAGE' }),
-  closureDate: createClosureSchema.shape.closureDate.openapi({ example: '2026-07-01' }),
+  closureDate: createClosureSchema.shape.closureDate.openapi({
+    example: '2026-07-01T00:00:00.000Z',
+  }),
   submittedByUserId: createClosureSchema.shape.submittedByUserId.openapi({
     example: '123e4567-e89b-12d3-a456-426614174001',
   }),

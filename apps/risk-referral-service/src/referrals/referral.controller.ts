@@ -13,7 +13,9 @@ const createReferralRequestSchema = createReferralSchema.extend({
     example: '3f3a8b0e-6b1a-4f2a-8f0a-3b6a0d9c1e2f',
   }),
   referralType: createReferralSchema.shape.referralType.openapi({ example: 'STANDARD' }),
-  referralDate: createReferralSchema.shape.referralDate.openapi({ example: '2026-07-16' }),
+  referralDate: createReferralSchema.shape.referralDate.openapi({
+    example: '2026-07-16T00:00:00.000Z',
+  }),
   status: createReferralSchema.shape.status.openapi({ example: 'INITIATED' }),
 });
 
