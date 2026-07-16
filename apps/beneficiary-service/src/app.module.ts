@@ -16,9 +16,11 @@ export {
   asyncHandler,
   ok,
   fail,
+  validate,
   validateBody,
   requireRoles,
   trustGatewayIdentity,
+  unauthorized,
   HttpError,
   ErrorCode,
 } from '@armman/service-commons';

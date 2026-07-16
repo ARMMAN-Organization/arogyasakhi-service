@@ -10,7 +10,21 @@ const schema = z.object({
   CORS_ORIGINS: z
     .string()
     .default('')
-    .transform((value) => value.split(',').map((origin) => origin.trim()).filter(Boolean)),
+    .transform((value) =>
+      value
+        .split(',')
+        .map((origin) => origin.trim())
+        .filter(Boolean),
+    ),
+  // Base64-encoded 32-byte keys consumed directly by @armman/service-commons'
+  // pii-crypto module (encryptPii/decryptPii, hashForSearch) via process.env.
+  // Validated here so the service fails fast at boot rather than at first use.
+  PII_ENCRYPTION_KEY: z
+    .string()
+    .refine((v) => Buffer.from(v, 'base64').length === 32, 'must be a base64-encoded 32-byte key'),
+  PII_SEARCH_HASH_KEY: z
+    .string()
+    .refine((v) => Buffer.from(v, 'base64').length === 32, 'must be a base64-encoded 32-byte key'),
 });
 
 export type AppConfig = z.infer<typeof schema>;
