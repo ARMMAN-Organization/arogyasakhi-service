@@ -1,13 +1,30 @@
 import express, { type Application } from 'express';
 import helmet from 'helmet';
 import { pinoHttp } from 'pino-http';
-import { buildLoggerOptions, errorHandler, notFoundHandler, requestId } from '@armman/service-commons';
+import {
+  buildLoggerOptions,
+  createSwaggerRouter,
+  errorHandler,
+  notFoundHandler,
+  requestId,
+} from '@armman/service-commons';
 import { appConfig } from './config/app-config';
 import { PrismaService } from './prisma/prisma.service';
 import { createHealthRouter } from './health/health.controller';
 import { createNotificationModule } from './notifications/notification.module';
+import { buildNotificationEscalationServiceOpenApiDocument } from './docs/openapi';
 
-export { asyncHandler, ok, fail, validateBody, requireRoles, HttpError, ErrorCode } from '@armman/service-commons';
+export {
+  asyncHandler,
+  ok,
+  fail,
+  validateBody,
+  requireRoles,
+  createDocumentedRouter,
+  HttpError,
+  ErrorCode,
+  type DocumentedRouter,
+} from '@armman/service-commons';
 
 export function createApp(prisma: PrismaService): Application {
   const app = express();
@@ -27,9 +44,19 @@ export function createApp(prisma: PrismaService): Application {
     next();
   });
   app.use(requestId);
+  const notificationModule = createNotificationModule(prisma);
+
   const api = express.Router();
   api.use(createHealthRouter(prisma));
-  api.use(createNotificationModule(prisma));
+  // Built from notificationModule.registry — every route registered via
+  // createDocumentedRouter() above is already in the spec, so this can never
+  // drift from what's actually mounted.
+  api.use(
+    createSwaggerRouter(
+      buildNotificationEscalationServiceOpenApiDocument(notificationModule.registry),
+    ),
+  );
+  api.use(notificationModule.router);
   app.use('/api/v1', api);
   app.use(notFoundHandler);
   app.use(errorHandler);
