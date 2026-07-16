@@ -260,7 +260,7 @@ CREATE INDEX "beneficiary_pii_date_of_birth_idx" ON "beneficiary_pii"("date_of_b
 CREATE INDEX "beneficiary_pii_rch_number_hash_idx" ON "beneficiary_pii"("rch_number_hash");
 
 -- CreateIndex
-CREATE INDEX "Beneficiary_search_tokens_name_token_dob_token_geography_to_idx" ON "Beneficiary_search_tokens"("name_token", "dob_token", "geography_token", "lmp_date_token");
+CREATE INDEX "Beneficiary_search_tokens_name_token_case_type_lookup_id_do_idx" ON "Beneficiary_search_tokens"("name_token", "case_type_lookup_id", "dob_token", "geography_token", "lmp_date_token");
 
 -- CreateIndex
 CREATE INDEX "Beneficiary_search_tokens_beneficiary_id_idx" ON "Beneficiary_search_tokens"("beneficiary_id");

@@ -2,6 +2,7 @@ import type { PrismaService } from '../prisma/prisma.service';
 
 export interface DuplicateSearchTokens {
   nameToken: Buffer;
+  caseTypeLookupId: string;
   dobToken: string | null;
   phoneHash: Buffer | null;
   geographyToken: string | null;
@@ -95,12 +96,15 @@ export class BeneficiaryRepository {
    * Finds an existing case whose PII/search tokens match ALL of the caller's
    * available tokens simultaneously (per FR-S-2.4). Legs the caller doesn't
    * supply (e.g. no phone given) are skipped rather than treated as a match.
+   * Always scoped to caseTypeLookupId (per the ERD's required index) so a
+   * MOTHER registration's tokens are never matched against a CHILD case's.
    */
   async findDuplicateCandidate(tokens: DuplicateSearchTokens) {
     const where: NonNullable<
       Parameters<typeof this.prisma.beneficiarySearchToken.findFirst>[0]
     >['where'] = {
       nameToken: tokens.nameToken.toString('base64'),
+      caseTypeLookupId: tokens.caseTypeLookupId,
     };
     if (tokens.dobToken) where.dobToken = tokens.dobToken;
     if (tokens.geographyToken) where.geographyToken = tokens.geographyToken;
