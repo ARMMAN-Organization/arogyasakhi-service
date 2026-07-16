@@ -1,4 +1,4 @@
-import type { Router } from 'express';
+import type { DocumentedRouter } from '@armman/service-commons';
 import type { TokenSigner } from '@armman/service-commons';
 import type { PrismaService } from '../prisma/prisma.service';
 import { AuthRepository } from './auth.repository';
@@ -11,7 +11,7 @@ export function createAuthModule(
   signer: TokenSigner,
   accessTokenTtl: string,
   refreshTokenTtl: string,
-): Router {
+): DocumentedRouter {
   const repository = new AuthRepository(prisma);
   const service = new AuthService(repository, signer, accessTokenTtl, refreshTokenTtl);
   return createAuthRouter(service, signer);

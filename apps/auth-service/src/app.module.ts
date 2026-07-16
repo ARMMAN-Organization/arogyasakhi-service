@@ -26,8 +26,10 @@ export {
   requireRoles,
   authenticate,
   unauthorized,
+  createDocumentedRouter,
   HttpError,
   ErrorCode,
+  type DocumentedRouter,
 } from '@armman/service-commons';
 
 /** Builds and wires the Express application (replaces NestFactory + AppModule). */
@@ -71,20 +73,23 @@ export function createApp(prisma: PrismaService, signer: TokenSigner, redis: Red
   });
   app.use(requestId);
 
+  const authModule = createAuthModule(
+    prisma,
+    signer,
+    appConfig.JWT_ACCESS_TOKEN_TTL,
+    appConfig.JWT_REFRESH_TOKEN_TTL,
+  );
+
   // All routes live under the global `api/v1` prefix.
   const api = express.Router();
   api.use(createHealthRouter(prisma));
-  api.use(createSwaggerRouter(buildAuthServiceOpenApiDocument()));
+  // Built from authModule.registry — every route registered via
+  // createDocumentedRouter() above is already in the spec, so this can never
+  // drift from what's actually mounted.
+  api.use(createSwaggerRouter(buildAuthServiceOpenApiDocument(authModule.registry)));
   // Rate limit applies to every /auth/* route per the HLD (100 req/min/IP).
   api.use('/auth', createAuthRateLimiter(redis));
-  api.use(
-    createAuthModule(
-      prisma,
-      signer,
-      appConfig.JWT_ACCESS_TOKEN_TTL,
-      appConfig.JWT_REFRESH_TOKEN_TTL,
-    ),
-  );
+  api.use(authModule.router);
   app.use('/api/v1', api);
 
   app.use(notFoundHandler);
