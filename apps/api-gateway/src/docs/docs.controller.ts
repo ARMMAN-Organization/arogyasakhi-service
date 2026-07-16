@@ -46,6 +46,15 @@ const CUSTOM_CSS = `
   .swagger-ui .scheme-container .schemes { align-items: center; }
 `;
 
+export interface DocsRouterOptions {
+  /** Defaults to `false` in production, `true` otherwise — matches
+   * `createSwaggerRouter`'s posture (each service already 404s its own
+   * `/docs` in prod). Mounting the gateway's aggregated UI unconditionally
+   * would keep `/api/v1/docs` reachable in prod regardless of what any
+   * individual service decides, so this must gate the same way. */
+  enabled?: boolean;
+}
+
 /**
  * Mounts the single aggregated Swagger UI for the whole platform:
  *   GET /docs       — interactive Swagger UI over the merged spec
@@ -56,8 +65,13 @@ const CUSTOM_CSS = `
  * the forklift / module-boundary rule. Mount this on the router that carries
  * the `/api/v1` prefix.
  */
-export function createDocsRouter(): Router {
+export function createDocsRouter(options: DocsRouterOptions = {}): Router {
   const router = Router();
+  const { enabled = process.env.NODE_ENV !== 'production' } = options;
+
+  if (!enabled) {
+    return router;
+  }
 
   const servers =
     appConfig.PUBLIC_BASE_URLS.length > 0
