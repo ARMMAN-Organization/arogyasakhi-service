@@ -1,27 +1,103 @@
-import { Router } from 'express';
+import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
+import { z } from 'zod';
 import type { ClosureService } from './closure.service';
 import { createClosureSchema } from './dto/create-closure.dto';
-import { asyncHandler, ok, validateBody } from '../app.module';
+import { asyncHandler, createDocumentedRouter, ok, validateBody } from '../app.module';
 
-/** Closure HTTP routes. Mounted under the global `api/v1` prefix. */
-export function createClosureRouter(service: ClosureService): Router {
-  const router = Router();
+extendZodWithOpenApi(z);
 
-  router.get(
+// Request DTO annotated with examples for Swagger UI; validation behavior is
+// unchanged (`.openapi()` only attaches documentation metadata).
+const createClosureRequestSchema = createClosureSchema.extend({
+  beneficiaryId: createClosureSchema.shape.beneficiaryId.openapi({
+    example: '123e4567-e89b-12d3-a456-426614174000',
+  }),
+  closureType: createClosureSchema.shape.closureType.openapi({ example: 'MEDICAL' }),
+  closureReason: createClosureSchema.shape.closureReason.openapi({ example: 'MISCARRIAGE' }),
+  closureDate: createClosureSchema.shape.closureDate.openapi({ example: '2026-07-01' }),
+  submittedByUserId: createClosureSchema.shape.submittedByUserId.openapi({
+    example: '123e4567-e89b-12d3-a456-426614174001',
+  }),
+});
+
+// Fields mirror `model Closure` in prisma/schema.prisma exactly — no invented
+// fields — for accurate Swagger documentation only.
+const closureSchema = z.object({
+  id: z.string().uuid(),
+  beneficiaryId: z.string().uuid(),
+  closureType: z.enum(['MEDICAL', 'NON_MEDICAL', 'PROGRAM_COMPLETION']),
+  closureReason: z.enum([
+    'MISCARRIAGE',
+    'ABORTION',
+    'MATERNAL_DEATH',
+    'INFANT_OR_CHILD_DEATH',
+    'MIGRATION',
+    'WITHDRAWAL',
+    'PROGRAM_CYCLE_COMPLETED',
+    'OTHER',
+  ]),
+  eventDate: z.string().datetime().nullable(),
+  closureDate: z.string().datetime(),
+  submittedByUserId: z.string().uuid(),
+  supervisorStatus: z.enum(['PENDING', 'APPROVED', 'REJECTED']).nullable(),
+  supervisorId: z.string().uuid().nullable(),
+  supervisorNotes: z.string().nullable(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+
+const apiErrorSchema = z.object({
+  success: z.literal(false),
+  message: z.string(),
+  errorCode: z.string().openapi({ example: 'VALIDATION_ERROR' }),
+  details: z.record(z.unknown()).optional(),
+});
+
+function envelope<T extends z.ZodTypeAny>(data: T) {
+  return z.object({ success: z.literal(true), message: z.string(), data });
+}
+
+/**
+ * Closure HTTP routes. Mounted under the global `api/v1` prefix.
+ *
+ * Uses `createDocumentedRouter()` so each route's OpenAPI entry is defined
+ * in the same call as the Express route itself — the request body schema
+ * is inferred from `validateBody` already in the middleware chain, so
+ * `/docs.json` can never drift from what's actually mounted.
+ */
+export function createClosureRouter(service: ClosureService) {
+  const doc = createDocumentedRouter();
+
+  doc.get(
     '/closures',
+    {
+      summary: 'List closures',
+      tags: ['Closures'],
+      responses: {
+        200: { description: 'Closures retrieved', schema: envelope(z.array(closureSchema)) },
+      },
+    },
     asyncHandler(async (_req, res) => {
       res.json(ok(await service.list()));
     }),
   );
 
-  router.post(
+  doc.post(
     '/closures',
-    validateBody(createClosureSchema),
+    {
+      summary: 'Create a closure',
+      tags: ['Closures'],
+      responses: {
+        201: { description: 'Closure created', schema: envelope(closureSchema) },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+      },
+    },
+    validateBody(createClosureRequestSchema),
     asyncHandler(async (req, res) => {
       const created = await service.create(req.body);
       res.status(201).json(ok(created));
     }),
   );
 
-  return router;
+  return doc;
 }
