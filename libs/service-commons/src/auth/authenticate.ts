@@ -15,13 +15,19 @@ declare module 'express-serve-static-core' {
   }
 }
 
+/** Attached to auth-gating middleware so the OpenAPI doc router can
+ * auto-detect `requiresAuth` instead of it being a separately-maintained flag. */
+export interface AuthMarker {
+  __requiresAuth: true;
+}
+
 /**
  * Verifies the `Authorization: Bearer <token>` access token and populates
  * `req.user`. Must run before `requireRoles(...)` on any protected route —
  * `requireRoles` only checks `req.user`, it never authenticates on its own.
  */
-export function authenticate(signer: TokenSigner): RequestHandler {
-  return (req: Request, _res, next) => {
+export function authenticate(signer: TokenSigner): RequestHandler & AuthMarker {
+  const handler: RequestHandler & Partial<AuthMarker> = (req: Request, _res, next) => {
     const header = req.header('authorization');
     if (!header?.startsWith('Bearer ')) return next(unauthorized());
 
@@ -42,4 +48,6 @@ export function authenticate(signer: TokenSigner): RequestHandler {
       })
       .catch(() => next(unauthorized('Invalid or expired token.')));
   };
+  handler.__requiresAuth = true;
+  return handler as RequestHandler & AuthMarker;
 }
