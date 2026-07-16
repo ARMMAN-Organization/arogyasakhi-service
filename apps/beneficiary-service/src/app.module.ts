@@ -3,6 +3,7 @@ import helmet from 'helmet';
 import { pinoHttp } from 'pino-http';
 import {
   buildLoggerOptions,
+  createSwaggerRouter,
   errorHandler,
   notFoundHandler,
   requestId,
@@ -11,6 +12,7 @@ import { appConfig } from './config/app-config';
 import { PrismaService } from './prisma/prisma.service';
 import { createHealthRouter } from './health/health.controller';
 import { createBeneficiaryModule } from './beneficiary/beneficiary.module';
+import { buildBeneficiaryServiceOpenApiDocument } from './docs/openapi';
 
 export {
   asyncHandler,
@@ -21,8 +23,10 @@ export {
   requireRoles,
   trustGatewayIdentity,
   unauthorized,
+  createDocumentedRouter,
   HttpError,
   ErrorCode,
+  type DocumentedRouter,
 } from '@armman/service-commons';
 
 /** Builds the Express application: security headers, logging, request-id, routes, error handling. */
@@ -45,9 +49,15 @@ export function createApp(prisma: PrismaService): Application {
   });
   app.use(requestId);
 
+  const beneficiaryModule = createBeneficiaryModule(prisma);
+
   const api = express.Router();
   api.use(createHealthRouter(prisma));
-  api.use(createBeneficiaryModule(prisma));
+  // Built from beneficiaryModule.registry — every route registered via
+  // createDocumentedRouter() above is already in the spec, so this can never
+  // drift from what's actually mounted.
+  api.use(createSwaggerRouter(buildBeneficiaryServiceOpenApiDocument(beneficiaryModule.registry)));
+  api.use(beneficiaryModule.router);
   app.use('/api/v1', api);
 
   app.use(notFoundHandler);

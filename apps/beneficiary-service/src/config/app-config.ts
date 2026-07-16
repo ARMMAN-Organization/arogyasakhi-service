@@ -1,4 +1,4 @@
-import { loadConfig } from '@armman/service-commons';
+import { loadConfig, publicBaseUrlsSchema } from '@armman/service-commons';
 import { z } from 'zod';
 
 /** Environment schema for this service. Validated and frozen at startup. */
@@ -16,6 +16,7 @@ const schema = z.object({
         .map((origin) => origin.trim())
         .filter(Boolean),
     ),
+  PUBLIC_BASE_URLS: publicBaseUrlsSchema,
   // Base64-encoded 32-byte keys consumed directly by @armman/service-commons'
   // pii-crypto module (encryptPii/decryptPii, hashForSearch) via process.env.
   // Validated here so the service fails fast at boot rather than at first use.
