@@ -29,6 +29,12 @@ export interface ServiceRoute {
    * live under `prefix/*` — e.g. `/docs.json` sits next to `/docs`, not under it.
    */
   readonly extraMountPaths?: readonly string[];
+  /**
+   * Downstream path to rewrite `prefix` (and each `extraMountPaths` entry) to,
+   * when it differs from the gateway-facing path. Omit when the gateway path
+   * and downstream path are identical (the common case).
+   */
+  readonly downstreamPrefix?: string;
 }
 
 export const SERVICE_ROUTES: readonly ServiceRoute[] = [
@@ -38,17 +44,11 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
   // rather than parsing which /auth/* sub-path needs a token.
   { prefix: '/auth', target: appConfig.AUTH_SERVICE_URL, requiresAuth: false },
   { prefix: '/me', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
-  // Swagger UI + spec are public docs, not an authenticated API — no token
-  // required to view them. `docs.json` is a sibling of `/docs`, not a child
-  // path, so it needs its own exact mount. Currently only auth-service has
-  // published docs; extend this list as more services adopt
-  // createDocumentedRouter().
-  {
-    prefix: '/docs',
-    target: appConfig.AUTH_SERVICE_URL,
-    requiresAuth: false,
-    extraMountPaths: ['/docs.json'],
-  },
+  // NOTE: `/docs` is NOT proxied here. The gateway serves ONE aggregated
+  // Swagger UI at `/api/v1/docs` (see docs/docs.controller.ts) that merges
+  // every service's own `/docs.json` into a single page — there is no single
+  // downstream service to proxy a bare `/docs` to, and per-service pages were
+  // replaced by the unified view.
   { prefix: '/beneficiaries', target: appConfig.BENEFICIARY_SERVICE_URL, requiresAuth: true },
   { prefix: '/visits', target: appConfig.VISIT_FORM_SERVICE_URL, requiresAuth: true },
   { prefix: '/rules', target: appConfig.RULES_SERVICE_URL, requiresAuth: true },

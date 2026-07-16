@@ -27,16 +27,31 @@ const API_PREFIX = '/api/v1';
  * their own per-route `requireRoles(...)` — the gateway does not attempt a
  * full route-to-role map for a generic proxy layer.
  */
-/** Mounts one proxy for a single exact/prefix path, with its own correctly-scoped `pathRewrite`. */
-function mountProxy(app: Application, mountPath: string, target: string): void {
+/**
+ * Mounts one proxy for a single exact/prefix path, with its own
+ * correctly-scoped `pathRewrite`.
+ *
+ * @param downstreamMountPath The path to rebuild on the downstream side, when
+ *   it differs from `mountPath` (e.g. gateway `/api/v1/docs/beneficiary` ->
+ *   downstream `/api/v1/docs`, since every service serves docs at its own
+ *   plain `/docs`). Defaults to `mountPath` — the common case where the
+ *   gateway and downstream paths are identical.
+ */
+function mountProxy(
+  app: Application,
+  mountPath: string,
+  target: string,
+  downstreamMountPath: string = mountPath,
+): void {
   app.use(
     mountPath,
     createProxyMiddleware({
       target,
       changeOrigin: true,
       // The mount path strips the prefix, so rebuild the full downstream path
-      // (services share the `api/v1` prefix and own the same path segment).
-      pathRewrite: (path) => `${mountPath}${path}`,
+      // (services share the `api/v1` prefix and own the same path segment,
+      // unless `downstreamMountPath` says otherwise).
+      pathRewrite: (path) => `${downstreamMountPath}${path}`,
       on: {
         proxyReq: (proxyReq, req) => {
           const requestId = req.headers['x-request-id'];
@@ -64,7 +79,13 @@ function mountProxy(app: Application, mountPath: string, target: string): void {
 }
 
 export function registerProxies(app: Application, signer: Pick<TokenSigner, 'verify'>): void {
-  for (const { prefix, target, requiresAuth, extraMountPaths } of SERVICE_ROUTES) {
+  for (const {
+    prefix,
+    target,
+    requiresAuth,
+    extraMountPaths,
+    downstreamPrefix,
+  } of SERVICE_ROUTES) {
     const mountPath = `${API_PREFIX}${prefix}`;
     const extraPaths = (extraMountPaths ?? []).map((p) => `${API_PREFIX}${p}`);
     const allMountPaths = [mountPath, ...extraPaths];
@@ -81,6 +102,12 @@ export function registerProxies(app: Application, signer: Pick<TokenSigner, 'ver
     // exact prefix to strip/re-add per path — `docs.json` must rewrite
     // differently from `docs`, and http-proxy-middleware's `pathRewrite`
     // callback has no reliable way to tell which array entry matched.
-    for (const path of allMountPaths) mountProxy(app, path, target);
+    for (const path of allMountPaths) {
+      // `downstreamPrefix` replaces only the `prefix` portion of each mount
+      // path — `/api/v1/docs/beneficiary.json` still needs to become
+      // `/api/v1/docs.json` downstream, not `/api/v1/docs/.json`.
+      const downstreamPath = downstreamPrefix ? path.replace(prefix, downstreamPrefix) : path;
+      mountProxy(app, path, target, downstreamPath);
+    }
   }
 }
