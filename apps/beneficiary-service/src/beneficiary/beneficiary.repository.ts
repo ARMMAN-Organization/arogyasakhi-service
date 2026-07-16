@@ -21,7 +21,7 @@ export interface PiiCreateData {
   healthBlockId: string | null;
   dateOfBirth: Date | null;
   sex: 'FEMALE' | 'MALE' | 'OTHER' | 'UNKNOWN' | null;
-  addressLineEnc: string | null;
+  addressLineEnc: Buffer | null;
   stateId: string | null;
   districtId: string | null;
   talukaId: string | null;

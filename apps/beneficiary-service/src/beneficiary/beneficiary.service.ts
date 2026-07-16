@@ -89,7 +89,7 @@ export class BeneficiaryService {
         healthBlockId: dto.pii.healthBlockId ?? null,
         dateOfBirth: dto.pii.dateOfBirth ?? null,
         sex: dto.pii.sex ?? null,
-        addressLineEnc: dto.pii.addressLine ? dto.pii.addressLine : null,
+        addressLineEnc: dto.pii.addressLine ? encryptPii(dto.pii.addressLine) : null,
         stateId: dto.pii.stateId ?? null,
         districtId: dto.pii.districtId ?? null,
         talukaId: dto.pii.talukaId ?? null,
