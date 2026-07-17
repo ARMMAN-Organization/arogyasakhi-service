@@ -96,10 +96,17 @@ describe('FormService', () => {
 
   describe('updateDraft', () => {
     it('updates schemaJson/validationJson when the version is DRAFT', async () => {
-      repository.findVersionById.mockResolvedValue({ id: 'v1', status: 'DRAFT' } as never);
+      repository.findVersionById.mockResolvedValue({
+        id: 'v1',
+        status: 'DRAFT',
+        formDefinition: { formCode: 'MOTHER_REGISTRATION' },
+      } as never);
       repository.updateDraft.mockResolvedValue({ id: 'v1' } as never);
 
-      await service.updateDraft('v1', { schemaJson: [], validationJson: [] });
+      await service.updateDraft('MOTHER_REGISTRATION', 'v1', {
+        schemaJson: [],
+        validationJson: [],
+      });
 
       expect(repository.updateDraft).toHaveBeenCalledWith(
         'v1',
@@ -107,53 +114,99 @@ describe('FormService', () => {
       );
     });
 
-    it('rejects editing a version that is not DRAFT', async () => {
-      repository.findVersionById.mockResolvedValue({ id: 'v1', status: 'PUBLISHED' } as never);
+    it('rejects when the version does not belong to the given form code', async () => {
+      repository.findVersionById.mockResolvedValue({
+        id: 'v1',
+        status: 'DRAFT',
+        formDefinition: { formCode: 'MOTHER_REGISTRATION' },
+      } as never);
+
       await expect(
-        service.updateDraft('v1', { schemaJson: [], validationJson: [] }),
+        service.updateDraft('CHILD_REGISTRATION', 'v1', { schemaJson: [], validationJson: [] }),
+      ).rejects.toThrow(/does not belong to this form code/);
+    });
+
+    it('rejects editing a version that is not DRAFT', async () => {
+      repository.findVersionById.mockResolvedValue({
+        id: 'v1',
+        status: 'PUBLISHED',
+        formDefinition: { formCode: 'MOTHER_REGISTRATION' },
+      } as never);
+      await expect(
+        service.updateDraft('MOTHER_REGISTRATION', 'v1', { schemaJson: [], validationJson: [] }),
       ).rejects.toThrow(/Only DRAFT versions can be edited/);
     });
 
     it('throws not-found for an unknown version id', async () => {
       repository.findVersionById.mockResolvedValue(null);
       await expect(
-        service.updateDraft('missing', { schemaJson: [], validationJson: [] }),
+        service.updateDraft('MOTHER_REGISTRATION', 'missing', {
+          schemaJson: [],
+          validationJson: [],
+        }),
       ).rejects.toThrow(/Form version not found/);
     });
   });
 
   describe('publish', () => {
+    const draftVersion = {
+      id: 'v2',
+      status: 'DRAFT',
+      formDefinitionId: 'def-1',
+      formDefinition: { formCode: 'MOTHER_REGISTRATION' },
+      schemaJson: [
+        { question_code: 'phone_owner', label: 'Phone owner', input_type: 'text', required: true },
+      ],
+    };
+
     it('publishes a DRAFT and retires the previously-active version', async () => {
-      repository.findVersionById.mockResolvedValue({
-        id: 'v2',
-        status: 'DRAFT',
-        formDefinitionId: 'def-1',
-      } as never);
+      repository.findVersionById.mockResolvedValue(draftVersion as never);
       repository.findCurrentlyPublished.mockResolvedValue({ id: 'v1' } as never);
       repository.publish.mockResolvedValue({ id: 'v2', status: 'PUBLISHED' } as never);
 
-      await service.publish('v2');
+      await service.publish('MOTHER_REGISTRATION', 'v2');
 
       expect(repository.publish).toHaveBeenCalledWith('v2', expect.any(Date), 'v1');
     });
 
     it('publishes with no previous version to retire when none exists', async () => {
       repository.findVersionById.mockResolvedValue({
+        ...draftVersion,
         id: 'v1',
-        status: 'DRAFT',
-        formDefinitionId: 'def-1',
       } as never);
       repository.findCurrentlyPublished.mockResolvedValue(null);
       repository.publish.mockResolvedValue({ id: 'v1' } as never);
 
-      await service.publish('v1');
+      await service.publish('MOTHER_REGISTRATION', 'v1');
 
       expect(repository.publish).toHaveBeenCalledWith('v1', expect.any(Date), null);
     });
 
+    it('rejects when the version does not belong to the given form code', async () => {
+      repository.findVersionById.mockResolvedValue(draftVersion as never);
+      await expect(service.publish('CHILD_REGISTRATION', 'v2')).rejects.toThrow(
+        /does not belong to this form code/,
+      );
+    });
+
     it('rejects publishing a version that is not DRAFT', async () => {
-      repository.findVersionById.mockResolvedValue({ id: 'v1', status: 'RETIRED' } as never);
-      await expect(service.publish('v1')).rejects.toThrow(/Only DRAFT versions can be published/);
+      repository.findVersionById.mockResolvedValue({
+        ...draftVersion,
+        status: 'RETIRED',
+      } as never);
+      await expect(service.publish('MOTHER_REGISTRATION', 'v1')).rejects.toThrow(
+        /Only DRAFT versions can be published/,
+      );
+    });
+
+    it('rejects publishing a draft with an empty schemaJson', async () => {
+      repository.findVersionById.mockResolvedValue({
+        ...draftVersion,
+        schemaJson: [],
+      } as never);
+      await expect(service.publish('MOTHER_REGISTRATION', 'v2')).rejects.toThrow(
+        /at least one well-formed field/,
+      );
     });
   });
 
@@ -298,6 +351,34 @@ describe('FormService', () => {
       await expect(call).rejects.toMatchObject({
         details: { violations: ['para must be <= gravida'] },
       });
+    });
+
+    it('skips a cross-field LTE check when a referenced field is legitimately absent', async () => {
+      repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+      repository.findVersionById.mockResolvedValue({
+        ...publishedVersion,
+        schemaJson: [
+          { question_code: 'para', label: 'Para', input_type: 'number', required: false },
+          { question_code: 'gravida', label: 'Gravida', input_type: 'number', required: false },
+        ],
+        validationJson: [{ rule: 'LTE', fields: ['para', 'gravida'] }],
+      } as never);
+      repository.createSubmission.mockResolvedValue({ id: 'sub-1' } as never);
+
+      // Neither `para` nor `gravida` was answered — both are optional, so the
+      // cross-field rule should not fire at all (not "must be numeric").
+      await service.createSubmission(
+        'MOTHER_REGISTRATION',
+        {
+          formVersionId: 'version-1',
+          beneficiaryId: 'b1',
+          localSubmissionUuid: 'uuid-1',
+          formData: {},
+        },
+        'u1',
+      );
+
+      expect(repository.createSubmission).toHaveBeenCalled();
     });
 
     it('skips the required check for a field hidden by skip logic', async () => {

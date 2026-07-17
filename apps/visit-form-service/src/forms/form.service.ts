@@ -82,9 +82,12 @@ export class FormService {
     });
   }
 
-  async updateDraft(versionId: string, dto: PatchFormVersionInput) {
+  async updateDraft(formCode: string, versionId: string, dto: PatchFormVersionInput) {
     const version = await this.repository.findVersionById(versionId);
     if (!version) throw notFound('Form version not found.');
+    if (version.formDefinition.formCode !== formCode) {
+      throw badRequest('versionId does not belong to this form code.');
+    }
     if (version.status !== 'DRAFT') {
       throw conflict('Only DRAFT versions can be edited.');
     }
@@ -96,11 +99,20 @@ export class FormService {
     });
   }
 
-  async publish(versionId: string) {
+  async publish(formCode: string, versionId: string) {
     const version = await this.repository.findVersionById(versionId);
     if (!version) throw notFound('Form version not found.');
+    if (version.formDefinition.formCode !== formCode) {
+      throw badRequest('versionId does not belong to this form code.');
+    }
     if (version.status !== 'DRAFT') {
       throw conflict('Only DRAFT versions can be published.');
+    }
+    // schemaJsonSchema requires >=1 field — publishing an empty/malformed
+    // draft would otherwise pass here and only fail later, as an uncaught
+    // exception, the first time createSubmission() parses it.
+    if (!schemaJsonSchema.safeParse(version.schemaJson).success) {
+      throw unprocessable('Draft schemaJson must have at least one well-formed field to publish.');
     }
 
     const current = await this.repository.findCurrentlyPublished(version.formDefinitionId);
@@ -181,6 +193,11 @@ export class FormService {
     for (const rule of crossFieldRules) {
       if (rule.rule === 'LTE') {
         const [a, b] = rule.fields;
+        // A field legitimately absent (optional, not yet answered) is not
+        // this rule's concern — the required-field check above already
+        // covers "missing". Only a *present but non-numeric* value is a
+        // cross-field violation.
+        if (isEmpty(formData[a]) || isEmpty(formData[b])) continue;
         const va = Number(formData[a]);
         const vb = Number(formData[b]);
         if (Number.isNaN(va) || Number.isNaN(vb)) {
@@ -189,6 +206,8 @@ export class FormService {
           violations.push(`${a} must be <= ${b}`);
         }
       } else if (rule.rule === 'SUM_EQUALS') {
+        const allFields = [...rule.fields, rule.equals];
+        if (allFields.some((f) => isEmpty(formData[f]))) continue;
         const values = rule.fields.map((f) => Number(formData[f]));
         const target = Number(formData[rule.equals]);
         if (values.some((v) => Number.isNaN(v)) || Number.isNaN(target)) {

@@ -65,8 +65,11 @@ export function createFormRouter(service: FormService): Router {
     validate(versionParamsSchema, 'params'),
     validateBody(patchFormVersionSchema),
     asyncHandler(async (req, res) => {
-      const { versionId } = req.params as unknown as { versionId: string };
-      const updated = await service.updateDraft(versionId, req.body);
+      const { formCode, versionId } = req.params as unknown as {
+        formCode: string;
+        versionId: string;
+      };
+      const updated = await service.updateDraft(formCode, versionId, req.body);
       res.json(ok(updated));
     }),
   );
@@ -77,8 +80,11 @@ export function createFormRouter(service: FormService): Router {
     requireRoles('ADMIN'),
     validate(versionParamsSchema, 'params'),
     asyncHandler(async (req, res) => {
-      const { versionId } = req.params as unknown as { versionId: string };
-      const published = await service.publish(versionId);
+      const { formCode, versionId } = req.params as unknown as {
+        formCode: string;
+        versionId: string;
+      };
+      const published = await service.publish(formCode, versionId);
       res.json(ok(published));
     }),
   );
