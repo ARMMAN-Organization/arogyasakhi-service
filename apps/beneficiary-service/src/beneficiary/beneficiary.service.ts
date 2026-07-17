@@ -184,6 +184,7 @@ export class BeneficiaryService {
 
     return {
       nameToken: hashForSearch(normalizeForSearch(dto.pii.fullName)),
+      caseTypeLookupId: dto.case.caseTypeLookupId,
       dobToken: dob ? hashForSearch(dob.toISOString().slice(0, 10)).toString('base64') : null,
       phoneHash: dto.pii.phone ? hashForSearch(normalizeForSearch(dto.pii.phone)) : null,
       geographyToken: geographyParts

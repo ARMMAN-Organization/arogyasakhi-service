@@ -240,6 +240,11 @@ model FormSubmission {
   visit       VisitInstance? @relation(fields: [visitId], references: [id])
   formAnswers FormAnswer[]
 
+  // ERD §6 "Required Indexes and Constraints" — Care journey row requires
+  // this index (ERD names the column form_definition_id, but form_submissions'
+  // actual FK is form_version_id, per this same table's own Appendix A
+  // definition — indexing the column that actually exists).
+  @@index([beneficiaryId, formVersionId, submittedAt])
   @@map("form_submissions")
 }
 

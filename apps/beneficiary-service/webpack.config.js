@@ -1,5 +1,6 @@
 const { NxAppWebpackPlugin } = require('@nx/webpack/app-plugin');
 const { join } = require('node:path');
+const { IgnorePrismaSourceMapWarnings } = require('../../tools/webpack-ignore-prisma-warnings');
 
 module.exports = {
   output: { path: join(__dirname, '../../dist/apps/beneficiary-service') },
@@ -13,5 +14,6 @@ module.exports = {
       outputHashing: 'none',
       generatePackageJson: false,
     }),
+    new IgnorePrismaSourceMapWarnings(),
   ],
 };
