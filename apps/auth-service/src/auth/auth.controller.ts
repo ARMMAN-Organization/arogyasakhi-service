@@ -39,6 +39,15 @@ const authTokensSchema = z.object({
     .string()
     .openapi({ description: 'Opaque refresh token; single-use, rotated on refresh.' }),
   expiresIn: z.number().openapi({ description: 'Access token lifetime in seconds.', example: 900 }),
+  roles: z
+    .array(z.string())
+    .openapi({ description: 'Every role code the caller holds.', example: ['SAKHI'] }),
+  projectId: z.string().uuid().nullable().openapi({
+    description: "The primary role assignment's project scope.",
+  }),
+  geographyUnitId: z.string().uuid().nullable().openapi({
+    description: "The primary role assignment's geography scope.",
+  }),
 });
 
 const userProfileSchema = z.object({
@@ -67,6 +76,9 @@ const userProfileSchema = z.object({
   maskedBankAccount: z.string().nullable().openapi({
     description: 'Last 4 digits of the linked bank account, masked — never the full number.',
     example: '••••1234',
+  }),
+  supervisorId: z.string().uuid().nullable().openapi({
+    description: "Sakhi profile's supervisor — null for non-SAKHI roles.",
   }),
 });
 

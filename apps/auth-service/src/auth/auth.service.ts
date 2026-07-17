@@ -10,6 +10,13 @@ import type { CreateUserInput } from './dto/create-user.dto';
 export interface AuthTokens {
   accessToken: string;
   refreshToken: string;
+  /** Access token lifetime in seconds, from now. */
+  expiresIn: number;
+  /** Every role code the caller holds — same set encoded in the access token's `roles` claim. */
+  roles: string[];
+  /** The primary role assignment's project/geography scope (first assignment; see issueTokens). */
+  projectId: string | null;
+  geographyUnitId: string | null;
 }
 
 export interface UserProfile {
@@ -27,6 +34,8 @@ export interface UserProfile {
   cardNumber: string | null;
   /** Last 4 digits of the Sakhi's bank account, masked (e.g. "••••1234") — never the full number. */
   maskedBankAccount: string | null;
+  /** Sakhi profile's supervisor_id — per SRS's Sakhi identity field list; only present for SAKHI-role users. */
+  supervisorId: string | null;
 }
 
 const BANK_ACCOUNT_VISIBLE_DIGITS = 4;
@@ -183,6 +192,7 @@ export class AuthService {
       maskedBankAccount: profile?.bankAccountToken
         ? maskBankAccount(decryptPii(profile.bankAccountToken))
         : null,
+      supervisorId: profile?.supervisorId ?? null,
     };
   }
 
@@ -230,7 +240,14 @@ export class AuthService {
       await this.repository.createSession(sessionData);
     }
 
-    return { accessToken, refreshToken };
+    return {
+      accessToken,
+      refreshToken,
+      expiresIn: Math.floor(parseDurationMs(this.accessTokenTtl) / 1000),
+      roles,
+      projectId: primary?.projectId ?? null,
+      geographyUnitId: primary?.geographyUnitId ?? null,
+    };
   }
 }
 

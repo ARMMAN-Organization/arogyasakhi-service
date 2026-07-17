@@ -81,6 +81,10 @@ describe('AuthService', () => {
       expect(tokens).toEqual({
         accessToken: 'signed-access-token',
         refreshToken: 'plain-refresh-token',
+        expiresIn: 900,
+        roles: ['SAKHI'],
+        projectId: 'project-1',
+        geographyUnitId: 'geo-1',
       });
       expect(repository.recordSuccessfulLoginAndCreateSession).toHaveBeenCalledWith(
         'user-1',
@@ -155,6 +159,10 @@ describe('AuthService', () => {
       expect(tokens).toEqual({
         accessToken: 'signed-access-token',
         refreshToken: 'plain-refresh-token',
+        expiresIn: 900,
+        roles: ['SAKHI'],
+        projectId: 'project-1',
+        geographyUnitId: 'geo-1',
       });
     });
 
@@ -412,6 +420,7 @@ describe('AuthService', () => {
       sakhiProfile: {
         employeeCode: 'EMP-00123',
         bankAccountToken: encryptPii('1234567890'),
+        supervisorId: 'supervisor-1',
       },
     });
 
@@ -433,6 +442,7 @@ describe('AuthService', () => {
         projectName: 'GEP-2324',
         cardNumber: null,
         maskedBankAccount: null,
+        supervisorId: null,
       });
     });
 
@@ -444,6 +454,7 @@ describe('AuthService', () => {
       expect(profile?.cardNumber).toBe('EMP-00123');
       expect(profile?.maskedBankAccount).toBe('••••7890');
       expect(profile?.maskedBankAccount).not.toContain('123456');
+      expect(profile?.supervisorId).toBe('supervisor-1');
     });
 
     it('returns null projectName when the primary role has no project (e.g. ADMIN)', async () => {
