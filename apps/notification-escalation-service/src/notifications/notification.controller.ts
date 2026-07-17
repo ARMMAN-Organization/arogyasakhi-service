@@ -2,7 +2,14 @@ import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
 import { z } from 'zod';
 import type { NotificationService } from './notification.service';
 import { createNotificationSchema } from './dto/create-notification.dto';
-import { asyncHandler, createDocumentedRouter, ok, validateBody } from '../app.module';
+import {
+  asyncHandler,
+  createDocumentedRouter,
+  ok,
+  requireRoles,
+  trustGatewayIdentity,
+  validateBody,
+} from '../app.module';
 
 extendZodWithOpenApi(z);
 
@@ -52,8 +59,12 @@ export function createNotificationRouter(service: NotificationService) {
       tags: ['Notifications'],
       responses: {
         200: { description: 'Notifications', schema: envelope(z.array(notificationSchema)) },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
       },
     },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER'),
     asyncHandler(async (_req, res) => {
       res.json(ok(await service.list()));
     }),
@@ -67,8 +78,12 @@ export function createNotificationRouter(service: NotificationService) {
       responses: {
         201: { description: 'Notification created', schema: envelope(notificationSchema) },
         400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
       },
     },
+    trustGatewayIdentity,
+    requireRoles('ADMIN'),
     validateBody(createNotificationSchema),
     asyncHandler(async (req, res) => {
       const created = await service.create(req.body);

@@ -2,7 +2,14 @@ import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
 import { z } from 'zod';
 import type { ClosureService } from './closure.service';
 import { createClosureSchema } from './dto/create-closure.dto';
-import { asyncHandler, createDocumentedRouter, ok, validateBody } from '../app.module';
+import {
+  asyncHandler,
+  createDocumentedRouter,
+  ok,
+  requireRoles,
+  trustGatewayIdentity,
+  validateBody,
+} from '../app.module';
 
 extendZodWithOpenApi(z);
 
@@ -77,8 +84,12 @@ export function createClosureRouter(service: ClosureService) {
       tags: ['Closures'],
       responses: {
         200: { description: 'Closures retrieved', schema: envelope(z.array(closureSchema)) },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
       },
     },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER'),
     asyncHandler(async (_req, res) => {
       res.json(ok(await service.list()));
     }),
@@ -92,8 +103,12 @@ export function createClosureRouter(service: ClosureService) {
       responses: {
         201: { description: 'Closure created', schema: envelope(closureSchema) },
         400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
       },
     },
+    trustGatewayIdentity,
+    requireRoles('SAKHI'),
     validateBody(createClosureRequestSchema),
     asyncHandler(async (req, res) => {
       const created = await service.create(req.body);

@@ -2,7 +2,14 @@ import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
 import { z } from 'zod';
 import type { SyncBatchService } from './syncBatch.service';
 import { createSyncBatchSchema } from './dto/create-syncBatch.dto';
-import { asyncHandler, createDocumentedRouter, ok, validateBody } from '../app.module';
+import {
+  asyncHandler,
+  createDocumentedRouter,
+  ok,
+  requireRoles,
+  trustGatewayIdentity,
+  validateBody,
+} from '../app.module';
 
 extendZodWithOpenApi(z);
 
@@ -66,8 +73,12 @@ export function createSyncBatchRouter(service: SyncBatchService) {
           description: 'Most recent sync batches',
           schema: envelope(z.array(syncBatchSchema)),
         },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
       },
     },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR'),
     asyncHandler(async (_req, res) => {
       res.json(ok(await service.list()));
     }),
@@ -81,8 +92,12 @@ export function createSyncBatchRouter(service: SyncBatchService) {
       responses: {
         201: { description: 'Sync batch created', schema: envelope(syncBatchSchema) },
         400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
       },
     },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR'),
     validateBody(createSyncBatchRequestSchema),
     asyncHandler(async (req, res) => {
       const created = await service.create(req.body);

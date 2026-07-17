@@ -2,7 +2,14 @@ import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
 import { z } from 'zod';
 import type { RuleSetService } from './ruleSet.service';
 import { createRuleSetSchema } from './dto/create-ruleSet.dto';
-import { asyncHandler, createDocumentedRouter, ok, validateBody } from '../app.module';
+import {
+  asyncHandler,
+  createDocumentedRouter,
+  ok,
+  requireRoles,
+  trustGatewayIdentity,
+  validateBody,
+} from '../app.module';
 
 extendZodWithOpenApi(z);
 
@@ -56,8 +63,12 @@ export function createRuleSetRouter(service: RuleSetService) {
       tags: ['Rules'],
       responses: {
         200: { description: 'Rule sets', schema: envelope(z.array(ruleSetSchema)) },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
       },
     },
+    trustGatewayIdentity,
+    requireRoles('ADMIN'),
     asyncHandler(async (_req, res) => {
       res.json(ok(await service.list()));
     }),
@@ -71,8 +82,12 @@ export function createRuleSetRouter(service: RuleSetService) {
       responses: {
         201: { description: 'Rule set created', schema: envelope(ruleSetSchema) },
         400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
       },
     },
+    trustGatewayIdentity,
+    requireRoles('ADMIN'),
     validateBody(createRuleSetRequestSchema),
     asyncHandler(async (req, res) => {
       const created = await service.create(req.body);

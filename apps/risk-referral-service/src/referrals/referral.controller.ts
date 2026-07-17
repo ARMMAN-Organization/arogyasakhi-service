@@ -2,7 +2,14 @@ import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
 import { z } from 'zod';
 import type { ReferralService } from './referral.service';
 import { createReferralSchema } from './dto/create-referral.dto';
-import { asyncHandler, createDocumentedRouter, ok, validateBody } from '../app.module';
+import {
+  asyncHandler,
+  createDocumentedRouter,
+  ok,
+  requireRoles,
+  trustGatewayIdentity,
+  validateBody,
+} from '../app.module';
 
 extendZodWithOpenApi(z);
 
@@ -65,8 +72,12 @@ export function createReferralRouter(service: ReferralService) {
       tags: ['Referrals'],
       responses: {
         200: { description: 'Referrals list', schema: envelope(z.array(referralSchema)) },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
       },
     },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER'),
     asyncHandler(async (_req, res) => {
       res.json(ok(await service.list()));
     }),
@@ -80,8 +91,12 @@ export function createReferralRouter(service: ReferralService) {
       responses: {
         201: { description: 'Referral created', schema: envelope(referralSchema) },
         400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
       },
     },
+    trustGatewayIdentity,
+    requireRoles('SAKHI'),
     validateBody(createReferralRequestSchema),
     asyncHandler(async (req, res) => {
       const created = await service.create(req.body);
