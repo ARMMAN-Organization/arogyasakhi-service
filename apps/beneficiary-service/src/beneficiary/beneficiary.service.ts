@@ -35,14 +35,50 @@ export interface ListBeneficiariesQuery {
   mobileNumber?: string;
 }
 
+interface PiiRow {
+  id: string;
+  fullNameEnc: Buffer;
+  villageId: string | null;
+  padaId: string | null;
+  healthSubCentreId: string | null;
+  phcId: string | null;
+  healthBlockId: string | null;
+  dateOfBirth: Date | null;
+  sex: string | null;
+  stateId: string | null;
+  districtId: string | null;
+  talukaId: string | null;
+}
+
 /**
- * Returns the case with `pii.fullName` decrypted for display. Names are stored
- * encrypted (`fullNameEnc`) with only a non-reversible search hash — this is
- * the single place the plaintext name is materialised for a response, reused
- * by list/getById/create so the decrypt-and-spread logic isn't repeated.
+ * Returns the case with `pii` reduced to the fields the API is allowed to
+ * expose, with `fullName` decrypted for display. Names are stored encrypted
+ * (`fullNameEnc`) with only a non-reversible search hash — this is the single
+ * place the plaintext name is materialised for a response, reused by
+ * list/getById/create. Only allow-listed fields are copied across so
+ * encrypted/hash columns (fullNameEnc, fullNameSearchHash, phoneEnc,
+ * phoneSearchHash, rchNumberEnc, rchNumberHash, addressLineEnc, ...) can
+ * never leak into the response even if the Prisma row gains new columns.
  */
-function withDecryptedName<T extends { pii: { fullNameEnc: Buffer } }>(caseRow: T) {
-  return { ...caseRow, pii: { ...caseRow.pii, fullName: decryptPii(caseRow.pii.fullNameEnc) } };
+function withDecryptedName<T extends { pii: PiiRow }>(caseRow: T) {
+  const { pii } = caseRow;
+  return {
+    ...caseRow,
+    pii: {
+      id: pii.id,
+      fullName: decryptPii(pii.fullNameEnc),
+      villageId: pii.villageId,
+      padaId: pii.padaId,
+      healthSubCentreId: pii.healthSubCentreId,
+      phcId: pii.phcId,
+      healthBlockId: pii.healthBlockId,
+      dateOfBirth: pii.dateOfBirth,
+      sex: pii.sex,
+      stateId: pii.stateId,
+      districtId: pii.districtId,
+      talukaId: pii.talukaId,
+    },
+  };
 }
 
 /** Business logic for the beneficiary enrollment lifecycle. */
