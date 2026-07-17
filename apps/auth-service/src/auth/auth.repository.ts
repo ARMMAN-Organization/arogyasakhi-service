@@ -29,6 +29,26 @@ export class AuthRepository {
     });
   }
 
+  /**
+   * Same as {@link findUserById}, additionally including the primary
+   * project's name (via each active role's `project` relation) and the
+   * caller's Sakhi profile (if any — only SAKHI-role users have one). Used
+   * by `GET /me`, which needs project name / employee code / masked bank
+   * account beyond the base profile fields.
+   */
+  findUserByIdWithProfile(id: string) {
+    return this.prisma.user.findUnique({
+      where: { id },
+      include: {
+        userRoles: {
+          where: { status: 'ACTIVE', isDeleted: false },
+          include: { role: true, project: true },
+        },
+        sakhiProfile: true,
+      },
+    });
+  }
+
   incrementFailedLoginCount(userId: string) {
     return this.prisma.user.update({
       where: { id: userId },

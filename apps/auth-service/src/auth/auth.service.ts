@@ -1,5 +1,5 @@
 import type { TokenSigner } from '@armman/service-commons';
-import { conflict, forbidden, notFound, unauthorized } from '@armman/service-commons';
+import { conflict, decryptPii, forbidden, notFound, unauthorized } from '@armman/service-commons';
 import type { AuthRepository } from './auth.repository';
 import { hashPassword, verifyPassword } from './password';
 import { generateRefreshToken, hashRefreshToken } from './refresh-token';
@@ -17,7 +17,25 @@ export interface UserProfile {
   username: string;
   displayName: string;
   mobileNumber: string;
+  email: string | null;
+  status: string;
+  createdAt: Date;
   roles: { roleCode: string; projectId: string | null; geographyUnitId: string | null }[];
+  /** The primary role's project name, or null if that role has no project (e.g. ADMIN). */
+  projectName: string | null;
+  /** Sakhi profile's employee_code — only present for SAKHI-role users. */
+  cardNumber: string | null;
+  /** Last 4 digits of the Sakhi's bank account, masked (e.g. "••••1234") — never the full number. */
+  maskedBankAccount: string | null;
+}
+
+const BANK_ACCOUNT_VISIBLE_DIGITS = 4;
+const BANK_ACCOUNT_MASK = '••••';
+
+/** Masks a decrypted bank account number down to its last 4 digits. */
+function maskBankAccount(accountNumber: string): string {
+  const lastDigits = accountNumber.slice(-BANK_ACCOUNT_VISIBLE_DIGITS);
+  return `${BANK_ACCOUNT_MASK}${lastDigits}`;
 }
 
 export interface CreatedUser {
@@ -141,18 +159,30 @@ export class AuthService {
   }
 
   async getProfile(userId: string): Promise<UserProfile | null> {
-    const user = await this.repository.findUserById(userId);
+    const user = await this.repository.findUserByIdWithProfile(userId);
     if (!user || user.isDeleted) return null;
+
+    const [primaryRole] = user.userRoles;
+    const profile = user.sakhiProfile;
+
     return {
       id: user.id,
       username: user.username,
       displayName: user.displayName,
       mobileNumber: user.mobileNumber,
+      email: user.email,
+      status: user.status,
+      createdAt: user.createdAt,
       roles: user.userRoles.map((ur) => ({
         roleCode: ur.role.roleCode,
         projectId: ur.projectId,
         geographyUnitId: ur.geographyUnitId,
       })),
+      projectName: primaryRole?.project?.projectName ?? null,
+      cardNumber: profile?.employeeCode ?? null,
+      maskedBankAccount: profile?.bankAccountToken
+        ? maskBankAccount(decryptPii(profile.bankAccountToken))
+        : null,
     };
   }
 
