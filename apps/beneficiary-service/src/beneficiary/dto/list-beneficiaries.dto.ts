@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { BENEFICIARY_STATUSES, CASE_TYPES } from '../beneficiary.constants';
 
 /**
  * Query params for `GET /beneficiaries`, per SRS FR-S-9.2 ("Search by name
@@ -13,10 +14,8 @@ export const listBeneficiariesQuerySchema = z
     projectId: z.string().uuid().optional(),
     villageId: z.string().uuid().optional(),
     padaId: z.string().uuid().optional(),
-    status: z
-      .enum(['ACTIVE', 'JOURNEY_COMPLETE', 'CLOSED', 'TRANSFERRED', 'REOPEN_REQUESTED'])
-      .optional(),
-    caseType: z.enum(['MOTHER', 'CHILD']).optional(),
+    status: z.enum(BENEFICIARY_STATUSES).optional(),
+    caseType: z.enum(CASE_TYPES).optional(),
     atRiskOnly: z.coerce.boolean().optional(),
     name: z.string().trim().min(1).max(200).optional(),
     mobileNumber: z.string().trim().min(1).max(20).optional(),

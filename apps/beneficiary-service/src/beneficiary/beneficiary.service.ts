@@ -9,6 +9,11 @@ import {
   unprocessable,
 } from '@armman/service-commons';
 import type {
+  BeneficiaryRiskConditionSummary,
+  BeneficiaryStatusHistory,
+} from '../../../../node_modules/.prisma/client-beneficiary-service';
+import type { BeneficiaryStatus, CaseType } from './beneficiary.constants';
+import type {
   BeneficiaryListFilters,
   BeneficiaryRepository,
   DuplicateSearchTokens,
@@ -22,12 +27,22 @@ export interface ListBeneficiariesQuery {
   projectId?: string;
   villageId?: string;
   padaId?: string;
-  status?: 'ACTIVE' | 'JOURNEY_COMPLETE' | 'CLOSED' | 'TRANSFERRED' | 'REOPEN_REQUESTED';
-  caseType?: 'MOTHER' | 'CHILD';
+  status?: BeneficiaryStatus;
+  caseType?: CaseType;
   atRiskOnly?: boolean;
   /** Raw search text — hashed the same way as duplicate-detection tokens (exact match only). */
   name?: string;
   mobileNumber?: string;
+}
+
+/**
+ * Returns the case with `pii.fullName` decrypted for display. Names are stored
+ * encrypted (`fullNameEnc`) with only a non-reversible search hash — this is
+ * the single place the plaintext name is materialised for a response, reused
+ * by list/getById/create so the decrypt-and-spread logic isn't repeated.
+ */
+function withDecryptedName<T extends { pii: { fullNameEnc: Buffer } }>(caseRow: T) {
+  return { ...caseRow, pii: { ...caseRow.pii, fullName: decryptPii(caseRow.pii.fullNameEnc) } };
 }
 
 /** Business logic for the beneficiary enrollment lifecycle. */
@@ -54,16 +69,13 @@ export class BeneficiaryService {
     };
 
     const cases = await this.repository.findMany(filters);
-    return cases.map((c) => ({
-      ...c,
-      pii: { ...c.pii, fullName: decryptPii(c.pii.fullNameEnc) },
-    }));
+    return cases.map(withDecryptedName);
   }
 
   async getById(id: string) {
     const found = await this.repository.findById(id);
     if (!found) throw notFound('Beneficiary case not found.');
-    return { ...found, pii: { ...found.pii, fullName: decryptPii(found.pii.fullNameEnc) } };
+    return withDecryptedName(found);
   }
 
   /**
@@ -157,13 +169,12 @@ export class BeneficiaryService {
     });
 
     return {
-      ...created,
-      pii: { ...created.pii, fullName: decryptPii(created.pii.fullNameEnc) },
+      ...withDecryptedName(created),
       // Nothing has accrued yet for a case created in this same call — risk
       // evaluation and status transitions only happen after visits/status
       // changes (see the repository's comment on the create query).
-      riskConditionSummaries: [] as never[],
-      statusHistory: [] as never[],
+      riskConditionSummaries: [] as BeneficiaryRiskConditionSummary[],
+      statusHistory: [] as BeneficiaryStatusHistory[],
     };
   }
 

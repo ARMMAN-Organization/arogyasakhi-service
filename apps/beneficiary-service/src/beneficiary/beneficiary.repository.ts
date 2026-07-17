@@ -1,11 +1,18 @@
 import type { PrismaService } from '../prisma/prisma.service';
+import type {
+  BeneficiaryStatus,
+  CasePhase,
+  CaseType,
+  ChildSex,
+  MotherSex,
+} from './beneficiary.constants';
 
 export interface BeneficiaryListFilters {
   projectId?: string;
   villageId?: string;
   padaId?: string;
-  currentStatus?: 'ACTIVE' | 'JOURNEY_COMPLETE' | 'CLOSED' | 'TRANSFERRED' | 'REOPEN_REQUESTED';
-  caseType?: 'MOTHER' | 'CHILD';
+  currentStatus?: BeneficiaryStatus;
+  caseType?: CaseType;
   /** True to return only cases with `everAtRiskFlag` set on any risk condition. */
   atRiskOnly?: boolean;
   /** hashForSearch(normalizeForSearch(name)) — exact-match only, see findMany's doc comment. */
@@ -34,7 +41,7 @@ export interface PiiCreateData {
   phcId: string | null;
   healthBlockId: string | null;
   dateOfBirth: Date | null;
-  sex: 'FEMALE' | 'MALE' | 'OTHER' | 'UNKNOWN' | null;
+  sex: MotherSex | null;
   addressLineEnc: Buffer | null;
   stateId: string | null;
   districtId: string | null;
@@ -46,14 +53,14 @@ export interface PiiCreateData {
 export interface CaseCreateData {
   projectId: string;
   sakhiId: string;
-  caseType: 'MOTHER' | 'CHILD';
+  caseType: CaseType;
   registrationDate: Date;
   previousBeneficiaryId: string | null;
   motherBeneficiaryId: string | null;
   beneficiaryTypeLookupId: string;
   caseTypeLookupId: string;
   journeyStartDate: Date;
-  currentPhase: 'ANC' | 'DELIVERY' | 'PP' | 'NN' | 'INC' | 'CCV' | 'CLOSED';
+  currentPhase: CasePhase;
 }
 
 export interface MotherDetailsCreateData {
@@ -68,7 +75,7 @@ export interface MotherDetailsCreateData {
 export interface ChildDetailsCreateData {
   motherBeneficiaryId: string | null;
   dateOfBirth: Date;
-  sex: 'FEMALE' | 'MALE' | 'OTHER' | 'INTERSEX' | null;
+  sex: ChildSex | null;
   birthWeightKg: number | null;
   birthLengthCm: number | null;
   prematureFlag: boolean | null;

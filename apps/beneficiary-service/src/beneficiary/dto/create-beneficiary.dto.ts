@@ -1,4 +1,10 @@
 import { z } from 'zod';
+import {
+  API_CONSENT_STATUSES,
+  CASE_TYPES,
+  CHILD_SEXES,
+  MOTHER_SEXES,
+} from '../beneficiary.constants';
 
 /**
  * Validation schema for enrolling a beneficiary (mother or child), per SRS
@@ -11,7 +17,7 @@ const piiSchema = z
     phone: z.string().trim().min(1).max(20).optional(),
     alternatePhone: z.string().trim().min(1).max(20).optional(),
     dateOfBirth: z.coerce.date().optional(),
-    sex: z.enum(['FEMALE', 'MALE', 'OTHER', 'UNKNOWN']).optional(),
+    sex: z.enum(MOTHER_SEXES).optional(),
     addressLine: z.string().trim().min(1).max(500).optional(),
     villageId: z.string().uuid().optional(),
     padaId: z.string().uuid().optional(),
@@ -92,7 +98,7 @@ const motherDetailsSchema = z
 const childDetailsSchema = z
   .object({
     dateOfBirth: z.coerce.date(),
-    sex: z.enum(['FEMALE', 'MALE', 'OTHER', 'INTERSEX']).optional(),
+    sex: z.enum(CHILD_SEXES).optional(),
     birthWeightKg: z.number().positive().max(10).optional(),
     birthLengthCm: z.number().positive().max(100).optional(),
     prematureFlag: z.boolean().optional(),
@@ -122,7 +128,7 @@ const childDetailsSchema = z
 
 const consentSchema = z
   .object({
-    status: z.enum(['GIVEN', 'REFUSED']),
+    status: z.enum(API_CONSENT_STATUSES),
     date: z.coerce.date(),
   })
   .strict();
@@ -131,7 +137,7 @@ const caseSchema = z
   .object({
     projectId: z.string().uuid(),
     sakhiId: z.string().uuid(),
-    caseType: z.enum(['MOTHER', 'CHILD']),
+    caseType: z.enum(CASE_TYPES),
     registrationDate: z.coerce.date(),
     previousBeneficiaryId: z.string().uuid().optional(),
     motherBeneficiaryId: z.string().uuid().optional(),

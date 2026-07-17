@@ -1,6 +1,15 @@
 import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
 import { z } from 'zod';
 import type { BeneficiaryService } from './beneficiary.service';
+import {
+  API_CONSENT_STATUSES,
+  BENEFICIARY_STATUSES,
+  CASE_PHASES,
+  CASE_TYPES,
+  CHILD_SEXES,
+  MOTHER_SEXES,
+  SUMMARY_PHASES,
+} from './beneficiary.constants';
 import { createBeneficiarySchema } from './dto/create-beneficiary.dto';
 import { listBeneficiariesQuerySchema } from './dto/list-beneficiaries.dto';
 import {
@@ -29,7 +38,7 @@ const piiResponseSchema = z.object({
   phcId: z.string().uuid().nullable(),
   healthBlockId: z.string().uuid().nullable(),
   dateOfBirth: z.string().datetime().nullable(),
-  sex: z.enum(['FEMALE', 'MALE', 'OTHER', 'UNKNOWN']).nullable(),
+  sex: z.enum(MOTHER_SEXES).nullable(),
   stateId: z.string().uuid().nullable(),
   districtId: z.string().uuid().nullable(),
   talukaId: z.string().uuid().nullable(),
@@ -37,7 +46,7 @@ const piiResponseSchema = z.object({
 
 const riskConditionSummarySchema = z.object({
   riskConditionId: z.string().uuid(),
-  phase: z.enum(['REGISTRATION', 'ANC', 'DELIVERY', 'PP', 'NN', 'INFANT_FOLLOWUP', 'CLOSURE']),
+  phase: z.enum(SUMMARY_PHASES),
   latestGrade: z.string().nullable(),
   latestAssessedAt: z.string().datetime().nullable(),
   everHighestGrade: z.string().nullable(),
@@ -47,10 +56,8 @@ const riskConditionSummarySchema = z.object({
 });
 
 const statusHistoryEntrySchema = z.object({
-  fromStatus: z
-    .enum(['ACTIVE', 'JOURNEY_COMPLETE', 'CLOSED', 'TRANSFERRED', 'REOPEN_REQUESTED'])
-    .nullable(),
-  toStatus: z.enum(['ACTIVE', 'JOURNEY_COMPLETE', 'CLOSED', 'TRANSFERRED', 'REOPEN_REQUESTED']),
+  fromStatus: z.enum(BENEFICIARY_STATUSES).nullable(),
+  toStatus: z.enum(BENEFICIARY_STATUSES),
   reasonCode: z.string().nullable(),
   changedByUserId: z.string().uuid(),
   changedAt: z.string().datetime(),
@@ -69,7 +76,7 @@ const motherCaseDetailsSchema = z.object({
 const childCaseDetailsSchema = z.object({
   motherBeneficiaryId: z.string().uuid().nullable(),
   dateOfBirth: z.string().datetime(),
-  sex: z.enum(['FEMALE', 'MALE', 'OTHER', 'INTERSEX']).nullable(),
+  sex: z.enum(CHILD_SEXES).nullable(),
   birthWeightKg: z.number().nullable(),
   birthLengthCm: z.number().nullable(),
   prematureFlag: z.boolean().nullable(),
@@ -78,7 +85,7 @@ const childCaseDetailsSchema = z.object({
 
 const consentRecordSchema = z.object({
   consentType: z.string().openapi({ example: 'PROGRAM_ENROLLMENT' }),
-  consentStatus: z.enum(['GIVEN', 'REFUSED']),
+  consentStatus: z.enum(API_CONSENT_STATUSES),
   consentDate: z.string().datetime(),
   capturedByUserId: z.string().uuid(),
 });
@@ -90,14 +97,14 @@ const beneficiaryCaseSchema = z.object({
   piiId: z.string().uuid(),
   projectId: z.string().uuid(),
   sakhiId: z.string().uuid(),
-  caseType: z.enum(['MOTHER', 'CHILD']),
+  caseType: z.enum(CASE_TYPES),
   registrationDate: z.string().datetime(),
   previousBeneficiaryId: z.string().uuid().nullable(),
   motherBeneficiaryId: z.string().uuid().nullable(),
   beneficiaryTypeLookupId: z.string().uuid(),
   caseTypeLookupId: z.string().uuid(),
   journeyStartDate: z.string().datetime(),
-  currentPhase: z.enum(['ANC', 'DELIVERY', 'PP', 'NN', 'INC', 'CCV', 'CLOSED']),
+  currentPhase: z.enum(CASE_PHASES),
   currentStatus: z.string().openapi({ example: 'ACTIVE' }),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
