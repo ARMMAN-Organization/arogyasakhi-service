@@ -9,8 +9,12 @@ export class AuthRepository {
     return this.prisma.user.findUnique({
       where: { username },
       include: {
+        // `createdAt: 'asc'` makes the "primary" role assignment (the first
+        // entry, used by issueTokens/getProfile) the earliest-assigned one
+        // instead of an unspecified Prisma row order.
         userRoles: {
           where: { status: 'ACTIVE', isDeleted: false },
+          orderBy: { createdAt: 'asc' },
           include: { role: true },
         },
       },
@@ -23,6 +27,7 @@ export class AuthRepository {
       include: {
         userRoles: {
           where: { status: 'ACTIVE', isDeleted: false },
+          orderBy: { createdAt: 'asc' },
           include: { role: true },
         },
       },
@@ -42,6 +47,7 @@ export class AuthRepository {
       include: {
         userRoles: {
           where: { status: 'ACTIVE', isDeleted: false },
+          orderBy: { createdAt: 'asc' },
           include: { role: true, project: true },
         },
         sakhiProfile: true,

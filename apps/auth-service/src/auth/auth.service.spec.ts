@@ -473,6 +473,19 @@ describe('AuthService', () => {
       expect(profile?.maskedBankAccount).toBeNull();
     });
 
+    it('treats a soft-deleted Sakhi profile as absent (no stale card/bank/supervisor fields)', async () => {
+      repository.findUserByIdWithProfile.mockResolvedValue({
+        ...activeUserWithProfile(),
+        sakhiProfile: { ...activeUserWithProfile().sakhiProfile, isDeleted: true },
+      } as never);
+
+      const profile = await service.getProfile('user-1');
+
+      expect(profile?.cardNumber).toBeNull();
+      expect(profile?.maskedBankAccount).toBeNull();
+      expect(profile?.supervisorId).toBeNull();
+    });
+
     it('returns null for a soft-deleted user', async () => {
       repository.findUserByIdWithProfile.mockResolvedValue({
         ...activeUserWithProfile(),

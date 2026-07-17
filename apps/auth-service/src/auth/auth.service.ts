@@ -172,7 +172,7 @@ export class AuthService {
     if (!user || user.isDeleted) return null;
 
     const [primaryRole] = user.userRoles;
-    const profile = user.sakhiProfile;
+    const profile = user.sakhiProfile && !user.sakhiProfile.isDeleted ? user.sakhiProfile : null;
 
     return {
       id: user.id,
