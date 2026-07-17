@@ -13,15 +13,20 @@ import { PrismaService } from './prisma/prisma.service';
 import { createHealthRouter } from './health/health.controller';
 import { createVisitInstanceModule } from './visits/visitInstance.module';
 import { buildVisitFormServiceOpenApiDocument } from './docs/openapi';
+import { createFormModule } from './forms/form.module';
 
 // Re-export shared HTTP helpers so feature routers can import from a single place.
 export {
   asyncHandler,
   ok,
   fail,
+  validate,
   validateBody,
   requireRoles,
+  trustGatewayIdentity,
   createDocumentedRouter,
+  unauthorized,
+  unprocessable,
   HttpError,
   ErrorCode,
   type DocumentedRouter,
@@ -55,9 +60,12 @@ export function createApp(prisma: PrismaService): Application {
   api.use(createHealthRouter(prisma));
   // Built from visitInstanceModule.registry — every route registered via
   // createDocumentedRouter() above is already in the spec, so this can never
-  // drift from what's actually mounted.
+  // drift from what's actually mounted. The forms feature isn't converted to
+  // createDocumentedRouter() yet, so it's mounted as a plain router below and
+  // is not yet represented in /docs.json.
   api.use(createSwaggerRouter(buildVisitFormServiceOpenApiDocument(visitInstanceModule.registry)));
   api.use(visitInstanceModule.router);
+  api.use(createFormModule(prisma));
   app.use('/api/v1', api);
 
   app.use(notFoundHandler);

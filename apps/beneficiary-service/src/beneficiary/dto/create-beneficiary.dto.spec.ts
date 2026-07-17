@@ -136,6 +136,50 @@ describe('createBeneficiarySchema', () => {
     expect(result.success).toBe(true);
   });
 
+  it('accepts a mother-linked child within the 0-183-day window (CH6)', () => {
+    const dob = new Date();
+    dob.setDate(dob.getDate() - 100);
+    const result = createBeneficiarySchema.safeParse({
+      pii: { fullName: 'Baby Doe' },
+      case: {
+        ...baseCase,
+        caseType: 'CHILD',
+        motherBeneficiaryId: '66666666-6666-6666-6666-666666666666',
+      },
+      childDetails: { dateOfBirth: dob.toISOString() },
+      consent,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects a mother-linked child past the 183-day window even though it is within 365 days (CH7)', () => {
+    const dob = new Date();
+    dob.setDate(dob.getDate() - 200);
+    const result = createBeneficiarySchema.safeParse({
+      pii: { fullName: 'Baby Doe' },
+      case: {
+        ...baseCase,
+        caseType: 'CHILD',
+        motherBeneficiaryId: '66666666-6666-6666-6666-666666666666',
+      },
+      childDetails: { dateOfBirth: dob.toISOString() },
+      consent,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('accepts an independent child within 365 days but past 183 (CH8)', () => {
+    const dob = new Date();
+    dob.setDate(dob.getDate() - 200);
+    const result = createBeneficiarySchema.safeParse({
+      pii: { fullName: 'Baby Doe' },
+      case: { ...baseCase, caseType: 'CHILD' },
+      childDetails: { dateOfBirth: dob.toISOString() },
+      consent,
+    });
+    expect(result.success).toBe(true);
+  });
+
   it('rejects an unknown top-level field (.strict())', () => {
     const result = createBeneficiarySchema.safeParse({
       pii: { fullName: 'Jane Doe' },

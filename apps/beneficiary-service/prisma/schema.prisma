@@ -167,10 +167,11 @@ model BeneficiarySearchToken {
 
   beneficiaryCase BeneficiaryCase @relation(fields: [beneficiaryId], references: [id])
 
-  // findDuplicateCandidate always filters on nameToken, optionally narrowing
-  // by dobToken/geographyToken/lmpDateToken — a leading-column composite index
-  // serves the mandatory-nameToken lookup and its narrowed variants alike.
-  @@index([nameToken, dobToken, geographyToken, lmpDateToken])
+  // findDuplicateCandidate always filters on nameToken (and caseTypeLookupId,
+  // per the ERD's required index), optionally narrowing by
+  // dobToken/geographyToken/lmpDateToken — a leading-column composite index
+  // serves the mandatory lookup and its narrowed variants alike.
+  @@index([nameToken, caseTypeLookupId, dobToken, geographyToken, lmpDateToken])
   @@index([beneficiaryId])
   @@map("Beneficiary_search_tokens")
 }

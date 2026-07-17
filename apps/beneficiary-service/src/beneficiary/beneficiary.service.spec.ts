@@ -115,6 +115,17 @@ describe('BeneficiaryService', () => {
       repository.createEnrollment.mockResolvedValue({ id: 'new-id' } as never);
       await expect(service.create(baseMotherInput, CALLER_ID)).resolves.toEqual({ id: 'new-id' });
     });
+
+    it('scopes duplicate search to the case type, so a MOTHER search never matches a CHILD case', async () => {
+      repository.findDuplicateCandidate.mockResolvedValue(null);
+      repository.createEnrollment.mockResolvedValue({ id: 'new-id' } as never);
+
+      await service.create(baseMotherInput, CALLER_ID);
+
+      expect(repository.findDuplicateCandidate).toHaveBeenCalledWith(
+        expect.objectContaining({ caseTypeLookupId: baseMotherInput.case.caseTypeLookupId }),
+      );
+    });
   });
 
   describe('create — server-side computation (M5)', () => {
