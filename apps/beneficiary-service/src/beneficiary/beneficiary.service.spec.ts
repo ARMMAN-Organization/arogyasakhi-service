@@ -183,7 +183,10 @@ describe('BeneficiaryService', () => {
 
     it('scopes duplicate search to the case type, so a MOTHER search never matches a CHILD case', async () => {
       repository.findDuplicateCandidate.mockResolvedValue(null);
-      repository.createEnrollment.mockResolvedValue({ id: 'new-id' } as never);
+      repository.createEnrollment.mockResolvedValue({
+        id: 'new-id',
+        pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
+      } as never);
 
       await service.create(baseMotherInput, CALLER_ID);
 
