@@ -1,5 +1,19 @@
 import type { PrismaService } from '../prisma/prisma.service';
 
+export interface BeneficiaryListFilters {
+  projectId?: string;
+  villageId?: string;
+  padaId?: string;
+  currentStatus?: 'ACTIVE' | 'JOURNEY_COMPLETE' | 'CLOSED' | 'TRANSFERRED' | 'REOPEN_REQUESTED';
+  caseType?: 'MOTHER' | 'CHILD';
+  /** True to return only cases with `everAtRiskFlag` set on any risk condition. */
+  atRiskOnly?: boolean;
+  /** hashForSearch(normalizeForSearch(name)) — exact-match only, see findMany's doc comment. */
+  nameHash?: Buffer;
+  /** hashForSearch(normalizeForSearch(mobileNumber)) — exact-match only. */
+  phoneHash?: Buffer;
+}
+
 export interface DuplicateSearchTokens {
   nameToken: Buffer;
   dobToken: string | null;
@@ -75,8 +89,40 @@ export interface CreateEnrollmentInput {
 export class BeneficiaryRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  findMany() {
-    return this.prisma.beneficiaryCase.findMany({ orderBy: { createdAt: 'desc' }, take: 50 });
+  /**
+   * Lists beneficiary cases with the filters SRS FR-S-9.2 / HLD's endpoint
+   * table require: project, geography (village/pada), status, case type, and
+   * risk level, plus name/mobile search. Name/mobile are encrypted at rest
+   * (no plaintext column to filter on), so search matches the same
+   * non-reversible hash used for duplicate detection — exact match on the
+   * normalized value, not a partial/fuzzy match.
+   */
+  findMany(filters: BeneficiaryListFilters) {
+    const where: NonNullable<Parameters<typeof this.prisma.beneficiaryCase.findMany>[0]>['where'] =
+      {
+        isDeleted: false,
+      };
+    if (filters.projectId) where.projectId = filters.projectId;
+    if (filters.currentStatus) where.currentStatus = filters.currentStatus;
+    if (filters.caseType) where.caseType = filters.caseType;
+    if (filters.villageId || filters.padaId || filters.nameHash || filters.phoneHash) {
+      where.pii = {
+        ...(filters.villageId ? { villageId: filters.villageId } : {}),
+        ...(filters.padaId ? { padaId: filters.padaId } : {}),
+        ...(filters.nameHash ? { fullNameSearchHash: filters.nameHash } : {}),
+        ...(filters.phoneHash ? { phoneSearchHash: filters.phoneHash } : {}),
+      };
+    }
+    if (filters.atRiskOnly) {
+      where.riskConditionSummaries = { some: { everAtRiskFlag: true } };
+    }
+
+    return this.prisma.beneficiaryCase.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+      include: { pii: true },
+    });
   }
 
   findById(id: string) {
@@ -87,6 +133,11 @@ export class BeneficiaryRepository {
         motherCaseDetails: true,
         childCaseDetails: true,
         consentRecords: { orderBy: { createdAt: 'desc' }, take: 1 },
+        // Per the HLD's endpoint table ("Beneficiary profile, current phase,
+        // last visits, risk state") — the detail view needs risk state and a
+        // status timeline, not just the case/PII/consent rows.
+        riskConditionSummaries: true,
+        statusHistory: { orderBy: { changedAt: 'desc' } },
       },
     });
   }
@@ -167,6 +218,10 @@ export class BeneficiaryRepository {
         },
       });
 
+      // riskConditionSummaries/statusHistory aren't included here: nothing
+      // has accrued yet for a case created in this same transaction (risk
+      // evaluation and status transitions only happen after visits/status
+      // changes) — the service fills in empty arrays for those.
       return tx.beneficiaryCase.findUniqueOrThrow({
         where: { id: beneficiaryCase.id },
         include: {

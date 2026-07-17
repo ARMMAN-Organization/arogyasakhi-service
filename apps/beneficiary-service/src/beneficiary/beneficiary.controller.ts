@@ -2,6 +2,7 @@ import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
 import { z } from 'zod';
 import type { BeneficiaryService } from './beneficiary.service';
 import { createBeneficiarySchema } from './dto/create-beneficiary.dto';
+import { listBeneficiariesQuerySchema } from './dto/list-beneficiaries.dto';
 import {
   asyncHandler,
   createDocumentedRouter,
@@ -19,6 +20,9 @@ const idParamsSchema = z.object({ id: z.string().uuid() }).strict();
 
 const piiResponseSchema = z.object({
   id: z.string().uuid(),
+  // Decrypted server-side for display (see BeneficiaryService.list/getById) —
+  // never the raw fullNameEnc/fullNameSearchHash.
+  fullName: z.string().openapi({ example: 'Jane Doe' }),
   villageId: z.string().uuid().nullable(),
   padaId: z.string().uuid().nullable(),
   healthSubCentreId: z.string().uuid().nullable(),
@@ -29,6 +33,28 @@ const piiResponseSchema = z.object({
   stateId: z.string().uuid().nullable(),
   districtId: z.string().uuid().nullable(),
   talukaId: z.string().uuid().nullable(),
+});
+
+const riskConditionSummarySchema = z.object({
+  riskConditionId: z.string().uuid(),
+  phase: z.enum(['REGISTRATION', 'ANC', 'DELIVERY', 'PP', 'NN', 'INFANT_FOLLOWUP', 'CLOSURE']),
+  latestGrade: z.string().nullable(),
+  latestAssessedAt: z.string().datetime().nullable(),
+  everHighestGrade: z.string().nullable(),
+  everAtRiskFlag: z.boolean(),
+  currentReferralTriggerFlag: z.boolean(),
+  currentHrVisitTriggerFlag: z.boolean(),
+});
+
+const statusHistoryEntrySchema = z.object({
+  fromStatus: z
+    .enum(['ACTIVE', 'JOURNEY_COMPLETE', 'CLOSED', 'TRANSFERRED', 'REOPEN_REQUESTED'])
+    .nullable(),
+  toStatus: z.enum(['ACTIVE', 'JOURNEY_COMPLETE', 'CLOSED', 'TRANSFERRED', 'REOPEN_REQUESTED']),
+  reasonCode: z.string().nullable(),
+  changedByUserId: z.string().uuid(),
+  changedAt: z.string().datetime(),
+  notes: z.string().nullable(),
 });
 
 const motherCaseDetailsSchema = z.object({
@@ -82,6 +108,16 @@ const beneficiaryCaseDetailSchema = beneficiaryCaseSchema.extend({
   motherCaseDetails: motherCaseDetailsSchema.nullable(),
   childCaseDetails: childCaseDetailsSchema.nullable(),
   consentRecords: z.array(consentRecordSchema),
+  riskConditionSummaries: z.array(riskConditionSummarySchema),
+  statusHistory: z.array(statusHistoryEntrySchema),
+});
+
+// List rows carry PII (decrypted name) but not the full detail-view
+// includes (risk/status history/mother-or-child details/consent) — per
+// SRS FR-S-9.2 / HLD's filter table, the list only needs to support
+// search/filter and a compact display row.
+const beneficiaryListItemSchema = beneficiaryCaseSchema.extend({
+  pii: piiResponseSchema,
 });
 
 const apiErrorSchema = z.object({
@@ -120,7 +156,7 @@ export function createBeneficiaryRouter(service: BeneficiaryService) {
       responses: {
         200: {
           description: 'Beneficiary cases retrieved',
-          schema: envelope(z.array(beneficiaryCaseSchema)),
+          schema: envelope(z.array(beneficiaryListItemSchema)),
         },
         401: { description: 'Unauthenticated', schema: apiErrorSchema },
         403: { description: 'Caller role not permitted', schema: apiErrorSchema },
@@ -128,15 +164,17 @@ export function createBeneficiaryRouter(service: BeneficiaryService) {
     },
     trustGatewayIdentity,
     requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER'),
-    asyncHandler(async (_req, res) => {
-      res.json(ok(await service.list()));
+    validate(listBeneficiariesQuerySchema, 'query'),
+    asyncHandler(async (req, res) => {
+      const query = req.query as unknown as z.infer<typeof listBeneficiariesQuerySchema>;
+      res.json(ok(await service.list(query)));
     }),
   );
 
   doc.get(
     '/beneficiaries/:id',
     {
-      summary: 'Get a beneficiary case by id',
+      summary: 'Get a beneficiary case by id — profile, current phase, risk state, status history',
       tags: ['Beneficiaries'],
       responses: {
         200: {

@@ -1,30 +1,69 @@
 import { addDays } from '@armman/core';
 import {
   conflict,
+  decryptPii,
   encryptPii,
   hashForSearch,
   notFound,
   normalizeForSearch,
   unprocessable,
 } from '@armman/service-commons';
-import type { BeneficiaryRepository, DuplicateSearchTokens } from './beneficiary.repository';
+import type {
+  BeneficiaryListFilters,
+  BeneficiaryRepository,
+  DuplicateSearchTokens,
+} from './beneficiary.repository';
 import type { CreateBeneficiaryInput } from './dto/create-beneficiary.dto';
 
 const GESTATION_DAYS = 280;
+
+/** Public list-query params — see ListBeneficiariesQuery in the DTO for validation. */
+export interface ListBeneficiariesQuery {
+  projectId?: string;
+  villageId?: string;
+  padaId?: string;
+  status?: 'ACTIVE' | 'JOURNEY_COMPLETE' | 'CLOSED' | 'TRANSFERRED' | 'REOPEN_REQUESTED';
+  caseType?: 'MOTHER' | 'CHILD';
+  atRiskOnly?: boolean;
+  /** Raw search text — hashed the same way as duplicate-detection tokens (exact match only). */
+  name?: string;
+  mobileNumber?: string;
+}
 
 /** Business logic for the beneficiary enrollment lifecycle. */
 export class BeneficiaryService {
   constructor(private readonly repository: BeneficiaryRepository) {}
 
-  /** Lists recent beneficiary cases (scope enforcement added with the auth layer). */
-  list() {
-    return this.repository.findMany();
+  /**
+   * Lists beneficiary cases per SRS FR-S-9.2 / HLD's filter set (scope
+   * enforcement added with the auth layer). Each row's name is decrypted
+   * server-side for display — the search hash itself is never returned.
+   */
+  async list(query: ListBeneficiariesQuery) {
+    const filters: BeneficiaryListFilters = {
+      projectId: query.projectId,
+      villageId: query.villageId,
+      padaId: query.padaId,
+      currentStatus: query.status,
+      caseType: query.caseType,
+      atRiskOnly: query.atRiskOnly,
+      nameHash: query.name ? hashForSearch(normalizeForSearch(query.name)) : undefined,
+      phoneHash: query.mobileNumber
+        ? hashForSearch(normalizeForSearch(query.mobileNumber))
+        : undefined,
+    };
+
+    const cases = await this.repository.findMany(filters);
+    return cases.map((c) => ({
+      ...c,
+      pii: { ...c.pii, fullName: decryptPii(c.pii.fullNameEnc) },
+    }));
   }
 
   async getById(id: string) {
     const found = await this.repository.findById(id);
     if (!found) throw notFound('Beneficiary case not found.');
-    return found;
+    return { ...found, pii: { ...found.pii, fullName: decryptPii(found.pii.fullNameEnc) } };
   }
 
   /**
@@ -75,7 +114,7 @@ export class BeneficiaryService {
     const journeyStartDate = dto.case.registrationDate;
     const currentPhase = dto.case.caseType === 'MOTHER' ? 'ANC' : 'NN';
 
-    return this.repository.createEnrollment({
+    const created = await this.repository.createEnrollment({
       pii: {
         fullNameEnc: encryptPii(dto.pii.fullName),
         fullNameSearchHash: hashForSearch(normalizeForSearch(dto.pii.fullName)),
@@ -116,6 +155,16 @@ export class BeneficiaryService {
       consentDate: dto.consent.date,
       consentCapturedByUserId: capturedByUserId,
     });
+
+    return {
+      ...created,
+      pii: { ...created.pii, fullName: decryptPii(created.pii.fullNameEnc) },
+      // Nothing has accrued yet for a case created in this same call — risk
+      // evaluation and status transitions only happen after visits/status
+      // changes (see the repository's comment on the create query).
+      riskConditionSummaries: [] as never[],
+      statusHistory: [] as never[],
+    };
   }
 
   private buildSearchTokens(dto: CreateBeneficiaryInput): DuplicateSearchTokens {

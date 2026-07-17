@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { encryptPii } from '@armman/service-commons';
 import { BeneficiaryService } from './beneficiary.service';
 import type { BeneficiaryRepository } from './beneficiary.repository';
 import type { CreateBeneficiaryInput } from './dto/create-beneficiary.dto';
@@ -63,15 +64,69 @@ describe('BeneficiaryService', () => {
   });
 
   describe('list / getById', () => {
-    it('lists beneficiaries via the repository', async () => {
-      repository.findMany.mockResolvedValue([]);
-      await expect(service.list()).resolves.toEqual([]);
+    it('lists beneficiaries via the repository, with names decrypted for display', async () => {
+      repository.findMany.mockResolvedValue([
+        { id: 'x', pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') } },
+      ] as never);
+
+      const result = await service.list({});
+
+      expect(result).toEqual([
+        expect.objectContaining({
+          id: 'x',
+          pii: expect.objectContaining({ fullName: 'Jane Doe' }),
+        }),
+      ]);
     });
 
-    it('returns a found case', async () => {
-      const found = { id: 'x' };
+    it('passes query filters through to the repository as search hashes/scalars', async () => {
+      repository.findMany.mockResolvedValue([]);
+
+      await service.list({
+        projectId: 'project-1',
+        status: 'ACTIVE',
+        caseType: 'MOTHER',
+        atRiskOnly: true,
+        name: 'Jane Doe',
+        mobileNumber: '9876543210',
+      });
+
+      const call = repository.findMany.mock.calls[0][0];
+      expect(call.projectId).toBe('project-1');
+      expect(call.currentStatus).toBe('ACTIVE');
+      expect(call.caseType).toBe('MOTHER');
+      expect(call.atRiskOnly).toBe(true);
+      expect(call.nameHash).toBeInstanceOf(Buffer);
+      expect(call.phoneHash).toBeInstanceOf(Buffer);
+    });
+
+    it('passes through risk condition summaries and status history from the repository', async () => {
+      const found = {
+        id: 'x',
+        pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
+        riskConditionSummaries: [{ riskConditionId: 'risk-1', everAtRiskFlag: true }],
+        statusHistory: [{ toStatus: 'ACTIVE', changedAt: new Date('2026-01-01') }],
+      };
       repository.findById.mockResolvedValue(found as never);
-      await expect(service.getById('x')).resolves.toBe(found);
+
+      const result = await service.getById('x');
+
+      expect(result.riskConditionSummaries).toEqual(found.riskConditionSummaries);
+      expect(result.statusHistory).toEqual(found.statusHistory);
+    });
+
+    it('returns a found case with the name decrypted for display', async () => {
+      const found = { id: 'x', pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') } };
+      repository.findById.mockResolvedValue(found as never);
+
+      const result = await service.getById('x');
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          id: 'x',
+          pii: expect.objectContaining({ fullName: 'Jane Doe' }),
+        }),
+      );
     });
 
     it('throws 404 when the case is not found', async () => {
@@ -104,16 +159,26 @@ describe('BeneficiaryService', () => {
       repository.findDuplicateCandidate.mockResolvedValue({
         beneficiaryId: 'existing-id',
       } as never);
-      repository.createEnrollment.mockResolvedValue({ id: 'new-id' } as never);
+      repository.createEnrollment.mockResolvedValue({
+        id: 'new-id',
+        pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
+      } as never);
       const dto = { ...baseMotherInput, acknowledgeDuplicate: true };
-      await expect(service.create(dto, CALLER_ID)).resolves.toEqual({ id: 'new-id' });
+      await expect(service.create(dto, CALLER_ID)).resolves.toEqual(
+        expect.objectContaining({ id: 'new-id' }),
+      );
       expect(repository.createEnrollment).toHaveBeenCalledTimes(1);
     });
 
     it('creates normally when no duplicate is found', async () => {
       repository.findDuplicateCandidate.mockResolvedValue(null);
-      repository.createEnrollment.mockResolvedValue({ id: 'new-id' } as never);
-      await expect(service.create(baseMotherInput, CALLER_ID)).resolves.toEqual({ id: 'new-id' });
+      repository.createEnrollment.mockResolvedValue({
+        id: 'new-id',
+        pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
+      } as never);
+      await expect(service.create(baseMotherInput, CALLER_ID)).resolves.toEqual(
+        expect.objectContaining({ id: 'new-id' }),
+      );
     });
   });
 
@@ -158,6 +223,18 @@ describe('BeneficiaryService', () => {
       expect(call.pii.fullNameSearchHash).toBeInstanceOf(Buffer);
       expect(call.searchTokens.lmpDateToken).not.toBeNull();
       expect(call.consentCapturedByUserId).toBe(CALLER_ID);
+    });
+
+    it('returns empty risk/status-history arrays for a freshly enrolled case', async () => {
+      repository.findDuplicateCandidate.mockResolvedValue(null);
+      repository.createEnrollment.mockImplementation((input) =>
+        Promise.resolve({ ...input, id: 'new-id' } as never),
+      );
+
+      const result = await service.create(baseMotherInput, CALLER_ID);
+
+      expect(result.riskConditionSummaries).toEqual([]);
+      expect(result.statusHistory).toEqual([]);
     });
   });
 
