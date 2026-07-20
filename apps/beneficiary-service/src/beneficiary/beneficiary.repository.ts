@@ -1,11 +1,5 @@
 import type { PrismaService } from '../prisma/prisma.service';
-import type {
-  BeneficiaryStatus,
-  CasePhase,
-  CaseType,
-  ChildSex,
-  MotherSex,
-} from './beneficiary.constants';
+import type { BeneficiaryStatus, CasePhase, CaseType, Sex } from './beneficiary.constants';
 
 export interface BeneficiaryListFilters {
   projectId?: string;
@@ -42,7 +36,7 @@ export interface PiiCreateData {
   phcId: string | null;
   healthBlockId: string | null;
   dateOfBirth: Date | null;
-  sex: MotherSex | null;
+  sex: Sex | null;
   addressLineEnc: Buffer | null;
   stateId: string | null;
   districtId: string | null;
@@ -77,7 +71,7 @@ export interface MotherDetailsCreateData {
 export interface ChildDetailsCreateData {
   motherBeneficiaryId: string | null;
   dateOfBirth: Date;
-  sex: ChildSex | null;
+  sex: Sex | null;
   birthWeightKg: number | null;
   birthLengthCm: number | null;
   prematureFlag: boolean | null;

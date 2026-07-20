@@ -6,8 +6,7 @@ import {
   BENEFICIARY_STATUSES,
   CASE_PHASES,
   CASE_TYPES,
-  CHILD_SEXES,
-  MOTHER_SEXES,
+  SEXES,
   SUMMARY_PHASES,
 } from './beneficiary.constants';
 import { createBeneficiarySchema } from './dto/create-beneficiary.dto';
@@ -38,7 +37,7 @@ const piiResponseSchema = z.object({
   phcId: z.string().uuid().nullable(),
   healthBlockId: z.string().uuid().nullable(),
   dateOfBirth: z.string().datetime().nullable(),
-  sex: z.enum(MOTHER_SEXES).nullable(),
+  sex: z.enum(SEXES).nullable(),
   stateId: z.string().uuid().nullable(),
   districtId: z.string().uuid().nullable(),
   talukaId: z.string().uuid().nullable(),
@@ -76,7 +75,7 @@ const motherCaseDetailsSchema = z.object({
 const childCaseDetailsSchema = z.object({
   motherBeneficiaryId: z.string().uuid().nullable(),
   dateOfBirth: z.string().datetime(),
-  sex: z.enum(CHILD_SEXES).nullable(),
+  sex: z.enum(SEXES).nullable(),
   birthWeightKg: z.number().nullable(),
   birthLengthCm: z.number().nullable(),
   prematureFlag: z.boolean().nullable(),

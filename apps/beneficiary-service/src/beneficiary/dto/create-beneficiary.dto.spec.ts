@@ -12,6 +12,48 @@ const baseCase = {
 const consent = { status: 'GIVEN', date: '2026-01-01' };
 
 describe('createBeneficiarySchema', () => {
+  describe('sex (unified SEX lookup: FEMALE, MALE, OTHER, INTERSEX)', () => {
+    it('accepts INTERSEX for pii.sex (mother/adult)', () => {
+      const result = createBeneficiarySchema.safeParse({
+        pii: { fullName: 'Jane Doe', sex: 'INTERSEX' },
+        case: { ...baseCase, caseType: 'MOTHER' },
+        motherDetails: { lmpDate: '2025-10-01' },
+        consent,
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('accepts INTERSEX for childDetails.sex', () => {
+      const result = createBeneficiarySchema.safeParse({
+        pii: { fullName: 'Baby Doe' },
+        case: { ...baseCase, caseType: 'CHILD' },
+        childDetails: { dateOfBirth: '2025-12-01', sex: 'INTERSEX' },
+        consent,
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('rejects UNKNOWN for pii.sex (removed value, no longer valid)', () => {
+      const result = createBeneficiarySchema.safeParse({
+        pii: { fullName: 'Jane Doe', sex: 'UNKNOWN' },
+        case: { ...baseCase, caseType: 'MOTHER' },
+        motherDetails: { lmpDate: '2025-10-01' },
+        consent,
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it('rejects UNKNOWN for childDetails.sex', () => {
+      const result = createBeneficiarySchema.safeParse({
+        pii: { fullName: 'Baby Doe' },
+        case: { ...baseCase, caseType: 'CHILD' },
+        childDetails: { dateOfBirth: '2025-12-01', sex: 'UNKNOWN' },
+        consent,
+      });
+      expect(result.success).toBe(false);
+    });
+  });
+
   it('rejects a MOTHER case missing motherDetails (M3)', () => {
     const result = createBeneficiarySchema.safeParse({
       pii: { fullName: 'Jane Doe' },
