@@ -9,20 +9,26 @@ import { API_CONSENT_STATUSES, CASE_TYPES, SEXES } from '../beneficiary.constant
 const piiSchema = z
   .object({
     fullName: z.string().trim().min(1).max(200),
-    phone: z.string().trim().min(1).max(20).optional(),
+    // Required per SRS FR-S-2.1: "age, demographics, geographic details
+    // (state, district, block, PHC, sub-centre, village, pada), mobile
+    // numbers, RCH number." phone (mobile), dateOfBirth (age), the 7
+    // geography levels, and rchNumber are therefore required. alternatePhone,
+    // addressLine, sex, and talukaId (a govt-revenue unit distinct from the
+    // health "block") are not named in the required list — left optional.
+    phone: z.string().trim().min(1).max(20),
     alternatePhone: z.string().trim().min(1).max(20).optional(),
-    dateOfBirth: z.coerce.date().optional(),
+    dateOfBirth: z.coerce.date(),
     sex: z.enum(SEXES).optional(),
     addressLine: z.string().trim().min(1).max(500).optional(),
-    villageId: z.string().uuid().optional(),
-    padaId: z.string().uuid().optional(),
-    healthSubCentreId: z.string().uuid().optional(),
-    phcId: z.string().uuid().optional(),
-    healthBlockId: z.string().uuid().optional(),
-    stateId: z.string().uuid().optional(),
-    districtId: z.string().uuid().optional(),
+    villageId: z.string().uuid(),
+    padaId: z.string().uuid(),
+    healthSubCentreId: z.string().uuid(),
+    phcId: z.string().uuid(),
+    healthBlockId: z.string().uuid(),
+    stateId: z.string().uuid(),
+    districtId: z.string().uuid(),
     talukaId: z.string().uuid().optional(),
-    rchNumber: z.string().trim().min(1).max(50).optional(),
+    rchNumber: z.string().trim().min(1).max(50),
   })
   .strict();
 

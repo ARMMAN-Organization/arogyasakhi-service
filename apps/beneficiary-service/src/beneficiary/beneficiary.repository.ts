@@ -186,18 +186,22 @@ export class BeneficiaryRepository {
 
     const candidates = await this.prisma.beneficiarySearchToken.findMany({
       where,
-      include: { beneficiaryCase: { include: { pii: true } } },
+      // currentSummary carries the matched case's delivery/closure/status/LMP,
+      // which FR-S-2.4 (new-pregnancy-vs-hard-duplicate) and FR-S-2.5
+      // (re-enrolment prompt) need to decide how to handle the match.
+      include: { beneficiaryCase: { include: { pii: true, currentSummary: true } } },
     });
 
     const phoneHash = tokens.phoneHash;
-    if (!phoneHash) return candidates.find((c) => !c.beneficiaryCase.isDeleted) ?? null;
+    const matchedToken = !phoneHash
+      ? candidates.find((c) => !c.beneficiaryCase.isDeleted)
+      : candidates.find(
+          (c) =>
+            !c.beneficiaryCase.isDeleted &&
+            c.beneficiaryCase.pii.phoneSearchHash?.equals(phoneHash),
+        );
 
-    return (
-      candidates.find(
-        (c) =>
-          !c.beneficiaryCase.isDeleted && c.beneficiaryCase.pii.phoneSearchHash?.equals(phoneHash),
-      ) ?? null
-    );
+    return matchedToken?.beneficiaryCase ?? null;
   }
 
   async createEnrollment(input: CreateEnrollmentInput) {

@@ -4,6 +4,7 @@ import {
   decryptPii,
   encryptPii,
   hashForSearch,
+  HttpError,
   notFound,
   normalizeForSearch,
   unprocessable,
@@ -33,6 +34,21 @@ export interface ListBeneficiariesQuery {
   /** Raw search text — hashed the same way as duplicate-detection tokens (exact match only). */
   name?: string;
   mobileNumber?: string;
+}
+
+/**
+ * The shape `findDuplicateCandidate` returns — the matched BeneficiaryCase
+ * with just the fields FR-S-2.4/2.5 need off its current summary. Structural
+ * (not the full Prisma type) so the decision logic isn't coupled to it.
+ */
+interface DuplicateMatch {
+  id: string;
+  currentStatus: string;
+  currentSummary: {
+    dateOfDelivery: Date | null;
+    closureDate: Date | null;
+    lmpDate: Date | null;
+  } | null;
 }
 
 interface PiiRow {
@@ -135,12 +151,9 @@ export class BeneficiaryService {
     const searchTokens = this.buildSearchTokens(dto);
 
     if (!dto.acknowledgeDuplicate) {
-      const duplicate = await this.repository.findDuplicateCandidate(searchTokens);
-      if (duplicate) {
-        throw conflict(
-          `A possible duplicate beneficiary already exists (beneficiaryId: ${duplicate.beneficiaryId}). ` +
-            'Resubmit with acknowledgeDuplicate: true to proceed anyway.',
-        );
+      const match = await this.repository.findDuplicateCandidate(searchTokens);
+      if (match) {
+        this.evaluateDuplicateMatch(match, dto);
       }
     }
 
@@ -239,6 +252,64 @@ export class BeneficiaryService {
         ? hashForSearch(dto.motherDetails.lmpDate.toISOString().slice(0, 10)).toString('base64')
         : null,
     };
+  }
+
+  /**
+   * Decides how to handle a duplicate-detection match, per SRS FR-S-2.4/2.5.
+   * Throws to block or prompt; returns normally to allow the enrollment.
+   *
+   * The matched case's `currentSummary` carries delivery/closure/status/LMP.
+   *
+   * - FR-S-2.5 (re-enrolment): matched case is JOURNEY_COMPLETE/CLOSED, has a
+   *   confirmed delivery, and the new LMP differs from the matched case's LMP
+   *   → surface the specific "is this a new pregnancy?" prompt (409 with a
+   *   RE_ENROLLMENT reason in details) so the client can confirm and resubmit
+   *   with acknowledgeDuplicate.
+   * - FR-S-2.4 (new pregnancy): matched case has BOTH a delivery date AND a
+   *   closure date → treat as a completed prior journey, allow the new
+   *   enrollment (return normally).
+   * - FR-S-2.4 (hard duplicate): anything else — including a matched case
+   *   with no summary row at all (SRS-literal: "if both not present →
+   *   duplicate, registration cannot proceed") → block with a 409.
+   */
+  private evaluateDuplicateMatch(match: DuplicateMatch, dto: CreateBeneficiaryInput): void {
+    const summary = match.currentSummary;
+    const hasDelivery = Boolean(summary?.dateOfDelivery);
+    const hasClosure = Boolean(summary?.closureDate);
+    const isCompletedJourney =
+      match.currentStatus === 'JOURNEY_COMPLETE' || match.currentStatus === 'CLOSED';
+
+    const newLmp = dto.motherDetails?.lmpDate;
+    const priorLmp = summary?.lmpDate;
+    const lmpDiffers =
+      newLmp != null &&
+      priorLmp != null &&
+      newLmp.toISOString().slice(0, 10) !== priorLmp.toISOString().slice(0, 10);
+
+    // FR-S-2.5 — re-enrolment for a new pregnancy after a completed journey.
+    if (isCompletedJourney && hasDelivery && lmpDiffers) {
+      throw new HttpError(
+        409,
+        'A previous record exists for this beneficiary. Is this a new pregnancy?',
+        {
+          reason: 'RE_ENROLLMENT',
+          existingBeneficiaryId: match.id,
+          resolution: 'Resubmit with acknowledgeDuplicate: true to enroll a new pregnancy.',
+        },
+      );
+    }
+
+    // FR-S-2.4 — both delivery AND closure exist → completed prior journey,
+    // this is a legitimate new pregnancy; allow it through.
+    if (hasDelivery && hasClosure) {
+      return;
+    }
+
+    // FR-S-2.4 — otherwise a hard duplicate (including no summary row at all).
+    throw conflict(
+      `A possible duplicate beneficiary already exists (beneficiaryId: ${match.id}). ` +
+        'Resubmit with acknowledgeDuplicate: true to proceed anyway.',
+    );
   }
 }
 
