@@ -19,20 +19,28 @@ describe('ProjectService', () => {
   });
 
   describe('list', () => {
-    it('returns active projects from the repository unchanged', async () => {
-      const projects = [{ projectId: 'p1' }];
+    it('returns active projects projected to the documented fields (no internal columns)', async () => {
+      const projects = [
+        { projectId: 'p1', projectName: 'P1', createdByUserId: 'u', isDeleted: false },
+      ];
       repository.findManyActiveProjects.mockResolvedValue(projects as never);
 
-      await expect(service.list()).resolves.toBe(projects);
+      const result = await service.list();
+      expect(result[0]).toEqual(expect.objectContaining({ projectId: 'p1', projectName: 'P1' }));
+      expect(result[0]).not.toHaveProperty('createdByUserId');
+      expect(result[0]).not.toHaveProperty('isDeleted');
     });
   });
 
   describe('getById', () => {
-    it('returns a project when found', async () => {
-      const project = { projectId: 'p1' };
+    it('returns a project projected to the documented fields', async () => {
+      const project = { projectId: 'p1', createdByUserId: 'u', deletedAt: null };
       repository.findProjectById.mockResolvedValue(project as never);
 
-      await expect(service.getById('p1')).resolves.toBe(project);
+      const result = await service.getById('p1');
+      expect(result).toEqual(expect.objectContaining({ projectId: 'p1' }));
+      expect(result).not.toHaveProperty('createdByUserId');
+      expect(result).not.toHaveProperty('deletedAt');
     });
 
     it('throws 404 when the project is not found', async () => {
@@ -55,7 +63,9 @@ describe('ProjectService', () => {
       const created = { projectId: 'p1', ...input };
       repository.createProject.mockResolvedValue(created as never);
 
-      await expect(service.create(input)).resolves.toBe(created);
+      await expect(service.create(input)).resolves.toEqual(
+        expect.objectContaining({ projectId: 'p1', projectCode: 'GEP-2324' }),
+      );
       expect(repository.createProject).toHaveBeenCalledWith(input);
     });
 
@@ -69,7 +79,9 @@ describe('ProjectService', () => {
       const created = { projectId: 'p2', ...withoutFunder, funderId: null };
       repository.createProject.mockResolvedValue(created as never);
 
-      await expect(service.create(withoutFunder)).resolves.toBe(created);
+      await expect(service.create(withoutFunder)).resolves.toEqual(
+        expect.objectContaining({ projectId: 'p2', funderId: null }),
+      );
     });
 
     it('throws 409 on a duplicate project code', async () => {
@@ -84,7 +96,9 @@ describe('ProjectService', () => {
       const updated = { projectId: 'p1', projectName: 'Renamed' };
       repository.updateProject.mockResolvedValue(updated as never);
 
-      await expect(service.update('p1', { projectName: 'Renamed' })).resolves.toBe(updated);
+      await expect(service.update('p1', { projectName: 'Renamed' })).resolves.toEqual(
+        expect.objectContaining({ projectId: 'p1', projectName: 'Renamed' }),
+      );
     });
 
     it('throws 404 when the project does not exist', async () => {
@@ -97,11 +111,13 @@ describe('ProjectService', () => {
   });
 
   describe('listFunders', () => {
-    it('returns funders from the repository unchanged', async () => {
-      const funders = [{ funderId: 'f1' }];
+    it('returns funders projected to documented fields (no internal columns)', async () => {
+      const funders = [{ funderId: 'f1', funderCode: 'BMGF', isDeleted: false }];
       repository.findManyFunders.mockResolvedValue(funders as never);
 
-      await expect(service.listFunders()).resolves.toBe(funders);
+      const result = await service.listFunders();
+      expect(result[0]).toEqual(expect.objectContaining({ funderId: 'f1', funderCode: 'BMGF' }));
+      expect(result[0]).not.toHaveProperty('isDeleted');
     });
   });
 
@@ -111,7 +127,9 @@ describe('ProjectService', () => {
       const created = { funderId: 'f1', ...input };
       repository.createFunder.mockResolvedValue(created as never);
 
-      await expect(service.createFunder(input)).resolves.toBe(created);
+      await expect(service.createFunder(input)).resolves.toEqual(
+        expect.objectContaining({ funderId: 'f1', funderCode: 'BMGF' }),
+      );
     });
 
     it('throws 409 on a duplicate funder code', async () => {

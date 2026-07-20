@@ -6,18 +6,48 @@ import type { UpdateLookupValueInput } from './dto/update-lookup-value.dto';
 /** Prisma unique-constraint violation code (valueCode within a category). */
 const PRISMA_UNIQUE_CONSTRAINT_CODE = 'P2002';
 
+/**
+ * Lookup category/value responses are projected to EXACTLY the fields the API
+ * documents (lookupCategorySchema/lookupValueSchema in lookup.controller.ts)
+ * so internal audit columns (createdByUserId, updatedByUserId, createdAt,
+ * updatedAt) — and, on values, lookupCategoryId — never leak into a response.
+ */
+function toApiLookupValue(v: Record<string, unknown>) {
+  return {
+    id: v.id,
+    valueCode: v.valueCode,
+    valueLabel: v.valueLabel,
+    sortOrder: v.sortOrder,
+    parentLookupValueId: v.parentLookupValueId,
+    isActive: v.isActive,
+  };
+}
+
+function toApiLookupCategory(c: Record<string, unknown>) {
+  const values = (c.values as Record<string, unknown>[] | undefined) ?? [];
+  return {
+    id: c.id,
+    categoryCode: c.categoryCode,
+    categoryName: c.categoryName,
+    description: c.description,
+    isActive: c.isActive,
+    values: values.map(toApiLookupValue),
+  };
+}
+
 /** Business logic for lookup categories/values master data. */
 export class LookupService {
   constructor(private readonly repository: LookupRepository) {}
 
-  listAll() {
-    return this.repository.findAllCategoriesWithValues();
+  async listAll() {
+    const categories = await this.repository.findAllCategoriesWithValues();
+    return categories.map((c) => toApiLookupCategory(c as unknown as Record<string, unknown>));
   }
 
   async getByCategoryCode(categoryCode: string) {
     const category = await this.repository.findCategoryByCode(categoryCode);
     if (!category) throw notFound('Lookup category not found.');
-    return category;
+    return toApiLookupCategory(category as unknown as Record<string, unknown>);
   }
 
   async createValue(categoryCode: string, input: CreateLookupValueInput) {
@@ -32,7 +62,8 @@ export class LookupService {
     }
 
     try {
-      return await this.repository.createValue(category.id, input);
+      const created = await this.repository.createValue(category.id, input);
+      return toApiLookupValue(created as unknown as Record<string, unknown>);
     } catch (err) {
       if (isUniqueConstraintViolation(err)) {
         throw conflict('A value with this code already exists in this category.');
@@ -54,7 +85,7 @@ export class LookupService {
 
     const updated = await this.repository.updateValue(id, input);
     if (!updated) throw notFound('Lookup value not found.');
-    return updated;
+    return toApiLookupValue(updated as unknown as Record<string, unknown>);
   }
 }
 

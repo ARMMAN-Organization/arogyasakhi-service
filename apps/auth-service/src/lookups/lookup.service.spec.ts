@@ -18,11 +18,29 @@ describe('LookupService', () => {
   });
 
   describe('listAll', () => {
-    it('returns every category with its nested values', async () => {
-      const categories = [{ id: 'cat-1', values: [{ id: 'val-1' }] }];
+    it('returns every category (projected) with its nested values (projected)', async () => {
+      const categories = [
+        {
+          id: 'cat-1',
+          categoryCode: 'RISK_GRADE',
+          createdByUserId: 'u',
+          values: [
+            { id: 'val-1', valueCode: 'HIGH', createdByUserId: 'u', lookupCategoryId: 'cat-1' },
+          ],
+        },
+      ];
       repository.findAllCategoriesWithValues.mockResolvedValue(categories as never);
 
-      await expect(service.listAll()).resolves.toBe(categories);
+      const result = await service.listAll();
+      expect(result[0]).toEqual(
+        expect.objectContaining({ id: 'cat-1', categoryCode: 'RISK_GRADE' }),
+      );
+      expect(result[0]).not.toHaveProperty('createdByUserId');
+      expect(result[0].values[0]).toEqual(
+        expect.objectContaining({ id: 'val-1', valueCode: 'HIGH' }),
+      );
+      expect(result[0].values[0]).not.toHaveProperty('createdByUserId');
+      expect(result[0].values[0]).not.toHaveProperty('lookupCategoryId');
     });
   });
 
@@ -31,7 +49,9 @@ describe('LookupService', () => {
       const category = { id: 'cat-1', categoryCode: 'RISK_GRADE', values: [] };
       repository.findCategoryByCode.mockResolvedValue(category as never);
 
-      await expect(service.getByCategoryCode('RISK_GRADE')).resolves.toBe(category);
+      await expect(service.getByCategoryCode('RISK_GRADE')).resolves.toEqual(
+        expect.objectContaining({ id: 'cat-1', categoryCode: 'RISK_GRADE', values: [] }),
+      );
     });
 
     it('throws 404 for an unknown category code', async () => {
@@ -50,7 +70,9 @@ describe('LookupService', () => {
       repository.createValue.mockResolvedValue(created as never);
 
       const input = { valueCode: 'HIGH', valueLabel: 'High' };
-      await expect(service.createValue('RISK_GRADE', input)).resolves.toBe(created);
+      const res = await service.createValue('RISK_GRADE', input);
+      expect(res).toEqual(expect.objectContaining({ id: 'val-1', valueCode: 'HIGH' }));
+      expect(res).not.toHaveProperty('lookupCategoryId');
       expect(repository.createValue).toHaveBeenCalledWith('cat-1', input);
     });
 
@@ -82,7 +104,9 @@ describe('LookupService', () => {
       repository.createValue.mockResolvedValue(created as never);
 
       const input = { valueCode: 'SUB', valueLabel: 'Sub', parentLookupValueId: 'parent-1' };
-      await expect(service.createValue('RISK_GRADE', input)).resolves.toBe(created);
+      await expect(service.createValue('RISK_GRADE', input)).resolves.toEqual(
+        expect.objectContaining({ id: 'val-2' }),
+      );
     });
 
     it('throws 422 when parentLookupValueId belongs to a different category', async () => {
@@ -105,7 +129,9 @@ describe('LookupService', () => {
       const updated = { id: 'val-1', valueLabel: 'Renamed' };
       repository.updateValue.mockResolvedValue(updated as never);
 
-      await expect(service.updateValue('val-1', { valueLabel: 'Renamed' })).resolves.toBe(updated);
+      await expect(service.updateValue('val-1', { valueLabel: 'Renamed' })).resolves.toEqual(
+        expect.objectContaining({ id: 'val-1', valueLabel: 'Renamed' }),
+      );
     });
 
     it('throws 404 when the lookup value does not exist', async () => {
