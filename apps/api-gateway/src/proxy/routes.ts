@@ -52,6 +52,10 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
   { prefix: '/beneficiaries', target: appConfig.BENEFICIARY_SERVICE_URL, requiresAuth: true },
   { prefix: '/visits', target: appConfig.VISIT_FORM_SERVICE_URL, requiresAuth: true },
   { prefix: '/forms', target: appConfig.VISIT_FORM_SERVICE_URL, requiresAuth: true },
+  // Admin form-authoring routes (create/patch/publish draft versions) live
+  // under /admin/forms in visit-form-service — a distinct prefix from /forms,
+  // so it needs its own gateway entry or those 3 endpoints are unreachable.
+  { prefix: '/admin/forms', target: appConfig.VISIT_FORM_SERVICE_URL, requiresAuth: true },
   { prefix: '/rules', target: appConfig.RULES_SERVICE_URL, requiresAuth: true },
   { prefix: '/referrals', target: appConfig.RISK_REFERRAL_SERVICE_URL, requiresAuth: true },
   { prefix: '/closures', target: appConfig.CLOSURE_REOPEN_SERVICE_URL, requiresAuth: true },
