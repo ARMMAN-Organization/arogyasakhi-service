@@ -2,7 +2,14 @@ import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
 import { z } from 'zod';
 import type { MediaAssetService } from './mediaAsset.service';
 import { createMediaAssetSchema } from './dto/create-mediaAsset.dto';
-import { asyncHandler, createDocumentedRouter, ok, validateBody } from '../app.module';
+import {
+  asyncHandler,
+  createDocumentedRouter,
+  ok,
+  requireRoles,
+  trustGatewayIdentity,
+  validateBody,
+} from '../app.module';
 
 extendZodWithOpenApi(z);
 
@@ -11,12 +18,10 @@ const mediaAssetSchema = z.object({
   assetType: z.string().openapi({ example: 'CONSENT_PHOTO' }),
   storageUri: z.string().openapi({ example: 's3://arogya-media/2026/07/consent-abc123.jpg' }),
   mimeType: z.string().openapi({ example: 'image/jpeg' }),
-  sizeBytes: z
-    .string()
-    .openapi({
-      description: 'File size in bytes (BigInt serialized as string).',
-      example: '204800',
-    }),
+  sizeBytes: z.string().openapi({
+    description: 'File size in bytes (BigInt serialized as string).',
+    example: '204800',
+  }),
   uploadedByUserId: z.string().uuid().nullable(),
   uploadedAt: z.string().datetime(),
   linkedEntityType: z.string().nullable(),
@@ -61,8 +66,12 @@ export function createMediaAssetRouter(service: MediaAssetService) {
       tags: ['Media'],
       responses: {
         200: { description: 'Media assets', schema: envelope(z.array(mediaAssetSchema)) },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
       },
     },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER'),
     asyncHandler(async (_req, res) => {
       res.json(ok(await service.list()));
     }),
@@ -76,8 +85,12 @@ export function createMediaAssetRouter(service: MediaAssetService) {
       responses: {
         201: { description: 'Media asset created', schema: envelope(mediaAssetSchema) },
         400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
       },
     },
+    trustGatewayIdentity,
+    requireRoles('SAKHI'),
     validateBody(createMediaAssetSchema),
     asyncHandler(async (req, res) => {
       const created = await service.create(req.body);

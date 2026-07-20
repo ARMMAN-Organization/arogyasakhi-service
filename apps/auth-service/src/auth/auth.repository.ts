@@ -9,8 +9,12 @@ export class AuthRepository {
     return this.prisma.user.findUnique({
       where: { username },
       include: {
+        // `createdAt: 'asc'` makes the "primary" role assignment (the first
+        // entry, used by issueTokens/getProfile) the earliest-assigned one
+        // instead of an unspecified Prisma row order.
         userRoles: {
           where: { status: 'ACTIVE', isDeleted: false },
+          orderBy: { createdAt: 'asc' },
           include: { role: true },
         },
       },
@@ -23,8 +27,30 @@ export class AuthRepository {
       include: {
         userRoles: {
           where: { status: 'ACTIVE', isDeleted: false },
+          orderBy: { createdAt: 'asc' },
           include: { role: true },
         },
+      },
+    });
+  }
+
+  /**
+   * Same as {@link findUserById}, additionally including the primary
+   * project's name (via each active role's `project` relation) and the
+   * caller's Sakhi profile (if any — only SAKHI-role users have one). Used
+   * by `GET /me`, which needs project name / employee code / masked bank
+   * account beyond the base profile fields.
+   */
+  findUserByIdWithProfile(id: string) {
+    return this.prisma.user.findUnique({
+      where: { id },
+      include: {
+        userRoles: {
+          where: { status: 'ACTIVE', isDeleted: false },
+          orderBy: { createdAt: 'asc' },
+          include: { role: true, project: true },
+        },
+        sakhiProfile: true,
       },
     });
   }

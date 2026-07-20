@@ -2,7 +2,14 @@ import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
 import { z } from 'zod';
 import type { IncentiveEventService } from './incentiveEvent.service';
 import { createIncentiveEventSchema } from './dto/create-incentiveEvent.dto';
-import { asyncHandler, createDocumentedRouter, ok, validateBody } from '../app.module';
+import {
+  asyncHandler,
+  createDocumentedRouter,
+  ok,
+  requireRoles,
+  trustGatewayIdentity,
+  validateBody,
+} from '../app.module';
 
 extendZodWithOpenApi(z);
 
@@ -57,8 +64,12 @@ export function createIncentiveEventRouter(service: IncentiveEventService) {
           description: 'Incentive events',
           schema: envelope(z.array(incentiveEventSchema)),
         },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
       },
     },
+    trustGatewayIdentity,
+    requireRoles('MANAGER', 'ADMIN'),
     asyncHandler(async (_req, res) => {
       res.json(ok(await service.list()));
     }),
@@ -72,8 +83,12 @@ export function createIncentiveEventRouter(service: IncentiveEventService) {
       responses: {
         201: { description: 'Incentive event created', schema: envelope(incentiveEventSchema) },
         400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
       },
     },
+    trustGatewayIdentity,
+    requireRoles('ADMIN'),
     validateBody(createIncentiveEventSchema),
     asyncHandler(async (req, res) => {
       const created = await service.create(req.body);

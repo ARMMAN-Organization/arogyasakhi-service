@@ -2,7 +2,14 @@ import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
 import { z } from 'zod';
 import type { VisitInstanceService } from './visitInstance.service';
 import { createVisitInstanceSchema } from './dto/create-visitInstance.dto';
-import { asyncHandler, createDocumentedRouter, ok, validateBody } from '../app.module';
+import {
+  asyncHandler,
+  createDocumentedRouter,
+  ok,
+  requireRoles,
+  trustGatewayIdentity,
+  validateBody,
+} from '../app.module';
 
 extendZodWithOpenApi(z);
 
@@ -69,8 +76,12 @@ export function createVisitInstanceRouter(service: VisitInstanceService) {
       tags: ['Visits'],
       responses: {
         200: { description: 'Visit instances', schema: envelope(z.array(visitInstanceSchema)) },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
       },
     },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER'),
     asyncHandler(async (_req, res) => {
       res.json(ok(await service.list()));
     }),
@@ -84,8 +95,12 @@ export function createVisitInstanceRouter(service: VisitInstanceService) {
       responses: {
         201: { description: 'Visit instance created', schema: envelope(visitInstanceSchema) },
         400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
       },
     },
+    trustGatewayIdentity,
+    requireRoles('SAKHI'),
     validateBody(createVisitInstanceRequestSchema),
     asyncHandler(async (req, res) => {
       const created = await service.create(req.body);

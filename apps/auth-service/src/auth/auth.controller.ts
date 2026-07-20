@@ -39,6 +39,15 @@ const authTokensSchema = z.object({
     .string()
     .openapi({ description: 'Opaque refresh token; single-use, rotated on refresh.' }),
   expiresIn: z.number().openapi({ description: 'Access token lifetime in seconds.', example: 900 }),
+  roles: z
+    .array(z.string())
+    .openapi({ description: 'Every role code the caller holds.', example: ['SAKHI'] }),
+  projectId: z.string().uuid().nullable().openapi({
+    description: "The primary role assignment's project scope.",
+  }),
+  geographyUnitId: z.string().uuid().nullable().openapi({
+    description: "The primary role assignment's geography scope.",
+  }),
 });
 
 const userProfileSchema = z.object({
@@ -46,6 +55,9 @@ const userProfileSchema = z.object({
   username: z.string().openapi({ example: 'jane.sakhi' }),
   displayName: z.string().openapi({ example: 'Jane Sakhi' }),
   mobileNumber: z.string().openapi({ example: '+919876543210' }),
+  email: z.string().email().nullable().openapi({ example: 'jane.sakhi@example.org' }),
+  status: z.string().openapi({ example: 'ACTIVE' }),
+  createdAt: z.string().datetime(),
   roles: z.array(
     z.object({
       roleCode: z.string().openapi({ example: 'SAKHI' }),
@@ -53,6 +65,21 @@ const userProfileSchema = z.object({
       geographyUnitId: z.string().uuid().nullable(),
     }),
   ),
+  projectName: z
+    .string()
+    .nullable()
+    .openapi({ description: "The primary role's project name.", example: 'GEP-2324' }),
+  cardNumber: z.string().nullable().openapi({
+    description: 'Sakhi employee/ID card number — null for non-SAKHI roles.',
+    example: 'EMP-00123',
+  }),
+  maskedBankAccount: z.string().nullable().openapi({
+    description: 'Last 4 digits of the linked bank account, masked — never the full number.',
+    example: '••••1234',
+  }),
+  supervisorId: z.string().uuid().nullable().openapi({
+    description: "Sakhi profile's supervisor — null for non-SAKHI roles.",
+  }),
 });
 
 const createdUserSchema = z.object({
