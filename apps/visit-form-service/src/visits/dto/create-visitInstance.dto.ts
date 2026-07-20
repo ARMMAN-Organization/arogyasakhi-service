@@ -16,7 +16,10 @@ export const createVisitInstanceSchema = z
     beneficiaryId: z.string().uuid(),
     sakhiId: z.string().uuid(),
     localVisitUuid: z.string().trim().min(1).max(80),
-    status: z.enum(['STARTED', 'PENDING', 'MISSED', 'COMPLETED', 'DISCARDED']),
+    // lookup_values.lookup_value_id (category VISIT_STATUS) — fetched via
+    // GET /lookups/VISIT_STATUS (auth-service). Replaces the previous
+    // STARTED/PENDING/MISSED/COMPLETED/DISCARDED Postgres enum.
+    statusLookupValueId: z.string().uuid(),
     actualVisitDate: z.coerce.date().optional(),
     meetBeneficiaryFlag: z.boolean().optional(),
     notMetReason: z.string().trim().min(1).max(255).optional(),
