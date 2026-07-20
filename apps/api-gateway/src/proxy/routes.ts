@@ -51,6 +51,7 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
   // replaced by the unified view.
   { prefix: '/beneficiaries', target: appConfig.BENEFICIARY_SERVICE_URL, requiresAuth: true },
   { prefix: '/visits', target: appConfig.VISIT_FORM_SERVICE_URL, requiresAuth: true },
+  { prefix: '/forms', target: appConfig.VISIT_FORM_SERVICE_URL, requiresAuth: true },
   { prefix: '/rules', target: appConfig.RULES_SERVICE_URL, requiresAuth: true },
   { prefix: '/referrals', target: appConfig.RISK_REFERRAL_SERVICE_URL, requiresAuth: true },
   { prefix: '/closures', target: appConfig.CLOSURE_REOPEN_SERVICE_URL, requiresAuth: true },
