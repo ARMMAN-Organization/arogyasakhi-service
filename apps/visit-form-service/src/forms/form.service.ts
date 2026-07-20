@@ -15,6 +15,81 @@ function computeChecksum(schemaJson: unknown): Buffer {
   return createHash('sha256').update(JSON.stringify(schemaJson)).digest();
 }
 
+/** The subset of FormVersion columns a client is allowed to see. */
+interface FormVersionRow {
+  id: string;
+  formDefinitionId: string;
+  versionNo: string;
+  schemaJson: unknown;
+  validationJson: unknown;
+  effectiveFrom: Date;
+  effectiveTo: Date | null;
+  publishedByUserId: string | null;
+  status: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/**
+ * Projects a raw form_versions row down to exactly the fields the API
+ * exposes (matches formVersionSchema in form.controller.ts). Drops internal
+ * columns — notably the binary `checksum`, plus createdByUserId/
+ * updatedByUserId/isDeleted/deletedAt — so they never leak into a response
+ * even though the Prisma row carries them.
+ */
+function toApiFormVersion<T extends FormVersionRow>(v: T) {
+  return {
+    id: v.id,
+    formDefinitionId: v.formDefinitionId,
+    versionNo: v.versionNo,
+    schemaJson: v.schemaJson,
+    validationJson: v.validationJson,
+    effectiveFrom: v.effectiveFrom,
+    effectiveTo: v.effectiveTo,
+    publishedByUserId: v.publishedByUserId,
+    status: v.status,
+    createdAt: v.createdAt,
+    updatedAt: v.updatedAt,
+  };
+}
+
+/** The subset of form_submissions columns a client is allowed to see. */
+interface FormSubmissionRow {
+  id: string;
+  formVersionId: string;
+  beneficiaryId: string;
+  visitId: string | null;
+  submittedByUserId: string;
+  submittedAt: Date;
+  localSubmissionUuid: string;
+  formDataJson: unknown;
+  validationStatus: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/**
+ * Projects a raw form_submissions row down to the API-exposed fields
+ * (matches formSubmissionSchema in form.controller.ts). Drops internal
+ * columns ruleVersionId/syncBatchId/createdByUserId/updatedByUserId/
+ * isDeleted/deletedAt so they never leak into a response.
+ */
+function toApiFormSubmission<T extends FormSubmissionRow>(s: T) {
+  return {
+    id: s.id,
+    formVersionId: s.formVersionId,
+    beneficiaryId: s.beneficiaryId,
+    visitId: s.visitId,
+    submittedByUserId: s.submittedByUserId,
+    submittedAt: s.submittedAt,
+    localSubmissionUuid: s.localSubmissionUuid,
+    formDataJson: s.formDataJson,
+    validationStatus: s.validationStatus,
+    createdAt: s.createdAt,
+    updatedAt: s.updatedAt,
+  };
+}
+
 function isEmpty(value: unknown): boolean {
   return value === undefined || value === null || value === '';
 }
@@ -48,7 +123,7 @@ export class FormService {
   async getActiveVersion(formCode: string, asOf: Date) {
     const version = await this.repository.findActiveVersion(formCode, asOf);
     if (!version) throw notFound(`No published form version found for form code "${formCode}".`);
-    return version;
+    return toApiFormVersion(version);
   }
 
   async createDraft(formCode: string, dto: CreateDraftVersionInput) {
@@ -69,7 +144,7 @@ export class FormService {
     const existingCount = await this.repository.countVersions(definition.id);
     const versionNo = `v${existingCount + 1}`;
 
-    return this.repository.createDraft({
+    const created = await this.repository.createDraft({
       formDefinitionId: definition.id,
       versionNo,
       schemaJson,
@@ -80,6 +155,7 @@ export class FormService {
       // the forms API design doc §7 (open question, flagged not assumed).
       effectiveFrom: new Date(),
     });
+    return toApiFormVersion(created);
   }
 
   async updateDraft(formCode: string, versionId: string, dto: PatchFormVersionInput) {
@@ -92,11 +168,12 @@ export class FormService {
       throw conflict('Only DRAFT versions can be edited.');
     }
 
-    return this.repository.updateDraft(versionId, {
+    const updated = await this.repository.updateDraft(versionId, {
       schemaJson: dto.schemaJson,
       validationJson: dto.validationJson ?? [],
       checksum: computeChecksum(dto.schemaJson),
     });
+    return toApiFormVersion(updated);
   }
 
   async publish(formCode: string, versionId: string) {
@@ -117,12 +194,14 @@ export class FormService {
 
     const current = await this.repository.findCurrentlyPublished(version.formDefinitionId);
     const effectiveFrom = new Date();
-    return this.repository.publish(versionId, effectiveFrom, current?.id ?? null);
+    const published = await this.repository.publish(versionId, effectiveFrom, current?.id ?? null);
+    return toApiFormVersion(published);
   }
 
   async createSubmission(formCode: string, dto: CreateSubmissionInput, submittedByUserId: string) {
     const existing = await this.repository.findSubmissionByLocalUuid(dto.localSubmissionUuid);
-    if (existing) return existing; // idempotent replay — matches sync's local_submission_uuid dedup key
+    // idempotent replay — matches sync's local_submission_uuid dedup key
+    if (existing) return toApiFormSubmission(existing);
 
     const version = await this.repository.findVersionById(dto.formVersionId);
     if (!version) throw notFound('Form version not found.');
@@ -141,7 +220,7 @@ export class FormService {
       throw unprocessable('Submission failed validation.', { violations });
     }
 
-    return this.repository.createSubmission({
+    const created = await this.repository.createSubmission({
       formVersionId: dto.formVersionId,
       beneficiaryId: dto.beneficiaryId,
       visitId: dto.visitId ?? null,
@@ -150,6 +229,7 @@ export class FormService {
       formDataJson: dto.formData,
       validationStatus: 'VALID',
     });
+    return toApiFormSubmission(created);
   }
 
   /**

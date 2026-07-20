@@ -22,12 +22,20 @@ describe('FormService', () => {
   });
 
   describe('getActiveVersion', () => {
-    it('returns the active version for a form code', async () => {
-      const version = { id: 'v1', status: 'PUBLISHED' };
+    it('returns the active version (API-projected) for a form code', async () => {
+      const version = {
+        id: 'v1',
+        versionNo: 'v1',
+        status: 'PUBLISHED',
+        checksum: Buffer.from('x'),
+      };
       repository.findActiveVersion.mockResolvedValue(version as never);
-      await expect(service.getActiveVersion('MOTHER_REGISTRATION', new Date())).resolves.toBe(
-        version,
-      );
+
+      const result = await service.getActiveVersion('MOTHER_REGISTRATION', new Date());
+
+      expect(result).toEqual(expect.objectContaining({ id: 'v1', status: 'PUBLISHED' }));
+      // Internal columns must not leak into the API response.
+      expect(result).not.toHaveProperty('checksum');
     });
 
     it('throws not-found when no published version exists', async () => {
@@ -229,7 +237,7 @@ describe('FormService', () => {
     };
 
     it('returns the existing submission on a retried localSubmissionUuid (idempotent)', async () => {
-      const existing = { id: 'sub-1' };
+      const existing = { id: 'sub-1', ruleVersionId: 'rule-1', syncBatchId: 'batch-1' };
       repository.findSubmissionByLocalUuid.mockResolvedValue(existing as never);
 
       const result = await service.createSubmission(
@@ -243,7 +251,10 @@ describe('FormService', () => {
         'u1',
       );
 
-      expect(result).toBe(existing);
+      expect(result).toEqual(expect.objectContaining({ id: 'sub-1' }));
+      // Internal columns must not leak into the API response.
+      expect(result).not.toHaveProperty('ruleVersionId');
+      expect(result).not.toHaveProperty('syncBatchId');
       expect(repository.findVersionById).not.toHaveBeenCalled();
     });
 
