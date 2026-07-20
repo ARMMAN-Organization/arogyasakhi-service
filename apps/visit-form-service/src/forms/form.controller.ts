@@ -200,12 +200,13 @@ export function createFormRouter(service: FormService) {
     trustGatewayIdentity,
     requireRoles('ADMIN'),
     validate(versionParamsSchema, 'params'),
-    asyncHandler(async (req, res) => {
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
       const { formCode, versionId } = req.params as unknown as {
         formCode: string;
         versionId: string;
       };
-      const published = await service.publish(formCode, versionId);
+      const published = await service.publish(formCode, versionId, req.user.id);
       res.json(ok(published));
     }),
   );

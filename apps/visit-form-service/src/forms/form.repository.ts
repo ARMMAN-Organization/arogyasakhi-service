@@ -94,7 +94,12 @@ export class FormRepository {
   }
 
   /** Publishes `versionId` and retires `previousVersionId` (if any) atomically. */
-  async publish(versionId: string, effectiveFrom: Date, previousVersionId: string | null) {
+  async publish(
+    versionId: string,
+    effectiveFrom: Date,
+    previousVersionId: string | null,
+    publishedByUserId: string,
+  ) {
     return this.prisma.$transaction(async (tx) => {
       if (previousVersionId) {
         await tx.formVersion.update({
@@ -104,7 +109,7 @@ export class FormRepository {
       }
       return tx.formVersion.update({
         where: { id: versionId },
-        data: { status: 'PUBLISHED', effectiveFrom },
+        data: { status: 'PUBLISHED', effectiveFrom, publishedByUserId },
       });
     });
   }

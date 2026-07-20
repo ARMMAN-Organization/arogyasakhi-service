@@ -60,6 +60,17 @@ describe('FormService', () => {
       expect(result).toEqual({ id: 'draft-3', versionNo: 'v3' });
     });
 
+    it('surfaces a concurrent version-number collision as a 409, not a 500', async () => {
+      repository.findDefinitionByCode.mockResolvedValue({ id: 'def-1' } as never);
+      repository.countVersions.mockResolvedValue(2);
+      // Prisma P2002 unique-constraint violation on [formDefinitionId, versionNo].
+      repository.createDraft.mockRejectedValue({ code: 'P2002' });
+
+      await expect(service.createDraft('MOTHER_REGISTRATION', {})).rejects.toMatchObject({
+        status: 409,
+      });
+    });
+
     it('throws not-found for an unknown form code', async () => {
       repository.findDefinitionByCode.mockResolvedValue(null);
       await expect(service.createDraft('NOT_A_FORM', {})).rejects.toThrow(/Unknown form code/);
@@ -172,9 +183,9 @@ describe('FormService', () => {
       repository.findCurrentlyPublished.mockResolvedValue({ id: 'v1' } as never);
       repository.publish.mockResolvedValue({ id: 'v2', status: 'PUBLISHED' } as never);
 
-      await service.publish('MOTHER_REGISTRATION', 'v2');
+      await service.publish('MOTHER_REGISTRATION', 'v2', 'admin-1');
 
-      expect(repository.publish).toHaveBeenCalledWith('v2', expect.any(Date), 'v1');
+      expect(repository.publish).toHaveBeenCalledWith('v2', expect.any(Date), 'v1', 'admin-1');
     });
 
     it('publishes with no previous version to retire when none exists', async () => {
@@ -185,14 +196,14 @@ describe('FormService', () => {
       repository.findCurrentlyPublished.mockResolvedValue(null);
       repository.publish.mockResolvedValue({ id: 'v1' } as never);
 
-      await service.publish('MOTHER_REGISTRATION', 'v1');
+      await service.publish('MOTHER_REGISTRATION', 'v1', 'admin-1');
 
-      expect(repository.publish).toHaveBeenCalledWith('v1', expect.any(Date), null);
+      expect(repository.publish).toHaveBeenCalledWith('v1', expect.any(Date), null, 'admin-1');
     });
 
     it('rejects when the version does not belong to the given form code', async () => {
       repository.findVersionById.mockResolvedValue(draftVersion as never);
-      await expect(service.publish('CHILD_REGISTRATION', 'v2')).rejects.toThrow(
+      await expect(service.publish('CHILD_REGISTRATION', 'v2', 'admin-1')).rejects.toThrow(
         /does not belong to this form code/,
       );
     });
@@ -202,7 +213,7 @@ describe('FormService', () => {
         ...draftVersion,
         status: 'RETIRED',
       } as never);
-      await expect(service.publish('MOTHER_REGISTRATION', 'v1')).rejects.toThrow(
+      await expect(service.publish('MOTHER_REGISTRATION', 'v1', 'admin-1')).rejects.toThrow(
         /Only DRAFT versions can be published/,
       );
     });
@@ -212,7 +223,7 @@ describe('FormService', () => {
         ...draftVersion,
         schemaJson: [],
       } as never);
-      await expect(service.publish('MOTHER_REGISTRATION', 'v2')).rejects.toThrow(
+      await expect(service.publish('MOTHER_REGISTRATION', 'v2', 'admin-1')).rejects.toThrow(
         /at least one well-formed field/,
       );
     });
