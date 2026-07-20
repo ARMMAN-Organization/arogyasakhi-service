@@ -53,7 +53,7 @@ const formVersionSchema = z.object({
   effectiveFrom: z.string().datetime(),
   effectiveTo: z.string().datetime().nullable(),
   publishedByUserId: z.string().uuid().nullable(),
-  status: z.enum(['DRAFT', 'PUBLISHED', 'SUPERSEDED', 'RETIRED']),
+  status: z.enum(['DRAFT', 'PUBLISHED', 'RETIRED']),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });
@@ -67,7 +67,7 @@ const formSubmissionSchema = z.object({
   submittedAt: z.string().datetime(),
   localSubmissionUuid: z.string().openapi({ example: 'device-abc-submission-001' }),
   formDataJson: z.record(z.string(), z.unknown()),
-  validationStatus: z.enum(['VALID', 'INVALID']),
+  validationStatus: z.enum(['VALID', 'INVALID', 'WARNING']),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });
