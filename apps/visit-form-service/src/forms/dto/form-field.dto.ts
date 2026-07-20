@@ -1,4 +1,7 @@
+import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
 import { z } from 'zod';
+
+extendZodWithOpenApi(z);
 
 /**
  * Shape of one entry in `form_versions.schema_json`. Only the parts confirmed
@@ -45,7 +48,10 @@ export const formFieldSchema = z
       .object({
         field: z.string().trim().min(1),
         operator: z.enum(['eq', 'gte', 'lt', 'isSet']),
-        value: z.any().optional(),
+        // Bare z.any() has no inferable OpenAPI type — annotated so the
+        // OpenAPI generator doesn't throw when this schema is used as a
+        // documented request/response body (see createDocumentedRouter()).
+        value: z.any().openapi({ type: 'object' }).optional(),
       })
       .optional(),
     computedFrom: z
@@ -76,16 +82,21 @@ export const schemaJsonSchema = z.array(formFieldSchema).min(1);
  * Live births, Live births + Stillbirths + Abortions = Gravida) — the shape
  * below is generic enough to express all four without inventing a fifth.
  */
-export const crossFieldRuleSchema = z.discriminatedUnion('rule', [
-  z.object({ rule: z.literal('LTE'), fields: z.tuple([z.string(), z.string()]) }).strict(),
-  z
-    .object({
-      rule: z.literal('SUM_EQUALS'),
-      fields: z.array(z.string().trim().min(1)).min(2),
-      equals: z.string().trim().min(1),
-    })
-    .strict(),
-]);
+// A discriminated union has no inferable OpenAPI type on its own — annotated
+// so the OpenAPI generator doesn't throw when this schema is used as a
+// documented request/response body (see createDocumentedRouter()).
+export const crossFieldRuleSchema = z
+  .discriminatedUnion('rule', [
+    z.object({ rule: z.literal('LTE'), fields: z.tuple([z.string(), z.string()]) }).strict(),
+    z
+      .object({
+        rule: z.literal('SUM_EQUALS'),
+        fields: z.array(z.string().trim().min(1)).min(2),
+        equals: z.string().trim().min(1),
+      })
+      .strict(),
+  ])
+  .openapi({ type: 'object' });
 
 export type CrossFieldRule = z.infer<typeof crossFieldRuleSchema>;
 

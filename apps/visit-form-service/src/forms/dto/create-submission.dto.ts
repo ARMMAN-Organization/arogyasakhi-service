@@ -1,4 +1,7 @@
+import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
 import { z } from 'zod';
+
+extendZodWithOpenApi(z);
 
 /**
  * Body for `POST /forms/:formCode/submissions`. Fields match
@@ -19,7 +22,10 @@ export const createSubmissionSchema = z
     beneficiaryId: z.string().uuid(),
     visitId: z.string().uuid().nullable().optional(),
     localSubmissionUuid: z.string().trim().min(1).max(80),
-    formData: z.record(z.string(), z.any()),
+    // z.record(_, z.any()) has no inferable OpenAPI type — annotated so the
+    // OpenAPI generator doesn't throw when this schema is used as a
+    // documented request body (see createDocumentedRouter()).
+    formData: z.record(z.string(), z.any()).openapi({ type: 'object' }),
   })
   .strict();
 

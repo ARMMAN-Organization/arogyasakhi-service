@@ -54,18 +54,21 @@ export function createApp(prisma: PrismaService): Application {
   app.use(requestId);
 
   const visitInstanceModule = createVisitInstanceModule(prisma);
+  const formModule = createFormModule(prisma);
 
   // All routes live under the global `api/v1` prefix.
   const api = express.Router();
   api.use(createHealthRouter(prisma));
-  // Built from visitInstanceModule.registry — every route registered via
+  // Built from every feature module's registry — every route registered via
   // createDocumentedRouter() above is already in the spec, so this can never
-  // drift from what's actually mounted. The forms feature isn't converted to
-  // createDocumentedRouter() yet, so it's mounted as a plain router below and
-  // is not yet represented in /docs.json.
-  api.use(createSwaggerRouter(buildVisitFormServiceOpenApiDocument(visitInstanceModule.registry)));
+  // drift from what's actually mounted.
+  api.use(
+    createSwaggerRouter(
+      buildVisitFormServiceOpenApiDocument(visitInstanceModule.registry, formModule.registry),
+    ),
+  );
   api.use(visitInstanceModule.router);
-  api.use(createFormModule(prisma));
+  api.use(formModule.router);
   app.use('/api/v1', api);
 
   app.use(notFoundHandler);
