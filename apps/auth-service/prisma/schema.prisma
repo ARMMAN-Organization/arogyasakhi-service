@@ -243,3 +243,49 @@ model GeographyUnit {
   @@map("geography_units")
   @@schema("auth_service")
 }
+
+// Column set matches ERD's lookup_categories/lookup_values tables. All
+// dropdown/select/radio options used in approved forms are maintained here
+// with a stable value_code, display label, and sort_order — form_versions'
+// schema_json stores a published snapshot for offline rendering, but this
+// stays the live managed master (see ERD note after lookup_values).
+model LookupCategory {
+  id              String        @id @default(uuid()) @map("lookup_category_id")
+  categoryCode    String        @unique @map("category_code") @db.VarChar(80)
+  categoryName    String        @map("category_name") @db.VarChar(160)
+  description     String?
+  isActive        Boolean       @default(true) @map("is_active")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  createdByUserId String?       @map("created_by_user_id")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+  updatedByUserId String?       @map("updated_by_user_id")
+
+  values LookupValue[]
+
+  @@map("lookup_categories")
+  @@schema("auth_service")
+}
+
+model LookupValue {
+  id                 String          @id @default(uuid()) @map("lookup_value_id")
+  lookupCategoryId   String          @map("lookup_category_id")
+  category           LookupCategory  @relation(fields: [lookupCategoryId], references: [id])
+  valueCode          String          @map("value_code") @db.VarChar(80)
+  valueLabel         String          @map("value_label") @db.VarChar(160)
+  sortOrder          Int             @default(0) @map("sort_order")
+  // Self-relation for dependent dropdowns (e.g. District depends on State) —
+  // the parent must belong to the same category; enforced in the service
+  // layer since Prisma can't express a same-table cross-row column check.
+  parentLookupValueId String?        @map("parent_lookup_value_id")
+  parent              LookupValue?   @relation("LookupValueHierarchy", fields: [parentLookupValueId], references: [id])
+  children             LookupValue[] @relation("LookupValueHierarchy")
+  isActive            Boolean        @default(true) @map("is_active")
+  createdAt           DateTime       @default(now()) @map("created_at")
+  createdByUserId      String?       @map("created_by_user_id")
+  updatedAt            DateTime      @updatedAt @map("updated_at")
+  updatedByUserId       String?      @map("updated_by_user_id")
+
+  @@unique([lookupCategoryId, valueCode])
+  @@map("lookup_values")
+  @@schema("auth_service")
+}

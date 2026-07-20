@@ -2,9 +2,9 @@ import { PrismaService } from './prisma.service';
 
 /**
  * Verifies the funders/projects migration itself (constraints, defaults, FK
- * behaviour) — there is no API layer for this domain yet (deferred to the
- * "Project APIs" sprint task), so these tests exercise the Prisma client
- * directly against the real schema. This requires a real, migrated database
+ * behaviour) directly against the real schema — complements
+ * `../projects/project.service.spec.ts`, which covers the service layer
+ * with a mocked repository. This requires a real, migrated database
  * (DATABASE_URL/DIRECT_URL), which CI does not currently provision — skipped
  * there rather than failing the pipeline; runs normally for any developer
  * with a local .env pointing at a migrated database.
