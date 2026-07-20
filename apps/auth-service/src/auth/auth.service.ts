@@ -1,61 +1,16 @@
 import type { TokenSigner } from '@armman/service-commons';
-import { conflict, decryptPii, forbidden, notFound, unauthorized } from '@armman/service-commons';
+import { conflict, forbidden, notFound, unauthorized } from '@armman/service-commons';
 import type { AuthRepository } from './auth.repository';
 import { hashPassword, verifyPassword } from './password';
 import { generateRefreshToken, hashRefreshToken } from './refresh-token';
 import { parseDurationMs } from './duration';
+import { toUserProfile, type AuthTokens, type CreatedUser, type UserProfile } from './auth.mapper';
 import type { LoginInput } from './dto/login.dto';
 import type { CreateUserInput } from './dto/create-user.dto';
 
-export interface AuthTokens {
-  accessToken: string;
-  refreshToken: string;
-  /** Access token lifetime in seconds, from now. */
-  expiresIn: number;
-  /** Every role code the caller holds — same set encoded in the access token's `roles` claim. */
-  roles: string[];
-  /** The primary role assignment's project/geography scope (first assignment; see issueTokens). */
-  projectId: string | null;
-  geographyUnitId: string | null;
-}
-
-export interface UserProfile {
-  id: string;
-  username: string;
-  displayName: string;
-  mobileNumber: string;
-  email: string | null;
-  status: string;
-  createdAt: Date;
-  roles: { roleCode: string; projectId: string | null; geographyUnitId: string | null }[];
-  /** The primary role's project name, or null if that role has no project (e.g. ADMIN). */
-  projectName: string | null;
-  /** Sakhi profile's employee_code — only present for SAKHI-role users. */
-  cardNumber: string | null;
-  /** Last 4 digits of the Sakhi's bank account, masked (e.g. "••••1234") — never the full number. */
-  maskedBankAccount: string | null;
-  /** Sakhi profile's supervisor_id — per SRS's Sakhi identity field list; only present for SAKHI-role users. */
-  supervisorId: string | null;
-}
-
-const BANK_ACCOUNT_VISIBLE_DIGITS = 4;
-const BANK_ACCOUNT_MASK = '••••';
-
-/** Masks a decrypted bank account number down to its last 4 digits. */
-function maskBankAccount(accountNumber: string): string {
-  const lastDigits = accountNumber.slice(-BANK_ACCOUNT_VISIBLE_DIGITS);
-  return `${BANK_ACCOUNT_MASK}${lastDigits}`;
-}
-
-export interface CreatedUser {
-  id: string;
-  username: string;
-  mobileNumber: string;
-  displayName: string;
-  email: string | null;
-  status: string;
-  createdAt: Date;
-}
+// Re-exported so importers of `./auth.service` keep resolving these types;
+// their definitions live in auth.mapper.ts.
+export type { AuthTokens, CreatedUser, UserProfile } from './auth.mapper';
 
 /** Prisma unique-constraint violation code (mobileNumber/email/roleCode etc). */
 const PRISMA_UNIQUE_CONSTRAINT_CODE = 'P2002';
@@ -170,30 +125,7 @@ export class AuthService {
   async getProfile(userId: string): Promise<UserProfile | null> {
     const user = await this.repository.findUserByIdWithProfile(userId);
     if (!user || user.isDeleted) return null;
-
-    const [primaryRole] = user.userRoles;
-    const profile = user.sakhiProfile && !user.sakhiProfile.isDeleted ? user.sakhiProfile : null;
-
-    return {
-      id: user.id,
-      username: user.username,
-      displayName: user.displayName,
-      mobileNumber: user.mobileNumber,
-      email: user.email,
-      status: user.status,
-      createdAt: user.createdAt,
-      roles: user.userRoles.map((ur) => ({
-        roleCode: ur.role.roleCode,
-        projectId: ur.projectId,
-        geographyUnitId: ur.geographyUnitId,
-      })),
-      projectName: primaryRole?.project?.projectName ?? null,
-      cardNumber: profile?.employeeCode ?? null,
-      maskedBankAccount: profile?.bankAccountToken
-        ? maskBankAccount(decryptPii(profile.bankAccountToken))
-        : null,
-      supervisorId: profile?.supervisorId ?? null,
-    };
+    return toUserProfile(user);
   }
 
   private async issueTokens(

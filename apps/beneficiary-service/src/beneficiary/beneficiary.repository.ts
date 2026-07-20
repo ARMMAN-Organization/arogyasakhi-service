@@ -1,92 +1,21 @@
 import type { PrismaService } from '../prisma/prisma.service';
-import type { BeneficiaryStatus, CasePhase, CaseType, Sex } from './beneficiary.constants';
+import type {
+  BeneficiaryListFilters,
+  CreateEnrollmentInput,
+  DuplicateSearchTokens,
+} from './beneficiary.repository.types';
 
-export interface BeneficiaryListFilters {
-  projectId?: string;
-  villageId?: string;
-  padaId?: string;
-  currentStatus?: BeneficiaryStatus;
-  caseType?: CaseType;
-  /** True to return only cases with `everAtRiskFlag` set on any risk condition. */
-  atRiskOnly?: boolean;
-  /** hashForSearch(normalizeForSearch(name)) — exact-match only, see findMany's doc comment. */
-  nameHash?: Buffer;
-  /** hashForSearch(normalizeForSearch(mobileNumber)) — exact-match only. */
-  phoneHash?: Buffer;
-}
-
-export interface DuplicateSearchTokens {
-  nameToken: Buffer;
-  caseTypeLookupId: string;
-  dobToken: string | null;
-  phoneHash: Buffer | null;
-  geographyToken: string | null;
-  lmpDateToken: string | null;
-}
-
-export interface PiiCreateData {
-  fullNameEnc: Buffer;
-  fullNameSearchHash: Buffer;
-  phoneEnc: Buffer | null;
-  phoneSearchHash: Buffer | null;
-  alternatePhoneEnc: Buffer | null;
-  villageId: string | null;
-  padaId: string | null;
-  healthSubCentreId: string | null;
-  phcId: string | null;
-  healthBlockId: string | null;
-  dateOfBirth: Date | null;
-  sex: Sex | null;
-  addressLineEnc: Buffer | null;
-  stateId: string | null;
-  districtId: string | null;
-  talukaId: string | null;
-  rchNumberEnc: Buffer | null;
-  rchNumberHash: Buffer | null;
-}
-
-export interface CaseCreateData {
-  localCaseUuid: string;
-  projectId: string;
-  sakhiId: string;
-  caseType: CaseType;
-  registrationDate: Date;
-  previousBeneficiaryId: string | null;
-  motherBeneficiaryId: string | null;
-  beneficiaryTypeLookupId: string;
-  caseTypeLookupId: string;
-  journeyStartDate: Date;
-  currentPhase: CasePhase;
-}
-
-export interface MotherDetailsCreateData {
-  lmpDate: Date;
-  eddDate: Date;
-  gravida: number | null;
-  parity: number | null;
-  heightCm: number | null;
-  bmiAtRegistration: number | null;
-}
-
-export interface ChildDetailsCreateData {
-  motherBeneficiaryId: string | null;
-  dateOfBirth: Date;
-  sex: Sex | null;
-  birthWeightKg: number | null;
-  birthLengthCm: number | null;
-  prematureFlag: boolean | null;
-  linkedAncCase: boolean;
-}
-
-export interface CreateEnrollmentInput {
-  pii: PiiCreateData;
-  case: CaseCreateData;
-  motherDetails: MotherDetailsCreateData | null;
-  childDetails: ChildDetailsCreateData | null;
-  searchTokens: DuplicateSearchTokens;
-  consentDate: Date;
-  consentCapturedByUserId: string;
-}
+// Re-exported so existing importers of `./beneficiary.repository` keep working;
+// the interface definitions live in beneficiary.repository.types.ts.
+export type {
+  BeneficiaryListFilters,
+  CaseCreateData,
+  ChildDetailsCreateData,
+  CreateEnrollmentInput,
+  DuplicateSearchTokens,
+  MotherDetailsCreateData,
+  PiiCreateData,
+} from './beneficiary.repository.types';
 
 /** Data-access layer for beneficiary cases. Only this domain touches these tables. */
 export class BeneficiaryRepository {
