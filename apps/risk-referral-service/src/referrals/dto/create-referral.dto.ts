@@ -37,7 +37,10 @@ export const createReferralSchema = z
     beneficiaryId: z.string().uuid(),
     visitId: z.string().uuid().optional(),
     sourceSubmissionId: z.string().uuid().optional(),
-    referralType: z.enum(['STANDARD', 'ACCOMPANIED']),
+    // lookup_values.lookup_value_id (category REFERRAL_TYPE) — fetched via
+    // GET /lookups/REFERRAL_TYPE (auth-service). Replaces the previous
+    // STANDARD/ACCOMPANIED Postgres enum.
+    referralTypeLookupValueId: z.string().uuid(),
     referralDate: z.coerce.date(),
     triggerConditionListJson: jsonValueSchema.optional(),
     facilityType: z.enum(['PUBLIC', 'PRIVATE', 'PHC', 'RH', 'DH', 'OTHER']).optional(),

@@ -23,7 +23,7 @@ describe('ReferralService', () => {
   it('returns the repository list unchanged', async () => {
     const listDto: CreateReferralInput = {
       beneficiaryId: '22222222-2222-2222-2222-222222222222',
-      referralType: 'STANDARD',
+      referralTypeLookupValueId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
       referralDate: new Date('2026-07-01'),
       facilityType: 'PHC',
       facilityName: 'Community PHC',
@@ -36,7 +36,7 @@ describe('ReferralService', () => {
         beneficiaryId: listDto.beneficiaryId,
         visitId: null,
         sourceSubmissionId: null,
-        referralType: listDto.referralType,
+        referralTypeLookupValueId: listDto.referralTypeLookupValueId,
         referralDate: listDto.referralDate,
         triggerConditionListJson: null,
         facilityType: listDto.facilityType ?? null,
@@ -59,7 +59,7 @@ describe('ReferralService', () => {
   it('creates via repository with the given data', async () => {
     const dto: CreateReferralInput = {
       beneficiaryId: '22222222-2222-2222-2222-222222222222',
-      referralType: 'STANDARD',
+      referralTypeLookupValueId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
       referralDate: new Date('2026-07-01'),
       status: 'INITIATED',
       supervisorApprovalStatus: 'NOT_REQUIRED',
@@ -69,7 +69,7 @@ describe('ReferralService', () => {
       beneficiaryId: dto.beneficiaryId,
       visitId: null,
       sourceSubmissionId: null,
-      referralType: dto.referralType,
+      referralTypeLookupValueId: dto.referralTypeLookupValueId,
       referralDate: dto.referralDate,
       triggerConditionListJson: null,
       facilityType: null,
@@ -93,7 +93,7 @@ describe('ReferralService', () => {
     repository.create.mockRejectedValue(new Error('db down'));
     const dto: CreateReferralInput = {
       beneficiaryId: '22222222-2222-2222-2222-222222222222',
-      referralType: 'STANDARD',
+      referralTypeLookupValueId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
       referralDate: new Date('2026-07-01'),
       status: 'INITIATED',
       supervisorApprovalStatus: 'NOT_REQUIRED',
