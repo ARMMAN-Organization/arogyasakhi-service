@@ -24,17 +24,6 @@ enum ClosureType {
   PROGRAM_COMPLETION
 }
 
-enum ClosureReason {
-  MISCARRIAGE
-  ABORTION
-  MATERNAL_DEATH
-  INFANT_OR_CHILD_DEATH
-  MIGRATION
-  WITHDRAWAL
-  PROGRAM_CYCLE_COMPLETED
-  OTHER
-}
-
 // Approval status required only when closure_reason = MIGRATION.
 // NULL means supervisor approval is not applicable for the closure reason.
 enum ClosureSupervisorStatus {
@@ -60,7 +49,10 @@ model Closure {
   // beneficiary_cases.beneficiary_id — owned by another service, no cross-service relation.
   beneficiaryId     String                   @map("beneficiary_id")
   closureType       ClosureType              @map("closure_type")
-  closureReason     ClosureReason            @map("closure_reason")
+  // lookup_values.lookup_value_id (category CLOSURE_REASON) — owned by
+  // auth-service, no cross-service relation. Replaces the previous
+  // ClosureReason Postgres enum (same value_codes).
+  closureReasonLookupValueId String          @map("closure_reason_lookup_value_id")
   eventDate         DateTime?                @map("event_date") @db.Date
   closureDate       DateTime                 @map("closure_date") @db.Date
   // users.user_id — owned by another service, no cross-service relation.
