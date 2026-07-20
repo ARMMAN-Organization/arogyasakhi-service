@@ -44,6 +44,14 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
   // rather than parsing which /auth/* sub-path needs a token.
   { prefix: '/auth', target: appConfig.AUTH_SERVICE_URL, requiresAuth: false },
   { prefix: '/me', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
+  // auth-service also owns user + project/funder + lookup master-data routes.
+  // Each enforces its own role guard downstream (requireRoles), so the gateway
+  // just needs to verify a token and forward — without these entries the
+  // endpoints return a gateway 404 despite appearing in the aggregated docs.
+  { prefix: '/users', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
+  { prefix: '/projects', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
+  { prefix: '/funders', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
+  { prefix: '/lookups', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
   // NOTE: `/docs` is NOT proxied here. The gateway serves ONE aggregated
   // Swagger UI at `/api/v1/docs` (see docs/docs.controller.ts) that merges
   // every service's own `/docs.json` into a single page — there is no single
