@@ -8,6 +8,7 @@ import {
   asyncHandler,
   authenticate,
   createDocumentedRouter,
+  errorResponse,
   ok,
   requireRoles,
   validate,
@@ -16,32 +17,32 @@ import {
 
 extendZodWithOpenApi(z);
 
-const categoryCodeParamsSchema = z.object({ categoryCode: z.string().trim().min(1) }).strict();
-const valueIdParamsSchema = z.object({ id: z.string().uuid() }).strict();
+const categoryCodeParamsSchema = z
+  .object({ categoryCode: z.string().trim().min(1).openapi({ example: 'RISK_GRADE' }) })
+  .strict();
+const valueIdParamsSchema = z
+  .object({ id: z.string().uuid().openapi({ example: '3eb3104f-3596-418f-8ccd-2e95323e14ba' }) })
+  .strict();
 
 const lookupValueSchema = z.object({
-  id: z.string().uuid(),
-  valueCode: z.string(),
-  valueLabel: z.string(),
-  sortOrder: z.number(),
-  parentLookupValueId: z.string().uuid().nullable(),
-  isActive: z.boolean(),
+  id: z.string().uuid().openapi({ example: '3eb3104f-3596-418f-8ccd-2e95323e14ba' }),
+  valueCode: z.string().openapi({ example: 'HIGH' }),
+  valueLabel: z.string().openapi({ example: 'High' }),
+  sortOrder: z.number().openapi({ example: 0 }),
+  parentLookupValueId: z.string().uuid().nullable().openapi({ example: null }),
+  isActive: z.boolean().openapi({ example: true }),
 });
 
 const lookupCategorySchema = z.object({
-  id: z.string().uuid(),
-  categoryCode: z.string(),
-  categoryName: z.string(),
-  description: z.string().nullable(),
-  isActive: z.boolean(),
+  id: z.string().uuid().openapi({ example: 'e23ecb9f-1bc5-493e-87a6-9a2960e3cd1c' }),
+  categoryCode: z.string().openapi({ example: 'RISK_GRADE' }),
+  categoryName: z.string().openapi({ example: 'Risk Grade' }),
+  description: z
+    .string()
+    .nullable()
+    .openapi({ example: 'Risk grading scale for beneficiary cases.' }),
+  isActive: z.boolean().openapi({ example: true }),
   values: z.array(lookupValueSchema),
-});
-
-const apiErrorSchema = z.object({
-  success: z.literal(false),
-  message: z.string(),
-  errorCode: z.string().openapi({ example: 'VALIDATION_ERROR' }),
-  details: z.record(z.unknown()).optional(),
 });
 
 function envelope<T extends z.ZodTypeAny>(data: T) {
@@ -67,7 +68,8 @@ export function createLookupRouter(service: LookupService, signer: TokenSigner) 
           description: 'All lookup categories with values',
           schema: envelope(z.array(lookupCategorySchema)),
         },
-        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        401: errorResponse(401),
+        500: errorResponse(500),
       },
     },
     authenticate(signer),
@@ -84,8 +86,9 @@ export function createLookupRouter(service: LookupService, signer: TokenSigner) 
       params: categoryCodeParamsSchema,
       responses: {
         200: { description: 'Lookup category with values', schema: envelope(lookupCategorySchema) },
-        401: { description: 'Unauthenticated', schema: apiErrorSchema },
-        404: { description: 'Lookup category not found', schema: apiErrorSchema },
+        401: errorResponse(401),
+        404: errorResponse(404, { message: 'Lookup category not found.' }),
+        500: errorResponse(500),
       },
     },
     authenticate(signer),
@@ -103,15 +106,19 @@ export function createLookupRouter(service: LookupService, signer: TokenSigner) 
       params: categoryCodeParamsSchema,
       responses: {
         201: { description: 'Lookup value created', schema: envelope(lookupValueSchema) },
-        400: { description: 'Validation error', schema: apiErrorSchema },
-        401: { description: 'Unauthenticated', schema: apiErrorSchema },
-        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
-        404: { description: 'Lookup category not found', schema: apiErrorSchema },
-        409: { description: 'Duplicate value code in this category', schema: apiErrorSchema },
-        422: {
-          description: 'parentLookupValueId belongs to a different category',
-          schema: apiErrorSchema,
-        },
+        400: errorResponse(400, { message: 'valueCode: Required' }),
+        401: errorResponse(401),
+        403: errorResponse(403),
+        404: errorResponse(404, { message: 'Lookup category not found.' }),
+        409: errorResponse(409, {
+          message: 'A value with this code already exists in this category.',
+          description: 'Conflict — duplicate value code in this category',
+        }),
+        422: errorResponse(422, {
+          message: 'parentLookupValueId must belong to the same lookup category.',
+          description: 'Unprocessable — parentLookupValueId belongs to a different category',
+        }),
+        500: errorResponse(500),
       },
     },
     authenticate(signer),
@@ -132,14 +139,15 @@ export function createLookupRouter(service: LookupService, signer: TokenSigner) 
       params: valueIdParamsSchema,
       responses: {
         200: { description: 'Lookup value updated', schema: envelope(lookupValueSchema) },
-        400: { description: 'Validation error', schema: apiErrorSchema },
-        401: { description: 'Unauthenticated', schema: apiErrorSchema },
-        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
-        404: { description: 'Lookup value not found', schema: apiErrorSchema },
-        422: {
-          description: 'parentLookupValueId belongs to a different category',
-          schema: apiErrorSchema,
-        },
+        400: errorResponse(400, { message: 'sortOrder: Expected number, received string' }),
+        401: errorResponse(401),
+        403: errorResponse(403),
+        404: errorResponse(404, { message: 'Lookup value not found.' }),
+        422: errorResponse(422, {
+          message: 'parentLookupValueId must belong to the same lookup category.',
+          description: 'Unprocessable — parentLookupValueId belongs to a different category',
+        }),
+        500: errorResponse(500),
       },
     },
     authenticate(signer),

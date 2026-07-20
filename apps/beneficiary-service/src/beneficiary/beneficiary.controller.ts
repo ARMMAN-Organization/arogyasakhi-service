@@ -14,6 +14,7 @@ import { listBeneficiariesQuerySchema } from './dto/list-beneficiaries.dto';
 import {
   asyncHandler,
   createDocumentedRouter,
+  errorResponse,
   ok,
   requireRoles,
   trustGatewayIdentity,
@@ -127,13 +128,6 @@ const beneficiaryListItemSchema = beneficiaryCaseSchema.extend({
   pii: piiResponseSchema,
 });
 
-const apiErrorSchema = z.object({
-  success: z.literal(false),
-  message: z.string(),
-  errorCode: z.string().openapi({ example: 'VALIDATION_ERROR' }),
-  details: z.record(z.unknown()).optional(),
-});
-
 function envelope<T extends z.ZodTypeAny>(data: T) {
   return z.object({ success: z.literal(true), message: z.string(), data });
 }
@@ -165,8 +159,10 @@ export function createBeneficiaryRouter(service: BeneficiaryService) {
           description: 'Beneficiary cases retrieved',
           schema: envelope(z.array(beneficiaryListItemSchema)),
         },
-        401: { description: 'Unauthenticated', schema: apiErrorSchema },
-        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+        400: errorResponse(400, { message: 'atRiskOnly: Expected boolean, received string' }),
+        401: errorResponse(401),
+        403: errorResponse(403),
+        500: errorResponse(500),
       },
     },
     trustGatewayIdentity,
@@ -188,9 +184,11 @@ export function createBeneficiaryRouter(service: BeneficiaryService) {
           description: 'Beneficiary case retrieved',
           schema: envelope(beneficiaryCaseDetailSchema),
         },
-        401: { description: 'Unauthenticated', schema: apiErrorSchema },
-        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
-        404: { description: 'Beneficiary case not found', schema: apiErrorSchema },
+        400: errorResponse(400, { message: 'id: Invalid uuid' }),
+        401: errorResponse(401),
+        403: errorResponse(403),
+        404: errorResponse(404, { message: 'Beneficiary case not found.' }),
+        500: errorResponse(500),
       },
     },
     trustGatewayIdentity,
@@ -211,17 +209,20 @@ export function createBeneficiaryRouter(service: BeneficiaryService) {
           description: 'Beneficiary case created',
           schema: envelope(beneficiaryCaseDetailSchema),
         },
-        400: { description: 'Validation error', schema: apiErrorSchema },
-        401: { description: 'Unauthenticated', schema: apiErrorSchema },
-        403: { description: 'Caller role not permitted (SAKHI only)', schema: apiErrorSchema },
-        409: {
-          description: 'A possible duplicate beneficiary already exists',
-          schema: apiErrorSchema,
-        },
-        422: {
-          description: 'Consent not received; registration cannot proceed',
-          schema: apiErrorSchema,
-        },
+        400: errorResponse(400, { message: 'pii.fullName: Required' }),
+        401: errorResponse(401),
+        403: errorResponse(403, {
+          description: 'Forbidden — caller role not permitted (SAKHI only)',
+        }),
+        409: errorResponse(409, {
+          message: 'A possible duplicate beneficiary already exists.',
+          description: 'Conflict — a possible duplicate beneficiary already exists',
+        }),
+        422: errorResponse(422, {
+          message: 'Consent must be given before registration can proceed.',
+          description: 'Unprocessable — consent not received; registration cannot proceed',
+        }),
+        500: errorResponse(500),
       },
     },
     trustGatewayIdentity,

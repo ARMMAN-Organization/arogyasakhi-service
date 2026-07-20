@@ -9,6 +9,7 @@ import {
   asyncHandler,
   authenticate,
   createDocumentedRouter,
+  errorResponse,
   ok,
   requireRoles,
   validate,
@@ -17,32 +18,33 @@ import {
 
 extendZodWithOpenApi(z);
 
-const idParamsSchema = z.object({ id: z.string().uuid() }).strict();
+const idParamsSchema = z
+  .object({
+    id: z.string().uuid().openapi({ example: '70ca545d-298a-4c02-bba2-d5c4c9bb9acd' }),
+  })
+  .strict();
 
 const funderSchema = z.object({
-  funderId: z.string().uuid(),
-  funderCode: z.string(),
-  funderName: z.string(),
-  status: z.enum(['ACTIVE', 'INACTIVE']),
+  funderId: z.string().uuid().openapi({ example: 'f25ef217-1cfd-4014-bddd-038c8b332a88' }),
+  funderCode: z.string().openapi({ example: 'ARMMAN-CSR' }),
+  funderName: z.string().openapi({ example: 'ARMMAN CSR Partner' }),
+  status: z.enum(['ACTIVE', 'INACTIVE']).openapi({ example: 'ACTIVE' }),
 });
 
 const projectSchema = z.object({
-  projectId: z.string().uuid(),
-  funderId: z.string().uuid().nullable(),
+  projectId: z.string().uuid().openapi({ example: '70ca545d-298a-4c02-bba2-d5c4c9bb9acd' }),
+  funderId: z
+    .string()
+    .uuid()
+    .nullable()
+    .openapi({ example: 'f25ef217-1cfd-4014-bddd-038c8b332a88' }),
   funder: funderSchema.nullable(),
-  projectCode: z.string(),
-  projectName: z.string(),
-  financialYear: z.string(),
-  startDate: z.string().datetime(),
-  endDate: z.string().datetime().nullable(),
-  status: z.enum(['ACTIVE', 'PAUSED', 'CLOSED']),
-});
-
-const apiErrorSchema = z.object({
-  success: z.literal(false),
-  message: z.string(),
-  errorCode: z.string().openapi({ example: 'VALIDATION_ERROR' }),
-  details: z.record(z.unknown()).optional(),
+  projectCode: z.string().openapi({ example: 'GEP-2627' }),
+  projectName: z.string().openapi({ example: 'GEP 2026-27' }),
+  financialYear: z.string().openapi({ example: '2026-27' }),
+  startDate: z.string().datetime().openapi({ example: '2026-04-01T00:00:00.000Z' }),
+  endDate: z.string().datetime().nullable().openapi({ example: '2027-03-31T00:00:00.000Z' }),
+  status: z.enum(['ACTIVE', 'PAUSED', 'CLOSED']).openapi({ example: 'ACTIVE' }),
 });
 
 function envelope<T extends z.ZodTypeAny>(data: T) {
@@ -65,7 +67,8 @@ export function createProjectRouter(service: ProjectService, signer: TokenSigner
       tags: ['Projects'],
       responses: {
         200: { description: 'Active projects', schema: envelope(z.array(projectSchema)) },
-        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        401: errorResponse(401),
+        500: errorResponse(500),
       },
     },
     authenticate(signer),
@@ -82,8 +85,9 @@ export function createProjectRouter(service: ProjectService, signer: TokenSigner
       params: idParamsSchema,
       responses: {
         200: { description: 'Project detail', schema: envelope(projectSchema) },
-        401: { description: 'Unauthenticated', schema: apiErrorSchema },
-        404: { description: 'Project not found', schema: apiErrorSchema },
+        401: errorResponse(401),
+        404: errorResponse(404, { message: 'Project not found.' }),
+        500: errorResponse(500),
       },
     },
     authenticate(signer),
@@ -100,10 +104,14 @@ export function createProjectRouter(service: ProjectService, signer: TokenSigner
       tags: ['Projects'],
       responses: {
         201: { description: 'Project created', schema: envelope(projectSchema) },
-        400: { description: 'Validation error', schema: apiErrorSchema },
-        401: { description: 'Unauthenticated', schema: apiErrorSchema },
-        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
-        409: { description: 'Duplicate project code', schema: apiErrorSchema },
+        400: errorResponse(400, { message: 'projectCode: Required' }),
+        401: errorResponse(401),
+        403: errorResponse(403),
+        409: errorResponse(409, {
+          message: 'A project with this project code already exists.',
+          description: 'Conflict — a project with this project code already exists',
+        }),
+        500: errorResponse(500),
       },
     },
     authenticate(signer),
@@ -123,10 +131,11 @@ export function createProjectRouter(service: ProjectService, signer: TokenSigner
       params: idParamsSchema,
       responses: {
         200: { description: 'Project updated', schema: envelope(projectSchema) },
-        400: { description: 'Validation error', schema: apiErrorSchema },
-        401: { description: 'Unauthenticated', schema: apiErrorSchema },
-        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
-        404: { description: 'Project not found', schema: apiErrorSchema },
+        400: errorResponse(400, { message: 'status: Invalid enum value.' }),
+        401: errorResponse(401),
+        403: errorResponse(403),
+        404: errorResponse(404, { message: 'Project not found.' }),
+        500: errorResponse(500),
       },
     },
     authenticate(signer),
@@ -145,7 +154,8 @@ export function createProjectRouter(service: ProjectService, signer: TokenSigner
       tags: ['Projects'],
       responses: {
         200: { description: 'Active funders', schema: envelope(z.array(funderSchema)) },
-        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        401: errorResponse(401),
+        500: errorResponse(500),
       },
     },
     authenticate(signer),
@@ -161,10 +171,14 @@ export function createProjectRouter(service: ProjectService, signer: TokenSigner
       tags: ['Projects'],
       responses: {
         201: { description: 'Funder created', schema: envelope(funderSchema) },
-        400: { description: 'Validation error', schema: apiErrorSchema },
-        401: { description: 'Unauthenticated', schema: apiErrorSchema },
-        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
-        409: { description: 'Duplicate funder code', schema: apiErrorSchema },
+        400: errorResponse(400, { message: 'funderCode: Required' }),
+        401: errorResponse(401),
+        403: errorResponse(403),
+        409: errorResponse(409, {
+          message: 'A funder with this funder code already exists.',
+          description: 'Conflict — a funder with this funder code already exists',
+        }),
+        500: errorResponse(500),
       },
     },
     authenticate(signer),

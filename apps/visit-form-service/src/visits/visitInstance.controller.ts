@@ -5,6 +5,7 @@ import { createVisitInstanceSchema } from './dto/create-visitInstance.dto';
 import {
   asyncHandler,
   createDocumentedRouter,
+  errorResponse,
   ok,
   requireRoles,
   trustGatewayIdentity,
@@ -34,26 +35,26 @@ const createVisitInstanceRequestSchema = createVisitInstanceSchema.extend({
 });
 
 const visitInstanceSchema = z.object({
-  id: z.string().uuid(),
-  scheduleId: z.string().uuid(),
-  beneficiaryId: z.string().uuid(),
-  sakhiId: z.string().uuid(),
+  id: z.string().uuid().openapi({ example: '3fa85f64-5717-4562-b3fc-2c963f66afa6' }),
+  scheduleId: z.string().uuid().openapi({ example: '3fa85f64-5717-4562-b3fc-2c963f66afa6' }),
+  beneficiaryId: z.string().uuid().openapi({ example: '3fa85f64-5717-4562-b3fc-2c963f66afa6' }),
+  sakhiId: z.string().uuid().openapi({ example: '3fa85f64-5717-4562-b3fc-2c963f66afa6' }),
   localVisitUuid: z.string().openapi({ example: 'device-abc-visit-001' }),
-  actualVisitDate: z.string().datetime().nullable(),
-  statusLookupValueId: z.string().uuid(),
-  meetBeneficiaryFlag: z.boolean().nullable(),
-  notMetReason: z.string().nullable(),
-  completedAt: z.string().datetime().nullable(),
-  syncedAt: z.string().datetime().nullable(),
-  createdAt: z.string().datetime(),
-  updatedAt: z.string().datetime(),
-});
-
-const apiErrorSchema = z.object({
-  success: z.literal(false),
-  message: z.string(),
-  errorCode: z.string().openapi({ example: 'VALIDATION_ERROR' }),
-  details: z.record(z.unknown()).optional(),
+  actualVisitDate: z
+    .string()
+    .datetime()
+    .nullable()
+    .openapi({ example: '2026-07-20T00:00:00.000Z' }),
+  statusLookupValueId: z
+    .string()
+    .uuid()
+    .openapi({ example: '3fa85f64-5717-4562-b3fc-2c963f66afa6' }),
+  meetBeneficiaryFlag: z.boolean().nullable().openapi({ example: true }),
+  notMetReason: z.string().nullable().openapi({ example: null }),
+  completedAt: z.string().datetime().nullable().openapi({ example: '2026-07-20T10:15:00.000Z' }),
+  syncedAt: z.string().datetime().nullable().openapi({ example: null }),
+  createdAt: z.string().datetime().openapi({ example: '2026-07-20T10:15:00.000Z' }),
+  updatedAt: z.string().datetime().openapi({ example: '2026-07-20T10:15:00.000Z' }),
 });
 
 function envelope<T extends z.ZodTypeAny>(data: T) {
@@ -78,8 +79,9 @@ export function createVisitInstanceRouter(service: VisitInstanceService) {
       tags: ['Visits'],
       responses: {
         200: { description: 'Visit instances', schema: envelope(z.array(visitInstanceSchema)) },
-        401: { description: 'Unauthenticated', schema: apiErrorSchema },
-        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+        401: errorResponse(401),
+        403: errorResponse(403),
+        500: errorResponse(500),
       },
     },
     trustGatewayIdentity,
@@ -96,9 +98,10 @@ export function createVisitInstanceRouter(service: VisitInstanceService) {
       tags: ['Visits'],
       responses: {
         201: { description: 'Visit instance created', schema: envelope(visitInstanceSchema) },
-        400: { description: 'Validation error', schema: apiErrorSchema },
-        401: { description: 'Unauthenticated', schema: apiErrorSchema },
-        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+        400: errorResponse(400, { message: 'beneficiaryId: Required' }),
+        401: errorResponse(401),
+        403: errorResponse(403),
+        500: errorResponse(500),
       },
     },
     trustGatewayIdentity,

@@ -30,6 +30,7 @@ export {
   authenticate,
   unauthorized,
   createDocumentedRouter,
+  errorResponse,
   HttpError,
   ErrorCode,
   type DocumentedRouter,
