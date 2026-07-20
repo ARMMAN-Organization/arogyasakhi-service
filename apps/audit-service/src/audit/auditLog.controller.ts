@@ -2,7 +2,14 @@ import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
 import { z } from 'zod';
 import type { AuditLogService } from './auditLog.service';
 import { createAuditLogSchema } from './dto/create-auditLog.dto';
-import { asyncHandler, createDocumentedRouter, ok, validateBody } from '../app.module';
+import {
+  asyncHandler,
+  createDocumentedRouter,
+  ok,
+  requireRoles,
+  trustGatewayIdentity,
+  validateBody,
+} from '../app.module';
 
 extendZodWithOpenApi(z);
 
@@ -52,8 +59,12 @@ export function createAuditLogRouter(service: AuditLogService) {
       tags: ['Audit'],
       responses: {
         200: { description: 'Audit log entries', schema: envelope(z.array(auditLogRecordSchema)) },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
       },
     },
+    trustGatewayIdentity,
+    requireRoles('ADMIN', 'MANAGER'),
     asyncHandler(async (_req, res) => {
       res.json(ok(await service.list()));
     }),
@@ -67,8 +78,12 @@ export function createAuditLogRouter(service: AuditLogService) {
       responses: {
         201: { description: 'Audit log entry created', schema: envelope(auditLogRecordSchema) },
         400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
       },
     },
+    trustGatewayIdentity,
+    requireRoles('ADMIN'),
     validateBody(createAuditLogSchema),
     asyncHandler(async (req, res) => {
       const created = await service.create(req.body);

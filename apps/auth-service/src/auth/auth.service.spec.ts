@@ -1,6 +1,7 @@
+import { randomBytes } from 'node:crypto';
 import { AuthService } from './auth.service';
 import type { AuthRepository } from './auth.repository';
-import type { TokenSigner } from '@armman/service-commons';
+import { encryptPii, type TokenSigner } from '@armman/service-commons';
 
 jest.mock('./password', () => ({
   verifyPassword: jest.fn(),
@@ -19,7 +20,9 @@ const ACTIVE_USER = {
   mobileNumber: '+919876543210',
   passwordHash: 'hashed-password',
   displayName: 'Test Sakhi',
+  email: 'test.sakhi@example.org',
   status: 'ACTIVE' as const,
+  createdAt: new Date('2026-01-01T00:00:00.000Z'),
   isDeleted: false,
   userRoles: [
     {
@@ -34,6 +37,7 @@ describe('AuthService', () => {
   const repository = {
     findUserByUsername: jest.fn(),
     findUserById: jest.fn(),
+    findUserByIdWithProfile: jest.fn(),
     incrementFailedLoginCount: jest.fn(),
     recordSuccessfulLogin: jest.fn(),
     recordSuccessfulLoginAndCreateSession: jest.fn(),
@@ -51,11 +55,17 @@ describe('AuthService', () => {
   } as unknown as jest.Mocked<TokenSigner>;
 
   let service: AuthService;
+  const originalEnv = { ...process.env };
 
   beforeEach(() => {
     jest.clearAllMocks();
+    process.env.PII_ENCRYPTION_KEY = randomBytes(32).toString('base64');
     signer.sign.mockResolvedValue('signed-access-token');
     service = new AuthService(repository, signer, '15m', '30d');
+  });
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
   });
 
   describe('login', () => {
@@ -71,6 +81,10 @@ describe('AuthService', () => {
       expect(tokens).toEqual({
         accessToken: 'signed-access-token',
         refreshToken: 'plain-refresh-token',
+        expiresIn: 900,
+        roles: ['SAKHI'],
+        projectId: 'project-1',
+        geographyUnitId: 'geo-1',
       });
       expect(repository.recordSuccessfulLoginAndCreateSession).toHaveBeenCalledWith(
         'user-1',
@@ -145,6 +159,10 @@ describe('AuthService', () => {
       expect(tokens).toEqual({
         accessToken: 'signed-access-token',
         refreshToken: 'plain-refresh-token',
+        expiresIn: 900,
+        roles: ['SAKHI'],
+        projectId: 'project-1',
+        geographyUnitId: 'geo-1',
       });
     });
 
@@ -386,25 +404,98 @@ describe('AuthService', () => {
   });
 
   describe('getProfile', () => {
+    // A function, not a constant: bankAccountToken must be encrypted AFTER
+    // beforeEach sets PII_ENCRYPTION_KEY, not at describe-block evaluation
+    // time (which runs once, before any beforeEach, against a stale/unset key).
+    const activeUserWithProfile = () => ({
+      ...ACTIVE_USER,
+      userRoles: [
+        {
+          projectId: 'project-1',
+          geographyUnitId: 'geo-1',
+          role: { roleCode: 'SAKHI' },
+          project: { projectName: 'GEP-2324' },
+        },
+      ],
+      sakhiProfile: {
+        employeeCode: 'EMP-00123',
+        bankAccountToken: encryptPii('1234567890'),
+        supervisorId: 'supervisor-1',
+      },
+    });
+
     it('returns the profile with role/project/geography scope', async () => {
-      repository.findUserById.mockResolvedValue(ACTIVE_USER as never);
+      repository.findUserByIdWithProfile.mockResolvedValue({
+        ...activeUserWithProfile(),
+        sakhiProfile: null,
+      } as never);
 
       await expect(service.getProfile('user-1')).resolves.toEqual({
         id: 'user-1',
         username: 'test.sakhi',
         displayName: 'Test Sakhi',
         mobileNumber: '+919876543210',
+        email: 'test.sakhi@example.org',
+        status: 'ACTIVE',
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
         roles: [{ roleCode: 'SAKHI', projectId: 'project-1', geographyUnitId: 'geo-1' }],
+        projectName: 'GEP-2324',
+        cardNumber: null,
+        maskedBankAccount: null,
+        supervisorId: null,
       });
     });
 
+    it('includes cardNumber and a masked (never full) bank account for a SAKHI with a profile', async () => {
+      repository.findUserByIdWithProfile.mockResolvedValue(activeUserWithProfile() as never);
+
+      const profile = await service.getProfile('user-1');
+
+      expect(profile?.cardNumber).toBe('EMP-00123');
+      expect(profile?.maskedBankAccount).toBe('••••7890');
+      expect(profile?.maskedBankAccount).not.toContain('123456');
+      expect(profile?.supervisorId).toBe('supervisor-1');
+    });
+
+    it('returns null projectName when the primary role has no project (e.g. ADMIN)', async () => {
+      repository.findUserByIdWithProfile.mockResolvedValue({
+        ...ACTIVE_USER,
+        userRoles: [
+          { projectId: null, geographyUnitId: null, role: { roleCode: 'ADMIN' }, project: null },
+        ],
+        sakhiProfile: null,
+      } as never);
+
+      const profile = await service.getProfile('user-1');
+
+      expect(profile?.projectName).toBeNull();
+      expect(profile?.cardNumber).toBeNull();
+      expect(profile?.maskedBankAccount).toBeNull();
+    });
+
+    it('treats a soft-deleted Sakhi profile as absent (no stale card/bank/supervisor fields)', async () => {
+      repository.findUserByIdWithProfile.mockResolvedValue({
+        ...activeUserWithProfile(),
+        sakhiProfile: { ...activeUserWithProfile().sakhiProfile, isDeleted: true },
+      } as never);
+
+      const profile = await service.getProfile('user-1');
+
+      expect(profile?.cardNumber).toBeNull();
+      expect(profile?.maskedBankAccount).toBeNull();
+      expect(profile?.supervisorId).toBeNull();
+    });
+
     it('returns null for a soft-deleted user', async () => {
-      repository.findUserById.mockResolvedValue({ ...ACTIVE_USER, isDeleted: true } as never);
+      repository.findUserByIdWithProfile.mockResolvedValue({
+        ...activeUserWithProfile(),
+        isDeleted: true,
+      } as never);
       await expect(service.getProfile('user-1')).resolves.toBeNull();
     });
 
     it('returns null for a non-existent user', async () => {
-      repository.findUserById.mockResolvedValue(null);
+      repository.findUserByIdWithProfile.mockResolvedValue(null);
       await expect(service.getProfile('missing')).resolves.toBeNull();
     });
   });

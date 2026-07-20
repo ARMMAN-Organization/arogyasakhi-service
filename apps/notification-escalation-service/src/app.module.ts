@@ -20,6 +20,7 @@ export {
   fail,
   validateBody,
   requireRoles,
+  trustGatewayIdentity,
   createDocumentedRouter,
   HttpError,
   ErrorCode,

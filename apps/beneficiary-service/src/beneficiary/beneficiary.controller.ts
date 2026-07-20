@@ -1,7 +1,17 @@
 import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
 import { z } from 'zod';
 import type { BeneficiaryService } from './beneficiary.service';
+import {
+  API_CONSENT_STATUSES,
+  BENEFICIARY_STATUSES,
+  CASE_PHASES,
+  CASE_TYPES,
+  CHILD_SEXES,
+  MOTHER_SEXES,
+  SUMMARY_PHASES,
+} from './beneficiary.constants';
 import { createBeneficiarySchema } from './dto/create-beneficiary.dto';
+import { listBeneficiariesQuerySchema } from './dto/list-beneficiaries.dto';
 import {
   asyncHandler,
   createDocumentedRouter,
@@ -19,16 +29,39 @@ const idParamsSchema = z.object({ id: z.string().uuid() }).strict();
 
 const piiResponseSchema = z.object({
   id: z.string().uuid(),
+  // Decrypted server-side for display (see BeneficiaryService.list/getById) —
+  // never the raw fullNameEnc/fullNameSearchHash.
+  fullName: z.string().openapi({ example: 'Jane Doe' }),
   villageId: z.string().uuid().nullable(),
   padaId: z.string().uuid().nullable(),
   healthSubCentreId: z.string().uuid().nullable(),
   phcId: z.string().uuid().nullable(),
   healthBlockId: z.string().uuid().nullable(),
   dateOfBirth: z.string().datetime().nullable(),
-  sex: z.enum(['FEMALE', 'MALE', 'OTHER', 'UNKNOWN']).nullable(),
+  sex: z.enum(MOTHER_SEXES).nullable(),
   stateId: z.string().uuid().nullable(),
   districtId: z.string().uuid().nullable(),
   talukaId: z.string().uuid().nullable(),
+});
+
+const riskConditionSummarySchema = z.object({
+  riskConditionId: z.string().uuid(),
+  phase: z.enum(SUMMARY_PHASES),
+  latestGrade: z.string().nullable(),
+  latestAssessedAt: z.string().datetime().nullable(),
+  everHighestGrade: z.string().nullable(),
+  everAtRiskFlag: z.boolean(),
+  currentReferralTriggerFlag: z.boolean(),
+  currentHrVisitTriggerFlag: z.boolean(),
+});
+
+const statusHistoryEntrySchema = z.object({
+  fromStatus: z.enum(BENEFICIARY_STATUSES).nullable(),
+  toStatus: z.enum(BENEFICIARY_STATUSES),
+  reasonCode: z.string().nullable(),
+  changedByUserId: z.string().uuid(),
+  changedAt: z.string().datetime(),
+  notes: z.string().nullable(),
 });
 
 const motherCaseDetailsSchema = z.object({
@@ -43,7 +76,7 @@ const motherCaseDetailsSchema = z.object({
 const childCaseDetailsSchema = z.object({
   motherBeneficiaryId: z.string().uuid().nullable(),
   dateOfBirth: z.string().datetime(),
-  sex: z.enum(['FEMALE', 'MALE', 'OTHER', 'INTERSEX']).nullable(),
+  sex: z.enum(CHILD_SEXES).nullable(),
   birthWeightKg: z.number().nullable(),
   birthLengthCm: z.number().nullable(),
   prematureFlag: z.boolean().nullable(),
@@ -52,7 +85,7 @@ const childCaseDetailsSchema = z.object({
 
 const consentRecordSchema = z.object({
   consentType: z.string().openapi({ example: 'PROGRAM_ENROLLMENT' }),
-  consentStatus: z.enum(['GIVEN', 'REFUSED']),
+  consentStatus: z.enum(API_CONSENT_STATUSES),
   consentDate: z.string().datetime(),
   capturedByUserId: z.string().uuid(),
 });
@@ -64,14 +97,14 @@ const beneficiaryCaseSchema = z.object({
   piiId: z.string().uuid(),
   projectId: z.string().uuid(),
   sakhiId: z.string().uuid(),
-  caseType: z.enum(['MOTHER', 'CHILD']),
+  caseType: z.enum(CASE_TYPES),
   registrationDate: z.string().datetime(),
   previousBeneficiaryId: z.string().uuid().nullable(),
   motherBeneficiaryId: z.string().uuid().nullable(),
   beneficiaryTypeLookupId: z.string().uuid(),
   caseTypeLookupId: z.string().uuid(),
   journeyStartDate: z.string().datetime(),
-  currentPhase: z.enum(['ANC', 'DELIVERY', 'PP', 'NN', 'INC', 'CCV', 'CLOSED']),
+  currentPhase: z.enum(CASE_PHASES),
   currentStatus: z.string().openapi({ example: 'ACTIVE' }),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
@@ -82,6 +115,16 @@ const beneficiaryCaseDetailSchema = beneficiaryCaseSchema.extend({
   motherCaseDetails: motherCaseDetailsSchema.nullable(),
   childCaseDetails: childCaseDetailsSchema.nullable(),
   consentRecords: z.array(consentRecordSchema),
+  riskConditionSummaries: z.array(riskConditionSummarySchema),
+  statusHistory: z.array(statusHistoryEntrySchema),
+});
+
+// List rows carry PII (decrypted name) but not the full detail-view
+// includes (risk/status history/mother-or-child details/consent) — per
+// SRS FR-S-9.2 / HLD's filter table, the list only needs to support
+// search/filter and a compact display row.
+const beneficiaryListItemSchema = beneficiaryCaseSchema.extend({
+  pii: piiResponseSchema,
 });
 
 const apiErrorSchema = z.object({
@@ -120,7 +163,7 @@ export function createBeneficiaryRouter(service: BeneficiaryService) {
       responses: {
         200: {
           description: 'Beneficiary cases retrieved',
-          schema: envelope(z.array(beneficiaryCaseSchema)),
+          schema: envelope(z.array(beneficiaryListItemSchema)),
         },
         401: { description: 'Unauthenticated', schema: apiErrorSchema },
         403: { description: 'Caller role not permitted', schema: apiErrorSchema },
@@ -128,15 +171,17 @@ export function createBeneficiaryRouter(service: BeneficiaryService) {
     },
     trustGatewayIdentity,
     requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER'),
-    asyncHandler(async (_req, res) => {
-      res.json(ok(await service.list()));
+    validate(listBeneficiariesQuerySchema, 'query'),
+    asyncHandler(async (req, res) => {
+      const query = req.query as unknown as z.infer<typeof listBeneficiariesQuerySchema>;
+      res.json(ok(await service.list(query)));
     }),
   );
 
   doc.get(
     '/beneficiaries/:id',
     {
-      summary: 'Get a beneficiary case by id',
+      summary: 'Get a beneficiary case by id — profile, current phase, risk state, status history',
       tags: ['Beneficiaries'],
       responses: {
         200: {

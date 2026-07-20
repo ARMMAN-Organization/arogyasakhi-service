@@ -71,6 +71,7 @@ model User {
 
   userRoles    UserRole[]
   userSessions UserSession[]
+  sakhiProfile SakhiProfile?
 
   @@map("users")
   @@schema("auth_service")
@@ -96,12 +97,16 @@ model Role {
 }
 
 model UserRole {
-  id              String         @id @default(uuid()) @map("user_role_id")
-  userId          String         @map("user_id")
-  roleId          String         @map("role_id")
-  // projects.project_id — owned by another service, no cross-service relation.
-  projectId       String?        @map("project_id")
-  // geography_units.geography_unit_id — owned by another service, no cross-service relation.
+  id        String         @id @default(uuid()) @map("user_role_id")
+  userId    String         @map("user_id")
+  roleId    String         @map("role_id")
+  // projects live in this same schema (auth-service also owns project/funder
+  // master data — see the Funder/Project models below), so this is a real
+  // Prisma relation, not a cross-service scalar.
+  projectId String?        @map("project_id")
+  project   Project?       @relation(fields: [projectId], references: [projectId])
+  // geography_units.geography_unit_id — same schema too, but no relation is
+  // declared here yet; left as a plain scalar until a caller actually needs it.
   geographyUnitId String?        @map("geography_unit_id")
   effectiveFrom   DateTime       @map("effective_from")
   effectiveTo     DateTime?      @map("effective_to")
@@ -195,7 +200,41 @@ model Project {
   isDeleted       Boolean       @default(false) @map("is_deleted")
   deletedAt       DateTime?     @map("deleted_at")
 
+  userRoles     UserRole[]
+  sakhiProfiles SakhiProfile[]
+
   @@map("projects")
+  @@schema("auth_service")
+}
+
+// Column set matches ERD Appendix A.1 ("sakhi_profiles") exactly.
+// supervisorId references supervisor_profiles.supervisor_id, which is not
+// modeled anywhere yet — left as a plain scalar (no relation) rather than
+// invented.
+model SakhiProfile {
+  id               String    @id @default(uuid()) @map("sakhi_id")
+  userId           String    @unique @map("user_id")
+  user             User      @relation(fields: [userId], references: [id])
+  primaryProjectId String    @map("primary_project_id")
+  primaryProject   Project   @relation(fields: [primaryProjectId], references: [projectId])
+  supervisorId     String?   @map("supervisor_id")
+  employeeCode     String?   @unique @map("employee_code") @db.VarChar(80)
+  phoneNumber      String    @map("phone_number") @db.VarChar(13)
+  backupContact    String?   @map("backup_contact") @db.VarChar(13)
+  panToken         Bytes?    @map("pan_token")
+  aadhaarToken     Bytes?    @map("aadhaar_token")
+  bankAccountToken Bytes?    @map("bank_account_token")
+  ifscCode         String?   @map("ifsc_code") @db.VarChar(20)
+  activeFrom       DateTime  @map("active_from") @db.Date
+  activeTo         DateTime? @map("active_to") @db.Date
+  createdAt        DateTime  @default(now()) @map("created_at")
+  createdByUserId  String?   @map("created_by_user_id")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+  updatedByUserId  String?   @map("updated_by_user_id")
+  isDeleted        Boolean   @default(false) @map("is_deleted")
+  deletedAt        DateTime? @map("deleted_at")
+
+  @@map("sakhi_profiles")
   @@schema("auth_service")
 }
 
