@@ -5,11 +5,20 @@ export interface ApiSuccess<TData> {
   data: TData;
 }
 
+/**
+ * Standard error envelope for all 4xx/5xx responses. Shape follows the HLD
+ * (§ Error Envelope): `{ errorCode, message, traceId, fieldErrors? }`. We also
+ * keep `success: false` so clients can discriminate success/failure on a single
+ * boolean without inspecting the status code.
+ */
 export interface ApiFailure {
   success: false;
   message: string;
   errorCode: ErrorCode;
-  details?: Record<string, unknown>;
+  /** Correlation id (from the X-Request-Id header) for tracing across services. */
+  traceId: string;
+  /** Field-level validation errors, keyed by field path. Present on 400/422. */
+  fieldErrors?: Record<string, unknown>;
 }
 
 /** Stable, machine-readable error codes the frontend can switch on. */
@@ -19,6 +28,7 @@ export enum ErrorCode {
   FORBIDDEN = 'FORBIDDEN',
   NOT_FOUND = 'NOT_FOUND',
   CONFLICT = 'CONFLICT',
+  UNPROCESSABLE = 'UNPROCESSABLE',
   INTERNAL_ERROR = 'INTERNAL_ERROR',
 }
 
@@ -31,7 +41,10 @@ export function ok<TData>(data: TData, message = 'OK'): ApiSuccess<TData> {
 export function fail(
   message: string,
   errorCode: ErrorCode,
-  details?: Record<string, unknown>,
+  traceId: string,
+  fieldErrors?: Record<string, unknown>,
 ): ApiFailure {
-  return details ? { success: false, message, errorCode, details } : { success: false, message, errorCode };
+  return fieldErrors
+    ? { success: false, message, errorCode, traceId, fieldErrors }
+    : { success: false, message, errorCode, traceId };
 }
