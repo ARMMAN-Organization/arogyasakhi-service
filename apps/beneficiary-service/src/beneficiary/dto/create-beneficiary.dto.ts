@@ -139,6 +139,11 @@ const consentSchema = z
 
 const caseSchema = z
   .object({
+    // Client-generated at enrollment-form submission time — lets a
+    // dropped-connection retry of POST /beneficiaries return the original
+    // case instead of creating a duplicate, matching localSubmissionUuid/
+    // localVisitUuid elsewhere in this codebase.
+    localCaseUuid: z.string().trim().min(1).max(80),
     projectId: z.string().uuid(),
     sakhiId: z.string().uuid(),
     caseType: z.enum(CASE_TYPES),

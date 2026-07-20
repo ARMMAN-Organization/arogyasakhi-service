@@ -9,6 +9,7 @@ describe('BeneficiaryService', () => {
   const repository = {
     findMany: jest.fn(),
     findById: jest.fn(),
+    findByLocalCaseUuid: jest.fn(),
     findDuplicateCandidate: jest.fn(),
     createEnrollment: jest.fn(),
   } as unknown as jest.Mocked<BeneficiaryRepository>;
@@ -19,6 +20,7 @@ describe('BeneficiaryService', () => {
   const baseMotherInput: CreateBeneficiaryInput = {
     pii: { fullName: 'Jane Doe', phone: '9876543210', villageId: 'v1', padaId: 'p1' },
     case: {
+      localCaseUuid: 'local-case-uuid-mother-1',
       projectId: '11111111-1111-1111-1111-111111111111',
       sakhiId: '33333333-3333-3333-3333-333333333333',
       caseType: 'MOTHER',
@@ -41,6 +43,7 @@ describe('BeneficiaryService', () => {
   const baseChildInput: CreateBeneficiaryInput = {
     pii: { fullName: 'Baby Doe' },
     case: {
+      localCaseUuid: 'local-case-uuid-child-1',
       projectId: '11111111-1111-1111-1111-111111111111',
       sakhiId: '33333333-3333-3333-3333-333333333333',
       caseType: 'CHILD',
@@ -132,6 +135,40 @@ describe('BeneficiaryService', () => {
     it('throws 404 when the case is not found', async () => {
       repository.findById.mockResolvedValue(null);
       await expect(service.getById('missing')).rejects.toMatchObject({ status: 404 });
+    });
+  });
+
+  describe('create — idempotent replay on localCaseUuid', () => {
+    it('returns the existing case without re-running consent/duplicate/create logic on a replay', async () => {
+      repository.findByLocalCaseUuid.mockResolvedValue({
+        id: 'existing-id',
+        pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
+        riskConditionSummaries: [],
+        statusHistory: [],
+      } as never);
+
+      await expect(service.create(baseMotherInput, CALLER_ID)).resolves.toEqual(
+        expect.objectContaining({ id: 'existing-id' }),
+      );
+      expect(repository.findByLocalCaseUuid).toHaveBeenCalledWith(
+        baseMotherInput.case.localCaseUuid,
+      );
+      expect(repository.findDuplicateCandidate).not.toHaveBeenCalled();
+      expect(repository.createEnrollment).not.toHaveBeenCalled();
+    });
+
+    it('proceeds with a normal create when no case exists for this localCaseUuid yet', async () => {
+      repository.findByLocalCaseUuid.mockResolvedValue(null);
+      repository.findDuplicateCandidate.mockResolvedValue(null);
+      repository.createEnrollment.mockResolvedValue({
+        id: 'new-id',
+        pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
+      } as never);
+
+      await expect(service.create(baseMotherInput, CALLER_ID)).resolves.toEqual(
+        expect.objectContaining({ id: 'new-id' }),
+      );
+      expect(repository.createEnrollment).toHaveBeenCalledTimes(1);
     });
   });
 

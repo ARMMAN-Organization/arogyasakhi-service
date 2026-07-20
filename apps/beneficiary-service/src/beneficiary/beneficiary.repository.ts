@@ -52,6 +52,7 @@ export interface PiiCreateData {
 }
 
 export interface CaseCreateData {
+  localCaseUuid: string;
   projectId: string;
   sakhiId: string;
   caseType: CaseType;
@@ -144,6 +145,27 @@ export class BeneficiaryRepository {
         // Per the HLD's endpoint table ("Beneficiary profile, current phase,
         // last visits, risk state") — the detail view needs risk state and a
         // status timeline, not just the case/PII/consent rows.
+        riskConditionSummaries: true,
+        statusHistory: { orderBy: { changedAt: 'desc' } },
+      },
+    });
+  }
+
+  /**
+   * Finds a case previously created from this exact client-generated
+   * `localCaseUuid` — lets `create()` treat a dropped-connection retry of
+   * `POST /beneficiaries` as an idempotent replay instead of a new
+   * enrollment. Same include shape as `createEnrollment`'s return value so
+   * a replay response looks identical to the original create response.
+   */
+  findByLocalCaseUuid(localCaseUuid: string) {
+    return this.prisma.beneficiaryCase.findFirst({
+      where: { localCaseUuid, isDeleted: false },
+      include: {
+        pii: true,
+        motherCaseDetails: true,
+        childCaseDetails: true,
+        consentRecords: true,
         riskConditionSummaries: true,
         statusHistory: { orderBy: { changedAt: 'desc' } },
       },

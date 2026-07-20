@@ -178,6 +178,11 @@ model BeneficiarySearchToken {
 
 model BeneficiaryCase {
   id                      String            @id @default(uuid()) @map("beneficiary_id")
+  // Client-generated on-device at enrollment-form submission time — lets a
+  // dropped-connection retry of POST /beneficiaries return the original case
+  // instead of creating a duplicate, matching the pattern form_submissions
+  // (local_submission_uuid) and visit_instances (local_visit_uuid) already use.
+  localCaseUuid           String            @unique @map("local_case_uuid") @db.VarChar(80)
   piiId                   String            @map("pii_id")
   // projects.project_id — owned by another service.
   projectId               String            @map("project_id")

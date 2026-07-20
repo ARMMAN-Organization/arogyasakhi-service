@@ -94,6 +94,7 @@ const consentRecordSchema = z.object({
 // fields — for accurate Swagger documentation only.
 const beneficiaryCaseSchema = z.object({
   id: z.string().uuid(),
+  localCaseUuid: z.string(),
   piiId: z.string().uuid(),
   projectId: z.string().uuid(),
   sakhiId: z.string().uuid(),

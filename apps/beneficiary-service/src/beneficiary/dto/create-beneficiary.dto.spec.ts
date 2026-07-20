@@ -1,6 +1,7 @@
 import { createBeneficiarySchema } from './create-beneficiary.dto';
 
 const baseCase = {
+  localCaseUuid: 'local-case-uuid-1',
   projectId: '11111111-1111-1111-1111-111111111111',
   sakhiId: '33333333-3333-3333-3333-333333333333',
   registrationDate: '2026-01-01',

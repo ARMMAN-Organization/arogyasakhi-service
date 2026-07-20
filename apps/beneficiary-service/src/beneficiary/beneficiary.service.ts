@@ -119,6 +119,14 @@ export class BeneficiaryService {
    * `capturedByUserId` is the authenticated caller (Sakhi) recording consent.
    */
   async create(dto: CreateBeneficiaryInput, capturedByUserId: string) {
+    // Idempotent replay: a dropped-connection retry resubmits the same
+    // localCaseUuid the device generated for this enrollment. Return the
+    // original case rather than re-running consent/duplicate/create logic —
+    // matches how form_submissions/visit_instances treat their own local
+    // uuid as "already handled," not a fresh operation.
+    const existing = await this.repository.findByLocalCaseUuid(dto.case.localCaseUuid);
+    if (existing) return withDecryptedName(existing);
+
     if (dto.consent.status === 'REFUSED') {
       // Per SRS: "No" halts registration entirely — nothing is persisted.
       throw unprocessable('Consent not received. Registration cannot proceed.');
@@ -186,6 +194,7 @@ export class BeneficiaryService {
           : null,
       },
       case: {
+        localCaseUuid: dto.case.localCaseUuid,
         projectId: dto.case.projectId,
         sakhiId: dto.case.sakhiId,
         caseType: dto.case.caseType,
