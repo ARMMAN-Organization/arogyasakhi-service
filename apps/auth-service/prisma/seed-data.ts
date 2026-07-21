@@ -146,4 +146,52 @@ export const LOOKUP_CATEGORIES: {
       { valueCode: 'OTHER', valueLabel: 'Other', sortOrder: 7 },
     ],
   },
+  {
+    categoryCode: 'CASE_TYPE',
+    categoryName: 'Case Type',
+    description:
+      "Mirrors beneficiary-service's CaseType Postgres enum (MOTHER/CHILD) as a lookup-value row, for beneficiary_cases.case_type_lookup_id — a cross-service scalar FK per the forklift rule.",
+    values: [
+      { valueCode: 'MOTHER', valueLabel: 'Mother', sortOrder: 0 },
+      { valueCode: 'CHILD', valueLabel: 'Child', sortOrder: 1 },
+    ],
+  },
+  {
+    categoryCode: 'BENEFICIARY_TYPE',
+    categoryName: 'Beneficiary Type',
+    description:
+      'Beneficiary type at enrolment, for beneficiary_cases.beneficiary_type_lookup_id per the ERD. PROVISIONAL — placeholder pending the "Revised App Form Final (20 March 2026)" source document.',
+    values: [
+      { valueCode: 'PREGNANT_WOMAN', valueLabel: 'Pregnant Woman', sortOrder: 0 },
+      { valueCode: 'CHILD', valueLabel: 'Child', sortOrder: 1 },
+    ],
+  },
+];
+
+/**
+ * Minimal geography_units seed — one row per level of the SRS's 7-level
+ * hierarchy (State > District > Block > PHC > Sub-centre > Village > Pada),
+ * linked by parentCode. Test/dev data only: real state/district/etc. names
+ * are not specified in the SRS/HLD/ERD, so these are placeholder identifiers
+ * sufficient to exercise POST /beneficiaries end-to-end, not real ARMMAN
+ * program geography.
+ */
+export const GEOGRAPHY_UNITS: {
+  geoCode: string;
+  name: string;
+  geoType: 'STATE' | 'DISTRICT' | 'BLOCK' | 'PHC' | 'SUBCENTRE' | 'VILLAGE' | 'PADA';
+  parentCode: string | null;
+}[] = [
+  { geoCode: 'MH', name: 'Maharashtra', geoType: 'STATE', parentCode: null },
+  { geoCode: 'NANDURBAR', name: 'Nandurbar', geoType: 'DISTRICT', parentCode: 'MH' },
+  { geoCode: 'DHADGAON', name: 'Dhadgaon', geoType: 'BLOCK', parentCode: 'NANDURBAR' },
+  { geoCode: 'PHC-TEST-01', name: 'Test PHC', geoType: 'PHC', parentCode: 'DHADGAON' },
+  {
+    geoCode: 'SC-TEST-01',
+    name: 'Test Sub-centre',
+    geoType: 'SUBCENTRE',
+    parentCode: 'PHC-TEST-01',
+  },
+  { geoCode: 'VLG-TEST-01', name: 'Test Village', geoType: 'VILLAGE', parentCode: 'SC-TEST-01' },
+  { geoCode: 'PADA-TEST-01', name: 'Test Pada', geoType: 'PADA', parentCode: 'VLG-TEST-01' },
 ];

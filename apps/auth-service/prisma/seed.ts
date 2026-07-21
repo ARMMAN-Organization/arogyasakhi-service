@@ -1,6 +1,6 @@
 import * as argon2 from 'argon2';
 import { PrismaClient } from '../../../node_modules/.prisma/client-auth-service';
-import { LOOKUP_CATEGORIES, ROLES, type SeedResult } from './seed-data';
+import { GEOGRAPHY_UNITS, LOOKUP_CATEGORIES, ROLES, type SeedResult } from './seed-data';
 
 const prisma = new PrismaClient();
 
@@ -164,12 +164,60 @@ async function seedLookups(): Promise<SeedResult> {
   };
 }
 
+/**
+ * Minimal geography_units chain (State > District > Block > PHC > Sub-centre
+ * > Village > Pada) so POST /beneficiaries has real villageId/padaId/etc. to
+ * reference. Test/dev data only — see GEOGRAPHY_UNITS' doc comment.
+ * Inserted in hierarchy order (each row's parentCode must already exist)
+ * since parentId is a self-relation FK.
+ */
+async function seedGeographyUnits(): Promise<SeedResult> {
+  let created = 0;
+  const idByCode = new Map<string, string>();
+
+  for (const unit of GEOGRAPHY_UNITS) {
+    const existing = await prisma.geographyUnit.findFirst({
+      where: { geoCode: unit.geoCode, geoType: unit.geoType },
+    });
+    if (existing) {
+      idByCode.set(unit.geoCode, existing.geographyUnitId);
+      continue;
+    }
+
+    const parentId = unit.parentCode ? idByCode.get(unit.parentCode) : null;
+    const row = await prisma.geographyUnit.create({
+      data: {
+        geoCode: unit.geoCode,
+        name: unit.name,
+        geoType: unit.geoType,
+        parentId: parentId ?? null,
+      },
+    });
+    idByCode.set(unit.geoCode, row.geographyUnitId);
+    created += 1;
+  }
+
+  if (created === 0) {
+    return {
+      step: 'geographyUnits',
+      created: false,
+      message: 'All geography units already present — skipped.',
+    };
+  }
+  return {
+    step: 'geographyUnits',
+    created: true,
+    message: `Seeded ${created} geography unit(s).`,
+  };
+}
+
 async function main(): Promise<void> {
   const results = [
     await seedRoles(),
     await seedAdminUser(),
     await seedTestUser(),
     await seedLookups(),
+    await seedGeographyUnits(),
   ];
 
   console.log('\nSeed summary:');
