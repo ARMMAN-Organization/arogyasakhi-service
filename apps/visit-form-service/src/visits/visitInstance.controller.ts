@@ -28,7 +28,9 @@ const createVisitInstanceRequestSchema = createVisitInstanceSchema.extend({
   localVisitUuid: createVisitInstanceSchema.shape.localVisitUuid.openapi({
     example: 'device-abc-visit-001',
   }),
-  status: createVisitInstanceSchema.shape.status.openapi({ example: 'STARTED' }),
+  statusLookupValueId: createVisitInstanceSchema.shape.statusLookupValueId.openapi({
+    example: '3fa85f64-5717-4562-b3fc-2c963f66afa6',
+  }),
 });
 
 const visitInstanceSchema = z.object({
@@ -38,7 +40,7 @@ const visitInstanceSchema = z.object({
   sakhiId: z.string().uuid(),
   localVisitUuid: z.string().openapi({ example: 'device-abc-visit-001' }),
   actualVisitDate: z.string().datetime().nullable(),
-  status: z.enum(['STARTED', 'PENDING', 'MISSED', 'COMPLETED', 'DISCARDED']),
+  statusLookupValueId: z.string().uuid(),
   meetBeneficiaryFlag: z.boolean().nullable(),
   notMetReason: z.string().nullable(),
   completedAt: z.string().datetime().nullable(),

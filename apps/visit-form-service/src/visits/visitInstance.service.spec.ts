@@ -27,7 +27,11 @@ describe('VisitInstanceService', () => {
     sakhiId: '33333333-3333-3333-3333-333333333333',
     localVisitUuid: 'local-visit-1',
     actualVisitDate: null,
-    status: 'STARTED' as const,
+    // A row written after the enum→lookup migration: statusLookupValueId is
+    // set directly, statusCode is null (it only carries legacy enum values on
+    // rows migrated from the old column).
+    statusCode: null,
+    statusLookupValueId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
     meetBeneficiaryFlag: null,
     notMetReason: null,
     completedAt: null,
@@ -52,7 +56,7 @@ describe('VisitInstanceService', () => {
       beneficiaryId: '22222222-2222-2222-2222-222222222222',
       sakhiId: '33333333-3333-3333-3333-333333333333',
       localVisitUuid: 'local-visit-1',
-      status: 'STARTED',
+      statusLookupValueId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
     };
     const created = sampleRow;
     repository.create.mockResolvedValue(created);
@@ -68,7 +72,7 @@ describe('VisitInstanceService', () => {
         beneficiaryId: '22222222-2222-2222-2222-222222222222',
         sakhiId: '33333333-3333-3333-3333-333333333333',
         localVisitUuid: 'local-visit-1',
-        status: 'STARTED',
+        statusLookupValueId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
       }),
     ).rejects.toThrow('db down');
   });

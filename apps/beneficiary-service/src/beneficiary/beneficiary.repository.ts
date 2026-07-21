@@ -1,11 +1,5 @@
 import type { PrismaService } from '../prisma/prisma.service';
-import type {
-  BeneficiaryStatus,
-  CasePhase,
-  CaseType,
-  ChildSex,
-  MotherSex,
-} from './beneficiary.constants';
+import type { BeneficiaryStatus, CasePhase, CaseType, Sex } from './beneficiary.constants';
 
 export interface BeneficiaryListFilters {
   projectId?: string;
@@ -42,7 +36,7 @@ export interface PiiCreateData {
   phcId: string | null;
   healthBlockId: string | null;
   dateOfBirth: Date | null;
-  sex: MotherSex | null;
+  sex: Sex | null;
   addressLineEnc: Buffer | null;
   stateId: string | null;
   districtId: string | null;
@@ -52,6 +46,7 @@ export interface PiiCreateData {
 }
 
 export interface CaseCreateData {
+  localCaseUuid: string;
   projectId: string;
   sakhiId: string;
   caseType: CaseType;
@@ -76,7 +71,7 @@ export interface MotherDetailsCreateData {
 export interface ChildDetailsCreateData {
   motherBeneficiaryId: string | null;
   dateOfBirth: Date;
-  sex: ChildSex | null;
+  sex: Sex | null;
   birthWeightKg: number | null;
   birthLengthCm: number | null;
   prematureFlag: boolean | null;
@@ -151,6 +146,27 @@ export class BeneficiaryRepository {
   }
 
   /**
+   * Finds a case previously created from this exact client-generated
+   * `localCaseUuid` — lets `create()` treat a dropped-connection retry of
+   * `POST /beneficiaries` as an idempotent replay instead of a new
+   * enrollment. Same include shape as `createEnrollment`'s return value so
+   * a replay response looks identical to the original create response.
+   */
+  findByLocalCaseUuid(localCaseUuid: string) {
+    return this.prisma.beneficiaryCase.findFirst({
+      where: { localCaseUuid, isDeleted: false },
+      include: {
+        pii: true,
+        motherCaseDetails: true,
+        childCaseDetails: true,
+        consentRecords: true,
+        riskConditionSummaries: true,
+        statusHistory: { orderBy: { changedAt: 'desc' } },
+      },
+    });
+  }
+
+  /**
    * Finds an existing case whose PII/search tokens match ALL of the caller's
    * available tokens simultaneously (per FR-S-2.4). Legs the caller doesn't
    * supply (e.g. no phone given) are skipped rather than treated as a match.
@@ -170,18 +186,22 @@ export class BeneficiaryRepository {
 
     const candidates = await this.prisma.beneficiarySearchToken.findMany({
       where,
-      include: { beneficiaryCase: { include: { pii: true } } },
+      // currentSummary carries the matched case's delivery/closure/status/LMP,
+      // which FR-S-2.4 (new-pregnancy-vs-hard-duplicate) and FR-S-2.5
+      // (re-enrolment prompt) need to decide how to handle the match.
+      include: { beneficiaryCase: { include: { pii: true, currentSummary: true } } },
     });
 
     const phoneHash = tokens.phoneHash;
-    if (!phoneHash) return candidates.find((c) => !c.beneficiaryCase.isDeleted) ?? null;
+    const matchedToken = !phoneHash
+      ? candidates.find((c) => !c.beneficiaryCase.isDeleted)
+      : candidates.find(
+          (c) =>
+            !c.beneficiaryCase.isDeleted &&
+            c.beneficiaryCase.pii.phoneSearchHash?.equals(phoneHash),
+        );
 
-    return (
-      candidates.find(
-        (c) =>
-          !c.beneficiaryCase.isDeleted && c.beneficiaryCase.pii.phoneSearchHash?.equals(phoneHash),
-      ) ?? null
-    );
+    return matchedToken?.beneficiaryCase ?? null;
   }
 
   async createEnrollment(input: CreateEnrollmentInput) {

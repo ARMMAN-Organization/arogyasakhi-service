@@ -22,9 +22,13 @@ datasource db {
 // media_asset_id are plain scalar columns (no Prisma relation), because
 // beneficiary_cases, visit_instances, form_submissions, rule_versions, users,
 // and media_assets are owned by other services (no cross-service joins per the
-// forklift rule). risk_flag_id (on Referral_trigger_sources) is likewise a
-// plain scalar column: risk_flags is not one of the tables this service's
-// Prisma schema is scoped to model in this change.
+// forklift rule).
+//
+// risk_flags (ERD line 1289: "one row per evaluated risk condition at a
+// visit, including both normal and at-risk results") is now modeled below as
+// RiskFlag — previously out of this schema's scope; added to give risk_grade
+// (lookup_values, category RISK_GRADE) a real place to live, since no
+// existing field stored a per-condition/per-assessment grade value.
 //
 // Special override (confirmed by user): risk_state_snapshots.ccv_state uses 5
 // values instead of the doc's literal 4, per SRS: NEVER_HR,
@@ -84,11 +88,6 @@ enum CcvState {
   STABLE_LOW_RISK
 }
 
-enum ReferralType {
-  STANDARD
-  ACCOMPANIED
-}
-
 enum FacilityType {
   PUBLIC
   PRIVATE
@@ -138,6 +137,8 @@ model RiskCondition {
   isDeleted                Boolean             @default(false) @map("is_deleted")
   deletedAt                DateTime?           @map("deleted_at")
 
+  riskFlags RiskFlag[]
+
   @@map("risk_conditions")
 }
 
@@ -162,7 +163,35 @@ model RiskAssessment {
   isDeleted           Boolean             @default(false) @map("is_deleted")
   deletedAt           DateTime?           @map("deleted_at")
 
+  riskFlags RiskFlag[]
+
   @@map("risk_assessments")
+}
+
+// One row per evaluated risk condition at a visit — including NORMAL
+// results, per the ERD's note that "Normal values must be stored when the
+// condition is evaluated" (risk_flags is the condition-level source of
+// truth; risk_assessments is only the visit-level summary).
+model RiskFlag {
+  id               String        @id @default(uuid()) @map("risk_flag_id")
+  riskAssessmentId String        @map("risk_assessment_id")
+  riskConditionId  String        @map("risk_condition_id")
+  // lookup_values.lookup_value_id (category RISK_GRADE) — owned by
+  // auth-service, no cross-service relation.
+  riskGradeLookupValueId String  @map("risk_grade_lookup_value_id")
+  observedValueJson Json?        @map("observed_value_json")
+  isReferralTrigger Boolean      @default(false) @map("is_referral_trigger")
+  isEducationTrigger Boolean     @default(false) @map("is_education_trigger")
+  isHrVisitTrigger  Boolean      @default(false) @map("is_hr_visit_trigger")
+  createdAt         DateTime     @default(now()) @map("created_at")
+  createdByUserId   String?      @map("created_by_user_id")
+  updatedAt         DateTime     @updatedAt @map("updated_at")
+  updatedByUserId   String?      @map("updated_by_user_id")
+
+  riskAssessment RiskAssessment @relation(fields: [riskAssessmentId], references: [id])
+  riskCondition  RiskCondition  @relation(fields: [riskConditionId], references: [id])
+
+  @@map("risk_flags")
 }
 
 model RiskStateSnapshot {
@@ -201,7 +230,10 @@ model Referral {
   visitId                  String?                  @map("visit_id")
   // form_submissions.submission_id — owned by another service, no cross-service relation.
   sourceSubmissionId       String?                  @map("source_submission_id")
-  referralType             ReferralType             @map("referral_type")
+  // lookup_values.lookup_value_id (category REFERRAL_TYPE) — owned by
+  // auth-service, no cross-service relation. Replaces the previous
+  // ReferralType Postgres enum (STANDARD/ACCOMPANIED — same value_codes).
+  referralTypeLookupValueId String                   @map("referral_type_lookup_value_id")
   referralDate             DateTime                 @map("referral_date") @db.Date
   triggerConditionListJson Json?                    @map("trigger_condition_list_json")
   facilityType             FacilityType?            @map("facility_type")
@@ -226,7 +258,9 @@ model Referral {
 model ReferralTriggerSource {
   id                 String   @id @default(uuid()) @map("referral_trigger_source_id")
   referralId         String   @map("referral_id")
-  // risk_flags.risk_flag_id — not modeled in this schema's scope, no cross-service relation.
+  // risk_flags.risk_flag_id — RiskFlag now exists in this schema (see below),
+  // but the relation is intentionally omitted here per the same reporting-
+  // only-reference scope as riskConditionId just below; kept as scalar.
   riskFlagId         String?  @map("risk_flag_id")
   // risk_conditions.risk_condition_id — same-service table, but relation intentionally
   // omitted per task scope (reporting-only reference); kept as scalar to mirror doc usage.

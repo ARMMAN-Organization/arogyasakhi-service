@@ -113,20 +113,29 @@ Include these bullets:
 
 ## Project\_registration\_targets
 
+_Combined definition — this table was previously defined 3 times in this document (this section, and Appendix A at two separate points) with differing column sets. Merged here into one definition carrying the union of every field that appeared in any version; no field from any version was dropped. Where two versions used different names for what appears to be the same concept (e.g. beneficiary\_type\_lookup\_id vs case\_type\_lookup\_id; registration\_target\_count vs registration\_target; status vs status\_lookup\_id), both names are kept as separate rows below pending explicit confirmation of which is authoritative._
+
 ##
 
-| Field                            | Description                                            |
-| -------------------------------- | ------------------------------------------------------ |
-| target\_id                       | Primary key                                            |
-| project\_id FK                   | Project for which target is defined                    |
-| geography\_unit\_id FK           | State/district/block/village/pada scope for the target |
-| beneficiary\_type\_lookup\_id FK | Mother/child/other beneficiary type                    |
-| target\_period\_type             | MONTHLY, QUARTERLY, ANNUAL, PROJECT\_PERIOD            |
-| target\_period\_start            | Target period start date                               |
-| target\_period\_end              | Target period end date                                 |
-| registration\_target\_count      | Expected registration target                           |
-| status                           | ACTIVE/INACTIVE                                        |
-| created\_at, updated\_at         | Audit timestamps                                       |
+| Field                            | Data type   | Constraints                                       | Description                                                                             |
+| -------------------------------- | ----------- | ------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| target\_id                       | UUID        | PK NOT NULL                                       | Primary key                                                                             |
+| funder\_id FK                    | UUID        | NULL FK \-\> funders.funder\_id                   | Optional if target is funder-level                                                      |
+| project\_id FK                   | UUID        | NOT NULL FK \-\> projects.project\_id             | Project for which target is defined                                                     |
+| geography\_unit\_id FK           | UUID        | NULL FK \-\> geography\_units.geography\_unit\_id | State/district/block/village/pada scope for the target; NULL means project-level target |
+| beneficiary\_type\_lookup\_id FK | UUID        | NULL FK \-\> lookup\_values.lookup\_value\_id     | Mother/child/other beneficiary type                                                     |
+| case\_type\_lookup\_id FK        | UUID        | NULL FK \-\> lookup\_values.lookup\_value\_id     | Mother/Child target split if required; NULL means combined target                       |
+| target\_period\_type             | ENUM        | NULL                                              | MONTHLY, QUARTERLY, ANNUAL, PROJECT\_PERIOD                                             |
+| target\_period\_start            | DATE        | NOT NULL                                          | Target period start date                                                                |
+| target\_period\_end              | DATE        | NOT NULL                                          | Target period end date                                                                  |
+| registration\_target\_count      | INT         | NULL CHECK \>= 0                                  | Expected registration target                                                            |
+| registration\_target             | INT         | NULL CHECK \>= 0                                  | Planned registration count                                                              |
+| status                           | ENUM        | NULL                                              | ACTIVE/INACTIVE                                                                         |
+| status\_lookup\_id FK            | UUID        | NULL FK \-\> lookup\_values.lookup\_value\_id     | Active, inactive, revised, etc.                                                         |
+| created\_at                      | DATETIME(3) | NOT NULL DEFAULT CURRENT\_TIMESTAMP(3)            | Audit timestamp                                                                         |
+| created\_by\_user\_id            | UUID        | NULL FK \-\> users.user\_id                       | Audit user reference                                                                    |
+| updated\_at                      | DATETIME(3) | NOT NULL DEFAULT CURRENT\_TIMESTAMP(3) ON UPDATE  | Audit timestamp                                                                         |
+| updated\_by\_user\_id            | UUID        | NULL FK \-\> users.user\_id                       | Audit user reference                                                                    |
 
 ##
 
@@ -495,19 +504,7 @@ _A program/project implementation year or funding unit._
 
 ### **Project\_registration\_targets**
 
-### _Stores registration targets by project, geography, beneficiary type, and period._
-
-| Column                 | Data type   | Constraints                                       | Enum / notes                          |
-| :--------------------- | :---------- | :------------------------------------------------ | :------------------------------------ |
-| target\_id             | UUID        | PK NOT NULL                                       |                                       |
-| project\_id            | UUID        | NOT NULL FK \-\> projects.project\_id             |                                       |
-| geography\_unit\_id    | UUID        | NULL FK \-\> geography\_units.geography\_unit\_id | NULL means project-level target       |
-| case\_type\_lookup\_id | UUID        | NULL FK \-\> lookup\_values.lookup\_value\_id     | Mother/Child target split if required |
-| target\_period\_start  | DATE        | NOT NULL                                          |                                       |
-| target\_period\_end    | DATE        | NOT NULL                                          |                                       |
-| registration\_target   | INT         | NOT NULL CHECK \>= 0                              | Planned registration count            |
-| created\_at            | DATETIME(3) | NOT NULL DEFAULT CURRENT\_TIMESTAMP(3)            |                                       |
-| updated\_at            | DATETIME(3) | NOT NULL DEFAULT CURRENT\_TIMESTAMP(3) ON UPDATE  |                                       |
+_See the combined **Project_registration_targets** table definition earlier in this document (Access, Project, and Geography section) — this table was previously defined 3 times with differing column sets; all 3 have been merged into a single definition there._
 
 ### **geography\_units**
 
@@ -548,23 +545,7 @@ _Maps projects to included geographies._
 
 ### **Project\_registration\_targets**
 
-_Stores funder/project-wise registration targets, optionally split by geography, beneficiary type, and target period_
-
-| Column                 | Data type   | Constraints                                       | Enum / notes                                                |
-| :--------------------- | :---------- | :------------------------------------------------ | :---------------------------------------------------------- |
-| target\_id             | UUID        | PK NOT NULL                                       |                                                             |
-| funder\_id             | UUID        | NULL FK \-\> funders.funder\_id                   | Optional if target is funder-level.                         |
-| project\_id            | UUID        | NOT NULL FK \-\> projects.project\_id             | Project/implementation unit for the target.                 |
-| geography\_unit\_id    | UUID        | NULL FK \-\> geography\_units.geography\_unit\_id | NULL means target applies to whole project.                 |
-| case\_type\_lookup\_id | UUID        | NULL FK \-\> lookup\_values.lookup\_value\_id     | Mother/Child split if required. NULL means combined target. |
-| target\_period\_start  | DATE        | NOT NULL                                          | Target period start.                                        |
-| target\_period\_end    | DATE        | NOT NULL                                          | Target period end.                                          |
-| registration\_target   | INT         | NOT NULL CHECK \>= 0                              | Planned registration count.                                 |
-| status\_lookup\_id     | UUID        | NOT NULL FK \-\> lookup\_values.lookup\_value\_id | Active, inactive, revised, etc.                             |
-| created\_at            | DATETIME(3) | NOT NULL DEFAULT CURRENT\_TIMESTAMP(3)            |                                                             |
-| created\_by\_user\_id  | UUID        | NULL FK \-\> users.user\_id                       |                                                             |
-| updated\_at            | DATETIME(3) | NOT NULL DEFAULT CURRENT\_TIMESTAMP(3) ON UPDATE  |                                                             |
-| updated\_by\_user\_id  | UUID        | NULL FK \-\> users.user\_id                       |                                                             |
+_See the combined **Project_registration_targets** table definition earlier in this document (Access, Project, and Geography section) — this table was previously defined 3 times with differing column sets; all 3 have been merged into a single definition there._
 
 ### **sakhi\_assignments**
 

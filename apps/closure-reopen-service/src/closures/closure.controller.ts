@@ -20,7 +20,9 @@ const createClosureRequestSchema = createClosureSchema.extend({
     example: '123e4567-e89b-12d3-a456-426614174000',
   }),
   closureType: createClosureSchema.shape.closureType.openapi({ example: 'MEDICAL' }),
-  closureReason: createClosureSchema.shape.closureReason.openapi({ example: 'MISCARRIAGE' }),
+  closureReasonLookupValueId: createClosureSchema.shape.closureReasonLookupValueId.openapi({
+    example: '3fa85f64-5717-4562-b3fc-2c963f66afa6',
+  }),
   closureDate: createClosureSchema.shape.closureDate.openapi({
     example: '2026-07-01T00:00:00.000Z',
   }),
@@ -35,16 +37,7 @@ const closureSchema = z.object({
   id: z.string().uuid(),
   beneficiaryId: z.string().uuid(),
   closureType: z.enum(['MEDICAL', 'NON_MEDICAL', 'PROGRAM_COMPLETION']),
-  closureReason: z.enum([
-    'MISCARRIAGE',
-    'ABORTION',
-    'MATERNAL_DEATH',
-    'INFANT_OR_CHILD_DEATH',
-    'MIGRATION',
-    'WITHDRAWAL',
-    'PROGRAM_CYCLE_COMPLETED',
-    'OTHER',
-  ]),
+  closureReasonLookupValueId: z.string().uuid(),
   eventDate: z.string().datetime().nullable(),
   closureDate: z.string().datetime(),
   submittedByUserId: z.string().uuid(),

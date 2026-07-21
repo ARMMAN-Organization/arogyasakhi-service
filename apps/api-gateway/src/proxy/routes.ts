@@ -44,6 +44,14 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
   // rather than parsing which /auth/* sub-path needs a token.
   { prefix: '/auth', target: appConfig.AUTH_SERVICE_URL, requiresAuth: false },
   { prefix: '/me', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
+  // auth-service also owns user + project/funder + lookup master-data routes.
+  // Each enforces its own role guard downstream (requireRoles), so the gateway
+  // just needs to verify a token and forward — without these entries the
+  // endpoints return a gateway 404 despite appearing in the aggregated docs.
+  { prefix: '/users', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
+  { prefix: '/projects', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
+  { prefix: '/funders', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
+  { prefix: '/lookups', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
   // NOTE: `/docs` is NOT proxied here. The gateway serves ONE aggregated
   // Swagger UI at `/api/v1/docs` (see docs/docs.controller.ts) that merges
   // every service's own `/docs.json` into a single page — there is no single
@@ -51,6 +59,11 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
   // replaced by the unified view.
   { prefix: '/beneficiaries', target: appConfig.BENEFICIARY_SERVICE_URL, requiresAuth: true },
   { prefix: '/visits', target: appConfig.VISIT_FORM_SERVICE_URL, requiresAuth: true },
+  { prefix: '/forms', target: appConfig.VISIT_FORM_SERVICE_URL, requiresAuth: true },
+  // Admin form-authoring routes (create/patch/publish draft versions) live
+  // under /admin/forms in visit-form-service — a distinct prefix from /forms,
+  // so it needs its own gateway entry or those 3 endpoints are unreachable.
+  { prefix: '/admin/forms', target: appConfig.VISIT_FORM_SERVICE_URL, requiresAuth: true },
   { prefix: '/rules', target: appConfig.RULES_SERVICE_URL, requiresAuth: true },
   { prefix: '/referrals', target: appConfig.RISK_REFERRAL_SERVICE_URL, requiresAuth: true },
   { prefix: '/closures', target: appConfig.CLOSURE_REOPEN_SERVICE_URL, requiresAuth: true },

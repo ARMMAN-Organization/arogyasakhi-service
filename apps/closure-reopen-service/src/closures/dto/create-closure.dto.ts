@@ -12,16 +12,11 @@ export const createClosureSchema = z
   .object({
     beneficiaryId: z.string().uuid(),
     closureType: z.enum(['MEDICAL', 'NON_MEDICAL', 'PROGRAM_COMPLETION']),
-    closureReason: z.enum([
-      'MISCARRIAGE',
-      'ABORTION',
-      'MATERNAL_DEATH',
-      'INFANT_OR_CHILD_DEATH',
-      'MIGRATION',
-      'WITHDRAWAL',
-      'PROGRAM_CYCLE_COMPLETED',
-      'OTHER',
-    ]),
+    // lookup_values.lookup_value_id (category CLOSURE_REASON) — fetched via
+    // GET /lookups/CLOSURE_REASON (auth-service). Replaces the previous
+    // MISCARRIAGE/ABORTION/MATERNAL_DEATH/INFANT_OR_CHILD_DEATH/MIGRATION/
+    // WITHDRAWAL/PROGRAM_CYCLE_COMPLETED/OTHER Postgres enum.
+    closureReasonLookupValueId: z.string().uuid(),
     eventDate: z.coerce.date().optional(),
     closureDate: z.coerce.date(),
     submittedByUserId: z.string().uuid(),

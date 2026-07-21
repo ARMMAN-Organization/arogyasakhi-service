@@ -1,10 +1,7 @@
 import { ClosureService } from './closure.service';
 import type { ClosureRepository } from './closure.repository';
 import type { CreateClosureInput } from './dto/create-closure.dto';
-import type {
-  ClosureReason,
-  ClosureType,
-} from '../../../../node_modules/.prisma/client-closure-reopen-service';
+import type { ClosureType } from '../../../../node_modules/.prisma/client-closure-reopen-service';
 
 describe('ClosureService', () => {
   const repository = {
@@ -30,7 +27,7 @@ describe('ClosureService', () => {
         id: '11111111-1111-1111-1111-111111111111',
         beneficiaryId: '22222222-2222-2222-2222-222222222222',
         closureType: 'MEDICAL' as ClosureType,
-        closureReason: 'MISCARRIAGE' as ClosureReason,
+        closureReasonLookupValueId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
         eventDate: new Date('2026-06-01'),
         closureDate: new Date('2026-06-05'),
         submittedByUserId: '33333333-3333-3333-3333-333333333333',
@@ -53,7 +50,7 @@ describe('ClosureService', () => {
     const dto: CreateClosureInput = {
       beneficiaryId: '22222222-2222-2222-2222-222222222222',
       closureType: 'MEDICAL',
-      closureReason: 'MISCARRIAGE',
+      closureReasonLookupValueId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
       eventDate: new Date('2026-06-01'),
       closureDate: new Date('2026-06-05'),
       submittedByUserId: '33333333-3333-3333-3333-333333333333',
@@ -62,7 +59,7 @@ describe('ClosureService', () => {
       id: '11111111-1111-1111-1111-111111111111',
       beneficiaryId: dto.beneficiaryId,
       closureType: dto.closureType as ClosureType,
-      closureReason: dto.closureReason as ClosureReason,
+      closureReasonLookupValueId: dto.closureReasonLookupValueId,
       eventDate: dto.eventDate ?? null,
       closureDate: dto.closureDate,
       submittedByUserId: dto.submittedByUserId,
@@ -85,7 +82,7 @@ describe('ClosureService', () => {
     const dto: CreateClosureInput = {
       beneficiaryId: '22222222-2222-2222-2222-222222222222',
       closureType: 'MEDICAL',
-      closureReason: 'MISCARRIAGE',
+      closureReasonLookupValueId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
       closureDate: new Date('2026-06-05'),
       submittedByUserId: '33333333-3333-3333-3333-333333333333',
     };

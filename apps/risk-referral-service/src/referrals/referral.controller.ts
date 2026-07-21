@@ -19,7 +19,9 @@ const createReferralRequestSchema = createReferralSchema.extend({
   beneficiaryId: createReferralSchema.shape.beneficiaryId.openapi({
     example: '3f3a8b0e-6b1a-4f2a-8f0a-3b6a0d9c1e2f',
   }),
-  referralType: createReferralSchema.shape.referralType.openapi({ example: 'STANDARD' }),
+  referralTypeLookupValueId: createReferralSchema.shape.referralTypeLookupValueId.openapi({
+    example: '3fa85f64-5717-4562-b3fc-2c963f66afa6',
+  }),
   referralDate: createReferralSchema.shape.referralDate.openapi({
     example: '2026-07-16T00:00:00.000Z',
   }),
@@ -31,7 +33,7 @@ const referralSchema = z.object({
   beneficiaryId: z.string().uuid(),
   visitId: z.string().uuid().nullable(),
   sourceSubmissionId: z.string().uuid().nullable(),
-  referralType: z.enum(['STANDARD', 'ACCOMPANIED']),
+  referralTypeLookupValueId: z.string().uuid(),
   referralDate: z.string().datetime(),
   triggerConditionListJson: z.unknown().nullable(),
   facilityType: z.enum(['PUBLIC', 'PRIVATE', 'PHC', 'RH', 'DH', 'OTHER']).nullable(),

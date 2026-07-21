@@ -29,14 +29,11 @@ datasource db {
   url       = env("DATABASE_URL")
 }
 
+// Unified sex value set shared by beneficiary_pii and child_case_details —
+// previously two different enums (Sex had UNKNOWN, ChildSex had INTERSEX);
+// merged into one, keeping INTERSEX and dropping UNKNOWN. Matches the SEX
+// lookup category seeded in auth-service (apps/auth-service/prisma/seed.ts).
 enum Sex {
-  FEMALE
-  MALE
-  OTHER
-  UNKNOWN
-}
-
-enum ChildSex {
   FEMALE
   MALE
   OTHER
@@ -178,6 +175,11 @@ model BeneficiarySearchToken {
 
 model BeneficiaryCase {
   id                      String            @id @default(uuid()) @map("beneficiary_id")
+  // Client-generated on-device at enrollment-form submission time — lets a
+  // dropped-connection retry of POST /beneficiaries return the original case
+  // instead of creating a duplicate, matching the pattern form_submissions
+  // (local_submission_uuid) and visit_instances (local_visit_uuid) already use.
+  localCaseUuid           String            @unique @map("local_case_uuid") @db.VarChar(80)
   piiId                   String            @map("pii_id")
   // projects.project_id — owned by another service.
   projectId               String            @map("project_id")
@@ -249,7 +251,7 @@ model ChildCaseDetails {
   beneficiaryId       String               @unique @map("beneficiary_id")
   motherBeneficiaryId String?              @map("mother_beneficiary_id")
   dateOfBirth         DateTime             @map("date_of_birth") @db.Date
-  sex                 ChildSex?
+  sex                 Sex?
   birthWeightKg       Decimal?             @map("birth_weight_kg") @db.Decimal(5, 2)
   birthLengthCm       Decimal?             @map("birth_length_cm") @db.Decimal(5, 2)
   prematureFlag       Boolean?             @map("premature_flag")

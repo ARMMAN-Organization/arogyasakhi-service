@@ -1,10 +1,5 @@
 import { z } from 'zod';
-import {
-  API_CONSENT_STATUSES,
-  CASE_TYPES,
-  CHILD_SEXES,
-  MOTHER_SEXES,
-} from '../beneficiary.constants';
+import { API_CONSENT_STATUSES, CASE_TYPES, SEXES } from '../beneficiary.constants';
 
 /**
  * Validation schema for enrolling a beneficiary (mother or child), per SRS
@@ -14,20 +9,26 @@ import {
 const piiSchema = z
   .object({
     fullName: z.string().trim().min(1).max(200),
-    phone: z.string().trim().min(1).max(20).optional(),
+    // Required per SRS FR-S-2.1: "age, demographics, geographic details
+    // (state, district, block, PHC, sub-centre, village, pada), mobile
+    // numbers, RCH number." phone (mobile), dateOfBirth (age), the 7
+    // geography levels, and rchNumber are therefore required. alternatePhone,
+    // addressLine, sex, and talukaId (a govt-revenue unit distinct from the
+    // health "block") are not named in the required list — left optional.
+    phone: z.string().trim().min(1).max(20),
     alternatePhone: z.string().trim().min(1).max(20).optional(),
-    dateOfBirth: z.coerce.date().optional(),
-    sex: z.enum(MOTHER_SEXES).optional(),
+    dateOfBirth: z.coerce.date(),
+    sex: z.enum(SEXES).optional(),
     addressLine: z.string().trim().min(1).max(500).optional(),
-    villageId: z.string().uuid().optional(),
-    padaId: z.string().uuid().optional(),
-    healthSubCentreId: z.string().uuid().optional(),
-    phcId: z.string().uuid().optional(),
-    healthBlockId: z.string().uuid().optional(),
-    stateId: z.string().uuid().optional(),
-    districtId: z.string().uuid().optional(),
+    villageId: z.string().uuid(),
+    padaId: z.string().uuid(),
+    healthSubCentreId: z.string().uuid(),
+    phcId: z.string().uuid(),
+    healthBlockId: z.string().uuid(),
+    stateId: z.string().uuid(),
+    districtId: z.string().uuid(),
     talukaId: z.string().uuid().optional(),
-    rchNumber: z.string().trim().min(1).max(50).optional(),
+    rchNumber: z.string().trim().min(1).max(50),
   })
   .strict();
 
@@ -106,7 +107,7 @@ const motherDetailsSchema = z
 const childDetailsSchema = z
   .object({
     dateOfBirth: z.coerce.date(),
-    sex: z.enum(CHILD_SEXES).optional(),
+    sex: z.enum(SEXES).optional(),
     birthWeightKg: z.number().positive().max(10).optional(),
     birthLengthCm: z.number().positive().max(100).optional(),
     prematureFlag: z.boolean().optional(),
@@ -139,6 +140,11 @@ const consentSchema = z
 
 const caseSchema = z
   .object({
+    // Client-generated at enrollment-form submission time — lets a
+    // dropped-connection retry of POST /beneficiaries return the original
+    // case instead of creating a duplicate, matching localSubmissionUuid/
+    // localVisitUuid elsewhere in this codebase.
+    localCaseUuid: z.string().trim().min(1).max(80),
     projectId: z.string().uuid(),
     sakhiId: z.string().uuid(),
     caseType: z.enum(CASE_TYPES),
@@ -191,6 +197,21 @@ export const createBeneficiarySchema = z
           code: 'custom',
           path: ['motherDetails'],
           message: 'motherDetails must not be set when caseType is CHILD',
+        });
+      }
+
+      // pii.dateOfBirth and childDetails.dateOfBirth are both required and
+      // both describe the child's DOB for a CHILD case. Reject a mismatch so
+      // the two tables can't persist conflicting dates — downstream code
+      // (e.g. buildSearchTokens) treats them as the same value.
+      if (
+        data.childDetails &&
+        data.pii.dateOfBirth.getTime() !== data.childDetails.dateOfBirth.getTime()
+      ) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['childDetails', 'dateOfBirth'],
+          message: 'childDetails.dateOfBirth must match pii.dateOfBirth for a CHILD case',
         });
       }
 

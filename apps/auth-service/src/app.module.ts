@@ -15,6 +15,8 @@ import { appConfig } from './config/app-config';
 import { PrismaService } from './prisma/prisma.service';
 import { createHealthRouter } from './health/health.controller';
 import { createAuthModule } from './auth/auth.module';
+import { createProjectModule } from './projects/project.module';
+import { createLookupModule } from './lookups/lookup.module';
 import { buildAuthServiceOpenApiDocument } from './docs/openapi';
 
 // Re-export shared HTTP helpers so feature routers can import from a single place.
@@ -22,6 +24,7 @@ export {
   asyncHandler,
   ok,
   fail,
+  validate,
   validateBody,
   requireRoles,
   authenticate,
@@ -79,17 +82,29 @@ export function createApp(prisma: PrismaService, signer: TokenSigner, redis: Red
     appConfig.JWT_ACCESS_TOKEN_TTL,
     appConfig.JWT_REFRESH_TOKEN_TTL,
   );
+  const projectModule = createProjectModule(prisma, signer);
+  const lookupModule = createLookupModule(prisma, signer);
 
   // All routes live under the global `api/v1` prefix.
   const api = express.Router();
   api.use(createHealthRouter(prisma));
-  // Built from authModule.registry — every route registered via
+  // Built from every feature module's registry — every route registered via
   // createDocumentedRouter() above is already in the spec, so this can never
   // drift from what's actually mounted.
-  api.use(createSwaggerRouter(buildAuthServiceOpenApiDocument(authModule.registry)));
+  api.use(
+    createSwaggerRouter(
+      buildAuthServiceOpenApiDocument(
+        authModule.registry,
+        projectModule.registry,
+        lookupModule.registry,
+      ),
+    ),
+  );
   // Rate limit applies to every /auth/* route per the HLD (100 req/min/IP).
   api.use('/auth', createAuthRateLimiter(redis));
   api.use(authModule.router);
+  api.use(projectModule.router);
+  api.use(lookupModule.router);
   app.use('/api/v1', api);
 
   app.use(notFoundHandler);

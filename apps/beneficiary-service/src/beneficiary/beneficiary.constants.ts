@@ -34,13 +34,15 @@ export const SUMMARY_PHASES = [
 ] as const;
 export type SummaryPhase = (typeof SUMMARY_PHASES)[number];
 
-/** Sex value set for a mother/PII record. */
-export const MOTHER_SEXES = ['FEMALE', 'MALE', 'OTHER', 'UNKNOWN'] as const;
-export type MotherSex = (typeof MOTHER_SEXES)[number];
-
-/** Sex value set for a child record — differs from MOTHER_SEXES (INTERSEX vs UNKNOWN). */
-export const CHILD_SEXES = ['FEMALE', 'MALE', 'OTHER', 'INTERSEX'] as const;
-export type ChildSex = (typeof CHILD_SEXES)[number];
+/**
+ * Shared sex value set for both adult (mother/PII) and child records — matches
+ * the SEX lookup category seeded in auth-service (apps/auth-service/prisma/seed.ts).
+ * Previously two different sets per the ERD (mother side had UNKNOWN, child
+ * side had INTERSEX); unified to one set, keeping INTERSEX and dropping
+ * UNKNOWN.
+ */
+export const SEXES = ['FEMALE', 'MALE', 'OTHER', 'INTERSEX'] as const;
+export type Sex = (typeof SEXES)[number];
 
 /**
  * Consent statuses the API accepts/returns. Deliberately the GIVEN/REFUSED
