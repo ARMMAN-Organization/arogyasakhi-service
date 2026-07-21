@@ -9,7 +9,7 @@ export class ProjectRepository {
 
   findManyActiveProjects() {
     return this.prisma.project.findMany({
-      where: { isDeleted: false },
+      where: { isDeleted: false, status: 'ACTIVE' },
       orderBy: { createdAt: 'desc' },
       include: { funder: true },
     });
@@ -51,7 +51,7 @@ export class ProjectRepository {
 
   findManyFunders() {
     return this.prisma.funder.findMany({
-      where: { isDeleted: false },
+      where: { isDeleted: false, status: 'ACTIVE' },
       orderBy: { createdAt: 'desc' },
     });
   }

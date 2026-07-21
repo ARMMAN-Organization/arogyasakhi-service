@@ -42,7 +42,9 @@ describe('createBeneficiarySchema', () => {
 
     it('accepts INTERSEX for childDetails.sex', () => {
       const result = createBeneficiarySchema.safeParse({
-        pii: { ...basePii, fullName: 'Baby Doe' },
+        // For a CHILD case the beneficiary IS the child, so pii.dateOfBirth
+        // (the beneficiary's DOB) must equal childDetails.dateOfBirth.
+        pii: { ...basePii, fullName: 'Baby Doe', dateOfBirth: '2025-12-01' },
         case: { ...baseCase, caseType: 'CHILD' },
         childDetails: { dateOfBirth: '2025-12-01', sex: 'INTERSEX' },
         consent,
@@ -62,7 +64,7 @@ describe('createBeneficiarySchema', () => {
 
     it('rejects UNKNOWN for childDetails.sex', () => {
       const result = createBeneficiarySchema.safeParse({
-        pii: { ...basePii, fullName: 'Baby Doe' },
+        pii: { ...basePii, fullName: 'Baby Doe', dateOfBirth: '2025-12-01' },
         case: { ...baseCase, caseType: 'CHILD' },
         childDetails: { dateOfBirth: '2025-12-01', sex: 'UNKNOWN' },
         consent,
@@ -204,7 +206,7 @@ describe('createBeneficiarySchema', () => {
 
   it('rejects a child DOB more than 12 months old (CH4)', () => {
     const result = createBeneficiarySchema.safeParse({
-      pii: { ...basePii, fullName: 'Baby Doe' },
+      pii: { ...basePii, fullName: 'Baby Doe', dateOfBirth: '2020-01-01' },
       case: { ...baseCase, caseType: 'CHILD' },
       childDetails: { dateOfBirth: '2020-01-01' },
       consent,
@@ -216,7 +218,7 @@ describe('createBeneficiarySchema', () => {
     const future = new Date();
     future.setDate(future.getDate() + 5);
     const result = createBeneficiarySchema.safeParse({
-      pii: { ...basePii, fullName: 'Baby Doe' },
+      pii: { ...basePii, fullName: 'Baby Doe', dateOfBirth: future.toISOString() },
       case: { ...baseCase, caseType: 'CHILD' },
       childDetails: { dateOfBirth: future.toISOString() },
       consent,
@@ -226,7 +228,7 @@ describe('createBeneficiarySchema', () => {
 
   it('accepts a valid independent child enrollment (CH1)', () => {
     const result = createBeneficiarySchema.safeParse({
-      pii: { ...basePii, fullName: 'Baby Doe' },
+      pii: { ...basePii, fullName: 'Baby Doe', dateOfBirth: '2025-12-01' },
       case: { ...baseCase, caseType: 'CHILD' },
       childDetails: { dateOfBirth: '2025-12-01' },
       consent,
@@ -238,7 +240,7 @@ describe('createBeneficiarySchema', () => {
     const dob = new Date();
     dob.setDate(dob.getDate() - 100);
     const result = createBeneficiarySchema.safeParse({
-      pii: { ...basePii, fullName: 'Baby Doe' },
+      pii: { ...basePii, fullName: 'Baby Doe', dateOfBirth: dob.toISOString() },
       case: {
         ...baseCase,
         caseType: 'CHILD',
@@ -254,7 +256,7 @@ describe('createBeneficiarySchema', () => {
     const dob = new Date();
     dob.setDate(dob.getDate() - 200);
     const result = createBeneficiarySchema.safeParse({
-      pii: { ...basePii, fullName: 'Baby Doe' },
+      pii: { ...basePii, fullName: 'Baby Doe', dateOfBirth: dob.toISOString() },
       case: {
         ...baseCase,
         caseType: 'CHILD',
@@ -266,11 +268,21 @@ describe('createBeneficiarySchema', () => {
     expect(result.success).toBe(false);
   });
 
+  it('rejects a CHILD case where pii.dateOfBirth and childDetails.dateOfBirth differ (CH9)', () => {
+    const result = createBeneficiarySchema.safeParse({
+      pii: { ...basePii, fullName: 'Baby Doe', dateOfBirth: '2025-11-01' },
+      case: { ...baseCase, caseType: 'CHILD' },
+      childDetails: { dateOfBirth: '2025-12-01' },
+      consent,
+    });
+    expect(result.success).toBe(false);
+  });
+
   it('accepts an independent child within 365 days but past 183 (CH8)', () => {
     const dob = new Date();
     dob.setDate(dob.getDate() - 200);
     const result = createBeneficiarySchema.safeParse({
-      pii: { ...basePii, fullName: 'Baby Doe' },
+      pii: { ...basePii, fullName: 'Baby Doe', dateOfBirth: dob.toISOString() },
       case: { ...baseCase, caseType: 'CHILD' },
       childDetails: { dateOfBirth: dob.toISOString() },
       consent,

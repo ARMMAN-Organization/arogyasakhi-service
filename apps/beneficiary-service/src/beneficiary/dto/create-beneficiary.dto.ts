@@ -200,6 +200,21 @@ export const createBeneficiarySchema = z
         });
       }
 
+      // pii.dateOfBirth and childDetails.dateOfBirth are both required and
+      // both describe the child's DOB for a CHILD case. Reject a mismatch so
+      // the two tables can't persist conflicting dates — downstream code
+      // (e.g. buildSearchTokens) treats them as the same value.
+      if (
+        data.childDetails &&
+        data.pii.dateOfBirth.getTime() !== data.childDetails.dateOfBirth.getTime()
+      ) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['childDetails', 'dateOfBirth'],
+          message: 'childDetails.dateOfBirth must match pii.dateOfBirth for a CHILD case',
+        });
+      }
+
       // FR-S-2.3: mother-linked registrations get the tighter 0-183-day
       // window; independent registrations get 0-365. Skipped if dateOfBirth
       // is already flagged as future-dated by childDetailsSchema above, to
