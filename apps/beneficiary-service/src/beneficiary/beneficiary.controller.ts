@@ -230,7 +230,9 @@ export function createBeneficiaryRouter(service: BeneficiaryService) {
     validateBody(createBeneficiarySchema),
     asyncHandler(async (req, res, next) => {
       if (!req.user) return next(unauthorized());
-      const created = await service.create(req.body, req.user.id);
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const created = await service.create(req.body, req.user.id, authorizationHeader);
       res.status(201).json(ok(created));
     }),
   );

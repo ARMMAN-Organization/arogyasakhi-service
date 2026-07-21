@@ -15,6 +15,7 @@ import { buildSearchTokens, evaluateDuplicateMatch } from './beneficiary.duplica
 import { computeBmi, withDecryptedName } from './beneficiary.mapper';
 import type { BeneficiaryListFilters, BeneficiaryRepository } from './beneficiary.repository';
 import type { CreateBeneficiaryInput } from './dto/create-beneficiary.dto';
+import { resolveHealthBlockIdFromPhc } from '../geography/geography.client';
 
 const GESTATION_DAYS = 280;
 
@@ -67,8 +68,12 @@ export class BeneficiaryService {
   /**
    * Enrolls a mother or child beneficiary per SRS FR-S-2.1/2.3/2.4/2.5.
    * `capturedByUserId` is the authenticated caller (Sakhi) recording consent.
+   * `authorizationHeader` is the same caller's original bearer token,
+   * forwarded unchanged to resolve pii.healthBlockId server-side from
+   * pii.phcId (see geography.client.ts) — the mobile enrollment form has no
+   * field to capture Health Block itself.
    */
-  async create(dto: CreateBeneficiaryInput, capturedByUserId: string) {
+  async create(dto: CreateBeneficiaryInput, capturedByUserId: string, authorizationHeader: string) {
     // Idempotent replay: a dropped-connection retry resubmits the same
     // localCaseUuid the device generated for this enrollment. Return the
     // original case rather than re-running consent/duplicate/create logic —
@@ -117,6 +122,11 @@ export class BeneficiaryService {
     const journeyStartDate = dto.case.registrationDate;
     const currentPhase = dto.case.caseType === 'MOTHER' ? 'ANC' : 'NN';
 
+    // Mobile never sends pii.healthBlockId (no field for it on the enrollment
+    // form) — derive it server-side from pii.phcId's parent Health Block
+    // instead of persisting null for every case.
+    const healthBlockId = await resolveHealthBlockIdFromPhc(dto.pii.phcId, authorizationHeader);
+
     const created = await this.repository.createEnrollment({
       pii: {
         fullNameEnc: encryptPii(dto.pii.fullName),
@@ -128,7 +138,7 @@ export class BeneficiaryService {
         padaId: dto.pii.padaId ?? null,
         healthSubCentreId: dto.pii.healthSubCentreId ?? null,
         phcId: dto.pii.phcId ?? null,
-        healthBlockId: dto.pii.healthBlockId ?? null,
+        healthBlockId,
         dateOfBirth: dto.pii.dateOfBirth ?? null,
         sex: dto.pii.sex ?? null,
         addressLineEnc: dto.pii.addressLine ? encryptPii(dto.pii.addressLine) : null,
