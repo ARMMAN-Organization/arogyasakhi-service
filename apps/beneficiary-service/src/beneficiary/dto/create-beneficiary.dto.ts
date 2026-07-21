@@ -24,7 +24,13 @@ const piiSchema = z
     padaId: z.string().uuid(),
     healthSubCentreId: z.string().uuid(),
     phcId: z.string().uuid(),
-    healthBlockId: z.string().uuid(),
+    // Optional, not required: the mobile enrollment form has no field to
+    // capture this and always omitted it, so the server derives the real
+    // value from phcId's parent Health Block instead (see
+    // beneficiary.service.ts). Kept as an accepted-but-ignored optional
+    // field — not deleted from the schema — so a client still sending it
+    // during the transition isn't rejected by this schema's .strict().
+    healthBlockId: z.string().uuid().optional(),
     stateId: z.string().uuid(),
     districtId: z.string().uuid(),
     talukaId: z.string().uuid().optional(),

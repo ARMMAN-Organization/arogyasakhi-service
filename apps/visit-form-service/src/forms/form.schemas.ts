@@ -37,7 +37,7 @@ export const formSubmissionSchema = z.object({
   submittedByUserId: z.string().uuid().openapi({ example: 'ba9c28fa-35fc-44e5-947c-eeca811bc052' }),
   submittedAt: z.string().datetime().openapi({ example: '2026-07-20T10:15:00.000Z' }),
   localSubmissionUuid: z.string().openapi({ example: 'device-abc-submission-001' }),
-  formDataJson: z
+  formData: z
     .record(z.string(), z.unknown())
     .openapi({ example: { weightKg: 58, bpSystolic: 118 } }),
   validationStatus: z.enum(['VALID', 'INVALID', 'WARNING']).openapi({ example: 'VALID' }),

@@ -73,7 +73,7 @@ export function toApiFormSubmission<T extends FormSubmissionRow>(s: T) {
     submittedByUserId: s.submittedByUserId,
     submittedAt: s.submittedAt,
     localSubmissionUuid: s.localSubmissionUuid,
-    formDataJson: s.formDataJson,
+    formData: s.formDataJson,
     validationStatus: s.validationStatus,
     createdAt: s.createdAt,
     updatedAt: s.updatedAt,

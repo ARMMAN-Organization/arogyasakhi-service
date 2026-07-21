@@ -19,6 +19,12 @@ extendZodWithOpenApi(z);
  * - computedFrom: SRS Category 4 (auto-calculated fields that must not be
  *   manually entered) — closed set of the exact formulas SRS names.
  * - captureMode / requirePlaybackComplete: SRS Category 6 (media/consent gating).
+ * - section: client-side tab grouping (e.g. "Consent", "Personal Info",
+ *   "Health History"), restoring the old static enrollment screen's stepper
+ *   UX for the dynamic form. Plain string label; tab order on the client is
+ *   first-seen order in the field array, not a separate sort field. Fields
+ *   with no section fall into a client-rendered catch-all tab — no special
+ *   handling needed here beyond allowing the field to be absent.
  * Categories 1 (date rules) and 3 (cross-field, on validation_json — see
  * cross-field-rule.dto.ts) are the only other SRS-named categories; date
  * rules are deliberately NOT modeled here yet (see the forms API design doc
@@ -68,6 +74,7 @@ export const formFieldSchema = z
       .optional(),
     captureMode: z.enum(['LIVE_CAMERA_ONLY']).optional(),
     requirePlaybackComplete: z.boolean().optional(),
+    section: z.string().trim().min(1).optional(),
   })
   .strict();
 

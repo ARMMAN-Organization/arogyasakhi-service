@@ -83,7 +83,6 @@ describe('createBeneficiarySchema', () => {
       'padaId',
       'healthSubCentreId',
       'phcId',
-      'healthBlockId',
       'stateId',
       'districtId',
     ] as const;
@@ -103,6 +102,28 @@ describe('createBeneficiarySchema', () => {
     it('accepts a payload with all required PII fields present', () => {
       const result = createBeneficiarySchema.safeParse({
         pii: { ...basePii },
+        case: { ...baseCase, caseType: 'MOTHER' },
+        motherDetails: { lmpDate: '2025-10-01' },
+        consent,
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('accepts a payload with pii.healthBlockId omitted (mobile app has no field for it; server derives it from phcId)', () => {
+      const pii: Record<string, unknown> = { ...basePii };
+      delete pii.healthBlockId;
+      const result = createBeneficiarySchema.safeParse({
+        pii,
+        case: { ...baseCase, caseType: 'MOTHER' },
+        motherDetails: { lmpDate: '2025-10-01' },
+        consent,
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('still accepts pii.healthBlockId if an older client sends it (ignored, not rejected)', () => {
+      const result = createBeneficiarySchema.safeParse({
+        pii: { ...basePii, healthBlockId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' },
         case: { ...baseCase, caseType: 'MOTHER' },
         motherDetails: { lmpDate: '2025-10-01' },
         consent,
