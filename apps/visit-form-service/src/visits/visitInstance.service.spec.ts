@@ -27,6 +27,10 @@ describe('VisitInstanceService', () => {
     sakhiId: '33333333-3333-3333-3333-333333333333',
     localVisitUuid: 'local-visit-1',
     actualVisitDate: null,
+    // A row written after the enum→lookup migration: statusLookupValueId is
+    // set directly, statusCode is null (it only carries legacy enum values on
+    // rows migrated from the old column).
+    statusCode: null,
     statusLookupValueId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
     meetBeneficiaryFlag: null,
     notMetReason: null,
