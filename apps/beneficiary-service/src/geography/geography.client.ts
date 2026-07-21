@@ -1,5 +1,9 @@
 import { notFound, unprocessable } from '@armman/service-commons';
-import { appConfig } from '../config/app-config';
+
+// Read directly (not via appConfig) so importing this client doesn't pull in
+// app-config's full schema — that schema requires DATABASE_URL/PII keys with
+// no defaults, which would fail unit tests that never otherwise load config.
+const AUTH_SERVICE_BASE_URL = process.env.AUTH_SERVICE_BASE_URL ?? 'http://localhost:3000';
 
 interface GeographyUnit {
   geographyUnitId: string;
@@ -20,7 +24,7 @@ export async function resolveHealthBlockIdFromPhc(
   phcId: string,
   authorizationHeader: string,
 ): Promise<string> {
-  const url = `${appConfig.AUTH_SERVICE_BASE_URL}/api/v1/geography-units/${phcId}`;
+  const url = `${AUTH_SERVICE_BASE_URL}/api/v1/geography-units/${phcId}`;
   const res = await fetch(url, { headers: { Authorization: authorizationHeader } });
 
   if (res.status === 404) {
