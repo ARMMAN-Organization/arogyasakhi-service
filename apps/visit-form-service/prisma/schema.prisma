@@ -121,11 +121,16 @@ model VisitInstance {
   sakhiId             String              @map("sakhi_id")
   localVisitUuid      String              @unique @map("local_visit_uuid") @db.VarChar(80)
   actualVisitDate     DateTime?           @map("actual_visit_date") @db.Date
-  // lookup_values.lookup_value_id (category VISIT_STATUS) — owned by
-  // auth-service, no cross-service relation. Replaces the previous
-  // VisitInstanceStatus Postgres enum (STARTED/PENDING/MISSED/COMPLETED/
-  // DISCARDED — same value_codes, now admin-editable lookup rows).
-  statusLookupValueId String
+  // Transitional pair replacing the VisitInstanceStatus Postgres enum.
+  // statusCode carries the legacy enum value (STARTED/PENDING/MISSED/
+  // COMPLETED/DISCARDED) ONLY for rows migrated from the old column — it is
+  // null on rows written after the migration. statusLookupValueId holds the
+  // lookup_values.lookup_value_id (category VISIT_STATUS, owned by
+  // auth-service, no cross-service relation); new writes set it directly,
+  // legacy rows get it via the backfill. Nullable until the backfill has
+  // run; a later migration enforces NOT NULL once every row is populated.
+  statusCode          String?             @map("status_code")
+  statusLookupValueId String?             @map("status_lookup_value_id")
   meetBeneficiaryFlag Boolean?            @map("meet_beneficiary_flag")
   notMetReason        String?             @map("not_met_reason") @db.VarChar(255)
   completedAt         DateTime?           @map("completed_at")
@@ -147,10 +152,14 @@ model VisitInstance {
 model VisitStatusHistory {
   id              String               @id @default(uuid()) @map("visit_status_history_id")
   visitId         String               @map("visit_id")
-  // lookup_values.lookup_value_id (category VISIT_STATUS) — see
-  // VisitInstance.statusLookupValueId.
+  // Transitional pair — see VisitInstance.statusCode/statusLookupValueId.
+  // *_code carries the legacy enum value only for migrated rows (null on new
+  // writes); *_lookup_value_id (category VISIT_STATUS, auth-service) is
+  // nullable until the backfill populates it.
+  fromStatusCode          String?      @map("from_status_code")
   fromStatusLookupValueId String?      @map("from_status_lookup_value_id")
-  toStatusLookupValueId   String       @map("to_status_lookup_value_id")
+  toStatusCode            String?      @map("to_status_code")
+  toStatusLookupValueId   String?      @map("to_status_lookup_value_id")
   reasonCode      String?              @map("reason_code") @db.VarChar(80)
   // users.user_id — owned by auth-service, no cross-service relation.
   changedByUserId String               @map("changed_by_user_id")
