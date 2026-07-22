@@ -25,7 +25,9 @@ describe('BeneficiaryService', () => {
   // All SRS FR-S-2.1 required PII fields present (phone, dob, the 7 geography
   // levels, rchNumber). Geography ids are uuid-shaped to satisfy the type.
   const fullPii = {
-    fullName: 'Jane Doe',
+    firstName: 'Jane',
+    middleName: undefined,
+    lastName: 'Doe',
     phone: '9876543210',
     dateOfBirth: new Date('1995-05-05'),
     villageId: '66666666-6666-6666-6666-666666666666',
@@ -62,7 +64,7 @@ describe('BeneficiaryService', () => {
   };
 
   const baseChildInput: CreateBeneficiaryInput = {
-    pii: { ...fullPii, fullName: 'Baby Doe' },
+    pii: { ...fullPii, firstName: 'Baby', lastName: 'Doe' },
     case: {
       localCaseUuid: 'local-case-uuid-child-1',
       projectId: '11111111-1111-1111-1111-111111111111',

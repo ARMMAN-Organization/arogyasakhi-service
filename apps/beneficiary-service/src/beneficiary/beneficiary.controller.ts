@@ -209,7 +209,7 @@ export function createBeneficiaryRouter(service: BeneficiaryService) {
           description: 'Beneficiary case created',
           schema: envelope(beneficiaryCaseDetailSchema),
         },
-        400: errorResponse(400, { message: 'pii.fullName: Required' }),
+        400: errorResponse(400, { message: 'pii.firstName: Required' }),
         401: errorResponse(401),
         403: errorResponse(403, {
           description: 'Forbidden — caller role not permitted (SAKHI only)',

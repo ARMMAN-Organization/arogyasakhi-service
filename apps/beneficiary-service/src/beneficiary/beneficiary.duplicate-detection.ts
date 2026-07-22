@@ -18,12 +18,15 @@ export interface DuplicateMatch {
 }
 
 /** Builds the non-reversible search tokens used for duplicate detection. */
-export function buildSearchTokens(dto: CreateBeneficiaryInput): DuplicateSearchTokens {
+export function buildSearchTokens(
+  dto: CreateBeneficiaryInput,
+  fullName: string,
+): DuplicateSearchTokens {
   const geographyParts = [dto.pii.villageId, dto.pii.padaId].filter(Boolean).join('|');
   const dob = dto.case.caseType === 'CHILD' ? dto.childDetails?.dateOfBirth : dto.pii.dateOfBirth;
 
   return {
-    nameToken: hashForSearch(normalizeForSearch(dto.pii.fullName)),
+    nameToken: hashForSearch(normalizeForSearch(fullName)),
     caseTypeLookupId: dto.case.caseTypeLookupId,
     dobToken: dob ? hashForSearch(dob.toISOString().slice(0, 10)).toString('base64') : null,
     phoneHash: dto.pii.phone ? hashForSearch(normalizeForSearch(dto.pii.phone)) : null,

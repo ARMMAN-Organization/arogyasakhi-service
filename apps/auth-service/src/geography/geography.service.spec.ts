@@ -4,6 +4,7 @@ import type { GeographyRepository } from './geography.repository';
 describe('GeographyService', () => {
   const repository = {
     findById: jest.fn(),
+    findAncestors: jest.fn(),
   } as unknown as jest.Mocked<GeographyRepository>;
 
   let service: GeographyService;
@@ -43,6 +44,58 @@ describe('GeographyService', () => {
     it('throws 404 when the unit is not found', async () => {
       repository.findById.mockResolvedValue(null);
       await expect(service.getById('missing')).rejects.toMatchObject({ status: 404 });
+    });
+  });
+
+  describe('getAncestors', () => {
+    it('returns the chain (projected), ordered from the unit up to STATE', async () => {
+      repository.findAncestors.mockResolvedValue([
+        {
+          geographyUnitId: 'pada-1',
+          parentId: 'village-1',
+          geoType: 'PADA',
+          geoCode: 'PADA-001',
+          name: 'Sample Pada',
+          status: 'ACTIVE',
+          createdByUserId: 'u',
+        },
+        {
+          geographyUnitId: 'state-1',
+          parentId: null,
+          geoType: 'STATE',
+          geoCode: 'MH',
+          name: 'Maharashtra',
+          status: 'ACTIVE',
+          createdByUserId: 'u',
+        },
+      ] as never);
+
+      const result = await service.getAncestors('pada-1');
+
+      expect(result).toEqual([
+        {
+          geographyUnitId: 'pada-1',
+          parentId: 'village-1',
+          geoType: 'PADA',
+          geoCode: 'PADA-001',
+          name: 'Sample Pada',
+          status: 'ACTIVE',
+        },
+        {
+          geographyUnitId: 'state-1',
+          parentId: null,
+          geoType: 'STATE',
+          geoCode: 'MH',
+          name: 'Maharashtra',
+          status: 'ACTIVE',
+        },
+      ]);
+      expect(result[0]).not.toHaveProperty('createdByUserId');
+    });
+
+    it('throws 404 when the starting unit is not found', async () => {
+      repository.findAncestors.mockResolvedValue([]);
+      await expect(service.getAncestors('missing')).rejects.toMatchObject({ status: 404 });
     });
   });
 });

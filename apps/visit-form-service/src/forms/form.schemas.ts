@@ -9,6 +9,19 @@ export function envelope<T extends z.ZodTypeAny>(data: T) {
   return z.object({ success: z.literal(true), message: z.string(), data });
 }
 
+/**
+ * One level of the caller's geography chain — only the fields a client needs
+ * to map a level onto pii.<level>Id (geoType) and show to a user (name).
+ * parentId/geoCode/status are internal/display-only and dropped here.
+ */
+const geographyUnitSchema = z.object({
+  geographyUnitId: z.string().uuid().openapi({ example: '99999999-9999-9999-9999-999999999999' }),
+  geoType: z
+    .enum(['STATE', 'DISTRICT', 'BLOCK', 'PHC', 'SUBCENTRE', 'VILLAGE', 'PADA'])
+    .openapi({ example: 'PHC' }),
+  name: z.string().openapi({ example: 'Sample PHC' }),
+});
+
 /** Response shape for a form version (matches FormService.toApiFormVersion). */
 export const formVersionSchema = z.object({
   id: z.string().uuid().openapi({ example: '3fa85f64-5717-4562-b3fc-2c963f66afa6' }),
@@ -26,6 +39,13 @@ export const formVersionSchema = z.object({
   status: z.enum(['DRAFT', 'PUBLISHED', 'RETIRED']).openapi({ example: 'PUBLISHED' }),
   createdAt: z.string().datetime().openapi({ example: '2026-07-20T00:00:00.000Z' }),
   updatedAt: z.string().datetime().openapi({ example: '2026-07-20T00:00:00.000Z' }),
+  // The calling Sakhi's full geography chain (state/district/block/PHC/
+  // sub-centre/village/pada), ordered from her assigned unit up to STATE.
+  // Omitted entirely when the caller has no geographyUnitId assigned.
+  geography: z.array(geographyUnitSchema).optional().openapi({
+    description:
+      "The caller's geography chain, ordered from their assigned unit up to STATE. Omitted if the caller has no geography assigned.",
+  }),
 });
 
 /** Response shape for a form submission (matches FormService.toApiFormSubmission). */

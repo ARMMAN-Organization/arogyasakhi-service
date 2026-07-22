@@ -27,4 +27,11 @@ export class GeographyService {
     if (!unit) throw notFound('Geography unit not found.');
     return toApiGeographyUnit(unit as unknown as Record<string, unknown>);
   }
+
+  /** Returns `id`'s full ancestor chain, ordered from `id` itself up to STATE. */
+  async getAncestors(id: string) {
+    const chain = await this.repository.findAncestors(id);
+    if (!chain.length) throw notFound('Geography unit not found.');
+    return chain.map((u) => toApiGeographyUnit(u as unknown as Record<string, unknown>));
+  }
 }

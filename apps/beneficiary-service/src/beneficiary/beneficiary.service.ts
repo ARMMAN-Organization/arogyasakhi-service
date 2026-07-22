@@ -14,7 +14,7 @@ import type { BeneficiaryStatus, CaseType } from './beneficiary.constants';
 import { buildSearchTokens, evaluateDuplicateMatch } from './beneficiary.duplicate-detection';
 import { computeBmi, withDecryptedName } from './beneficiary.mapper';
 import type { BeneficiaryListFilters, BeneficiaryRepository } from './beneficiary.repository';
-import type { CreateBeneficiaryInput } from './dto/create-beneficiary.dto';
+import { deriveFullName, type CreateBeneficiaryInput } from './dto/create-beneficiary.dto';
 import { resolveHealthBlockIdFromPhc } from '../geography/geography.client';
 
 const GESTATION_DAYS = 280;
@@ -87,7 +87,8 @@ export class BeneficiaryService {
       throw unprocessable('Consent not received. Registration cannot proceed.');
     }
 
-    const searchTokens = buildSearchTokens(dto);
+    const fullName = deriveFullName(dto.pii.firstName, dto.pii.middleName, dto.pii.lastName);
+    const searchTokens = buildSearchTokens(dto, fullName);
 
     if (!dto.acknowledgeDuplicate) {
       const match = await this.repository.findDuplicateCandidate(searchTokens);
@@ -129,8 +130,8 @@ export class BeneficiaryService {
 
     const created = await this.repository.createEnrollment({
       pii: {
-        fullNameEnc: encryptPii(dto.pii.fullName),
-        fullNameSearchHash: hashForSearch(normalizeForSearch(dto.pii.fullName)),
+        fullNameEnc: encryptPii(fullName),
+        fullNameSearchHash: hashForSearch(normalizeForSearch(fullName)),
         phoneEnc: dto.pii.phone ? encryptPii(dto.pii.phone) : null,
         phoneSearchHash: dto.pii.phone ? hashForSearch(normalizeForSearch(dto.pii.phone)) : null,
         alternatePhoneEnc: dto.pii.alternatePhone ? encryptPii(dto.pii.alternatePhone) : null,

@@ -1,4 +1,4 @@
-import { createBeneficiarySchema } from './create-beneficiary.dto';
+import { createBeneficiarySchema, deriveFullName } from './create-beneficiary.dto';
 
 const baseCase = {
   localCaseUuid: 'local-case-uuid-1',
@@ -11,9 +11,10 @@ const baseCase = {
 
 // All SRS FR-S-2.1 required PII fields — spread into each test's pii so the
 // test isolates the one thing it's checking rather than tripping the
-// now-required-field validation. fullName overridden per test as needed.
+// now-required-field validation. firstName/lastName overridden per test as needed.
 const basePii = {
-  fullName: 'Jane Doe',
+  firstName: 'Jane',
+  lastName: 'Doe',
   phone: '9876543210',
   dateOfBirth: '1995-05-05',
   villageId: '66666666-6666-6666-6666-666666666666',
@@ -44,7 +45,7 @@ describe('createBeneficiarySchema', () => {
       const result = createBeneficiarySchema.safeParse({
         // For a CHILD case the beneficiary IS the child, so pii.dateOfBirth
         // (the beneficiary's DOB) must equal childDetails.dateOfBirth.
-        pii: { ...basePii, fullName: 'Baby Doe', dateOfBirth: '2025-12-01' },
+        pii: { ...basePii, firstName: 'Baby', lastName: 'Doe', dateOfBirth: '2025-12-01' },
         case: { ...baseCase, caseType: 'CHILD' },
         childDetails: { dateOfBirth: '2025-12-01', sex: 'INTERSEX' },
         consent,
@@ -64,7 +65,7 @@ describe('createBeneficiarySchema', () => {
 
     it('rejects UNKNOWN for childDetails.sex', () => {
       const result = createBeneficiarySchema.safeParse({
-        pii: { ...basePii, fullName: 'Baby Doe', dateOfBirth: '2025-12-01' },
+        pii: { ...basePii, firstName: 'Baby', lastName: 'Doe', dateOfBirth: '2025-12-01' },
         case: { ...baseCase, caseType: 'CHILD' },
         childDetails: { dateOfBirth: '2025-12-01', sex: 'UNKNOWN' },
         consent,
@@ -76,9 +77,10 @@ describe('createBeneficiarySchema', () => {
   describe('required PII fields (FR-S-2.1)', () => {
     // Each removes one SRS-required field and expects rejection.
     const requiredPiiFields = [
+      'firstName',
+      'lastName',
       'phone',
       'dateOfBirth',
-      'rchNumber',
       'villageId',
       'padaId',
       'healthSubCentreId',
@@ -129,6 +131,52 @@ describe('createBeneficiarySchema', () => {
         consent,
       });
       expect(result.success).toBe(true);
+    });
+
+    it('accepts a payload with pii.rchNumber omitted (form allows "not registered under RCH" / "card not available" / "status not known")', () => {
+      const pii: Record<string, unknown> = { ...basePii };
+      delete pii.rchNumber;
+      const result = createBeneficiarySchema.safeParse({
+        pii,
+        case: { ...baseCase, caseType: 'MOTHER' },
+        motherDetails: { lmpDate: '2025-10-01' },
+        consent,
+      });
+      expect(result.success).toBe(true);
+    });
+  });
+
+  describe('deriveFullName (from firstName/middleName/lastName)', () => {
+    it('joins firstName + middleName + lastName with single spaces', () => {
+      expect(deriveFullName('Jane', 'Q', 'Doe')).toBe('Jane Q Doe');
+    });
+
+    it('joins firstName + lastName without a double space when middleName is omitted', () => {
+      expect(deriveFullName('Jane', undefined, 'Doe')).toBe('Jane Doe');
+    });
+
+    it('rejects a payload missing pii.firstName or pii.lastName', () => {
+      const missingFirst: Record<string, unknown> = { ...basePii };
+      delete missingFirst.firstName;
+      expect(
+        createBeneficiarySchema.safeParse({
+          pii: missingFirst,
+          case: { ...baseCase, caseType: 'MOTHER' },
+          motherDetails: { lmpDate: '2025-10-01' },
+          consent,
+        }).success,
+      ).toBe(false);
+
+      const missingLast: Record<string, unknown> = { ...basePii };
+      delete missingLast.lastName;
+      expect(
+        createBeneficiarySchema.safeParse({
+          pii: missingLast,
+          case: { ...baseCase, caseType: 'MOTHER' },
+          motherDetails: { lmpDate: '2025-10-01' },
+          consent,
+        }).success,
+      ).toBe(false);
     });
   });
 
@@ -218,7 +266,7 @@ describe('createBeneficiarySchema', () => {
 
   it('rejects a CHILD case missing childDetails (CH3)', () => {
     const result = createBeneficiarySchema.safeParse({
-      pii: { ...basePii, fullName: 'Baby Doe' },
+      pii: { ...basePii, firstName: 'Baby', lastName: 'Doe' },
       case: { ...baseCase, caseType: 'CHILD' },
       consent,
     });
@@ -227,7 +275,7 @@ describe('createBeneficiarySchema', () => {
 
   it('rejects a child DOB more than 12 months old (CH4)', () => {
     const result = createBeneficiarySchema.safeParse({
-      pii: { ...basePii, fullName: 'Baby Doe', dateOfBirth: '2020-01-01' },
+      pii: { ...basePii, firstName: 'Baby', lastName: 'Doe', dateOfBirth: '2020-01-01' },
       case: { ...baseCase, caseType: 'CHILD' },
       childDetails: { dateOfBirth: '2020-01-01' },
       consent,
@@ -239,7 +287,7 @@ describe('createBeneficiarySchema', () => {
     const future = new Date();
     future.setDate(future.getDate() + 5);
     const result = createBeneficiarySchema.safeParse({
-      pii: { ...basePii, fullName: 'Baby Doe', dateOfBirth: future.toISOString() },
+      pii: { ...basePii, firstName: 'Baby', lastName: 'Doe', dateOfBirth: future.toISOString() },
       case: { ...baseCase, caseType: 'CHILD' },
       childDetails: { dateOfBirth: future.toISOString() },
       consent,
@@ -249,7 +297,7 @@ describe('createBeneficiarySchema', () => {
 
   it('accepts a valid independent child enrollment (CH1)', () => {
     const result = createBeneficiarySchema.safeParse({
-      pii: { ...basePii, fullName: 'Baby Doe', dateOfBirth: '2025-12-01' },
+      pii: { ...basePii, firstName: 'Baby', lastName: 'Doe', dateOfBirth: '2025-12-01' },
       case: { ...baseCase, caseType: 'CHILD' },
       childDetails: { dateOfBirth: '2025-12-01' },
       consent,
@@ -261,7 +309,7 @@ describe('createBeneficiarySchema', () => {
     const dob = new Date();
     dob.setDate(dob.getDate() - 100);
     const result = createBeneficiarySchema.safeParse({
-      pii: { ...basePii, fullName: 'Baby Doe', dateOfBirth: dob.toISOString() },
+      pii: { ...basePii, firstName: 'Baby', lastName: 'Doe', dateOfBirth: dob.toISOString() },
       case: {
         ...baseCase,
         caseType: 'CHILD',
@@ -277,7 +325,7 @@ describe('createBeneficiarySchema', () => {
     const dob = new Date();
     dob.setDate(dob.getDate() - 200);
     const result = createBeneficiarySchema.safeParse({
-      pii: { ...basePii, fullName: 'Baby Doe', dateOfBirth: dob.toISOString() },
+      pii: { ...basePii, firstName: 'Baby', lastName: 'Doe', dateOfBirth: dob.toISOString() },
       case: {
         ...baseCase,
         caseType: 'CHILD',
@@ -291,7 +339,7 @@ describe('createBeneficiarySchema', () => {
 
   it('rejects a CHILD case where pii.dateOfBirth and childDetails.dateOfBirth differ (CH9)', () => {
     const result = createBeneficiarySchema.safeParse({
-      pii: { ...basePii, fullName: 'Baby Doe', dateOfBirth: '2025-11-01' },
+      pii: { ...basePii, firstName: 'Baby', lastName: 'Doe', dateOfBirth: '2025-11-01' },
       case: { ...baseCase, caseType: 'CHILD' },
       childDetails: { dateOfBirth: '2025-12-01' },
       consent,
@@ -303,7 +351,7 @@ describe('createBeneficiarySchema', () => {
     const dob = new Date();
     dob.setDate(dob.getDate() - 200);
     const result = createBeneficiarySchema.safeParse({
-      pii: { ...basePii, fullName: 'Baby Doe', dateOfBirth: dob.toISOString() },
+      pii: { ...basePii, firstName: 'Baby', lastName: 'Doe', dateOfBirth: dob.toISOString() },
       case: { ...baseCase, caseType: 'CHILD' },
       childDetails: { dateOfBirth: dob.toISOString() },
       consent,

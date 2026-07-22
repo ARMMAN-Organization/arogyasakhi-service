@@ -6,6 +6,7 @@ import type { PatchFormVersionInput } from './dto/patch-form-version.dto';
 import type { CreateSubmissionInput } from './dto/create-submission.dto';
 import { computeChecksum, toApiFormSubmission, toApiFormVersion } from './form.mapper';
 import { validateSubmission } from './form-validation';
+import { getAncestorChain } from '../geography/geography.client';
 
 /**
  * Business logic for the dynamic-forms feature: fetching the active version,
@@ -15,10 +16,35 @@ import { validateSubmission } from './form-validation';
 export class FormService {
   constructor(private readonly repository: FormRepository) {}
 
-  async getActiveVersion(formCode: string, asOf: Date) {
+  /**
+   * `callerGeographyUnitId`/`authorizationHeader` are the caller's own scope
+   * and bearer token (from `req.user`/the inbound request, see
+   * form.controller.ts) — used only to attach the caller's geography chain to
+   * the response, not to scope which form version is returned. Omitted when
+   * the caller has no geographyUnitId assigned.
+   */
+  async getActiveVersion(
+    formCode: string,
+    asOf: Date,
+    callerGeographyUnitId: string | null,
+    authorizationHeader: string,
+  ) {
     const version = await this.repository.findActiveVersion(formCode, asOf);
     if (!version) throw notFound(`No published form version found for form code "${formCode}".`);
-    return toApiFormVersion(version);
+    const apiVersion = toApiFormVersion(version);
+
+    if (!callerGeographyUnitId) return apiVersion;
+
+    const chain = await getAncestorChain(callerGeographyUnitId, authorizationHeader);
+    // Only the fields a client needs to map a level onto pii.<level>Id
+    // (geoType) and show to a user (name) — parentId/geoCode/status are
+    // internal/display-only and dropped here.
+    const geography = chain.map((unit) => ({
+      geographyUnitId: unit.geographyUnitId,
+      geoType: unit.geoType,
+      name: unit.name,
+    }));
+    return { ...apiVersion, geography };
   }
 
   async createDraft(formCode: string, dto: CreateDraftVersionInput) {

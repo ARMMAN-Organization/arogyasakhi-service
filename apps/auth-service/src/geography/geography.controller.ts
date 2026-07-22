@@ -67,5 +67,28 @@ export function createGeographyRouter(service: GeographyService, signer: TokenSi
     }),
   );
 
+  doc.get(
+    '/geography-units/:id/ancestors',
+    {
+      summary: "Get one geography unit's full ancestor chain, up to STATE",
+      tags: ['Geography'],
+      params: geographyUnitIdParamsSchema,
+      responses: {
+        200: {
+          description: 'Ancestor chain, ordered from the requested unit up to STATE',
+          schema: envelope(z.array(geographyUnitSchema)),
+        },
+        401: errorResponse(401),
+        404: errorResponse(404, { message: 'Geography unit not found.' }),
+        500: errorResponse(500),
+      },
+    },
+    authenticate(signer),
+    validate(geographyUnitIdParamsSchema, 'params'),
+    asyncHandler(async (req, res) => {
+      res.json(ok(await service.getAncestors(req.params.id)));
+    }),
+  );
+
   return doc;
 }

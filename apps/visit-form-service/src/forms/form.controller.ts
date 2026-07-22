@@ -91,10 +91,21 @@ export function createFormRouter(service: FormService) {
     trustGatewayIdentity,
     validate(formCodeParamsSchema, 'params'),
     validate(activeVersionQuerySchema, 'query'),
-    asyncHandler(async (req, res) => {
+    asyncHandler(async (req, res, next) => {
+      // trustGatewayIdentity runs first and calls next(unauthorized()) if it
+      // fails, so req.user is always populated by the time this handler runs.
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+
       const { formCode } = req.params as unknown as { formCode: string };
       const { asOf } = req.query as unknown as { asOf?: Date };
-      const version = await service.getActiveVersion(formCode, asOf ?? new Date());
+      const version = await service.getActiveVersion(
+        formCode,
+        asOf ?? new Date(),
+        req.user.geographyUnitId,
+        authorizationHeader,
+      );
       res.json(ok(version));
     }),
   );
