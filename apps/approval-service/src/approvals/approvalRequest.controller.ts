@@ -38,7 +38,7 @@ const approvalRequestSchema = z.object({
   requestedByUserId: z.string().uuid(),
   approverUserId: z.string().uuid().nullable(),
   requestPayloadJson: z.unknown().nullable(),
-  status: z.enum(['PENDING', 'APPROVED', 'REJECTED', 'AUTO_LAPSED', 'CANCELLED']),
+  decisionStatusLookupId: z.string().uuid(),
   decisionPayloadJson: z.unknown().nullable(),
   decidedAt: z.string().datetime().nullable(),
   createdAt: z.string().datetime(),
