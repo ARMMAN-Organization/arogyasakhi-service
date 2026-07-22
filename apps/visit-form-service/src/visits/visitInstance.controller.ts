@@ -45,9 +45,15 @@ const visitInstanceSchema = z.object({
     .datetime()
     .nullable()
     .openapi({ example: '2026-07-20T00:00:00.000Z' }),
+  // Nullable until backfill-visit-status-lookup.ts has run in every env: the
+  // underlying column (schema.prisma) is String? for the transition window, so
+  // GET /visits can return null for legacy rows. Documenting it as non-null
+  // would mislead clients that trust this schema. Tighten to non-null in a
+  // follow-up once backfill is confirmed complete everywhere.
   statusLookupValueId: z
     .string()
     .uuid()
+    .nullable()
     .openapi({ example: '3fa85f64-5717-4562-b3fc-2c963f66afa6' }),
   meetBeneficiaryFlag: z.boolean().nullable().openapi({ example: true }),
   notMetReason: z.string().nullable().openapi({ example: null }),

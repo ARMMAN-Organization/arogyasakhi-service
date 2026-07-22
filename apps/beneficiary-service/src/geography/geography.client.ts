@@ -1,4 +1,4 @@
-import { notFound, unprocessable } from '@armman/service-commons';
+import { badGateway, unprocessable } from '@armman/service-commons';
 
 // Read directly (not via appConfig) so importing this client doesn't pull in
 // app-config's full schema — that schema requires DATABASE_URL/PII keys with
@@ -9,6 +9,40 @@ interface GeographyUnit {
   geographyUnitId: string;
   parentId: string | null;
   geoType: 'STATE' | 'DISTRICT' | 'BLOCK' | 'PHC' | 'SUBCENTRE' | 'VILLAGE' | 'PADA';
+  status: 'ACTIVE' | 'INACTIVE';
+}
+
+/** Fetches one geography unit through the gateway, mapping transport/HTTP
+ * outcomes to the right error class: a 404 is a client data problem (bad id),
+ * anything else non-ok — or a network failure — is an upstream-dependency
+ * problem (502), never a 404 to our own caller. */
+async function fetchGeographyUnit(
+  id: string,
+  authorizationHeader: string,
+  notFoundMessage: string,
+): Promise<GeographyUnit> {
+  let res: Response;
+  try {
+    res = await fetch(`${AUTH_SERVICE_BASE_URL}/api/v1/geography-units/${id}`, {
+      headers: { Authorization: authorizationHeader },
+    });
+  } catch {
+    // Network error / timeout reaching auth-service — infra problem, retryable.
+    throw badGateway('Unable to resolve geography — the auth service is unreachable.');
+  }
+
+  if (res.status === 404) {
+    throw unprocessable(notFoundMessage);
+  }
+  if (!res.ok) {
+    // 5xx or any other non-ok from auth-service is a dependency failure, not a
+    // "not found" — surface it as 502 so a Sakhi sees a retryable error and it
+    // doesn't pollute 404-rate monitoring during an auth-service blip.
+    throw badGateway('Unable to resolve geography — the auth service returned an error.');
+  }
+
+  const body = (await res.json()) as { data: GeographyUnit };
+  return body.data;
 }
 
 /**
@@ -24,19 +58,15 @@ export async function resolveHealthBlockIdFromPhc(
   phcId: string,
   authorizationHeader: string,
 ): Promise<string> {
-  const url = `${AUTH_SERVICE_BASE_URL}/api/v1/geography-units/${phcId}`;
-  const res = await fetch(url, { headers: { Authorization: authorizationHeader } });
+  const phc = await fetchGeographyUnit(
+    phcId,
+    authorizationHeader,
+    'pii.phcId does not refer to a known geography unit.',
+  );
 
-  if (res.status === 404) {
-    throw unprocessable('pii.phcId does not refer to a known geography unit.');
+  if (phc.status !== 'ACTIVE') {
+    throw unprocessable('pii.phcId refers to an inactive geography unit.');
   }
-  if (!res.ok) {
-    throw notFound('Unable to resolve pii.phcId — geography lookup failed.');
-  }
-
-  const body = (await res.json()) as { data: GeographyUnit };
-  const phc = body.data;
-
   if (phc.geoType !== 'PHC') {
     throw unprocessable('pii.phcId does not refer to a PHC-level geography unit.');
   }
@@ -44,5 +74,21 @@ export async function resolveHealthBlockIdFromPhc(
     throw unprocessable('The PHC referenced by pii.phcId has no parent Health Block on record.');
   }
 
-  return phc.parentId;
+  // Verify the parent is actually a BLOCK (Health Block), not silently trusting
+  // the one-level parentId link — a data-entry error in geography_units.parent_id
+  // should surface as a 422 rather than persisting a wrong healthBlockId. The
+  // parent lookup also enforces active + existence via fetchGeographyUnit.
+  const parent = await fetchGeographyUnit(
+    phc.parentId,
+    authorizationHeader,
+    'The Health Block referenced by the PHC does not exist.',
+  );
+  if (parent.status !== 'ACTIVE') {
+    throw unprocessable('The Health Block referenced by the PHC is inactive.');
+  }
+  if (parent.geoType !== 'BLOCK') {
+    throw unprocessable('The parent of pii.phcId is not a Health Block (BLOCK) unit.');
+  }
+
+  return parent.geographyUnitId;
 }

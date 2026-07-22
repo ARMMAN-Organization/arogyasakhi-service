@@ -240,10 +240,14 @@ export const createBeneficiarySchema = z
       // pii.dateOfBirth and childDetails.dateOfBirth are both required and
       // both describe the child's DOB for a CHILD case. Reject a mismatch so
       // the two tables can't persist conflicting dates — downstream code
-      // (e.g. buildSearchTokens) treats them as the same value.
+      // (e.g. buildSearchTokens) treats them as the same value. Compared on
+      // the calendar day (YYYY-MM-DD), matching beneficiary.duplicate-detection.ts,
+      // so a same-date pair with differing time-of-day components (e.g. from a
+      // date-only picker vs. a full ISO timestamp) doesn't spuriously fail.
       if (
         data.childDetails &&
-        data.pii.dateOfBirth.getTime() !== data.childDetails.dateOfBirth.getTime()
+        data.pii.dateOfBirth.toISOString().slice(0, 10) !==
+          data.childDetails.dateOfBirth.toISOString().slice(0, 10)
       ) {
         ctx.addIssue({
           code: 'custom',

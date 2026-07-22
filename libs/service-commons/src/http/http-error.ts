@@ -21,3 +21,7 @@ export const notFound = (message = 'Not found.'): HttpError => new HttpError(404
 export const conflict = (message: string): HttpError => new HttpError(409, message);
 export const unprocessable = (message: string, details?: Record<string, unknown>): HttpError =>
   new HttpError(422, message, details);
+/** 502 — an upstream dependency this service calls failed or was unreachable
+ * (distinct from a 4xx caused by the client's own input). */
+export const badGateway = (message = 'Upstream service is unavailable.'): HttpError =>
+  new HttpError(502, message);

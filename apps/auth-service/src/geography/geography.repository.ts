@@ -6,7 +6,14 @@ export class GeographyRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   findById(id: string) {
-    return this.prisma.geographyUnit.findUnique({ where: { geographyUnitId: id } });
+    // Filter out soft-deleted rows, consistent with project.repository.ts and
+    // root CLAUDE.md §11 ("soft-delete where needed"). A soft-deleted PHC/Block
+    // must not be silently resolvable when deriving healthBlockId for a new
+    // beneficiary. findFirst (not findUnique) so the non-unique isDeleted filter
+    // can be applied alongside the id.
+    return this.prisma.geographyUnit.findFirst({
+      where: { geographyUnitId: id, isDeleted: false },
+    });
   }
 
   /**
@@ -20,8 +27,8 @@ export class GeographyRepository {
     let currentId: string | null = id;
 
     while (currentId) {
-      const unit: GeographyUnit | null = await this.prisma.geographyUnit.findUnique({
-        where: { geographyUnitId: currentId },
+      const unit: GeographyUnit | null = await this.prisma.geographyUnit.findFirst({
+        where: { geographyUnitId: currentId, isDeleted: false },
       });
       if (!unit) break;
       chain.push(unit);
