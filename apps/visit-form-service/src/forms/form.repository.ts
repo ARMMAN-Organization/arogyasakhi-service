@@ -1,4 +1,5 @@
 import type { PrismaService } from '../prisma/prisma.service';
+import type { FormAnswerRow } from './form.mapper';
 
 export interface CreateVersionData {
   formDefinitionId: string;
@@ -23,12 +24,17 @@ export interface CreateSubmissionData {
   localSubmissionUuid: string;
   formDataJson: unknown;
   validationStatus: 'VALID' | 'INVALID' | 'WARNING';
+  /**
+   * Normalized per-question rows decomposed from formDataJson (see
+   * buildFormAnswers). Written to form_answers in the same transaction as the
+   * submission so a submission can never persist without its answers.
+   */
+  formAnswers: FormAnswerRow[];
 }
 
 /**
- * Data access for form_definitions/form_versions/form_submissions — the
- * only tables this repository touches (forklift rule; form_answers is not
- * written yet, see forms API design doc §7).
+ * Data access for form_definitions/form_versions/form_submissions/form_answers
+ * — the only tables this repository touches (forklift rule).
  */
 export class FormRepository {
   constructor(private readonly prisma: PrismaService) {}
@@ -118,18 +124,42 @@ export class FormRepository {
     return this.prisma.formSubmission.findUnique({ where: { localSubmissionUuid } });
   }
 
+  /**
+   * Persists the submission and its normalized form_answers rows atomically:
+   * the submission and every answer row commit together or not at all, so the
+   * raw form_data_json and its per-question projection can never diverge.
+   */
   createSubmission(data: CreateSubmissionData) {
-    return this.prisma.formSubmission.create({
-      data: {
-        formVersionId: data.formVersionId,
-        beneficiaryId: data.beneficiaryId,
-        visitId: data.visitId,
-        submittedByUserId: data.submittedByUserId,
-        submittedAt: new Date(),
-        localSubmissionUuid: data.localSubmissionUuid,
-        formDataJson: data.formDataJson as never,
-        validationStatus: data.validationStatus,
-      },
+    return this.prisma.$transaction(async (tx) => {
+      const submission = await tx.formSubmission.create({
+        data: {
+          formVersionId: data.formVersionId,
+          beneficiaryId: data.beneficiaryId,
+          visitId: data.visitId,
+          submittedByUserId: data.submittedByUserId,
+          submittedAt: new Date(),
+          localSubmissionUuid: data.localSubmissionUuid,
+          formDataJson: data.formDataJson as never,
+          validationStatus: data.validationStatus,
+        },
+      });
+
+      if (data.formAnswers.length) {
+        await tx.formAnswer.createMany({
+          data: data.formAnswers.map((a) => ({
+            submissionId: submission.id,
+            fieldCode: a.fieldCode,
+            answerValueText: a.answerValueText,
+            answerValueNumber: a.answerValueNumber,
+            answerValueDate: a.answerValueDate,
+            answerValueBool: a.answerValueBool,
+            answerValueJson: a.answerValueJson as never,
+            isIndexed: a.isIndexed,
+          })),
+        });
+      }
+
+      return submission;
     });
   }
 }

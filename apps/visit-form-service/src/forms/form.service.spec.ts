@@ -530,5 +530,33 @@ describe('FormService', () => {
       );
       expect(result).toEqual({ id: 'sub-1' });
     });
+
+    it('decomposes formData into typed form_answers and passes them to the repository', () => {
+      repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+      repository.findVersionById.mockResolvedValue(publishedVersion as never);
+      repository.createSubmission.mockResolvedValue({ id: 'sub-1' } as never);
+
+      return service
+        .createSubmission(
+          'MOTHER_REGISTRATION',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: { phone_owner: 'SELF', bp_systolic: '120' },
+          },
+          'u1',
+        )
+        .then(() => {
+          const arg = repository.createSubmission.mock.calls[0][0];
+          expect(arg.formAnswers).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({ fieldCode: 'phone_owner', answerValueText: 'SELF' }),
+              // "120" for a number-typed field is coerced to a number column.
+              expect.objectContaining({ fieldCode: 'bp_systolic', answerValueNumber: 120 }),
+            ]),
+          );
+        });
+    });
   });
 });
