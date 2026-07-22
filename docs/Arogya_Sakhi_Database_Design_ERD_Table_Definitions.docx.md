@@ -187,7 +187,7 @@ _Combined definition — this table was previously defined 3 times in this docum
 
 | Table               | Purpose                                                                                                                                                                                         | PK                    | Key columns                                                                                                                                                                                                                                                                                                                                                  | Relationships                                                                                      |
 | :------------------ | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :-------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------- |
-| referrals           | Referral form and referral decision.                                                                                                                                                            | referral\_id          | beneficiary\_id FK, visit\_id FK, source\_submission\_id FK, referral\_type, visit\_referral\_once \[UNIQUE (visit\_id) where visit\_id IS NOT NULL\], referral\_date, trigger\_condition\_list\_json, facility\_type, facility\_name, status, valid\_till, supervisor\_approval\_status                                                                     | beneficiary\_cases, visit\_instances,form\_submissions, risk\_flags                                |
+| referrals           | Referral form and referral decision.                                                                                                                                                            | referral\_id          | beneficiary\_id FK, visit\_id NOT NULL FK; UNIQUE per visit \[ensures only one referral form per visit\], source\_submission\_id FK, referral\_type, referral\_date, trigger\_condition\_list\_json, facility\_type, facility\_name, status, valid\_till, supervisor\_approval\_status                                                                       | beneficiary\_cases, visit\_instances,form\_submissions, risk\_flags                                |
 | referral\_followups | Follow-up attempt after referral.                                                                                                                                                               | followup\_id          | referral\_id FK, followup\_date, visited\_facility\_flag, not\_visited\_reason, diagnosis, treatment\_given, outcome, case\_paper\_media\_id FK, followup\_status                                                                                                                                                                                            | referrals, media\_assets                                                                           |
 | closures            | Mother/child closure form and Supervisor review.                                                                                                                                                | closure\_id           | beneficiary\_id FK, closure\_type, closure\_reason, event\_date, closure\_date, submitted\_by\_user\_id FK, supervisor\_status, supervisor\_id FK, supervisor\_notes                                                                                                                                                                                         | beneficiary\_cases, users                                                                          |
 | reopen\_requests    | Reopen request for migration or closed-by-mistake cases.                                                                                                                                        | reopen\_request\_id   | beneficiary\_id FK, request\_reason, requested\_by\_user\_id FK, requested\_at, supervisor\_status, decided\_by\_user\_id FK, decided\_at                                                                                                                                                                                                                    | beneficiary\_cases, users                                                                          |
@@ -251,7 +251,7 @@ For analytics and reporting, the same beneficiary-level summary is also exposed 
 | Care journey                    | Index visit\_schedules(beneficiary\_id, scheduled\_date, status); visit\_instances(sakhi\_id, actual\_visit\_date, status); form\_submissions(beneficiary\_id, form\_definition\_id, submitted\_at).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | Risk and referral               | Index risk\_flags(risk\_condition\_id, risk\_grade); risk\_state\_snapshots(beneficiary\_id, as\_of\_date); referrals(beneficiary\_id, status, valid\_till); referral\_followups(referral\_id, followup\_date).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | Supervisor monitoring           | Index escalation\_events(assigned\_supervisor\_id, status, created\_at); approval\_requests(approver\_user\_id, status, request\_type); notifications(recipient\_user\_id, status, priority).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| Sync                            | Unique sync\_items(local\_entity\_uuid, entity\_type, operation) where possible; index sync\_batches(device\_id, started\_at, status).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Sync                            | Unique sync\_items(local\_entity\_uuid, entity\_type, operation) — holds because a retry UPDATEs the existing row (incrementing retry\_count, updating status/error\_code), never INSERTs a second row for the same triple; index sync\_batches(device\_id, started\_at, status).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | Audit                           | Append-only audit\_log with index(entity\_type, entity\_id, created\_at) and actor\_user\_id. Prevent update/delete at application layer.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | Reporting                       | ClickHouse partition facts by event month/date; order by project/geography/beneficiary/date to support dashboard filters.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 
@@ -603,16 +603,21 @@ _Shared PII record reusable across current and future ARMMAN programs._
 
 Stores non-reversible search tokens used for duplicate detection without decrypting PII.
 
-| Column                 | Data type    | Constraints                                         | Enum / notes                                  |
-| :--------------------- | :----------- | :-------------------------------------------------- | :-------------------------------------------- |
-| search\_token\_id      | UUID         | PK NOT NULL                                         |                                               |
-| beneficiary\_id        | UUID         | NOT NULL FK \-\> beneficiary\_cases.beneficiary\_id |                                               |
-| name\_token            | VARCHAR(128) | NULL                                                | Normalized non-reversible name token          |
-| dob\_token             | VARCHAR(128) | NULL                                                | Normalized DOB token                          |
-| lmp\_date\_token       | VARCHAR(128) | NULL                                                | Used for mother/pregnancy duplicate detection |
-| geography\_token       | VARCHAR(128) | NULL                                                | Village/pada or equivalent geography token    |
-| case\_type\_lookup\_id | UUID         | NOT NULL FK \-\> lookup\_values.lookup\_value\_id   | Mother/Child                                  |
-| created\_at            | DATETIME(3)  | NOT NULL                                            |                                               |
+| Column                 | Data type    | Constraints                                         | Enum / notes                                                                                                        |
+| :--------------------- | :----------- | :-------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------ |
+| search\_token\_id      | UUID         | PK NOT NULL                                         |                                                                                                                     |
+| beneficiary\_id        | UUID         | NOT NULL FK \-\> beneficiary\_cases.beneficiary\_id |                                                                                                                     |
+| name\_token            | VARCHAR(128) | NULL                                                | Normalized non-reversible name token                                                                                |
+| dob\_token             | VARCHAR(128) | NULL                                                | Normalized DOB token                                                                                                |
+| lmp\_date\_token       | VARCHAR(128) | NULL                                                | Used for mother/pregnancy duplicate detection                                                                       |
+| geography\_token       | VARCHAR(128) | NULL                                                | Village/pada or equivalent geography token                                                                          |
+| case\_type\_lookup\_id | UUID         | NOT NULL FK \-\> lookup\_values.lookup\_value\_id   | Mother/Child                                                                                                        |
+| created\_at            | DATETIME(3)  | NOT NULL DEFAULT CURRENT\_TIMESTAMP(3)              |                                                                                                                     |
+| created\_by\_user\_id  | UUID         | NULL FK \-\> users.user\_id                         |                                                                                                                     |
+| updated\_at            | DATETIME(3)  | NOT NULL DEFAULT CURRENT\_TIMESTAMP(3) ON UPDATE    |                                                                                                                     |
+| updated\_by\_user\_id  | UUID         | NULL FK \-\> users.user\_id                         |                                                                                                                     |
+| is\_deleted            | BOOLEAN      | NOT NULL DEFAULT FALSE                              | soft delete marker — a token row must be refreshed, not silently orphaned, when the underlying PII/name/DOB changes |
+| deleted\_at            | DATETIME(3)  | NULL                                                |                                                                                                                     |
 
 ### **states**
 
@@ -656,99 +661,135 @@ _District definitions with the district master values_
 
 _Talukas definitions with the talukas master values_
 
-| Column             | Data type    | Constraints                              | Enum / notes                     |
-| :----------------- | :----------- | :--------------------------------------- | :------------------------------- |
-| taluka\_id         | UUID         | PK NOT NULL                              |                                  |
-| district\_id       | UUID         | NOT NULL FK \-\> districts.district\_id  | Parent district                  |
-| taluka\_code       | VARCHAR(40)  | NOT NULL                                 | Govt/master code where available |
-| taluka\_name       | VARCHAR(160) | NOT NULL                                 |                                  |
-| status\_lookup\_id | UUID         | FK \-\> lookup\_values.lookup\_value\_id | Active/inactive                  |
-| created\_at        | DATETIME(3)  | NOT NULL                                 |                                  |
-| updated\_at        | DATETIME(3)  | NOT NULL                                 |                                  |
+| Column                | Data type    | Constraints                                      | Enum / notes                     |
+| :-------------------- | :----------- | :----------------------------------------------- | :------------------------------- |
+| taluka\_id            | UUID         | PK NOT NULL                                      |                                  |
+| district\_id          | UUID         | NOT NULL FK \-\> districts.district\_id          | Parent district                  |
+| taluka\_code          | VARCHAR(40)  | NOT NULL                                         | Govt/master code where available |
+| taluka\_name          | VARCHAR(160) | NOT NULL                                         |                                  |
+| status\_lookup\_id    | UUID         | FK \-\> lookup\_values.lookup\_value\_id         | Active/inactive                  |
+| created\_at           | DATETIME(3)  | NOT NULL DEFAULT CURRENT\_TIMESTAMP(3)           |                                  |
+| created\_by\_user\_id | UUID         | NULL FK \-\> users.user\_id                      |                                  |
+| updated\_at           | DATETIME(3)  | NOT NULL DEFAULT CURRENT\_TIMESTAMP(3) ON UPDATE |                                  |
+| updated\_by\_user\_id | UUID         | NULL FK \-\> users.user\_id                      |                                  |
+| is\_deleted           | BOOLEAN      | NOT NULL DEFAULT FALSE                           | soft delete marker               |
+| deleted\_at           | DATETIME(3)  | NULL                                             |                                  |
 
 ### **health\_blocks**
 
-| Column              | Data type    | Constraints                              | Enum / notes                  |
-| :------------------ | :----------- | :--------------------------------------- | :---------------------------- |
-| health\_block\_id   | UUID         | PK NOT NULL                              |                               |
-| district\_id        | UUID         | NOT NULL FK \-\> districts.district\_id  | Parent district               |
-| health\_block\_code | VARCHAR(40)  | NOT NULL                                 | Govt/MoH code where available |
-| health\_block\_name | VARCHAR(160) | NOT NULL                                 |                               |
-| status\_lookup\_id  | UUID         | FK \-\> lookup\_values.lookup\_value\_id | Active/inactive               |
-| created\_at         | DATETIME(3)  | NOT NULL                                 |                               |
-| updated\_at         | DATETIME(3)  | NOT NULL                                 |                               |
+| Column                | Data type    | Constraints                                      | Enum / notes                  |
+| :-------------------- | :----------- | :----------------------------------------------- | :---------------------------- |
+| health\_block\_id     | UUID         | PK NOT NULL                                      |                               |
+| district\_id          | UUID         | NOT NULL FK \-\> districts.district\_id          | Parent district               |
+| health\_block\_code   | VARCHAR(40)  | NOT NULL                                         | Govt/MoH code where available |
+| health\_block\_name   | VARCHAR(160) | NOT NULL                                         |                               |
+| status\_lookup\_id    | UUID         | FK \-\> lookup\_values.lookup\_value\_id         | Active/inactive               |
+| created\_at           | DATETIME(3)  | NOT NULL DEFAULT CURRENT\_TIMESTAMP(3)           |                               |
+| created\_by\_user\_id | UUID         | NULL FK \-\> users.user\_id                      |                               |
+| updated\_at           | DATETIME(3)  | NOT NULL DEFAULT CURRENT\_TIMESTAMP(3) ON UPDATE |                               |
+| updated\_by\_user\_id | UUID         | NULL FK \-\> users.user\_id                      |                               |
+| is\_deleted           | BOOLEAN      | NOT NULL DEFAULT FALSE                           | soft delete marker            |
+| deleted\_at           | DATETIME(3)  | NULL                                             |                               |
 
 ### **taluka\_health\_block\_mappings**
 
-| Column             | Data type | Constraints                                       | Enum / notes    |
-| :----------------- | :-------- | :------------------------------------------------ | :-------------- |
-| mapping\_id        | UUID      | PK NOT NULL                                       |                 |
-| taluka\_id         | UUID      | NOT NULL FK \-\> talukas.taluka\_id               |                 |
-| health\_block\_id  | UUID      | NOT NULL FK \-\> health\_blocks.health\_block\_id |                 |
-| status\_lookup\_id | UUID      | FK \-\> lookup\_values.lookup\_value\_id          | Active/inactive |
-| effective\_from    | DATE      | NULL                                              |                 |
-| effective\_to      | DATE      | NULL                                              |                 |
+| Column                | Data type   | Constraints                                       | Enum / notes       |
+| :-------------------- | :---------- | :------------------------------------------------ | :----------------- |
+| mapping\_id           | UUID        | PK NOT NULL                                       |                    |
+| taluka\_id            | UUID        | NOT NULL FK \-\> talukas.taluka\_id               |                    |
+| health\_block\_id     | UUID        | NOT NULL FK \-\> health\_blocks.health\_block\_id |                    |
+| status\_lookup\_id    | UUID        | FK \-\> lookup\_values.lookup\_value\_id          | Active/inactive    |
+| effective\_from       | DATE        | NULL                                              |                    |
+| effective\_to         | DATE        | NULL                                              |                    |
+| created\_at           | DATETIME(3) | NOT NULL DEFAULT CURRENT\_TIMESTAMP(3)            |                    |
+| created\_by\_user\_id | UUID        | NULL FK \-\> users.user\_id                       |                    |
+| updated\_at           | DATETIME(3) | NOT NULL DEFAULT CURRENT\_TIMESTAMP(3) ON UPDATE  |                    |
+| updated\_by\_user\_id | UUID        | NULL FK \-\> users.user\_id                       |                    |
+| is\_deleted           | BOOLEAN     | NOT NULL DEFAULT FALSE                            | soft delete marker |
+| deleted\_at           | DATETIME(3) | NULL                                              |                    |
 
 ###
 
 ### **phcs**
 
-| Column             | Data type    | Constraints                                       | Enum / notes                  |
-| :----------------- | :----------- | :------------------------------------------------ | :---------------------------- |
-| phc\_id            | UUID         | PK NOT NULL                                       |                               |
-| health\_block\_id  | UUID         | NOT NULL FK \-\> health\_blocks.health\_block\_id | Parent Health Block           |
-| phc\_code          | VARCHAR(40)  | NOT NULL                                          | Govt/MoH code where available |
-| phc\_name          | VARCHAR(160) | NOT NULL                                          | Primary Healthcare Centre     |
-| status\_lookup\_id | UUID         | FK \-\> lookup\_values.lookup\_value\_id          | Active/inactive               |
-| created\_at        | DATETIME(3)  | NOT NULL                                          |                               |
-| updated\_at        | DATETIME(3)  | NOT NULL                                          |                               |
+| Column                | Data type    | Constraints                                       | Enum / notes                  |
+| :-------------------- | :----------- | :------------------------------------------------ | :---------------------------- |
+| phc\_id               | UUID         | PK NOT NULL                                       |                               |
+| health\_block\_id     | UUID         | NOT NULL FK \-\> health\_blocks.health\_block\_id | Parent Health Block           |
+| phc\_code             | VARCHAR(40)  | NOT NULL                                          | Govt/MoH code where available |
+| phc\_name             | VARCHAR(160) | NOT NULL                                          | Primary Healthcare Centre     |
+| status\_lookup\_id    | UUID         | FK \-\> lookup\_values.lookup\_value\_id          | Active/inactive               |
+| created\_at           | DATETIME(3)  | NOT NULL DEFAULT CURRENT\_TIMESTAMP(3)            |                               |
+| created\_by\_user\_id | UUID         | NULL FK \-\> users.user\_id                       |                               |
+| updated\_at           | DATETIME(3)  | NOT NULL DEFAULT CURRENT\_TIMESTAMP(3) ON UPDATE  |                               |
+| updated\_by\_user\_id | UUID         | NULL FK \-\> users.user\_id                       |                               |
+| is\_deleted           | BOOLEAN      | NOT NULL DEFAULT FALSE                            | soft delete marker            |
+| deleted\_at           | DATETIME(3)  | NULL                                              |                               |
 
 ### **health\_sub\_centres**
 
-| Column                    | Data type    | Constraints                              | Enum / notes                  |
-| :------------------------ | :----------- | :--------------------------------------- | :---------------------------- |
-| health\_sub\_centre\_id   | UUID         | PK NOT NULL                              |                               |
-| phc\_id                   | UUID         | NOT NULL FK \-\> phcs.phc\_id            | Parent PHC                    |
-| health\_sub\_centre\_code | VARCHAR(40)  | NOT NULL                                 | Govt/MoH code where available |
-| health\_sub\_centre\_name | VARCHAR(160) | NOT NULL                                 |                               |
-| status\_lookup\_id        | UUID         | FK \-\> lookup\_values.lookup\_value\_id | Active/inactive               |
-| created\_at               | DATETIME(3)  | NOT NULL                                 |                               |
-| updated\_at               | DATETIME(3)  | NOT NULL                                 |                               |
+| Column                    | Data type    | Constraints                                      | Enum / notes                  |
+| :------------------------ | :----------- | :----------------------------------------------- | :---------------------------- |
+| health\_sub\_centre\_id   | UUID         | PK NOT NULL                                      |                               |
+| phc\_id                   | UUID         | NOT NULL FK \-\> phcs.phc\_id                    | Parent PHC                    |
+| health\_sub\_centre\_code | VARCHAR(40)  | NOT NULL                                         | Govt/MoH code where available |
+| health\_sub\_centre\_name | VARCHAR(160) | NOT NULL                                         |                               |
+| status\_lookup\_id        | UUID         | FK \-\> lookup\_values.lookup\_value\_id         | Active/inactive               |
+| created\_at               | DATETIME(3)  | NOT NULL DEFAULT CURRENT\_TIMESTAMP(3)           |                               |
+| created\_by\_user\_id     | UUID         | NULL FK \-\> users.user\_id                      |                               |
+| updated\_at               | DATETIME(3)  | NOT NULL DEFAULT CURRENT\_TIMESTAMP(3) ON UPDATE |                               |
+| updated\_by\_user\_id     | UUID         | NULL FK \-\> users.user\_id                      |                               |
+| is\_deleted               | BOOLEAN      | NOT NULL DEFAULT FALSE                           | soft delete marker            |
+| deleted\_at               | DATETIME(3)  | NULL                                             |                               |
 
 ### **villages**
 
-| Column             | Data type    | Constraints                              | Enum / notes                         |
-| :----------------- | :----------- | :--------------------------------------- | :----------------------------------- |
-| village\_id        | UUID         | PK NOT NULL                              |                                      |
-| taluka\_id         | UUID         | NOT NULL FK \-\> talukas.taluka\_id      | Administrative parent                |
-| village\_code      | VARCHAR(40)  | NOT NULL                                 | Govt/local body code where available |
-| village\_name      | VARCHAR(160) | NOT NULL                                 |                                      |
-| status\_lookup\_id | UUID         | FK \-\> lookup\_values.lookup\_value\_id | Active/inactive                      |
-| created\_at        | DATETIME(3)  | NOT NULL                                 |                                      |
-| updated\_at        | DATETIME(3)  | NOT NULL                                 |                                      |
+| Column                | Data type    | Constraints                                      | Enum / notes                         |
+| :-------------------- | :----------- | :----------------------------------------------- | :----------------------------------- |
+| village\_id           | UUID         | PK NOT NULL                                      |                                      |
+| taluka\_id            | UUID         | NOT NULL FK \-\> talukas.taluka\_id              | Administrative parent                |
+| village\_code         | VARCHAR(40)  | NOT NULL                                         | Govt/local body code where available |
+| village\_name         | VARCHAR(160) | NOT NULL                                         |                                      |
+| status\_lookup\_id    | UUID         | FK \-\> lookup\_values.lookup\_value\_id         | Active/inactive                      |
+| created\_at           | DATETIME(3)  | NOT NULL DEFAULT CURRENT\_TIMESTAMP(3)           |                                      |
+| created\_by\_user\_id | UUID         | NULL FK \-\> users.user\_id                      |                                      |
+| updated\_at           | DATETIME(3)  | NOT NULL DEFAULT CURRENT\_TIMESTAMP(3) ON UPDATE |                                      |
+| updated\_by\_user\_id | UUID         | NULL FK \-\> users.user\_id                      |                                      |
+| is\_deleted           | BOOLEAN      | NOT NULL DEFAULT FALSE                           | soft delete marker                   |
+| deleted\_at           | DATETIME(3)  | NULL                                             |                                      |
 
 ### **village\_health\_sub\_centre\_mappings**
 
-| Column                  | Data type | Constraints                                                   | Enum / notes    |
-| :---------------------- | :-------- | :------------------------------------------------------------ | :-------------- |
-| mapping\_id             | UUID      | PK NOT NULL                                                   |                 |
-| village\_id             | UUID      | NOT NULL FK \-\> villages.village\_id                         |                 |
-| health\_sub\_centre\_id | UUID      | NOT NULL FK \-\> health\_sub\_centres.health\_sub\_centre\_id |                 |
-| status\_lookup\_id      | UUID      | FK \-\> lookup\_values.lookup\_value\_id                      | Active/inactive |
-| effective\_from         | DATE      | NULL                                                          |                 |
-| effective\_to           | DATE      | NULL                                                          |                 |
+| Column                  | Data type   | Constraints                                                   | Enum / notes       |
+| :---------------------- | :---------- | :------------------------------------------------------------ | :----------------- |
+| mapping\_id             | UUID        | PK NOT NULL                                                   |                    |
+| village\_id             | UUID        | NOT NULL FK \-\> villages.village\_id                         |                    |
+| health\_sub\_centre\_id | UUID        | NOT NULL FK \-\> health\_sub\_centres.health\_sub\_centre\_id |                    |
+| status\_lookup\_id      | UUID        | FK \-\> lookup\_values.lookup\_value\_id                      | Active/inactive    |
+| effective\_from         | DATE        | NULL                                                          |                    |
+| effective\_to           | DATE        | NULL                                                          |                    |
+| created\_at             | DATETIME(3) | NOT NULL DEFAULT CURRENT\_TIMESTAMP(3)                        |                    |
+| created\_by\_user\_id   | UUID        | NULL FK \-\> users.user\_id                                   |                    |
+| updated\_at             | DATETIME(3) | NOT NULL DEFAULT CURRENT\_TIMESTAMP(3) ON UPDATE              |                    |
+| updated\_by\_user\_id   | UUID        | NULL FK \-\> users.user\_id                                   |                    |
+| is\_deleted             | BOOLEAN     | NOT NULL DEFAULT FALSE                                        | soft delete marker |
+| deleted\_at             | DATETIME(3) | NULL                                                          |                    |
 
 ### **padas**
 
-| Column             | Data type    | Constraints                              | Enum / notes                   |
-| :----------------- | :----------- | :--------------------------------------- | :----------------------------- |
-| pada\_id           | UUID         | PK NOT NULL                              |                                |
-| village\_id        | UUID         | NOT NULL FK \-\> villages.village\_id    | Parent village                 |
-| pada\_code         | VARCHAR(40)  | NULL                                     | Local hamlet code if available |
-| pada\_name         | VARCHAR(160) | NOT NULL                                 | Pada/hamlet name               |
-| status\_lookup\_id | UUID         | FK \-\> lookup\_values.lookup\_value\_id | Active/inactive                |
-| created\_at        | DATETIME(3)  | NOT NULL                                 |                                |
-| updated\_at        | DATETIME(3)  | NOT NULL                                 |                                |
+| Column                | Data type    | Constraints                                      | Enum / notes                   |
+| :-------------------- | :----------- | :----------------------------------------------- | :----------------------------- |
+| pada\_id              | UUID         | PK NOT NULL                                      |                                |
+| village\_id           | UUID         | NOT NULL FK \-\> villages.village\_id            | Parent village                 |
+| pada\_code            | VARCHAR(40)  | NULL                                             | Local hamlet code if available |
+| pada\_name            | VARCHAR(160) | NOT NULL                                         | Pada/hamlet name               |
+| status\_lookup\_id    | UUID         | FK \-\> lookup\_values.lookup\_value\_id         | Active/inactive                |
+| created\_at           | DATETIME(3)  | NOT NULL DEFAULT CURRENT\_TIMESTAMP(3)           |                                |
+| created\_by\_user\_id | UUID         | NULL FK \-\> users.user\_id                      |                                |
+| updated\_at           | DATETIME(3)  | NOT NULL DEFAULT CURRENT\_TIMESTAMP(3) ON UPDATE |                                |
+| updated\_by\_user\_id | UUID         | NULL FK \-\> users.user\_id                      |                                |
+| is\_deleted           | BOOLEAN      | NOT NULL DEFAULT FALSE                           | soft delete marker             |
+| deleted\_at           | DATETIME(3)  | NULL                                             |                                |
 
 ### **sakhi\_location\_assignments**
 
@@ -804,7 +845,7 @@ _All dropdown/select/radio options used in approved forms will be maintained thr
 
 ### **beneficiary\_cases**
 
-_One program care case for a mother or child._
+_One program care case for a mother or child. Application-enforced invariant (not a declared DB constraint): a beneficiary\_cases row has exactly one of mother\_case\_details or child\_case\_details, matching its own case\_type — never both, never neither. Enforced today at the application layer (case\_type drives which extension table is written at creation), not by a database-level CHECK/trigger._
 
 | Column                        | Data type   | Constraints                                       | Enum / notes                                                                                                                                 |
 | :---------------------------- | :---------- | :------------------------------------------------ | :------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1180,7 +1221,12 @@ _Uploaded file/media metadata._
 | followup\_id                  | UUID        | NOT NULL FK \-\> referral\_followups.followup\_id |                                                     |
 | media\_asset\_id              | UUID        | NOT NULL FK \-\> media\_assets.media\_asset\_id   |                                                     |
 | asset\_type\_lookup\_id       | UUID        | NOT NULL FK \-\> lookup\_values.lookup\_value\_id | Case paper, discharge summary, facility photo, etc. |
-| created\_at                   | DATETIME(3) | NOT NULL                                          |                                                     |
+| created\_at                   | DATETIME(3) | NOT NULL DEFAULT CURRENT\_TIMESTAMP(3)            |                                                     |
+| created\_by\_user\_id         | UUID        | NULL FK \-\> users.user\_id                       |                                                     |
+| updated\_at                   | DATETIME(3) | NOT NULL DEFAULT CURRENT\_TIMESTAMP(3) ON UPDATE  |                                                     |
+| updated\_by\_user\_id         | UUID        | NULL FK \-\> users.user\_id                       |                                                     |
+| is\_deleted                   | BOOLEAN     | NOT NULL DEFAULT FALSE                            | soft delete marker                                  |
+| deleted\_at                   | DATETIME(3) | NULL                                              |                                                     |
 
 ### **rule\_sets**
 
@@ -1351,7 +1397,12 @@ _Referral decision and referral form. trigger\_condition\_list\_json optional su
 | source\_submission\_id        | UUID         | NOT NULL FK \-\> form\_submissions.submission\_id | Form submission where the value/referral decision originated.      |
 | source\_field\_code           | VARCHAR(100) | NULL                                              | Form field/question code that contributed to the referral trigger. |
 | trigger\_reason               | VARCHAR(255) | NULL                                              | Human-readable trigger reason or rule output.                      |
-| created\_at                   | DATETIME(3)  | NOT NULL                                          | Record creation timestamp.                                         |
+| created\_at                   | DATETIME(3)  | NOT NULL DEFAULT CURRENT\_TIMESTAMP(3)            | Record creation timestamp.                                         |
+| created\_by\_user\_id         | UUID         | NULL FK \-\> users.user\_id                       |                                                                    |
+| updated\_at                   | DATETIME(3)  | NOT NULL DEFAULT CURRENT\_TIMESTAMP(3) ON UPDATE  |                                                                    |
+| updated\_by\_user\_id         | UUID         | NULL FK \-\> users.user\_id                       |                                                                    |
+| is\_deleted                   | BOOLEAN      | NOT NULL DEFAULT FALSE                            | soft delete marker                                                 |
+| deleted\_at                   | DATETIME(3)  | NULL                                              |                                                                    |
 
 ### **referral\_followups**
 
@@ -1539,24 +1590,24 @@ _Configurable rate master._
 
 _Atomic earning event._
 
-| Column                | Data type     | Constraints                                      | Enum / notes                                 |
-| :-------------------- | :------------ | :----------------------------------------------- | :------------------------------------------- |
-| incentive\_event\_id  | UUID          | PK NOT NULL                                      |                                              |
-| sakhi\_id             | UUID          | NOT NULL FK \-\> sakhi\_profiles.sakhi\_id       |                                              |
-| source\_entity\_type  | ENUM          | NOT NULL                                         | VISIT, REFERRAL, MEETING, TRAINING, RETAINER |
-| source\_entity\_id    | UUID          | NULL                                             |                                              |
-| event\_month          | DATE          | NOT NULL                                         | first day of month                           |
-| rate\_id              | UUID          | NOT NULL FK \-\> incentive\_rates.rate\_id       |                                              |
-| quantity              | DECIMAL(10,2) | NOT NULL DEFAULT 1                               |                                              |
-| amount\_inr           | DECIMAL(10,2) | NOT NULL                                         |                                              |
-| eligibility\_status   | ENUM          | NOT NULL                                         | ELIGIBLE, INELIGIBLE, PENDING, REVERSED      |
-| calculated\_at        | DATETIME(3)   | NOT NULL                                         |                                              |
-| created\_at           | DATETIME(3)   | NOT NULL DEFAULT CURRENT\_TIMESTAMP(3)           |                                              |
-| created\_by\_user\_id | UUID          | NULL FK \-\> users.user\_id                      |                                              |
-| updated\_at           | DATETIME(3)   | NOT NULL DEFAULT CURRENT\_TIMESTAMP(3) ON UPDATE |                                              |
-| updated\_by\_user\_id | UUID          | NULL FK \-\> users.user\_id                      |                                              |
-| is\_deleted           | BOOLEAN       | NOT NULL DEFAULT FALSE                           | soft delete marker                           |
-| deleted\_at           | DATETIME(3)   | NULL                                             |                                              |
+| Column                | Data type     | Constraints                                      | Enum / notes                                                                                                                                                                                                                                                                                      |
+| :-------------------- | :------------ | :----------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| incentive\_event\_id  | UUID          | PK NOT NULL                                      |                                                                                                                                                                                                                                                                                                   |
+| sakhi\_id             | UUID          | NOT NULL FK \-\> sakhi\_profiles.sakhi\_id       |                                                                                                                                                                                                                                                                                                   |
+| source\_entity\_type  | ENUM          | NOT NULL                                         | VISIT, REFERRAL, MEETING, TRAINING, RETAINER                                                                                                                                                                                                                                                      |
+| source\_entity\_id    | UUID          | NULL                                             | Polymorphic reference resolved by source\_entity\_type (VISIT/REFERRAL/MEETING/TRAINING/RETAINER) — no single DB-level FK is possible since it may point at 5 different tables. Same intentionally-FK-less pattern as media\_assets.linked\_entity\_id and approval\_requests.source\_entity\_id. |
+| event\_month          | DATE          | NOT NULL                                         | first day of month                                                                                                                                                                                                                                                                                |
+| rate\_id              | UUID          | NOT NULL FK \-\> incentive\_rates.rate\_id       |                                                                                                                                                                                                                                                                                                   |
+| quantity              | DECIMAL(10,2) | NOT NULL DEFAULT 1                               |                                                                                                                                                                                                                                                                                                   |
+| amount\_inr           | DECIMAL(10,2) | NOT NULL                                         |                                                                                                                                                                                                                                                                                                   |
+| eligibility\_status   | ENUM          | NOT NULL                                         | ELIGIBLE, INELIGIBLE, PENDING, REVERSED                                                                                                                                                                                                                                                           |
+| calculated\_at        | DATETIME(3)   | NOT NULL                                         |                                                                                                                                                                                                                                                                                                   |
+| created\_at           | DATETIME(3)   | NOT NULL DEFAULT CURRENT\_TIMESTAMP(3)           |                                                                                                                                                                                                                                                                                                   |
+| created\_by\_user\_id | UUID          | NULL FK \-\> users.user\_id                      |                                                                                                                                                                                                                                                                                                   |
+| updated\_at           | DATETIME(3)   | NOT NULL DEFAULT CURRENT\_TIMESTAMP(3) ON UPDATE |                                                                                                                                                                                                                                                                                                   |
+| updated\_by\_user\_id | UUID          | NULL FK \-\> users.user\_id                      |                                                                                                                                                                                                                                                                                                   |
+| is\_deleted           | BOOLEAN       | NOT NULL DEFAULT FALSE                           | soft delete marker                                                                                                                                                                                                                                                                                |
+| deleted\_at           | DATETIME(3)   | NULL                                             |                                                                                                                                                                                                                                                                                                   |
 
 ### **payout\_batches**
 
