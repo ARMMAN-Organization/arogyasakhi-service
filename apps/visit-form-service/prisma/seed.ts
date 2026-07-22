@@ -26,6 +26,13 @@ interface SeedField {
   required: boolean;
   lookup_category_code?: string;
   computedFrom?: string;
+  /** Client-side tab grouping (e.g. "Consent", "Personal Info", "Health
+   * History") restoring the old static enrollment stepper's UX for the
+   * dynamic form. Tab order on the client is first-seen order in this array.
+   * Mapping per mother-registration-static-fields-by-tab.md (the old
+   * EnrollmentViewModel/step composables) — LMP/EDD sit at the end of
+   * Personal Info in that flow, not in Health History. */
+  section?: string;
 }
 
 /**
@@ -52,25 +59,19 @@ const FORMS: {
     formName: 'Pregnant Woman Registration',
     entityType: 'MOTHER',
     fields: [
-      { question_code: 'lmp_date', label: 'LMP date', input_type: 'date', required: true },
-      {
-        question_code: 'edd_date',
-        label: 'EDD',
-        input_type: 'date',
-        required: false,
-        computedFrom: 'EDD_FROM_LMP',
-      },
       {
         question_code: 'beneficiary_address',
         label: 'Beneficiary address',
         input_type: 'text',
         required: false,
+        section: 'Personal Info',
       },
       {
         question_code: 'mobile_number',
         label: 'Mobile number',
         input_type: 'text',
         required: false,
+        section: 'Personal Info',
       },
       {
         question_code: 'phone_owner',
@@ -78,28 +79,71 @@ const FORMS: {
         input_type: 'select',
         required: false,
         lookup_category_code: 'PHONE_OWNER',
+        section: 'Personal Info',
       },
-      { question_code: 'gravida', label: 'Gravida', input_type: 'number', required: false },
-      { question_code: 'para', label: 'Para', input_type: 'number', required: false },
+      {
+        question_code: 'lmp_date',
+        label: 'LMP date',
+        input_type: 'date',
+        required: true,
+        section: 'Personal Info',
+      },
+      {
+        question_code: 'edd_date',
+        label: 'EDD',
+        input_type: 'date',
+        required: false,
+        computedFrom: 'EDD_FROM_LMP',
+        section: 'Personal Info',
+      },
+      {
+        question_code: 'gravida',
+        label: 'Gravida',
+        input_type: 'number',
+        required: false,
+        section: 'Health History',
+      },
+      {
+        question_code: 'para',
+        label: 'Para',
+        input_type: 'number',
+        required: false,
+        section: 'Health History',
+      },
       {
         question_code: 'living_children',
         label: 'Living children',
         input_type: 'number',
         required: false,
+        section: 'Health History',
       },
-      { question_code: 'abortions', label: 'Abortions', input_type: 'number', required: false },
-      { question_code: 'stillbirths', label: 'Stillbirths', input_type: 'number', required: false },
+      {
+        question_code: 'abortions',
+        label: 'Abortions',
+        input_type: 'number',
+        required: false,
+        section: 'Health History',
+      },
+      {
+        question_code: 'stillbirths',
+        label: 'Stillbirths',
+        input_type: 'number',
+        required: false,
+        section: 'Health History',
+      },
       {
         question_code: 'dead_children',
         label: 'Dead children',
         input_type: 'number',
         required: false,
+        section: 'Health History',
       },
       {
         question_code: 'sickle_cell_status',
         label: 'Sickle Cell status',
         input_type: 'text',
         required: false,
+        section: 'Health History',
       },
     ],
   },
@@ -113,24 +157,28 @@ const FORMS: {
         label: 'Caregiver name',
         input_type: 'text',
         required: true,
+        section: 'Personal Info',
       },
       {
         question_code: 'mother_date_of_birth',
         label: 'Mother date of birth',
         input_type: 'date',
         required: false,
+        section: 'Personal Info',
       },
       {
         question_code: 'beneficiary_address',
         label: 'Beneficiary address',
         input_type: 'text',
         required: false,
+        section: 'Personal Info',
       },
       {
         question_code: 'mobile_number',
         label: 'Mobile number',
         input_type: 'text',
         required: false,
+        section: 'Personal Info',
       },
       {
         question_code: 'phone_owner',
@@ -138,30 +186,35 @@ const FORMS: {
         input_type: 'select',
         required: false,
         lookup_category_code: 'PHONE_OWNER',
+        section: 'Personal Info',
       },
       {
         question_code: 'child_birth_length',
         label: 'Child birth length',
         input_type: 'number',
         required: false,
+        section: 'Health History',
       },
       {
         question_code: 'child_birth_weight',
         label: 'Child birth weight',
         input_type: 'number',
         required: false,
+        section: 'Health History',
       },
       {
         question_code: 'current_length_at_registration',
         label: 'Current length at registration',
         input_type: 'number',
         required: false,
+        section: 'Health History',
       },
       {
         question_code: 'current_weight_at_registration',
         label: 'Current weight at registration',
         input_type: 'number',
         required: false,
+        section: 'Health History',
       },
     ],
   },

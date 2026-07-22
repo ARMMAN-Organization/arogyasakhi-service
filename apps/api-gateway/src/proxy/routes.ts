@@ -52,6 +52,7 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
   { prefix: '/projects', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
   { prefix: '/funders', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
   { prefix: '/lookups', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
+  { prefix: '/geography-units', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
   // NOTE: `/docs` is NOT proxied here. The gateway serves ONE aggregated
   // Swagger UI at `/api/v1/docs` (see docs/docs.controller.ts) that merges
   // every service's own `/docs.json` into a single page — there is no single

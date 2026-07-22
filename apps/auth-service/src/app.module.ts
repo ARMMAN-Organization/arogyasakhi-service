@@ -17,6 +17,7 @@ import { createHealthRouter } from './health/health.controller';
 import { createAuthModule } from './auth/auth.module';
 import { createProjectModule } from './projects/project.module';
 import { createLookupModule } from './lookups/lookup.module';
+import { createGeographyModule } from './geography/geography.module';
 import { buildAuthServiceOpenApiDocument } from './docs/openapi';
 
 // Re-export shared HTTP helpers so feature routers can import from a single place.
@@ -30,6 +31,7 @@ export {
   authenticate,
   unauthorized,
   createDocumentedRouter,
+  errorResponse,
   HttpError,
   ErrorCode,
   type DocumentedRouter,
@@ -84,6 +86,7 @@ export function createApp(prisma: PrismaService, signer: TokenSigner, redis: Red
   );
   const projectModule = createProjectModule(prisma, signer);
   const lookupModule = createLookupModule(prisma, signer);
+  const geographyModule = createGeographyModule(prisma, signer);
 
   // All routes live under the global `api/v1` prefix.
   const api = express.Router();
@@ -97,6 +100,7 @@ export function createApp(prisma: PrismaService, signer: TokenSigner, redis: Red
         authModule.registry,
         projectModule.registry,
         lookupModule.registry,
+        geographyModule.registry,
       ),
     ),
   );
@@ -105,6 +109,7 @@ export function createApp(prisma: PrismaService, signer: TokenSigner, redis: Red
   api.use(authModule.router);
   api.use(projectModule.router);
   api.use(lookupModule.router);
+  api.use(geographyModule.router);
   app.use('/api/v1', api);
 
   app.use(notFoundHandler);

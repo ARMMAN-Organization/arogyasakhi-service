@@ -3,6 +3,9 @@ import { encryptPii } from '@armman/service-commons';
 import { BeneficiaryService } from './beneficiary.service';
 import type { BeneficiaryRepository } from './beneficiary.repository';
 import type { CreateBeneficiaryInput } from './dto/create-beneficiary.dto';
+import { resolveHealthBlockIdFromPhc } from '../geography/geography.client';
+
+jest.mock('../geography/geography.client');
 
 describe('BeneficiaryService', () => {
   const originalEnv = { ...process.env };
@@ -16,11 +19,15 @@ describe('BeneficiaryService', () => {
   let service: BeneficiaryService;
 
   const CALLER_ID = '99999999-9999-9999-9999-999999999999';
+  const AUTH_HEADER = 'Bearer test-token';
+  const resolveHealthBlockIdFromPhcMock = jest.mocked(resolveHealthBlockIdFromPhc);
 
   // All SRS FR-S-2.1 required PII fields present (phone, dob, the 7 geography
   // levels, rchNumber). Geography ids are uuid-shaped to satisfy the type.
   const fullPii = {
-    fullName: 'Jane Doe',
+    firstName: 'Jane',
+    middleName: undefined,
+    lastName: 'Doe',
     phone: '9876543210',
     dateOfBirth: new Date('1995-05-05'),
     villageId: '66666666-6666-6666-6666-666666666666',
@@ -57,7 +64,7 @@ describe('BeneficiaryService', () => {
   };
 
   const baseChildInput: CreateBeneficiaryInput = {
-    pii: { ...fullPii, fullName: 'Baby Doe' },
+    pii: { ...fullPii, firstName: 'Baby', lastName: 'Doe' },
     case: {
       localCaseUuid: 'local-case-uuid-child-1',
       projectId: '11111111-1111-1111-1111-111111111111',
@@ -75,6 +82,7 @@ describe('BeneficiaryService', () => {
     jest.resetAllMocks();
     process.env.PII_ENCRYPTION_KEY = randomBytes(32).toString('base64');
     process.env.PII_SEARCH_HASH_KEY = randomBytes(32).toString('base64');
+    resolveHealthBlockIdFromPhcMock.mockResolvedValue('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
     service = new BeneficiaryService(repository);
   });
 
@@ -163,7 +171,7 @@ describe('BeneficiaryService', () => {
         statusHistory: [],
       } as never);
 
-      await expect(service.create(baseMotherInput, CALLER_ID)).resolves.toEqual(
+      await expect(service.create(baseMotherInput, CALLER_ID, AUTH_HEADER)).resolves.toEqual(
         expect.objectContaining({ id: 'existing-id' }),
       );
       expect(repository.findByLocalCaseUuid).toHaveBeenCalledWith(
@@ -181,7 +189,7 @@ describe('BeneficiaryService', () => {
         pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
       } as never);
 
-      await expect(service.create(baseMotherInput, CALLER_ID)).resolves.toEqual(
+      await expect(service.create(baseMotherInput, CALLER_ID, AUTH_HEADER)).resolves.toEqual(
         expect.objectContaining({ id: 'new-id' }),
       );
       expect(repository.createEnrollment).toHaveBeenCalledTimes(1);
@@ -191,7 +199,9 @@ describe('BeneficiaryService', () => {
   describe('create — consent (M2)', () => {
     it('rejects with 422 and creates nothing when consent is REFUSED', async () => {
       const dto = { ...baseMotherInput, consent: { status: 'REFUSED' as const, date: new Date() } };
-      await expect(service.create(dto, CALLER_ID)).rejects.toMatchObject({ status: 422 });
+      await expect(service.create(dto, CALLER_ID, AUTH_HEADER)).rejects.toMatchObject({
+        status: 422,
+      });
       expect(repository.findDuplicateCandidate).not.toHaveBeenCalled();
       expect(repository.createEnrollment).not.toHaveBeenCalled();
     });
@@ -230,7 +240,7 @@ describe('BeneficiaryService', () => {
 
     it('blocks with 409 (hard duplicate) when the matched case has neither delivery nor closure', async () => {
       repository.findDuplicateCandidate.mockResolvedValue(matchedCase({}) as never);
-      await expect(service.create(baseMotherInput, CALLER_ID)).rejects.toMatchObject({
+      await expect(service.create(baseMotherInput, CALLER_ID, AUTH_HEADER)).rejects.toMatchObject({
         status: 409,
       });
       expect(repository.createEnrollment).not.toHaveBeenCalled();
@@ -238,7 +248,7 @@ describe('BeneficiaryService', () => {
 
     it('blocks with 409 when the matched case has no summary row at all (SRS-literal default-deny)', async () => {
       repository.findDuplicateCandidate.mockResolvedValue(matchedCase({ summary: false }) as never);
-      await expect(service.create(baseMotherInput, CALLER_ID)).rejects.toMatchObject({
+      await expect(service.create(baseMotherInput, CALLER_ID, AUTH_HEADER)).rejects.toMatchObject({
         status: 409,
       });
       expect(repository.createEnrollment).not.toHaveBeenCalled();
@@ -248,7 +258,7 @@ describe('BeneficiaryService', () => {
       repository.findDuplicateCandidate.mockResolvedValue(
         matchedCase({ dateOfDelivery: new Date('2026-02-01') }) as never,
       );
-      await expect(service.create(baseMotherInput, CALLER_ID)).rejects.toMatchObject({
+      await expect(service.create(baseMotherInput, CALLER_ID, AUTH_HEADER)).rejects.toMatchObject({
         status: 409,
       });
       expect(repository.createEnrollment).not.toHaveBeenCalled();
@@ -263,7 +273,7 @@ describe('BeneficiaryService', () => {
       );
       repository.createEnrollment.mockResolvedValue(newCase() as never);
 
-      await expect(service.create(baseMotherInput, CALLER_ID)).resolves.toEqual(
+      await expect(service.create(baseMotherInput, CALLER_ID, AUTH_HEADER)).resolves.toEqual(
         expect.objectContaining({ id: 'new-id' }),
       );
       expect(repository.createEnrollment).toHaveBeenCalledTimes(1);
@@ -278,7 +288,7 @@ describe('BeneficiaryService', () => {
         }) as never,
       );
 
-      await expect(service.create(baseMotherInput, CALLER_ID)).rejects.toMatchObject({
+      await expect(service.create(baseMotherInput, CALLER_ID, AUTH_HEADER)).rejects.toMatchObject({
         status: 409,
         details: expect.objectContaining({ reason: 'RE_ENROLLMENT' }),
       });
@@ -294,7 +304,7 @@ describe('BeneficiaryService', () => {
         }) as never,
       );
 
-      const err = await service.create(baseMotherInput, CALLER_ID).catch((e) => e);
+      const err = await service.create(baseMotherInput, CALLER_ID, AUTH_HEADER).catch((e) => e);
       expect(err.status).toBe(409);
       expect(err.details?.reason).toBeUndefined();
     });
@@ -303,7 +313,7 @@ describe('BeneficiaryService', () => {
       repository.findDuplicateCandidate.mockResolvedValue(matchedCase({}) as never);
       repository.createEnrollment.mockResolvedValue(newCase() as never);
       const dto = { ...baseMotherInput, acknowledgeDuplicate: true };
-      await expect(service.create(dto, CALLER_ID)).resolves.toEqual(
+      await expect(service.create(dto, CALLER_ID, AUTH_HEADER)).resolves.toEqual(
         expect.objectContaining({ id: 'new-id' }),
       );
       expect(repository.createEnrollment).toHaveBeenCalledTimes(1);
@@ -315,7 +325,7 @@ describe('BeneficiaryService', () => {
         id: 'new-id',
         pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
       } as never);
-      await expect(service.create(baseMotherInput, CALLER_ID)).resolves.toEqual(
+      await expect(service.create(baseMotherInput, CALLER_ID, AUTH_HEADER)).resolves.toEqual(
         expect.objectContaining({ id: 'new-id' }),
       );
     });
@@ -327,7 +337,7 @@ describe('BeneficiaryService', () => {
         pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
       } as never);
 
-      await service.create(baseMotherInput, CALLER_ID);
+      await service.create(baseMotherInput, CALLER_ID, AUTH_HEADER);
 
       expect(repository.findDuplicateCandidate).toHaveBeenCalledWith(
         expect.objectContaining({ caseTypeLookupId: baseMotherInput.case.caseTypeLookupId }),
@@ -342,7 +352,7 @@ describe('BeneficiaryService', () => {
         Promise.resolve({ ...input } as never),
       );
 
-      await service.create(baseMotherInput, CALLER_ID);
+      await service.create(baseMotherInput, CALLER_ID, AUTH_HEADER);
 
       const call = repository.createEnrollment.mock.calls[0][0];
       expect(call.motherDetails?.eddDate.toISOString().slice(0, 10)).toBe('2026-07-08');
@@ -354,7 +364,7 @@ describe('BeneficiaryService', () => {
         Promise.resolve({ ...input } as never),
       );
 
-      await service.create(baseMotherInput, CALLER_ID);
+      await service.create(baseMotherInput, CALLER_ID, AUTH_HEADER);
 
       const call = repository.createEnrollment.mock.calls[0][0];
       // 60 / (1.6*1.6) = 23.4375
@@ -369,7 +379,7 @@ describe('BeneficiaryService', () => {
         Promise.resolve({ ...input } as never),
       );
 
-      await service.create(baseMotherInput, CALLER_ID);
+      await service.create(baseMotherInput, CALLER_ID, AUTH_HEADER);
 
       const call = repository.createEnrollment.mock.calls[0][0];
       expect(call.pii.fullNameEnc).toBeInstanceOf(Buffer);
@@ -384,7 +394,7 @@ describe('BeneficiaryService', () => {
         Promise.resolve({ ...input, id: 'new-id' } as never),
       );
 
-      const result = await service.create(baseMotherInput, CALLER_ID);
+      const result = await service.create(baseMotherInput, CALLER_ID, AUTH_HEADER);
 
       expect(result.riskConditionSummaries).toEqual([]);
       expect(result.statusHistory).toEqual([]);
@@ -398,7 +408,7 @@ describe('BeneficiaryService', () => {
         Promise.resolve({ ...input } as never),
       );
 
-      await service.create(baseChildInput, CALLER_ID);
+      await service.create(baseChildInput, CALLER_ID, AUTH_HEADER);
 
       const call = repository.createEnrollment.mock.calls[0][0];
       expect(call.childDetails?.linkedAncCase).toBe(false);
@@ -417,7 +427,7 @@ describe('BeneficiaryService', () => {
           motherBeneficiaryId: '77777777-7777-7777-7777-777777777777',
         },
       };
-      await service.create(dto, CALLER_ID);
+      await service.create(dto, CALLER_ID, AUTH_HEADER);
 
       const call = repository.createEnrollment.mock.calls[0][0];
       expect(call.childDetails?.linkedAncCase).toBe(true);
@@ -439,7 +449,7 @@ describe('BeneficiaryService', () => {
           previousBeneficiaryId: '88888888-8888-8888-8888-888888888888',
         },
       };
-      await service.create(dto, CALLER_ID);
+      await service.create(dto, CALLER_ID, AUTH_HEADER);
 
       const call = repository.createEnrollment.mock.calls[0][0];
       expect(call.case.previousBeneficiaryId).toBe('88888888-8888-8888-8888-888888888888');
@@ -449,6 +459,8 @@ describe('BeneficiaryService', () => {
   it('propagates repository errors on create', async () => {
     repository.findDuplicateCandidate.mockResolvedValue(null);
     repository.createEnrollment.mockRejectedValue(new Error('db down'));
-    await expect(service.create(baseMotherInput, CALLER_ID)).rejects.toThrow('db down');
+    await expect(service.create(baseMotherInput, CALLER_ID, AUTH_HEADER)).rejects.toThrow(
+      'db down',
+    );
   });
 });

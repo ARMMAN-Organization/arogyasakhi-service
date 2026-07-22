@@ -1,116 +1,12 @@
-import { createHash } from 'node:crypto';
 import { badRequest, conflict, notFound, unprocessable } from '@armman/service-commons';
 import type { FormRepository } from './form.repository';
-import {
-  schemaJsonSchema,
-  validationJsonSchema,
-  type CrossFieldRule,
-  type FormField,
-} from './dto/form-field.dto';
+import { schemaJsonSchema, validationJsonSchema } from './dto/form-field.dto';
 import type { CreateDraftVersionInput } from './dto/create-draft-version.dto';
 import type { PatchFormVersionInput } from './dto/patch-form-version.dto';
 import type { CreateSubmissionInput } from './dto/create-submission.dto';
-
-function computeChecksum(schemaJson: unknown): Buffer {
-  return createHash('sha256').update(JSON.stringify(schemaJson)).digest();
-}
-
-/** The subset of FormVersion columns a client is allowed to see. */
-interface FormVersionRow {
-  id: string;
-  formDefinitionId: string;
-  versionNo: string;
-  schemaJson: unknown;
-  validationJson: unknown;
-  effectiveFrom: Date;
-  effectiveTo: Date | null;
-  publishedByUserId: string | null;
-  status: string;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-/**
- * Projects a raw form_versions row down to exactly the fields the API
- * exposes (matches formVersionSchema in form.controller.ts). Drops internal
- * columns — notably the binary `checksum`, plus createdByUserId/
- * updatedByUserId/isDeleted/deletedAt — so they never leak into a response
- * even though the Prisma row carries them.
- */
-function toApiFormVersion<T extends FormVersionRow>(v: T) {
-  return {
-    id: v.id,
-    formDefinitionId: v.formDefinitionId,
-    versionNo: v.versionNo,
-    schemaJson: v.schemaJson,
-    validationJson: v.validationJson,
-    effectiveFrom: v.effectiveFrom,
-    effectiveTo: v.effectiveTo,
-    publishedByUserId: v.publishedByUserId,
-    status: v.status,
-    createdAt: v.createdAt,
-    updatedAt: v.updatedAt,
-  };
-}
-
-/** The subset of form_submissions columns a client is allowed to see. */
-interface FormSubmissionRow {
-  id: string;
-  formVersionId: string;
-  beneficiaryId: string;
-  visitId: string | null;
-  submittedByUserId: string;
-  submittedAt: Date;
-  localSubmissionUuid: string;
-  formDataJson: unknown;
-  validationStatus: string;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-/**
- * Projects a raw form_submissions row down to the API-exposed fields
- * (matches formSubmissionSchema in form.controller.ts). Drops internal
- * columns ruleVersionId/syncBatchId/createdByUserId/updatedByUserId/
- * isDeleted/deletedAt so they never leak into a response.
- */
-function toApiFormSubmission<T extends FormSubmissionRow>(s: T) {
-  return {
-    id: s.id,
-    formVersionId: s.formVersionId,
-    beneficiaryId: s.beneficiaryId,
-    visitId: s.visitId,
-    submittedByUserId: s.submittedByUserId,
-    submittedAt: s.submittedAt,
-    localSubmissionUuid: s.localSubmissionUuid,
-    formDataJson: s.formDataJson,
-    validationStatus: s.validationStatus,
-    createdAt: s.createdAt,
-    updatedAt: s.updatedAt,
-  };
-}
-
-function isEmpty(value: unknown): boolean {
-  return value === undefined || value === null || value === '';
-}
-
-/** Evaluates SRS Category 5 skip logic for one field against the submitted formData. */
-function isVisible(field: FormField, formData: Record<string, unknown>): boolean {
-  if (!field.visibleWhen) return true;
-  const actual = formData[field.visibleWhen.field];
-  switch (field.visibleWhen.operator) {
-    case 'eq':
-      return actual === field.visibleWhen.value;
-    case 'gte':
-      return Number(actual) >= Number(field.visibleWhen.value);
-    case 'lt':
-      return Number(actual) < Number(field.visibleWhen.value);
-    case 'isSet':
-      return !isEmpty(actual);
-    default:
-      return true;
-  }
-}
+import { computeChecksum, toApiFormSubmission, toApiFormVersion } from './form.mapper';
+import { validateSubmission } from './form-validation';
+import { getAncestorChain } from '../geography/geography.client';
 
 /**
  * Business logic for the dynamic-forms feature: fetching the active version,
@@ -120,10 +16,35 @@ function isVisible(field: FormField, formData: Record<string, unknown>): boolean
 export class FormService {
   constructor(private readonly repository: FormRepository) {}
 
-  async getActiveVersion(formCode: string, asOf: Date) {
+  /**
+   * `callerGeographyUnitId`/`authorizationHeader` are the caller's own scope
+   * and bearer token (from `req.user`/the inbound request, see
+   * form.controller.ts) — used only to attach the caller's geography chain to
+   * the response, not to scope which form version is returned. Omitted when
+   * the caller has no geographyUnitId assigned.
+   */
+  async getActiveVersion(
+    formCode: string,
+    asOf: Date,
+    callerGeographyUnitId: string | null,
+    authorizationHeader: string,
+  ) {
     const version = await this.repository.findActiveVersion(formCode, asOf);
     if (!version) throw notFound(`No published form version found for form code "${formCode}".`);
-    return toApiFormVersion(version);
+    const apiVersion = toApiFormVersion(version);
+
+    if (!callerGeographyUnitId) return apiVersion;
+
+    const chain = await getAncestorChain(callerGeographyUnitId, authorizationHeader);
+    // Only the fields a client needs to map a level onto pii.<level>Id
+    // (geoType) and show to a user (name) — parentId/geoCode/status are
+    // internal/display-only and dropped here.
+    const geography = chain.map((unit) => ({
+      geographyUnitId: unit.geographyUnitId,
+      geoType: unit.geoType,
+      name: unit.name,
+    }));
+    return { ...apiVersion, geography };
   }
 
   async createDraft(formCode: string, dto: CreateDraftVersionInput) {
@@ -232,7 +153,7 @@ export class FormService {
 
     const fields = schemaJsonSchema.parse(version.schemaJson);
     const crossFieldRules = validationJsonSchema.parse(version.validationJson ?? []);
-    const violations = this.validate(fields, crossFieldRules, dto.formData);
+    const violations = validateSubmission(fields, crossFieldRules, dto.formData);
 
     if (violations.length) {
       throw unprocessable('Submission failed validation.', { violations });
@@ -248,75 +169,6 @@ export class FormService {
       validationStatus: 'VALID',
     });
     return toApiFormSubmission(created);
-  }
-
-  /**
-   * Checks required fields (SRS line 1150), numeric ranges (SRS Category 2),
-   * and cross-field consistency (SRS Category 3) against submitted formData.
-   * Date rules (Category 1) are deliberately not checked here — see the
-   * forms API design doc §7. Fields hidden by skip logic (Category 5) or
-   * computed by the system (Category 4) are excluded from the required check.
-   */
-  private validate(
-    fields: FormField[],
-    crossFieldRules: CrossFieldRule[],
-    formData: Record<string, unknown>,
-  ): string[] {
-    const violations: string[] = [];
-
-    for (const field of fields) {
-      if (field.computedFrom) continue;
-      if (!isVisible(field, formData)) continue;
-
-      const value = formData[field.question_code];
-      if (field.required && isEmpty(value)) {
-        violations.push(`Missing required field: ${field.question_code}`);
-        continue;
-      }
-
-      if (field.numericRange && !isEmpty(value)) {
-        const numeric = Number(value);
-        if (
-          Number.isNaN(numeric) ||
-          numeric < field.numericRange.min ||
-          numeric > field.numericRange.max
-        ) {
-          violations.push(
-            `${field.question_code} must be between ${field.numericRange.min} and ${field.numericRange.max}`,
-          );
-        }
-      }
-    }
-
-    for (const rule of crossFieldRules) {
-      if (rule.rule === 'LTE') {
-        const [a, b] = rule.fields;
-        // A field legitimately absent (optional, not yet answered) is not
-        // this rule's concern — the required-field check above already
-        // covers "missing". Only a *present but non-numeric* value is a
-        // cross-field violation.
-        if (isEmpty(formData[a]) || isEmpty(formData[b])) continue;
-        const va = Number(formData[a]);
-        const vb = Number(formData[b]);
-        if (Number.isNaN(va) || Number.isNaN(vb)) {
-          violations.push(`${a} and ${b} must both be numeric`);
-        } else if (va > vb) {
-          violations.push(`${a} must be <= ${b}`);
-        }
-      } else if (rule.rule === 'SUM_EQUALS') {
-        const allFields = [...rule.fields, rule.equals];
-        if (allFields.some((f) => isEmpty(formData[f]))) continue;
-        const values = rule.fields.map((f) => Number(formData[f]));
-        const target = Number(formData[rule.equals]);
-        if (values.some((v) => Number.isNaN(v)) || Number.isNaN(target)) {
-          violations.push(`${rule.fields.join(', ')} and ${rule.equals} must all be numeric`);
-        } else if (values.reduce((total, v) => total + v, 0) !== target) {
-          violations.push(`${rule.fields.join(' + ')} must equal ${rule.equals}`);
-        }
-      }
-    }
-
-    return violations;
   }
 }
 

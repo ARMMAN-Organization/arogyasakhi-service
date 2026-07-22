@@ -27,7 +27,13 @@ export function validate<TSchema extends ZodTypeAny>(
       const message = parsed.error.issues
         .map((i) => `${i.path.join('.') || target}: ${i.message}`)
         .join('; ');
-      return next(badRequest(message));
+      // Structured field errors keyed by path, surfaced as `fieldErrors` in the
+      // response envelope (HLD error envelope) alongside the joined `message`.
+      const fieldErrors = parsed.error.issues.reduce<Record<string, string>>((acc, i) => {
+        acc[i.path.join('.') || target] = i.message;
+        return acc;
+      }, {});
+      return next(badRequest(message, fieldErrors));
     }
     req[target] = parsed.data as ZodInfer<TSchema>;
     next();

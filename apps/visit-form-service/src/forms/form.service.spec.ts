@@ -1,5 +1,8 @@
 import { FormService } from './form.service';
 import type { FormRepository } from './form.repository';
+import * as geographyClient from '../geography/geography.client';
+
+jest.mock('../geography/geography.client');
 
 describe('FormService', () => {
   const repository = {
@@ -31,17 +34,60 @@ describe('FormService', () => {
       };
       repository.findActiveVersion.mockResolvedValue(version as never);
 
-      const result = await service.getActiveVersion('MOTHER_REGISTRATION', new Date());
+      const result = await service.getActiveVersion(
+        'MOTHER_REGISTRATION',
+        new Date(),
+        null,
+        'Bearer test-token',
+      );
 
       expect(result).toEqual(expect.objectContaining({ id: 'v1', status: 'PUBLISHED' }));
       // Internal columns must not leak into the API response.
       expect(result).not.toHaveProperty('checksum');
+      // No geographyUnitId on the caller -> no cross-service lookup, no field.
+      expect(result).not.toHaveProperty('geography');
     });
 
     it('throws not-found when no published version exists', async () => {
       repository.findActiveVersion.mockResolvedValue(null);
-      await expect(service.getActiveVersion('MOTHER_REGISTRATION', new Date())).rejects.toThrow(
-        /No published form version/,
+      await expect(
+        service.getActiveVersion('MOTHER_REGISTRATION', new Date(), null, 'Bearer test-token'),
+      ).rejects.toThrow(/No published form version/);
+    });
+
+    it("attaches the caller's geography chain when they have a geographyUnitId assigned", async () => {
+      const version = {
+        id: 'v1',
+        versionNo: 'v1',
+        status: 'PUBLISHED',
+        checksum: Buffer.from('x'),
+      };
+      repository.findActiveVersion.mockResolvedValue(version as never);
+      const chain = [
+        {
+          geographyUnitId: 'pada-1',
+          geoType: 'PADA',
+          parentId: 'village-1',
+          geoCode: 'PADA-001',
+          name: 'Sample Pada',
+          status: 'ACTIVE',
+        },
+      ];
+      jest.spyOn(geographyClient, 'getAncestorChain').mockResolvedValue(chain as never);
+
+      const result = await service.getActiveVersion(
+        'MOTHER_REGISTRATION',
+        new Date(),
+        'pada-1',
+        'Bearer test-token',
+      );
+
+      expect(geographyClient.getAncestorChain).toHaveBeenCalledWith('pada-1', 'Bearer test-token');
+      // Only geographyUnitId/geoType/name are exposed — parentId/geoCode/status dropped.
+      expect(result).toEqual(
+        expect.objectContaining({
+          geography: [{ geographyUnitId: 'pada-1', geoType: 'PADA', name: 'Sample Pada' }],
+        }),
       );
     });
   });

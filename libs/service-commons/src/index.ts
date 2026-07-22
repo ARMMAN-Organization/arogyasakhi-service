@@ -18,3 +18,4 @@ export * from './crypto/pii-crypto';
 export * from './docs/openapi-registry';
 export * from './docs/swagger-router';
 export * from './docs/documented-router';
+export * from './docs/error-responses';

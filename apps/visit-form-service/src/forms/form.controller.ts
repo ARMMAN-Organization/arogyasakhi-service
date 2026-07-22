@@ -4,10 +4,11 @@ import type { FormService } from './form.service';
 import { createDraftVersionSchema } from './dto/create-draft-version.dto';
 import { patchFormVersionSchema } from './dto/patch-form-version.dto';
 import { createSubmissionSchema } from './dto/create-submission.dto';
-import { formFieldSchema, crossFieldRuleSchema } from './dto/form-field.dto';
+import { envelope, formSubmissionSchema, formVersionSchema } from './form.schemas';
 import {
   asyncHandler,
   createDocumentedRouter,
+  errorResponse,
   ok,
   requireRoles,
   trustGatewayIdentity,
@@ -18,11 +19,18 @@ import {
 
 extendZodWithOpenApi(z);
 
-const formCodeParamsSchema = z.object({ formCode: z.string().trim().min(1) }).strict();
-const versionParamsSchema = z
-  .object({ formCode: z.string().trim().min(1), versionId: z.string().uuid() })
+const formCodeParamsSchema = z
+  .object({ formCode: z.string().trim().min(1).openapi({ example: 'ANC_VISIT' }) })
   .strict();
-const activeVersionQuerySchema = z.object({ asOf: z.coerce.date().optional() }).strict();
+const versionParamsSchema = z
+  .object({
+    formCode: z.string().trim().min(1).openapi({ example: 'ANC_VISIT' }),
+    versionId: z.string().uuid().openapi({ example: '3fa85f64-5717-4562-b3fc-2c963f66afa6' }),
+  })
+  .strict();
+const activeVersionQuerySchema = z
+  .object({ asOf: z.coerce.date().optional().openapi({ example: '2026-07-20T00:00:00.000Z' }) })
+  .strict();
 
 // Request DTOs annotated with examples for Swagger UI; validation behavior is
 // unchanged (`.openapi()` only attaches documentation metadata).
@@ -43,45 +51,6 @@ const createSubmissionRequestSchema = createSubmissionSchema.extend({
     example: 'device-abc-submission-001',
   }),
 });
-
-const formVersionSchema = z.object({
-  id: z.string().uuid(),
-  formDefinitionId: z.string().uuid(),
-  versionNo: z.string().openapi({ example: 'v1' }),
-  schemaJson: z.array(formFieldSchema),
-  validationJson: z.array(crossFieldRuleSchema).nullable(),
-  effectiveFrom: z.string().datetime(),
-  effectiveTo: z.string().datetime().nullable(),
-  publishedByUserId: z.string().uuid().nullable(),
-  status: z.enum(['DRAFT', 'PUBLISHED', 'RETIRED']),
-  createdAt: z.string().datetime(),
-  updatedAt: z.string().datetime(),
-});
-
-const formSubmissionSchema = z.object({
-  id: z.string().uuid(),
-  formVersionId: z.string().uuid(),
-  beneficiaryId: z.string().uuid(),
-  visitId: z.string().uuid().nullable(),
-  submittedByUserId: z.string().uuid(),
-  submittedAt: z.string().datetime(),
-  localSubmissionUuid: z.string().openapi({ example: 'device-abc-submission-001' }),
-  formDataJson: z.record(z.string(), z.unknown()),
-  validationStatus: z.enum(['VALID', 'INVALID', 'WARNING']),
-  createdAt: z.string().datetime(),
-  updatedAt: z.string().datetime(),
-});
-
-const apiErrorSchema = z.object({
-  success: z.literal(false),
-  message: z.string(),
-  errorCode: z.string().openapi({ example: 'VALIDATION_ERROR' }),
-  details: z.record(z.unknown()).optional(),
-});
-
-function envelope<T extends z.ZodTypeAny>(data: T) {
-  return z.object({ success: z.literal(true), message: z.string(), data });
-}
 
 /**
  * Dynamic-forms HTTP routes (Layer 1 only — form mechanics, not the
@@ -110,17 +79,33 @@ export function createFormRouter(service: FormService) {
       query: activeVersionQuerySchema,
       responses: {
         200: { description: 'Active form version', schema: envelope(formVersionSchema) },
-        401: { description: 'Unauthenticated', schema: apiErrorSchema },
-        404: { description: 'No published version for this form code', schema: apiErrorSchema },
+        400: errorResponse(400, { message: 'asOf: Invalid date' }),
+        401: errorResponse(401),
+        404: errorResponse(404, {
+          message: 'No published version found for this form.',
+          description: 'No published version for this form code',
+        }),
+        500: errorResponse(500),
       },
     },
     trustGatewayIdentity,
     validate(formCodeParamsSchema, 'params'),
     validate(activeVersionQuerySchema, 'query'),
-    asyncHandler(async (req, res) => {
+    asyncHandler(async (req, res, next) => {
+      // trustGatewayIdentity runs first and calls next(unauthorized()) if it
+      // fails, so req.user is always populated by the time this handler runs.
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+
       const { formCode } = req.params as unknown as { formCode: string };
       const { asOf } = req.query as unknown as { asOf?: Date };
-      const version = await service.getActiveVersion(formCode, asOf ?? new Date());
+      const version = await service.getActiveVersion(
+        formCode,
+        asOf ?? new Date(),
+        req.user.geographyUnitId,
+        authorizationHeader,
+      );
       res.json(ok(version));
     }),
   );
@@ -133,10 +118,14 @@ export function createFormRouter(service: FormService) {
       params: formCodeParamsSchema,
       responses: {
         201: { description: 'Draft version created', schema: envelope(formVersionSchema) },
-        400: { description: 'Validation error', schema: apiErrorSchema },
-        401: { description: 'Unauthenticated', schema: apiErrorSchema },
-        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
-        404: { description: 'Unknown form code', schema: apiErrorSchema },
+        400: errorResponse(400, { message: 'cloneFromVersionId: Invalid uuid' }),
+        401: errorResponse(401),
+        403: errorResponse(403),
+        404: errorResponse(404, {
+          message: 'Form not found.',
+          description: 'Not found — unknown form code',
+        }),
+        500: errorResponse(500),
       },
     },
     trustGatewayIdentity,
@@ -158,11 +147,15 @@ export function createFormRouter(service: FormService) {
       params: versionParamsSchema,
       responses: {
         200: { description: 'Draft version updated', schema: envelope(formVersionSchema) },
-        400: { description: 'Validation error', schema: apiErrorSchema },
-        401: { description: 'Unauthenticated', schema: apiErrorSchema },
-        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
-        404: { description: 'Form version not found', schema: apiErrorSchema },
-        409: { description: 'Only DRAFT versions can be edited', schema: apiErrorSchema },
+        400: errorResponse(400, { message: 'schemaJson: Required' }),
+        401: errorResponse(401),
+        403: errorResponse(403),
+        404: errorResponse(404, { message: 'Form version not found.' }),
+        409: errorResponse(409, {
+          message: 'Only DRAFT versions can be edited.',
+          description: 'Conflict — only DRAFT versions can be edited',
+        }),
+        500: errorResponse(500),
       },
     },
     trustGatewayIdentity,
@@ -187,14 +180,19 @@ export function createFormRouter(service: FormService) {
       params: versionParamsSchema,
       responses: {
         200: { description: 'Version published', schema: envelope(formVersionSchema) },
-        401: { description: 'Unauthenticated', schema: apiErrorSchema },
-        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
-        404: { description: 'Form version not found', schema: apiErrorSchema },
-        409: { description: 'Only DRAFT versions can be published', schema: apiErrorSchema },
-        422: {
-          description: 'Draft schemaJson has no well-formed fields to publish',
-          schema: apiErrorSchema,
-        },
+        400: errorResponse(400, { message: 'versionId: Invalid uuid' }),
+        401: errorResponse(401),
+        403: errorResponse(403),
+        404: errorResponse(404, { message: 'Form version not found.' }),
+        409: errorResponse(409, {
+          message: 'Only DRAFT versions can be published.',
+          description: 'Conflict — only DRAFT versions can be published',
+        }),
+        422: errorResponse(422, {
+          message: 'Draft has no well-formed fields to publish.',
+          description: 'Unprocessable — draft schemaJson has no well-formed fields to publish',
+        }),
+        500: errorResponse(500),
       },
     },
     trustGatewayIdentity,
@@ -219,9 +217,17 @@ export function createFormRouter(service: FormService) {
       params: formCodeParamsSchema,
       responses: {
         201: { description: 'Submission recorded', schema: envelope(formSubmissionSchema) },
-        400: { description: 'Validation error', schema: apiErrorSchema },
-        401: { description: 'Unauthenticated', schema: apiErrorSchema },
-        422: { description: 'Submission failed form validation', schema: apiErrorSchema },
+        400: errorResponse(400, { message: 'formVersionId: Required' }),
+        401: errorResponse(401),
+        404: errorResponse(404, {
+          message: 'Form version not found.',
+          description: 'Not found — unknown form code or form version',
+        }),
+        422: errorResponse(422, {
+          message: 'Submission failed form validation.',
+          description: 'Unprocessable — submission failed form validation',
+        }),
+        500: errorResponse(500),
       },
     },
     trustGatewayIdentity,

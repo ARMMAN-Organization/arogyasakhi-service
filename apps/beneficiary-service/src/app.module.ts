@@ -24,6 +24,7 @@ export {
   trustGatewayIdentity,
   unauthorized,
   createDocumentedRouter,
+  errorResponse,
   HttpError,
   ErrorCode,
   type DocumentedRouter,

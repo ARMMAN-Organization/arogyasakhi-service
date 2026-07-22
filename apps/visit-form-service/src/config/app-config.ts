@@ -16,6 +16,11 @@ const schema = z.object({
         .filter(Boolean),
     ),
   PUBLIC_BASE_URLS: publicBaseUrlsSchema,
+  // Base URL of the gateway to reach auth-service's geography-units endpoint
+  // through (same naming/default as beneficiary-service's Health Block
+  // derivation call) — NOT auth-service's own port directly, since the
+  // gateway is what verifies the caller's forwarded Authorization header.
+  AUTH_SERVICE_BASE_URL: z.string().url().default('http://localhost:3000'),
 });
 
 export type AppConfig = z.infer<typeof schema>;

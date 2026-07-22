@@ -8,6 +8,7 @@ import {
   asyncHandler,
   authenticate,
   createDocumentedRouter,
+  errorResponse,
   ok,
   requireRoles,
   unauthorized,
@@ -92,13 +93,6 @@ const createdUserSchema = z.object({
   createdAt: z.string().datetime(),
 });
 
-const apiErrorSchema = z.object({
-  success: z.literal(false),
-  message: z.string(),
-  errorCode: z.string().openapi({ example: 'VALIDATION_ERROR' }),
-  details: z.record(z.unknown()).optional(),
-});
-
 function envelope<T extends z.ZodTypeAny>(data: T) {
   return z.object({ success: z.literal(true), message: z.string(), data });
 }
@@ -122,8 +116,12 @@ export function createAuthRouter(service: AuthService, signer: TokenSigner) {
       tags: ['Auth'],
       responses: {
         200: { description: 'Authenticated', schema: envelope(authTokensSchema) },
-        400: { description: 'Validation error', schema: apiErrorSchema },
-        401: { description: 'Invalid credentials', schema: apiErrorSchema },
+        400: errorResponse(400, { message: 'password: Required' }),
+        401: errorResponse(401, {
+          message: 'Invalid credentials.',
+          description: 'Unauthenticated — username/password did not match',
+        }),
+        500: errorResponse(500),
       },
     },
     validateBody(loginRequestSchema),
@@ -140,7 +138,12 @@ export function createAuthRouter(service: AuthService, signer: TokenSigner) {
       tags: ['Auth'],
       responses: {
         200: { description: 'New tokens issued', schema: envelope(authTokensSchema) },
-        401: { description: 'Invalid or expired refresh token', schema: apiErrorSchema },
+        400: errorResponse(400, { message: 'refreshToken: Required' }),
+        401: errorResponse(401, {
+          message: 'Invalid or expired refresh token.',
+          description: 'Unauthenticated — refresh token invalid, expired, or already used',
+        }),
+        500: errorResponse(500),
       },
     },
     validateBody(refreshSchema),
@@ -160,7 +163,9 @@ export function createAuthRouter(service: AuthService, signer: TokenSigner) {
           description: 'Logged out',
           schema: envelope(z.object({ loggedOut: z.literal(true) })),
         },
-        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        400: errorResponse(400, { message: 'refreshToken: Required' }),
+        401: errorResponse(401),
+        500: errorResponse(500),
       },
     },
     authenticate(signer),
@@ -178,10 +183,17 @@ export function createAuthRouter(service: AuthService, signer: TokenSigner) {
       tags: ['Users'],
       responses: {
         201: { description: 'User created', schema: envelope(createdUserSchema) },
-        400: { description: 'Validation error', schema: apiErrorSchema },
-        401: { description: 'Unauthenticated', schema: apiErrorSchema },
-        403: { description: 'Caller not permitted to create this role', schema: apiErrorSchema },
-        409: { description: 'Username or mobile number already in use', schema: apiErrorSchema },
+        400: errorResponse(400, { message: 'password: Required' }),
+        401: errorResponse(401),
+        403: errorResponse(403, {
+          message: 'You do not have access to this resource.',
+          description: 'Forbidden — caller not permitted to create this role',
+        }),
+        409: errorResponse(409, {
+          message: 'Username or mobile number already in use.',
+          description: 'Conflict — username or mobile number already in use',
+        }),
+        500: errorResponse(500),
       },
     },
     authenticate(signer),
@@ -203,7 +215,8 @@ export function createAuthRouter(service: AuthService, signer: TokenSigner) {
       tags: ['Users'],
       responses: {
         200: { description: 'Caller profile', schema: envelope(userProfileSchema) },
-        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        401: errorResponse(401),
+        500: errorResponse(500),
       },
     },
     authenticate(signer),

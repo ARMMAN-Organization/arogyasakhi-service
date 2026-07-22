@@ -8,13 +8,25 @@ import { API_CONSENT_STATUSES, CASE_TYPES, SEXES } from '../beneficiary.constant
  */
 const piiSchema = z
   .object({
-    fullName: z.string().trim().min(1).max(200),
+    // Matches the MOTHER_REGISTRATION form's first_name/middle_name/last_name
+    // question_codes — the mobile form never collects a single combined name
+    // field, so the client sends these 3 parts and the server derives
+    // `fullName` below (joined, skipping an absent middleName) for the
+    // existing encrypted-storage/duplicate-detection path.
+    firstName: z.string().trim().min(1).max(100),
+    middleName: z.string().trim().min(1).max(100).optional(),
+    lastName: z.string().trim().min(1).max(100),
     // Required per SRS FR-S-2.1: "age, demographics, geographic details
     // (state, district, block, PHC, sub-centre, village, pada), mobile
-    // numbers, RCH number." phone (mobile), dateOfBirth (age), the 7
-    // geography levels, and rchNumber are therefore required. alternatePhone,
-    // addressLine, sex, and talukaId (a govt-revenue unit distinct from the
-    // health "block") are not named in the required list — left optional.
+    // numbers, RCH number." phone (mobile), dateOfBirth (age), and the 7
+    // geography levels are therefore required. alternatePhone, addressLine,
+    // sex, and talukaId (a govt-revenue unit distinct from the health
+    // "block") are not named in the required list — left optional. rchNumber
+    // is also optional here: the form's "Enrolled in RCH?" question allows
+    // "not registered" / "card not available" / "status not known" (App
+    // Form doc row 39-40), and in those cases the Sakhi has no number to
+    // enter — only mandatory client-side when "RCH card available" is
+    // selected, which this API doesn't model as a separate status field.
     phone: z.string().trim().min(1).max(20),
     alternatePhone: z.string().trim().min(1).max(20).optional(),
     dateOfBirth: z.coerce.date(),
@@ -24,13 +36,38 @@ const piiSchema = z
     padaId: z.string().uuid(),
     healthSubCentreId: z.string().uuid(),
     phcId: z.string().uuid(),
-    healthBlockId: z.string().uuid(),
+    // Optional, not required: the mobile enrollment form has no field to
+    // capture this and always omitted it, so the server derives the real
+    // value from phcId's parent Health Block instead (see
+    // beneficiary.service.ts). Kept as an accepted-but-ignored optional
+    // field — not deleted from the schema — so a client still sending it
+    // during the transition isn't rejected by this schema's .strict().
+    healthBlockId: z.string().uuid().optional(),
     stateId: z.string().uuid(),
     districtId: z.string().uuid(),
     talukaId: z.string().uuid().optional(),
-    rchNumber: z.string().trim().min(1).max(50),
+    rchNumber: z.string().trim().min(1).max(50).optional(),
   })
   .strict();
+
+/**
+ * Derives the single display/storage name from the mobile form's separate
+ * firstName/middleName/lastName fields, for the encrypted-storage/
+ * duplicate-detection path (beneficiary.service.ts,
+ * beneficiary.duplicate-detection.ts) that's keyed on one full name.
+ *
+ * Kept out of `piiSchema` itself (not a `.transform()`) because
+ * `@asteasolutions/zod-to-openapi`'s generator can't introspect a
+ * `ZodEffects`-wrapped schema of type `transform` — registering one as a
+ * route's request body throws `UnknownZodTypeError` at doc-build time.
+ */
+export function deriveFullName(
+  firstName: string,
+  middleName: string | undefined,
+  lastName: string,
+): string {
+  return [firstName, middleName, lastName].filter(Boolean).join(' ');
+}
 
 /**
  * Cross-field consistency rules per SRS Category 3 (line 401): Para ≤
@@ -203,10 +240,14 @@ export const createBeneficiarySchema = z
       // pii.dateOfBirth and childDetails.dateOfBirth are both required and
       // both describe the child's DOB for a CHILD case. Reject a mismatch so
       // the two tables can't persist conflicting dates — downstream code
-      // (e.g. buildSearchTokens) treats them as the same value.
+      // (e.g. buildSearchTokens) treats them as the same value. Compared on
+      // the calendar day (YYYY-MM-DD), matching beneficiary.duplicate-detection.ts,
+      // so a same-date pair with differing time-of-day components (e.g. from a
+      // date-only picker vs. a full ISO timestamp) doesn't spuriously fail.
       if (
         data.childDetails &&
-        data.pii.dateOfBirth.getTime() !== data.childDetails.dateOfBirth.getTime()
+        data.pii.dateOfBirth.toISOString().slice(0, 10) !==
+          data.childDetails.dateOfBirth.toISOString().slice(0, 10)
       ) {
         ctx.addIssue({
           code: 'custom',
