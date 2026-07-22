@@ -111,7 +111,7 @@ Include these bullets:
 | project\_geographies | Geographies included in each project.                                               | project\_geo\_id    | project\_id FK, geography\_unit\_id FK, active\_from, active\_to                                                                                                   | projects, geography\_units                  |
 | sakhi\_assignments   | Assignment of Sakhis to project and geography scope.                                | assignment\_id      | sakhi\_id FK, project\_id FK, geography\_unit\_id FK, assignment\_type, active\_from, active\_to                                                                   | sakhi\_profiles, projects, geography\_units |
 
-## Project\_registration\_targets
+## project\_registration\_targets
 
 _Combined definition — this table was previously defined 3 times in this document (this section, and Appendix A at two separate points) with differing column sets. Merged here into one definition carrying the union of every field that appeared in any version; no field from any version was dropped. Where two versions used different names for what appears to be the same concept (e.g. beneficiary\_type\_lookup\_id vs case\_type\_lookup\_id; registration\_target\_count vs registration\_target; status vs status\_lookup\_id), both names are kept as separate rows below pending explicit confirmation of which is authoritative._
 
@@ -502,9 +502,9 @@ _A program/project implementation year or funding unit._
 | is\_deleted           | BOOLEAN     | NOT NULL DEFAULT FALSE                           | soft delete marker     |
 | deleted\_at           | DATETIME(3) | NULL                                             |                        |
 
-### **Project\_registration\_targets**
+### **project\_registration\_targets**
 
-_See the combined **Project_registration_targets** table definition earlier in this document (Access, Project, and Geography section) — this table was previously defined 3 times with differing column sets; all 3 have been merged into a single definition there._
+_See the combined **project\_registration\_targets** table definition earlier in this document (Access, Project, and Geography section) — this table was previously defined 3 times with differing column sets; all 3 have been merged into a single definition there._
 
 ### **geography\_units**
 
@@ -543,9 +543,9 @@ _Maps projects to included geographies._
 | is\_deleted           | BOOLEAN     | NOT NULL DEFAULT FALSE                                | soft delete marker |
 | deleted\_at           | DATETIME(3) | NULL                                                  |                    |
 
-### **Project\_registration\_targets**
+### **project\_registration\_targets**
 
-_See the combined **Project_registration_targets** table definition earlier in this document (Access, Project, and Geography section) — this table was previously defined 3 times with differing column sets; all 3 have been merged into a single definition there._
+_See the combined **project\_registration\_targets** table definition earlier in this document (Access, Project, and Geography section) — this table was previously defined 3 times with differing column sets; all 3 have been merged into a single definition there._
 
 ### **sakhi\_assignments**
 
@@ -571,35 +571,35 @@ _Assignment of Sakhis to project/geography scope over time._
 
 _Shared PII record reusable across current and future ARMMAN programs._
 
-| Column                   | Data type      | Constraints                                         | Enum / notes                          |
-| :----------------------- | :------------- | :-------------------------------------------------- | :------------------------------------ |
-| pii\_id                  | UUID           | PK NOT NULL                                         |                                       |
-| full\_name\_enc          | VARBINARY(512) | NOT NULL                                            | application-level encrypted           |
-| full\_name\_search\_hash | BINARY(32)     | NOT NULL INDEX                                      | non-reversible duplicate search token |
-| phone\_enc               | VARBINARY(256) | NULL                                                | encrypted                             |
-| phone\_search\_hash      | BINARY(32)     | NULL INDEX                                          |                                       |
-| alternate\_phone\_enc    | VARBINARY(256) | NULL                                                | encrypted                             |
-| village\_id              | UUID           | FK \-\> village.village\_id                         |                                       |
-| pada\_id                 | UUID           | FK \-\> pada.pada\_id                               |                                       |
-| health\_sub\_centre\_id  | UUID           | FK \-\> health\_sub\_centre.health\_sub\_centre\_id |                                       |
-| phc\_id                  | UUID           | FK \-\> phc.phc\_id                                 |                                       |
-| health\_block\_id        | UUID           | FK \-\> health\_block.health\_block\_id             |                                       |
-| date\_of\_birth          | DATE           | NULL INDEX                                          |                                       |
-| sex                      | ENUM           | NULL                                                | FEMALE, MALE, OTHER, UNKNOWN          |
-| address\_line\_enc       | VARBINARY/TEXT | NULL                                                | encrypted                             |
-| state\_id                | UUID           | FK \-\> states.state\_id                            |                                       |
-| district\_id             | UUID           | FK \-\> district.district\_id                       |                                       |
-| taluka\_id               | UUID           | FK \-\> taluka.taluka\_id                           |                                       |
-| rch\_number\_enc         | VARBINARY(256) | NULL                                                | encrypted                             |
-| rch\_number\_hash        | BINARY(32)     | NULL INDEX                                          |                                       |
-| created\_at              | DATETIME(3)    | NOT NULL DEFAULT CURRENT\_TIMESTAMP(3)              |                                       |
-| created\_by\_user\_id    | UUID           | NULL FK \-\> users.user\_id                         |                                       |
-| updated\_at              | DATETIME(3)    | NOT NULL DEFAULT CURRENT\_TIMESTAMP(3) ON UPDATE    |                                       |
-| updated\_by\_user\_id    | UUID           | NULL FK \-\> users.user\_id                         |                                       |
-| is\_deleted              | BOOLEAN        | NOT NULL DEFAULT FALSE                              | soft delete marker                    |
-| deleted\_at              | DATETIME(3)    | NULL                                                |                                       |
+| Column                   | Data type      | Constraints                                          | Enum / notes                          |
+| :----------------------- | :------------- | :--------------------------------------------------- | :------------------------------------ |
+| pii\_id                  | UUID           | PK NOT NULL                                          |                                       |
+| full\_name\_enc          | VARBINARY(512) | NOT NULL                                             | application-level encrypted           |
+| full\_name\_search\_hash | BINARY(32)     | NOT NULL INDEX                                       | non-reversible duplicate search token |
+| phone\_enc               | VARBINARY(256) | NULL                                                 | encrypted                             |
+| phone\_search\_hash      | BINARY(32)     | NULL INDEX                                           |                                       |
+| alternate\_phone\_enc    | VARBINARY(256) | NULL                                                 | encrypted                             |
+| village\_id              | UUID           | FK \-\> villages.village\_id                         |                                       |
+| pada\_id                 | UUID           | FK \-\> padas.pada\_id                               |                                       |
+| health\_sub\_centre\_id  | UUID           | FK \-\> health\_sub\_centres.health\_sub\_centre\_id |                                       |
+| phc\_id                  | UUID           | FK \-\> phcs.phc\_id                                 |                                       |
+| health\_block\_id        | UUID           | FK \-\> health\_blocks.health\_block\_id             |                                       |
+| date\_of\_birth          | DATE           | NULL INDEX                                           |                                       |
+| sex                      | ENUM           | NULL                                                 | FEMALE, MALE, OTHER, UNKNOWN          |
+| address\_line\_enc       | VARBINARY/TEXT | NULL                                                 | encrypted                             |
+| state\_id                | UUID           | FK \-\> states.state\_id                             |                                       |
+| district\_id             | UUID           | FK \-\> districts.district\_id                       |                                       |
+| taluka\_id               | UUID           | FK \-\> talukas.taluka\_id                           |                                       |
+| rch\_number\_enc         | VARBINARY(256) | NULL                                                 | encrypted                             |
+| rch\_number\_hash        | BINARY(32)     | NULL INDEX                                           |                                       |
+| created\_at              | DATETIME(3)    | NOT NULL DEFAULT CURRENT\_TIMESTAMP(3)               |                                       |
+| created\_by\_user\_id    | UUID           | NULL FK \-\> users.user\_id                          |                                       |
+| updated\_at              | DATETIME(3)    | NOT NULL DEFAULT CURRENT\_TIMESTAMP(3) ON UPDATE     |                                       |
+| updated\_by\_user\_id    | UUID           | NULL FK \-\> users.user\_id                          |                                       |
+| is\_deleted              | BOOLEAN        | NOT NULL DEFAULT FALSE                               | soft delete marker                    |
+| deleted\_at              | DATETIME(3)    | NULL                                                 |                                       |
 
-### **Beneficiary\_search\_tokens**
+### **beneficiary\_search\_tokens**
 
 Stores non-reversible search tokens used for duplicate detection without decrypting PII.
 
@@ -614,7 +614,7 @@ Stores non-reversible search tokens used for duplicate detection without decrypt
 | case\_type\_lookup\_id | UUID         | NOT NULL FK \-\> lookup\_values.lookup\_value\_id   | Mother/Child                                  |
 | created\_at            | DATETIME(3)  | NOT NULL                                            |                                               |
 
-### **state**
+### **states**
 
 _State definitions with the state master values_
 
@@ -666,7 +666,7 @@ _Talukas definitions with the talukas master values_
 | created\_at        | DATETIME(3)  | NOT NULL                                 |                                  |
 | updated\_at        | DATETIME(3)  | NOT NULL                                 |                                  |
 
-### **Health\_blocks**
+### **health\_blocks**
 
 | Column              | Data type    | Constraints                              | Enum / notes                  |
 | :------------------ | :----------- | :--------------------------------------- | :---------------------------- |
@@ -898,7 +898,7 @@ _Consent evidence and registration consent audit._
 | is\_deleted            | BOOLEAN     | NOT NULL DEFAULT FALSE                              | soft delete marker        |
 | deleted\_at            | DATETIME(3) | NULL                                                |                           |
 
-### **Beneficiary\_risk\_condition\_summary**
+### **beneficiary\_risk\_condition\_summary**
 
 _Derived condition-wise risk summary table for each beneficiary case. It supports application screens, MIS, dashboards, and reporting without repeatedly scanning all historical visit-level risk records._
 
@@ -952,7 +952,7 @@ _Timeline of beneficiary state transitions._
 | is\_deleted           | BOOLEAN     | NOT NULL DEFAULT FALSE                              | soft delete marker                                                                                          |
 | deleted\_at           | DATETIME(3) | NULL                                                |                                                                                                             |
 
-### **Beneficiary\_current\_summary**
+### **beneficiary\_current\_summary**
 
 _beneficiary\_current\_summary should be treated as a derived read model, not the source of truth. Source-of-truth data remains in normalized transactional tables. The summary can be implemented as a database view, materialized table, or application-maintained projection depending on performance needs._
 
@@ -1342,7 +1342,7 @@ _Referral decision and referral form. trigger\_condition\_list\_json optional su
 | is\_deleted                     | BOOLEAN      | NOT NULL DEFAULT FALSE                                        | soft delete marker                                                                                                                                                                                          |
 | deleted\_at                     | DATETIME(3)  | NULL                                                          |                                                                                                                                                                                                             |
 
-### **Referral\_trigger\_sources**
+### **referral\_trigger\_sources**
 
 | Column                        | Data Type    | Constraint                                        | Description                                                        |
 | ----------------------------- | ------------ | ------------------------------------------------- | ------------------------------------------------------------------ |
