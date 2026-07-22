@@ -166,6 +166,19 @@ export const LOOKUP_CATEGORIES: {
       { valueCode: 'CHILD', valueLabel: 'Child', sortOrder: 1 },
     ],
   },
+  {
+    categoryCode: 'APPROVAL_STATUS',
+    categoryName: 'Approval Status',
+    description:
+      "Decision status for approval-service's approval_requests.decision_status_lookup_id — replaces the former ApprovalRequestStatus Postgres enum with lookup-value rows (cross-service scalar FK per the forklift rule).",
+    values: [
+      { valueCode: 'PENDING', valueLabel: 'Pending', sortOrder: 0 },
+      { valueCode: 'APPROVED', valueLabel: 'Approved', sortOrder: 1 },
+      { valueCode: 'REJECTED', valueLabel: 'Rejected', sortOrder: 2 },
+      { valueCode: 'AUTO_LAPSED', valueLabel: 'Auto-lapsed', sortOrder: 3 },
+      { valueCode: 'CANCELLED', valueLabel: 'Cancelled', sortOrder: 4 },
+    ],
+  },
 ];
 
 /**

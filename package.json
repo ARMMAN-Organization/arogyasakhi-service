@@ -24,6 +24,8 @@
     "db:generate": "node tools/prisma-foreach.js generate",
     "db:push": "node tools/prisma-foreach.js db push",
     "db:setup": "npm run db:push",
+    "migrate": "node tools/prisma-foreach.js migrate deploy",
+    "db:migrate": "npm run migrate",
     "serve:all": "nx run-many -t build --projects=service-commons,core && nx run-many -t serve --all --parallel=16",
     "postinstall": "npm run db:generate",
     "prepare": "husky"
