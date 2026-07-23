@@ -11,3 +11,6 @@ coverage/
 !.env.example
 .DS_Store
 postman/
+
+# Local DB backups (may contain PII) — never commit
+db-backups/
