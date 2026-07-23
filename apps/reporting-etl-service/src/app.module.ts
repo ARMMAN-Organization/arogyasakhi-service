@@ -10,12 +10,21 @@ import {
 import { appConfig } from './config/app-config';
 import { createHealthRouter } from './health/health.controller';
 import { createInfoRouter } from './info/info.controller';
+import type { PrismaService } from './prisma/prisma.service';
 
 // Re-export shared HTTP helpers so feature routers can import from a single place.
-export { asyncHandler, ok, fail, validateBody, requireRoles, HttpError, ErrorCode } from '@armman/service-commons';
+export {
+  asyncHandler,
+  ok,
+  fail,
+  validateBody,
+  requireRoles,
+  HttpError,
+  ErrorCode,
+} from '@armman/service-commons';
 
 /** Builds and wires the Express application (replaces NestFactory + AppModule). */
-export function createApp(): Application {
+export function createApp(prisma: PrismaService): Application {
   const app = express();
 
   app.use(pinoHttp(buildLoggerOptions(appConfig.LOG_LEVEL)));
@@ -37,7 +46,7 @@ export function createApp(): Application {
 
   // All routes live under the global `api/v1` prefix.
   const api = express.Router();
-  api.use(createHealthRouter());
+  api.use(createHealthRouter(prisma));
   api.use(createInfoRouter());
   app.use('/api/v1', api);
 
