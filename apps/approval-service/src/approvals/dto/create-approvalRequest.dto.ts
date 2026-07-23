@@ -58,7 +58,7 @@ export const createApprovalRequestSchema = z
     requestedByUserId: z.string().uuid(),
     approverUserId: z.string().uuid().optional(),
     requestPayloadJson: jsonValueSchema.optional(),
-    status: z.enum(['PENDING', 'APPROVED', 'REJECTED', 'AUTO_LAPSED', 'CANCELLED']),
+    decisionStatusLookupId: z.string().uuid(),
     decisionPayloadJson: jsonValueSchema.optional(),
     decidedAt: z.coerce.date().optional(),
   })

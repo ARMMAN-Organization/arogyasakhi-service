@@ -66,6 +66,10 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
   // so it needs its own gateway entry or those 3 endpoints are unreachable.
   { prefix: '/admin/forms', target: appConfig.VISIT_FORM_SERVICE_URL, requiresAuth: true },
   { prefix: '/rules', target: appConfig.RULES_SERVICE_URL, requiresAuth: true },
+  // Admin rule-pack version routes (get current published version, publish a
+  // new version) live under /admin/rules in rules-service — a distinct prefix
+  // from /rules, so it needs its own gateway entry (mirrors /admin/forms).
+  { prefix: '/admin/rules', target: appConfig.RULES_SERVICE_URL, requiresAuth: true },
   { prefix: '/referrals', target: appConfig.RISK_REFERRAL_SERVICE_URL, requiresAuth: true },
   { prefix: '/closures', target: appConfig.CLOSURE_REOPEN_SERVICE_URL, requiresAuth: true },
   { prefix: '/approvals', target: appConfig.APPROVAL_SERVICE_URL, requiresAuth: true },

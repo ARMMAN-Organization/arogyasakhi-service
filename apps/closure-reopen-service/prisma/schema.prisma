@@ -12,11 +12,11 @@ datasource db {
 // closure-reopen-service owns these tables only (forklift rule).
 // Field/table definitions sourced from docs/Arogya_Sakhi_Database_Design_ERD_Table_Definitions.docx.md
 // section "closures", "reopen_requests" (Appendix A).
-// beneficiary_id / submitted_by_user_id / supervisor_id / requested_by_user_id /
-// decision_reason_code_lookup_id / decided_by_user_id / supervisor_rejection_reason_code_lookup_id
-// and all *_user_id audit columns are plain scalar columns, not Prisma relations,
-// because beneficiary_cases, users, supervisor_profiles and lookup_values are
-// owned by other services (no cross-service joins per the forklift rule).
+// beneficiary_id / submitted_by_user_id / supervisor_id (on closures) / requested_by_user_id /
+// decision_reason_code_lookup_id / decided_by_user_id and all *_user_id audit columns are
+// plain scalar columns, not Prisma relations, because beneficiary_cases, users,
+// supervisor_profiles and lookup_values are owned by other services (no cross-service joins
+// per the forklift rule).
 
 enum ClosureType {
   MEDICAL
@@ -45,58 +45,53 @@ enum ReopenSupervisorStatus {
 }
 
 model Closure {
-  id                String                   @id @default(uuid()) @map("closure_id")
+  id                         String                   @id @default(uuid()) @map("closure_id")
   // beneficiary_cases.beneficiary_id — owned by another service, no cross-service relation.
-  beneficiaryId     String                   @map("beneficiary_id")
-  closureType       ClosureType              @map("closure_type")
+  beneficiaryId              String                   @map("beneficiary_id")
+  closureType                ClosureType              @map("closure_type")
   // lookup_values.lookup_value_id (category CLOSURE_REASON) — owned by
   // auth-service, no cross-service relation. Replaces the previous
   // ClosureReason Postgres enum (same value_codes).
-  closureReasonLookupValueId String          @map("closure_reason_lookup_value_id")
-  eventDate         DateTime?                @map("event_date") @db.Date
-  closureDate       DateTime                 @map("closure_date") @db.Date
+  closureReasonLookupValueId String                   @map("closure_reason_lookup_value_id")
+  eventDate                  DateTime?                @map("event_date") @db.Date
+  closureDate                DateTime                 @map("closure_date") @db.Date
   // users.user_id — owned by another service, no cross-service relation.
-  submittedByUserId String                   @map("submitted_by_user_id")
-  supervisorStatus  ClosureSupervisorStatus? @map("supervisor_status")
+  submittedByUserId          String                   @map("submitted_by_user_id")
+  supervisorStatus           ClosureSupervisorStatus? @map("supervisor_status")
   // supervisor_profiles.supervisor_id — owned by another service, no cross-service relation.
-  supervisorId      String?                  @map("supervisor_id")
-  supervisorNotes   String?                  @map("supervisor_notes")
-  createdAt         DateTime                 @default(now()) @map("created_at")
-  createdByUserId   String?                  @map("created_by_user_id")
-  updatedAt         DateTime                 @updatedAt @map("updated_at")
-  updatedByUserId   String?                  @map("updated_by_user_id")
-  isDeleted         Boolean                  @default(false) @map("is_deleted")
-  deletedAt         DateTime?                @map("deleted_at")
+  supervisorId               String?                  @map("supervisor_id")
+  supervisorNotes            String?                  @map("supervisor_notes")
+  createdAt                  DateTime                 @default(now()) @map("created_at")
+  createdByUserId            String?                  @map("created_by_user_id")
+  updatedAt                  DateTime                 @updatedAt @map("updated_at")
+  updatedByUserId            String?                  @map("updated_by_user_id")
+  isDeleted                  Boolean                  @default(false) @map("is_deleted")
+  deletedAt                  DateTime?                @map("deleted_at")
 
   @@map("closures")
 }
 
 model ReopenRequest {
-  id                                    String                 @id @default(uuid()) @map("reopen_request_id")
+  id                         String                 @id @default(uuid()) @map("reopen_request_id")
   // beneficiary_cases.beneficiary_id — owned by another service, no cross-service relation.
-  beneficiaryId                         String                 @map("beneficiary_id")
-  requestReason                         ReopenRequestReason    @map("request_reason")
+  beneficiaryId              String                 @map("beneficiary_id")
+  requestReason              ReopenRequestReason    @map("request_reason")
   // users.user_id — owned by another service, no cross-service relation.
-  requestedByUserId                     String                 @map("requested_by_user_id")
-  requestedAt                           DateTime               @map("requested_at")
-  supervisorStatus                      ReopenSupervisorStatus @default(PENDING) @map("supervisor_status")
+  requestedByUserId          String                 @map("requested_by_user_id")
+  requestedAt                DateTime               @map("requested_at")
+  supervisorStatus           ReopenSupervisorStatus @default(PENDING) @map("supervisor_status")
   // lookup_values.lookup_value_id — owned by another service, no cross-service relation.
-  decisionReasonCodeLookupId            String?                @map("decision_reason_code_lookup_id")
-  decisionNotes                         String?                @map("decision_notes")
+  decisionReasonCodeLookupId String?                @map("decision_reason_code_lookup_id")
+  decisionNotes              String?                @map("decision_notes")
   // users.user_id — owned by another service, no cross-service relation.
-  decidedByUserId                       String?                @map("decided_by_user_id")
-  decidedAt                             DateTime?              @map("decided_at")
-  // users.user_id — owned by another service, no cross-service relation.
-  supervisorId                          String?                @map("supervisor_id")
-  // lookup_values.lookup_value_id — owned by another service, no cross-service relation.
-  supervisorRejectionReasonCodeLookupId String?                @map("supervisor_rejection_reason_code_lookup_id")
-  supervisorRejectionNotes              String?                @map("supervisor_rejection_notes")
-  createdAt                             DateTime               @default(now()) @map("created_at")
-  createdByUserId                       String?                @map("created_by_user_id")
-  updatedAt                             DateTime               @updatedAt @map("updated_at")
-  updatedByUserId                       String?                @map("updated_by_user_id")
-  isDeleted                             Boolean                @default(false) @map("is_deleted")
-  deletedAt                             DateTime?              @map("deleted_at")
+  decidedByUserId            String?                @map("decided_by_user_id")
+  decidedAt                  DateTime?              @map("decided_at")
+  createdAt                  DateTime               @default(now()) @map("created_at")
+  createdByUserId            String?                @map("created_by_user_id")
+  updatedAt                  DateTime               @updatedAt @map("updated_at")
+  updatedByUserId            String?                @map("updated_by_user_id")
+  isDeleted                  Boolean                @default(false) @map("is_deleted")
+  deletedAt                  DateTime?              @map("deleted_at")
 
   @@map("reopen_requests")
 }

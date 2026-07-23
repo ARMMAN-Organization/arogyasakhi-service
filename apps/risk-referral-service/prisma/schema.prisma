@@ -173,20 +173,20 @@ model RiskAssessment {
 // condition is evaluated" (risk_flags is the condition-level source of
 // truth; risk_assessments is only the visit-level summary).
 model RiskFlag {
-  id               String        @id @default(uuid()) @map("risk_flag_id")
-  riskAssessmentId String        @map("risk_assessment_id")
-  riskConditionId  String        @map("risk_condition_id")
+  id                     String   @id @default(uuid()) @map("risk_flag_id")
+  riskAssessmentId       String   @map("risk_assessment_id")
+  riskConditionId        String   @map("risk_condition_id")
   // lookup_values.lookup_value_id (category RISK_GRADE) — owned by
   // auth-service, no cross-service relation.
-  riskGradeLookupValueId String  @map("risk_grade_lookup_value_id")
-  observedValueJson Json?        @map("observed_value_json")
-  isReferralTrigger Boolean      @default(false) @map("is_referral_trigger")
-  isEducationTrigger Boolean     @default(false) @map("is_education_trigger")
-  isHrVisitTrigger  Boolean      @default(false) @map("is_hr_visit_trigger")
-  createdAt         DateTime     @default(now()) @map("created_at")
-  createdByUserId   String?      @map("created_by_user_id")
-  updatedAt         DateTime     @updatedAt @map("updated_at")
-  updatedByUserId   String?      @map("updated_by_user_id")
+  riskGradeLookupValueId String   @map("risk_grade_lookup_value_id")
+  observedValueJson      Json?    @map("observed_value_json")
+  isReferralTrigger      Boolean  @default(false) @map("is_referral_trigger")
+  isEducationTrigger     Boolean  @default(false) @map("is_education_trigger")
+  isHrVisitTrigger       Boolean  @default(false) @map("is_hr_visit_trigger")
+  createdAt              DateTime @default(now()) @map("created_at")
+  createdByUserId        String?  @map("created_by_user_id")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+  updatedByUserId        String?  @map("updated_by_user_id")
 
   riskAssessment RiskAssessment @relation(fields: [riskAssessmentId], references: [id])
   riskCondition  RiskCondition  @relation(fields: [riskConditionId], references: [id])
@@ -195,24 +195,19 @@ model RiskFlag {
 }
 
 model RiskStateSnapshot {
-  id               String         @id @default(uuid()) @map("risk_state_id")
+  id              String         @id @default(uuid()) @map("risk_state_id")
   // beneficiary_cases.beneficiary_id — owned by another service, no cross-service relation.
-  beneficiaryId    String         @map("beneficiary_id")
-  phase            RiskStatePhase
-  asOfDate         DateTime       @map("as_of_date") @db.Date
-  baselineRiskJson Json?          @map("baseline_risk_json")
-  latestRiskJson   Json?          @map("latest_risk_json")
-  everAtRiskJson   Json?          @map("ever_at_risk_json")
-  // visit_instances.visit_id — owned by another service, no cross-service relation.
-  sourceVisitId    String?        @map("source_visit_id")
+  beneficiaryId   String         @map("beneficiary_id")
+  phase           RiskStatePhase
+  asOfDate        DateTime       @map("as_of_date") @db.Date
   // Override confirmed by user (SRS): 5 values instead of doc's 4.
-  ccvState         CcvState?      @map("ccv_state")
-  createdAt        DateTime       @default(now()) @map("created_at")
-  createdByUserId  String?        @map("created_by_user_id")
-  updatedAt        DateTime       @updatedAt @map("updated_at")
-  updatedByUserId  String?        @map("updated_by_user_id")
-  isDeleted        Boolean        @default(false) @map("is_deleted")
-  deletedAt        DateTime?      @map("deleted_at")
+  ccvState        CcvState?      @map("ccv_state")
+  createdAt       DateTime       @default(now()) @map("created_at")
+  createdByUserId String?        @map("created_by_user_id")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+  updatedByUserId String?        @map("updated_by_user_id")
+  isDeleted       Boolean        @default(false) @map("is_deleted")
+  deletedAt       DateTime?      @map("deleted_at")
 
   @@map("risk_state_snapshots")
 }
@@ -221,32 +216,32 @@ model RiskStateSnapshot {
 // user override, columns are taken from the section 4.5 summary table, with
 // standard audit columns added to match every other Appendix A table.
 model Referral {
-  id                       String                   @id @default(uuid()) @map("referral_id")
+  id                        String                   @id @default(uuid()) @map("referral_id")
   // beneficiary_cases.beneficiary_id — owned by another service, no cross-service relation.
-  beneficiaryId            String                   @map("beneficiary_id")
+  beneficiaryId             String                   @map("beneficiary_id")
   // visit_instances.visit_id — owned by another service, no cross-service relation.
   // Nullable per the referrals override spec's partial-unique constraint
   // "UNIQUE on visit_id where visit_id IS NOT NULL" (visit_referral_once).
-  visitId                  String?                  @map("visit_id")
+  visitId                   String?                  @map("visit_id")
   // form_submissions.submission_id — owned by another service, no cross-service relation.
-  sourceSubmissionId       String?                  @map("source_submission_id")
+  sourceSubmissionId        String?                  @map("source_submission_id")
   // lookup_values.lookup_value_id (category REFERRAL_TYPE) — owned by
   // auth-service, no cross-service relation. Replaces the previous
   // ReferralType Postgres enum (STANDARD/ACCOMPANIED — same value_codes).
   referralTypeLookupValueId String                   @map("referral_type_lookup_value_id")
-  referralDate             DateTime                 @map("referral_date") @db.Date
-  triggerConditionListJson Json?                    @map("trigger_condition_list_json")
-  facilityType             FacilityType?            @map("facility_type")
-  facilityName             String?                  @map("facility_name") @db.VarChar(200)
-  status                   ReferralStatus
-  validTill                DateTime?                @map("valid_till") @db.Date
-  supervisorApprovalStatus SupervisorApprovalStatus @default(NOT_REQUIRED) @map("supervisor_approval_status")
-  createdAt                DateTime                 @default(now()) @map("created_at")
-  createdByUserId          String?                  @map("created_by_user_id")
-  updatedAt                DateTime                 @updatedAt @map("updated_at")
-  updatedByUserId          String?                  @map("updated_by_user_id")
-  isDeleted                Boolean                  @default(false) @map("is_deleted")
-  deletedAt                DateTime?                @map("deleted_at")
+  referralDate              DateTime                 @map("referral_date") @db.Date
+  triggerConditionListJson  Json?                    @map("trigger_condition_list_json")
+  facilityType              FacilityType?            @map("facility_type")
+  facilityName              String?                  @map("facility_name") @db.VarChar(200)
+  status                    ReferralStatus
+  validTill                 DateTime?                @map("valid_till") @db.Date
+  supervisorApprovalStatus  SupervisorApprovalStatus @default(NOT_REQUIRED) @map("supervisor_approval_status")
+  createdAt                 DateTime                 @default(now()) @map("created_at")
+  createdByUserId           String?                  @map("created_by_user_id")
+  updatedAt                 DateTime                 @updatedAt @map("updated_at")
+  updatedByUserId           String?                  @map("updated_by_user_id")
+  isDeleted                 Boolean                  @default(false) @map("is_deleted")
+  deletedAt                 DateTime?                @map("deleted_at")
 
   referralTriggerSources ReferralTriggerSource[]
   referralFollowups      ReferralFollowup[]
