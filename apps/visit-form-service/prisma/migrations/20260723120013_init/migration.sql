@@ -8,9 +8,6 @@ CREATE TYPE "AnchorType" AS ENUM ('REGISTRATION', 'LMP', 'EDD', 'DELIVERY_DATE',
 CREATE TYPE "VisitScheduleStatus" AS ENUM ('GENERATED', 'OPEN', 'MISSED', 'COMPLETED', 'SUPERSEDED', 'CANCELLED');
 
 -- CreateEnum
-CREATE TYPE "VisitInstanceStatus" AS ENUM ('STARTED', 'PENDING', 'MISSED', 'COMPLETED', 'DISCARDED');
-
--- CreateEnum
 CREATE TYPE "FormEntityType" AS ENUM ('MOTHER', 'CHILD', 'REFERRAL', 'SUPERVISOR', 'SYSTEM');
 
 -- CreateEnum
@@ -56,7 +53,8 @@ CREATE TABLE "visit_instances" (
     "sakhi_id" TEXT NOT NULL,
     "local_visit_uuid" VARCHAR(80) NOT NULL,
     "actual_visit_date" DATE,
-    "status" "VisitInstanceStatus" NOT NULL,
+    "status_code" TEXT,
+    "status_lookup_value_id" TEXT,
     "meet_beneficiary_flag" BOOLEAN,
     "not_met_reason" VARCHAR(255),
     "completed_at" TIMESTAMP(3),
@@ -75,8 +73,10 @@ CREATE TABLE "visit_instances" (
 CREATE TABLE "visit_status_history" (
     "visit_status_history_id" TEXT NOT NULL,
     "visit_id" TEXT NOT NULL,
-    "from_status" "VisitInstanceStatus",
-    "to_status" "VisitInstanceStatus" NOT NULL,
+    "from_status_code" TEXT,
+    "from_status_lookup_value_id" TEXT,
+    "to_status_code" TEXT,
+    "to_status_lookup_value_id" TEXT,
     "reason_code" VARCHAR(80),
     "changed_by_user_id" TEXT NOT NULL,
     "changed_at" TIMESTAMP(3) NOT NULL,
@@ -184,6 +184,9 @@ CREATE UNIQUE INDEX "form_versions_form_definition_id_version_no_key" ON "form_v
 
 -- CreateIndex
 CREATE UNIQUE INDEX "form_submissions_local_submission_uuid_key" ON "form_submissions"("local_submission_uuid");
+
+-- CreateIndex
+CREATE INDEX "form_submissions_beneficiary_id_form_version_id_submitted_a_idx" ON "form_submissions"("beneficiary_id", "form_version_id", "submitted_at");
 
 -- AddForeignKey
 ALTER TABLE "visit_instances" ADD CONSTRAINT "visit_instances_schedule_id_fkey" FOREIGN KEY ("schedule_id") REFERENCES "visit_schedules"("schedule_id") ON DELETE RESTRICT ON UPDATE CASCADE;

@@ -1,8 +1,5 @@
 -- CreateEnum
-CREATE TYPE "Sex" AS ENUM ('FEMALE', 'MALE', 'OTHER', 'UNKNOWN');
-
--- CreateEnum
-CREATE TYPE "ChildSex" AS ENUM ('FEMALE', 'MALE', 'OTHER', 'INTERSEX');
+CREATE TYPE "Sex" AS ENUM ('FEMALE', 'MALE', 'OTHER', 'INTERSEX');
 
 -- CreateEnum
 CREATE TYPE "CaseType" AS ENUM ('MOTHER', 'CHILD');
@@ -79,6 +76,7 @@ CREATE TABLE "Beneficiary_search_tokens" (
 -- CreateTable
 CREATE TABLE "beneficiary_cases" (
     "beneficiary_id" TEXT NOT NULL,
+    "local_case_uuid" VARCHAR(80) NOT NULL,
     "pii_id" TEXT NOT NULL,
     "project_id" TEXT NOT NULL,
     "case_type" "CaseType" NOT NULL,
@@ -132,7 +130,7 @@ CREATE TABLE "child_case_details" (
     "beneficiary_id" TEXT NOT NULL,
     "mother_beneficiary_id" TEXT,
     "date_of_birth" DATE NOT NULL,
-    "sex" "ChildSex",
+    "sex" "Sex",
     "birth_weight_kg" DECIMAL(5,2),
     "birth_length_cm" DECIMAL(5,2),
     "premature_flag" BOOLEAN,
@@ -266,6 +264,9 @@ CREATE INDEX "Beneficiary_search_tokens_name_token_case_type_lookup_id_do_idx" O
 CREATE INDEX "Beneficiary_search_tokens_beneficiary_id_idx" ON "Beneficiary_search_tokens"("beneficiary_id");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "beneficiary_cases_local_case_uuid_key" ON "beneficiary_cases"("local_case_uuid");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "mother_case_details_beneficiary_id_key" ON "mother_case_details"("beneficiary_id");
 
 -- CreateIndex
@@ -300,3 +301,4 @@ ALTER TABLE "beneficiary_status_history" ADD CONSTRAINT "beneficiary_status_hist
 
 -- AddForeignKey
 ALTER TABLE "Beneficiary_current_summary" ADD CONSTRAINT "Beneficiary_current_summary_beneficiary_id_fkey" FOREIGN KEY ("beneficiary_id") REFERENCES "beneficiary_cases"("beneficiary_id") ON DELETE RESTRICT ON UPDATE CASCADE;
+

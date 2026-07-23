@@ -1,8 +1,5 @@
--- CreateSchema
-CREATE SCHEMA IF NOT EXISTS "audit_service";
-
 -- CreateTable
-CREATE TABLE "audit_service"."audit_log" (
+CREATE TABLE "audit_log" (
     "audit_id" TEXT NOT NULL,
     "actor_user_id" TEXT,
     "action" VARCHAR(120) NOT NULL,

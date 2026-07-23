@@ -3,12 +3,17 @@
  * Runs a Prisma command against every service schema in apps/*\/prisma/schema.prisma.
  *
  * Each service owns its own isolated Prisma client (see the `output` in each
- * schema) AND its own Postgres schema namespace (e.g. schema=beneficiary,
- * schema=auth-service) so the 12 services never collide in one database.
+ * schema). All services now share a single Postgres schema (`public`) —
+ * per-service table names stay unique via `@@map(...)`, so there's no
+ * namespace collision even without a dedicated schema per service. Per-service
+ * schema targeting was dropped after Supabase's pgbouncer transaction pooler
+ * proved unable to honor per-session `search_path`, which silently misrouted
+ * migrations to the wrong schema.
  *
- * For `db push`/`db pull`/`migrate`, this script derives a per-service
- * DATABASE_URL/DIRECT_URL by taking the base connection from the root .env and
- * appending each service's `schema=` (read from apps/<svc>/.env or .env.example).
+ * For `db push`/`db pull`/`migrate`, this script still supports an optional
+ * per-service `schema=` override (read from apps/<svc>/.env or .env.example)
+ * for anyone who reintroduces one — if none is set, it just uses the root
+ * .env's DATABASE_URL/DIRECT_URL as-is (i.e. `public`).
  * For `generate` (no DB needed), it just runs per schema.
  *
  * Usage:

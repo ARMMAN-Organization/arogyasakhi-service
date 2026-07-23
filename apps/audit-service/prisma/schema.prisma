@@ -1,20 +1,12 @@
 generator client {
-  provider        = "prisma-client-js"
-  output          = "../../../node_modules/.prisma/client-audit-service"
-  previewFeatures = ["multiSchema"]
+  provider = "prisma-client-js"
+  output   = "../../../node_modules/.prisma/client-audit-service"
 }
 
-// schemas is set explicitly (rather than relying on the connection URL's
-// ?schema= param) because Supabase's transaction pooler (port 6543, used for
-// DATABASE_URL at runtime) does not honor per-session search_path changes —
-// see apps/auth-service/prisma/schema.prisma for the confirmed root cause.
-// Baking the schema into every generated query via @@schema(...) works
-// regardless of which pooler mode is used.
 datasource db {
   provider  = "postgresql"
   directUrl = env("DIRECT_URL")
   url       = env("DATABASE_URL")
-  schemas   = ["audit_service"]
 }
 
 // audit-service owns these tables only (forklift rule).
@@ -42,5 +34,4 @@ model AuditLog {
   createdAt   DateTime @default(now()) @map("created_at")
 
   @@map("audit_log")
-  @@schema("audit_service")
 }
