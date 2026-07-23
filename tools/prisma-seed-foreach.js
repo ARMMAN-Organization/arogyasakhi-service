@@ -32,7 +32,7 @@ for (const service of services) {
   try {
     execFileSync(
       'npx',
-      ['ts-node', '--compiler-options', '{"module":"commonjs"}', seedFile],
+      ['ts-node', '--compiler-options', '{"module":"commonjs","resolveJsonModule":true}', seedFile],
       { stdio: 'inherit' },
     );
   } catch {

@@ -9,7 +9,7 @@
     "prisma:seed": "prisma db seed"
   },
   "prisma": {
-    "seed": "ts-node --compiler-options {\"module\":\"commonjs\"} prisma/seed.ts"
+    "seed": "ts-node --compiler-options {\"module\":\"commonjs\",\"resolveJsonModule\":true} prisma/seed.ts"
   },
   "dependencies": {
     "@armman/core": "*",
