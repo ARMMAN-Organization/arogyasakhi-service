@@ -17,6 +17,20 @@ const geographyUnitIdParamsSchema = z
   .object({ id: z.string().uuid().openapi({ example: '99999999-9999-9999-9999-999999999999' }) })
   .strict();
 
+const listGeographyUnitsQuerySchema = z
+  .object({
+    geoType: z
+      .enum(['STATE', 'DISTRICT', 'BLOCK', 'PHC', 'SUBCENTRE', 'VILLAGE', 'PADA'])
+      .optional()
+      .openapi({ example: 'DISTRICT' }),
+    parentId: z
+      .string()
+      .uuid()
+      .optional()
+      .openapi({ example: '99999999-9999-9999-9999-999999999999' }),
+  })
+  .strict();
+
 const geographyUnitSchema = z.object({
   geographyUnitId: z.string().uuid().openapi({ example: '99999999-9999-9999-9999-999999999999' }),
   parentId: z
@@ -46,6 +60,31 @@ function envelope<T extends z.ZodTypeAny>(data: T) {
  */
 export function createGeographyRouter(service: GeographyService, signer: TokenSigner) {
   const doc = createDocumentedRouter();
+
+  // Registered before `/geography-units/:id` so the bare `/geography-units`
+  // list path isn't captured by the `:id` route.
+  doc.get(
+    '/geography-units',
+    {
+      summary: 'List geography units for cascading selection (filter by geoType and/or parentId)',
+      tags: ['Geography'],
+      query: listGeographyUnitsQuerySchema,
+      responses: {
+        200: {
+          description:
+            'Geography units matching the filters. With no filter, returns top-level units (STATEs).',
+          schema: envelope(z.array(geographyUnitSchema)),
+        },
+        401: errorResponse(401),
+        500: errorResponse(500),
+      },
+    },
+    authenticate(signer),
+    validate(listGeographyUnitsQuerySchema, 'query'),
+    asyncHandler(async (req, res) => {
+      res.json(ok(await service.list(req.query as { geoType?: string; parentId?: string })));
+    }),
+  );
 
   doc.get(
     '/geography-units/:id',

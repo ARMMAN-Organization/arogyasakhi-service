@@ -37,4 +37,34 @@ export class GeographyRepository {
 
     return chain;
   }
+
+  /**
+   * Lists geography units for cascading-dropdown selection (SRS FR line 971),
+   * excluding soft-deleted rows, ordered by geoCode. Filters:
+   * - both/neither absent: with no filter at all, defaults to top-level units
+   *   (parentId null — the STATEs), so an unfiltered call never dumps the whole
+   *   multi-level tree; callers walk down one level per request.
+   * - geoType and/or parentId narrow the result (e.g. geoType=DISTRICT +
+   *   parentId=<stateId> → districts of that state).
+   * Capped at 500 rows — a defensive bound; a single level of the hierarchy
+   * (e.g. villages under one taluka) is well within this.
+   */
+  findMany(filters: { geoType?: string; parentId?: string }) {
+    const where: NonNullable<Parameters<typeof this.prisma.geographyUnit.findMany>[0]>['where'] = {
+      isDeleted: false,
+    };
+    // geoType is a Prisma GeoType enum column; the caller-supplied string is
+    // already constrained to the valid set by the controller's Zod query schema.
+    if (filters.geoType) where.geoType = filters.geoType as never;
+    if (filters.parentId) where.parentId = filters.parentId;
+    // Default to roots only when NO filter was supplied — avoids returning the
+    // entire tree. If either filter is present, honor it as given.
+    if (!filters.geoType && !filters.parentId) where.parentId = null;
+
+    return this.prisma.geographyUnit.findMany({
+      where,
+      orderBy: { geoCode: 'asc' },
+      take: 500,
+    });
+  }
 }
