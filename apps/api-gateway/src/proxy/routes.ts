@@ -82,4 +82,26 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
   { prefix: '/sync', target: appConfig.SYNC_SERVICE_URL, requiresAuth: true },
   { prefix: '/media', target: appConfig.MEDIA_SERVICE_URL, requiresAuth: true },
   { prefix: '/audit', target: appConfig.AUDIT_SERVICE_URL, requiresAuth: true },
+  // supervisor-operations-service owns four sibling prefixes (events, inventory
+  // items/transactions, call logs). Each enforces its own role guard downstream.
+  {
+    prefix: '/supervisor-events',
+    target: appConfig.SUPERVISOR_OPERATIONS_SERVICE_URL,
+    requiresAuth: true,
+  },
+  {
+    prefix: '/inventory-items',
+    target: appConfig.SUPERVISOR_OPERATIONS_SERVICE_URL,
+    requiresAuth: true,
+  },
+  {
+    prefix: '/inventory-transactions',
+    target: appConfig.SUPERVISOR_OPERATIONS_SERVICE_URL,
+    requiresAuth: true,
+  },
+  {
+    prefix: '/call-logs',
+    target: appConfig.SUPERVISOR_OPERATIONS_SERVICE_URL,
+    requiresAuth: true,
+  },
 ];
