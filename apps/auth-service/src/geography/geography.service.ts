@@ -1,5 +1,25 @@
-import { notFound } from '@armman/service-commons';
+import { badRequest, conflict, notFound } from '@armman/service-commons';
 import type { GeographyRepository } from './geography.repository';
+import type { CreateGeographyUnitInput } from './dto/create-geography-unit.dto';
+import type { UpdateGeographyUnitInput } from './dto/update-geography-unit.dto';
+
+/** Prisma unique-constraint violation code (parentId + geoType + geoCode). */
+const PRISMA_UNIQUE_CONSTRAINT_CODE = 'P2002';
+
+/**
+ * Fixed 7-level hierarchy order (SRS/ERD) — a unit's geoType must be exactly
+ * one level below its parent's geoType. STATE is the only level with no
+ * parent.
+ */
+const GEO_TYPE_ORDER = [
+  'STATE',
+  'DISTRICT',
+  'BLOCK',
+  'PHC',
+  'SUBCENTRE',
+  'VILLAGE',
+  'PADA',
+] as const;
 
 /**
  * Response is projected to EXACTLY the fields the API documents
@@ -64,4 +84,72 @@ export class GeographyService {
     const units = await this.repository.findMany(filters);
     return units.map((u) => toApiGeographyUnit(u as unknown as Record<string, unknown>));
   }
+
+  async create(input: CreateGeographyUnitInput, createdByUserId: string) {
+    if (input.geoType === 'STATE') {
+      if (input.parentId) {
+        throw badRequest('parentId: Must be omitted for a STATE-level unit.');
+      }
+    } else {
+      if (!input.parentId) {
+        throw badRequest('parentId: Required for every geoType except STATE.');
+      }
+
+      const parent = await this.repository.findById(input.parentId);
+      if (!parent) throw notFound('Parent geography unit not found.');
+
+      const parentLevel = GEO_TYPE_ORDER.indexOf(parent.geoType as (typeof GEO_TYPE_ORDER)[number]);
+      const childLevel = GEO_TYPE_ORDER.indexOf(input.geoType);
+      if (childLevel !== parentLevel + 1) {
+        throw badRequest(
+          `geoType: Must be exactly one level below the parent's geoType (${parent.geoType}).`,
+        );
+      }
+    }
+
+    try {
+      const created = await this.repository.createUnit(input, createdByUserId);
+      return toApiGeographyUnit(created as unknown as Record<string, unknown>);
+    } catch (err) {
+      if (isUniqueConstraintViolation(err)) {
+        throw conflict('A geography unit with this parent, geoType, and geoCode already exists.');
+      }
+      throw err;
+    }
+  }
+
+  async update(id: string, input: UpdateGeographyUnitInput, updatedByUserId: string) {
+    try {
+      const updated = await this.repository.updateUnit(id, input, updatedByUserId);
+      if (!updated) throw notFound('Geography unit not found.');
+      return toApiGeographyUnit(updated as unknown as Record<string, unknown>);
+    } catch (err) {
+      if (isUniqueConstraintViolation(err)) {
+        throw conflict('A geography unit with this parent, geoType, and geoCode already exists.');
+      }
+      throw err;
+    }
+  }
+
+  async remove(id: string, updatedByUserId: string) {
+    const existing = await this.repository.findById(id);
+    if (!existing) throw notFound('Geography unit not found.');
+
+    const hasChildren = await this.repository.hasActiveChildren(id);
+    if (hasChildren) {
+      throw conflict('Cannot delete a geography unit that has active child units.');
+    }
+
+    await this.repository.softDelete(id, updatedByUserId);
+  }
+}
+
+/** Narrows a caught Prisma error to a unique-constraint violation (P2002). */
+function isUniqueConstraintViolation(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'code' in err &&
+    (err as { code: unknown }).code === PRISMA_UNIQUE_CONSTRAINT_CODE
+  );
 }
