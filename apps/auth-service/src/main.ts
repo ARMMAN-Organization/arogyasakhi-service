@@ -4,10 +4,12 @@ import { LocalKeypairTokenSigner } from '@armman/service-commons';
 import { appConfig } from './config/app-config';
 import { createApp } from './app.module';
 import { PrismaService } from './prisma/prisma.service';
+import { seedOnStartup } from './prisma/startup-seed';
 
 async function bootstrap(): Promise<void> {
   const prisma = new PrismaService();
   await prisma.connect();
+  await seedOnStartup(prisma);
 
   const signer = await LocalKeypairTokenSigner.create(
     appConfig.JWT_PRIVATE_KEY,
