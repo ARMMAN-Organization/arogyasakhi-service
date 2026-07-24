@@ -1,5 +1,7 @@
 import { buildFormAnswers } from './form.mapper';
 import type { FormField } from './dto/form-field.dto';
+import { BENEFICIARY_DUPLICATED_FIELD_CODES } from './beneficiary-duplicated-fields';
+import { REGISTRATION_FORMS } from './registration-forms.seed-data';
 
 /** Minimal FormField factory — only the fields buildFormAnswers reads. */
 function field(question_code: string, input_type: string): FormField {
@@ -118,41 +120,64 @@ describe('buildFormAnswers', () => {
   describe('beneficiary-duplicated fields', () => {
     it('writes no row for a field already stored by beneficiary creation', () => {
       const fields = [
-        field('first_name', 'text'),
+        field('beneficiary_address', 'text'),
         field('lmp_date', 'date'),
-        field('height_cm', 'number'),
+        field('gravida', 'number'),
       ];
       const rows = buildFormAnswers(fields, {
-        first_name: 'bajaja',
+        beneficiary_address: '123 Main St',
         lmp_date: '2026-06-10',
-        height_cm: 123,
+        gravida: 2,
       });
       expect(rows).toEqual([]);
     });
 
     it('still writes rows for non-duplicate fields alongside skipped duplicates', () => {
       const fields = [
-        field('first_name', 'text'), // duplicate -> skipped
-        field('who_owns_the_phone', 'select'), // not a duplicate -> kept
+        field('beneficiary_address', 'text'), // duplicate -> skipped
+        field('phone_owner', 'select'), // not a duplicate -> kept
       ];
       const rows = buildFormAnswers(fields, {
-        first_name: 'bajaja',
-        who_owns_the_phone: 'asha',
+        beneficiary_address: '123 Main St',
+        phone_owner: 'SELF',
       });
       expect(rows).toHaveLength(1);
       expect(rows[0]).toEqual(
-        expect.objectContaining({ fieldCode: 'who_owns_the_phone', answerValueText: 'asha' }),
+        expect.objectContaining({ fieldCode: 'phone_owner', answerValueText: 'SELF' }),
       );
     });
 
     it('does not skip a similarly-named field that is not on the duplicate list', () => {
-      // "gravida_total_number_of_pregnancies" is duplicated; a differently
-      // coded gravida-like field must not be caught by a partial match.
-      const rows = buildFormAnswers([field('gravida', 'number')], { gravida: 2 });
+      // "sickle_cell_status" is not duplicated with beneficiary-service; a
+      // similarly health-history-flavored field must not be caught by a
+      // partial/fuzzy match against the duplicate list.
+      const rows = buildFormAnswers([field('sickle_cell_status', 'text')], {
+        sickle_cell_status: 'AA',
+      });
       expect(rows).toHaveLength(1);
       expect(rows[0]).toEqual(
-        expect.objectContaining({ fieldCode: 'gravida', answerValueNumber: 2 }),
+        expect.objectContaining({ fieldCode: 'sickle_cell_status', answerValueText: 'AA' }),
       );
+    });
+
+    it('every code in BENEFICIARY_DUPLICATED_FIELD_CODES matches a real seeded question_code', () => {
+      // Guards against the two lists drifting apart silently: this list is a
+      // manually-maintained mirror of the MOTHER_REGISTRATION form actually
+      // seeded in registration-forms.seed-data.ts (which itself mirrors
+      // beneficiary-service's create-beneficiary DTO). If either side renames
+      // a question_code without updating the other, this test fails loudly
+      // instead of the exclusion silently becoming a no-op for the renamed
+      // field.
+      const motherRegistrationForm = REGISTRATION_FORMS.find(
+        (f) => f.formCode === 'MOTHER_REGISTRATION',
+      );
+      const seededCodes = new Set(
+        (motherRegistrationForm?.fields ?? []).map((f) => f.question_code),
+      );
+
+      for (const code of BENEFICIARY_DUPLICATED_FIELD_CODES) {
+        expect(seededCodes.has(code)).toBe(true);
+      }
     });
   });
 });

@@ -15,39 +15,27 @@
  * elsewhere).
  *
  * Source of the mapping: see the beneficiary-service create-beneficiary DTO
- * (piiSchema / motherDetailsSchema) — each code below corresponds 1:1 to a
- * field accepted there. Keep the two lists in sync if either form changes.
+ * (piiSchema / motherDetailsSchema) and this service's seeded
+ * MOTHER_REGISTRATION form (prisma/seed.ts) — each code below matches a
+ * question_code actually seeded there. There is no compile-time link across
+ * the two services (they're independently deployable), so
+ * form.mapper.spec.ts's "beneficiary-duplicated fields" suite asserts every
+ * code here matches a real seeded question_code, catching drift if either
+ * side renames a field.
  */
 export const BENEFICIARY_DUPLICATED_FIELD_CODES: ReadonlySet<string> = new Set([
-  // pii.firstName / middleName / lastName
-  'first_name',
-  'middle_name',
-  'last_name',
-  // pii.dateOfBirth
-  'date_of_birth',
+  // pii.addressLine
+  'beneficiary_address',
   // pii.phone
   'mobile_number',
-  // pii.addressLine
-  'enter_the_beneficiary_address',
-  // pii.stateId / districtId / talukaId / villageId / padaId / phcId / healthSubCentreId
-  'name_of_the_state',
-  'name_of_district',
-  'name_of_block_taluka',
-  'name_of_the_revenue_village_grampanchayat',
-  'beneficary_pada_name',
-  'beneficary_phc_name',
-  'name_of_sub_center',
   // motherDetails.lmpDate / computed EDD
   'lmp_date',
-  'edd',
+  'edd_date',
   // motherDetails.gravida / parity / liveBirths / abortions / stillbirths / deadChildren
-  'gravida_total_number_of_pregnancies',
-  'para_number_of_births_after_24_weeks',
+  'gravida',
+  'para',
   'living_children',
-  'abortions_pregnancy_losses_before_24_weeks',
-  'still_births',
+  'abortions',
+  'stillbirths',
   'dead_children',
-  // motherDetails.heightCm / weightKg
-  'height_cm',
-  'weight_kg',
 ]);
