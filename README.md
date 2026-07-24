@@ -4,12 +4,14 @@ Nx monorepo of independently deployable Express microservices for the Arogya Sak
 platform. Engineering standards live in [`.claude/CLAUDE.md`](./.claude/CLAUDE.md).
 
 ## Layout
+
 ```
 apps/   16 microservices (each its own Dockerfile, deployed independently)
 libs/   core · service-commons · api-contracts (shared, publishable)
 ```
 
 ## Prerequisites
+
 - **Node 20.11.0** — pinned in `.nvmrc`. With `nvm`: `nvm install && nvm use`.
 - **npm 10+** (ships with Node 20).
 - **Docker** for local Postgres + Redis.
@@ -17,6 +19,7 @@ libs/   core · service-commons · api-contracts (shared, publishable)
     then `colima start` once. After that `docker compose` works normally.
 
 ## Getting started (clone → all services running)
+
 ```bash
 nvm install && nvm use        # Node 20.11.0 from .nvmrc
 npm install                   # installs deps AND generates all Prisma clients (postinstall)
@@ -25,7 +28,9 @@ docker compose up -d          # start Postgres + Redis
 npm run db:setup              # create each service's tables in the DB
 npm run serve:all             # build + run all 16 services (ports 3000-3015)
 ```
+
 Verify a service is up (e.g. beneficiary on 3001):
+
 ```bash
 curl http://localhost:3001/api/v1/health/live
 # -> {"success":true,"message":"OK","data":{"status":"ok"}}
@@ -43,17 +48,39 @@ Re-run `npm run db:generate` after changing any schema.
 3012 wrapper-api · 3013 audit · 3014 cms-content · 3015 reporting-etl.
 
 ## Common commands
+
 ```bash
 npm run serve:all               # run all 16 services (ports 3000-3015)
 npx nx serve <service>          # run a single service in watch mode
 npm run db:generate             # regenerate all Prisma clients (after a schema change)
-npm run db:setup                # push all schemas to the DB
+npm run db:setup                # push all schemas to the DB (dev-only, non-migrating)
+npm run migrate                 # apply every service's migrations (prisma migrate deploy)
 npx nx test <service>           # unit tests
 npx nx affected -t lint test build   # only what changed
 npx nx graph                    # dependency graph
 ```
 
+## Migrations
+
+`npm run migrate` runs `prisma migrate deploy` for every service (via
+`tools/prisma-foreach.js`), applying each service's already-authored migration
+files against its own schema namespace. It never generates or edits migrations
+and never resets the DB — safe for CI/production.
+
+**Migrations are append-only.** For any schema change:
+
+1. Edit the service's `prisma/schema.prisma`.
+2. Generate a NEW migration: `npx prisma migrate dev --name <desc> --schema apps/<svc>/prisma/schema.prisma`.
+3. Apply everywhere with `npm run migrate`.
+
+Never edit an already-committed migration file — Prisma tracks each by checksum,
+so retroactive edits break `migrate deploy` on any environment where the
+migration was already applied. Correct a mistake with a new follow-up migration
+instead. (`db:setup`/`db:push` is a schemaless dev shortcut that bypasses
+migration history — use `migrate` for anything that must be reproducible.)
+
 ## Adding a service
+
 Clone the structure of `apps/beneficiary-service` (the reference service). Keep it
 forklift-ready: no imports from other services, own DB tables, shared code only via
 `libs/*`.

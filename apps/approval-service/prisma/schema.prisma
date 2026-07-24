@@ -14,16 +14,20 @@ datasource db {
 // section "approval_requests" (Appendix A).
 // beneficiary_id / source_submission_id / decision_reason_code_lookup_id / decided_by_user_id /
 // source_answer_id / referral_id / closure_id / reopen_request_id / requested_by_user_id /
-// approver_user_id / created_by_user_id / updated_by_user_id are plain scalar columns, not
-// Prisma relations, because beneficiary_cases, form_submissions, lookup_values, users,
-// form_answers, referrals, closures, and reopen_requests are owned by other services
-// (no cross-service joins per the forklift rule).
+// approver_user_id / created_by_user_id / updated_by_user_id / decision_status_lookup_id are
+// plain scalar columns, not Prisma relations, because beneficiary_cases, form_submissions,
+// lookup_values, users, form_answers, referrals, closures, and reopen_requests are owned by
+// other services (no cross-service joins per the forklift rule).
 //
-// Doc note: the doc lists "decision_status_lookup_id or status" as one row (an either/or
-// design note) and separately lists a plain "status" ENUM (PENDING, APPROVED, REJECTED,
-// AUTO_LAPSED, CANCELLED) later in the same table block. Modeled as a single `status` enum
-// field using the more complete later enum set; no separate decision_status_lookup_id
-// column was invented. The doc also repeats "source_entity_type" / "source_entity_id" /
+// Doc note: the doc originally listed BOTH an ambiguous "decision_status_lookup_id or status"
+// row AND a separate plain "status" ENUM (PENDING, APPROVED, REJECTED, AUTO_LAPSED, CANCELLED)
+// later in the same table block — an unresolved duplicate. Resolved (see
+// docs/Arogya_Sakhi_Database_Design_ERD_Table_Definitions.docx.md) by keeping
+// decision_status_lookup_id, matching the lookup_values pattern used for extensible statuses
+// elsewhere (reopen_requests.decision_reason_code_lookup_id,
+// project_registration_targets.status_lookup_id) — the ApprovalRequestStatus enum was dropped.
+// All 5 values (including AUTO_LAPSED/CANCELLED, absent from the doc's either/or row) must be
+// seeded as lookup_values rows. The doc also repeats "source_entity_type" / "source_entity_id" /
 // "decided_at" as duplicate rows (apparent doc redundancy) — each modeled once.
 
 enum ApprovalRequestType {
@@ -36,44 +40,41 @@ enum ApprovalRequestType {
   TRANSFER
 }
 
-enum ApprovalRequestStatus {
-  PENDING
-  APPROVED
-  REJECTED
-  AUTO_LAPSED
-  CANCELLED
-}
-
 model ApprovalRequest {
-  id                         String                @id @default(uuid()) @map("approval_request_id")
-  requestType                ApprovalRequestType   @map("request_type")
+  id                         String              @id @default(uuid()) @map("approval_request_id")
+  requestType                ApprovalRequestType @map("request_type")
   // beneficiary_cases.beneficiary_id — owned by another service, no cross-service relation.
-  beneficiaryId              String?               @map("beneficiary_id")
-  sourceEntityType           String                @map("source_entity_type") @db.VarChar(80)
-  sourceEntityId             String                @map("source_entity_id")
+  beneficiaryId              String?             @map("beneficiary_id")
+  sourceEntityType           String              @map("source_entity_type") @db.VarChar(80)
+  sourceEntityId             String              @map("source_entity_id")
   // form_submissions.submission_id — owned by another service, no cross-service relation.
-  sourceSubmissionId         String?               @map("source_submission_id")
+  sourceSubmissionId         String?             @map("source_submission_id")
   // lookup_values.lookup_value_id — owned by another service, no cross-service relation.
-  decisionReasonCodeLookupId String?               @map("decision_reason_code_lookup_id")
-  decisionNotes              String?               @map("decision_notes")
+  decisionReasonCodeLookupId String?             @map("decision_reason_code_lookup_id")
+  decisionNotes              String?             @map("decision_notes")
   // users.user_id — owned by auth-service, no cross-service relation.
-  decidedByUserId            String?               @map("decided_by_user_id")
+  decidedByUserId            String?             @map("decided_by_user_id")
   // form_answers.answer_id — owned by another service, no cross-service relation.
-  sourceAnswerId             String?               @map("source_answer_id")
+  sourceAnswerId             String?             @map("source_answer_id")
   // referrals.referral_id — owned by another service, no cross-service relation.
-  referralId                 String?               @map("referral_id")
+  referralId                 String?             @map("referral_id")
   // closures.closure_id — owned by another service, no cross-service relation.
-  closureId                  String?               @map("closure_id")
+  closureId                  String?             @map("closure_id")
   // reopen_requests.reopen_request_id — owned by another service, no cross-service relation.
-  reopenRequestId            String?               @map("reopen_request_id")
+  reopenRequestId            String?             @map("reopen_request_id")
   // users.user_id — owned by auth-service, no cross-service relation.
-  requestedByUserId          String                @map("requested_by_user_id")
+  requestedByUserId          String              @map("requested_by_user_id")
   // users.user_id — owned by auth-service, no cross-service relation.
-  approverUserId             String?               @map("approver_user_id")
-  requestPayloadJson         Json?                 @map("request_payload_json")
-  status                     ApprovalRequestStatus @map("status")
-  decisionPayloadJson        Json?                 @map("decision_payload_json")
-  decidedAt                  DateTime?             @map("decided_at")
+  approverUserId             String?             @map("approver_user_id")
+  requestPayloadJson         Json?               @map("request_payload_json")
+  // lookup_values.lookup_value_id — owned by another service, no cross-service relation.
+  // PENDING/APPROVED/REJECTED/AUTO_LAPSED/CANCELLED as lookup_values rows — replaces a
+  // plain ApprovalRequestStatus enum to match the lookup_values pattern used for
+  // extensible statuses elsewhere (see reopen_requests.decision_reason_code_lookup_id,
+  // project_registration_targets.status_lookup_id).
+  decisionStatusLookupId     String              @map("decision_status_lookup_id")
+  decisionPayloadJson        Json?               @map("decision_payload_json")
+  decidedAt                  DateTime?           @map("decided_at")
 
   createdAt       DateTime  @default(now()) @map("created_at")
   createdByUserId String?   @map("created_by_user_id")
