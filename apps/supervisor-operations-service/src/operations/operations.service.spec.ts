@@ -81,6 +81,35 @@ describe('OperationsService', () => {
     ).rejects.toThrow('db down');
   });
 
+  it('rejects a COMPLETED event with no photoMediaId without hitting the repository', () => {
+    expect(() =>
+      service.createEvent({
+        projectId: '22222222-2222-2222-2222-222222222222',
+        supervisorId: '33333333-3333-3333-3333-333333333333',
+        eventType: 'MEETING',
+        eventDate: new Date('2026-07-01'),
+        topicsJson: ['review'],
+        status: 'COMPLETED',
+      }),
+    ).toThrow('photoMediaId is required when status is COMPLETED.');
+    expect(repository.createEvent).not.toHaveBeenCalled();
+  });
+
+  it('allows a COMPLETED event when photoMediaId is present', async () => {
+    const dto: CreateSupervisorEventInput = {
+      projectId: '22222222-2222-2222-2222-222222222222',
+      supervisorId: '33333333-3333-3333-3333-333333333333',
+      eventType: 'MEETING',
+      eventDate: new Date('2026-07-01'),
+      topicsJson: ['review'],
+      status: 'COMPLETED',
+      photoMediaId: '55555555-5555-5555-5555-555555555555',
+    };
+    repository.createEvent.mockResolvedValue(eventRow);
+    await expect(service.createEvent(dto)).resolves.toBe(eventRow);
+    expect(repository.createEvent).toHaveBeenCalledWith(dto);
+  });
+
   it('lists inventory items via repository', async () => {
     const rows: InventoryItem[] = [
       {
