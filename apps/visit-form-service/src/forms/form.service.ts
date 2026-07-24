@@ -4,7 +4,12 @@ import { schemaJsonSchema, validationJsonSchema } from './dto/form-field.dto';
 import type { CreateDraftVersionInput } from './dto/create-draft-version.dto';
 import type { PatchFormVersionInput } from './dto/patch-form-version.dto';
 import type { CreateSubmissionInput } from './dto/create-submission.dto';
-import { computeChecksum, toApiFormSubmission, toApiFormVersion } from './form.mapper';
+import {
+  buildFormAnswers,
+  computeChecksum,
+  toApiFormSubmission,
+  toApiFormVersion,
+} from './form.mapper';
 import { validateSubmission } from './form-validation';
 import { getAncestorChain } from '../geography/geography.client';
 
@@ -159,6 +164,11 @@ export class FormService {
       throw unprocessable('Submission failed validation.', { violations });
     }
 
+    // Decompose the validated payload into normalized per-question rows so
+    // every submitted field is individually queryable (ERD design stance,
+    // line 19), driven by each field's declared input_type — no hardcoding.
+    const formAnswers = buildFormAnswers(fields, dto.formData);
+
     const created = await this.repository.createSubmission({
       formVersionId: dto.formVersionId,
       beneficiaryId: dto.beneficiaryId,
@@ -167,6 +177,7 @@ export class FormService {
       localSubmissionUuid: dto.localSubmissionUuid,
       formDataJson: dto.formData,
       validationStatus: 'VALID',
+      formAnswers,
     });
     return toApiFormSubmission(created);
   }

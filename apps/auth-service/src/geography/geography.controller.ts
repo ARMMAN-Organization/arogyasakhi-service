@@ -47,6 +47,26 @@ function envelope<T extends z.ZodTypeAny>(data: T) {
 export function createGeographyRouter(service: GeographyService, signer: TokenSigner) {
   const doc = createDocumentedRouter();
 
+  // Registered before `/geography-units/:id` — Express matches routes in
+  // registration order, and `:id` would otherwise capture the literal
+  // "roots" segment as an id value.
+  doc.get(
+    '/geography-units/roots',
+    {
+      summary: 'List all top-level geography units (STATEs — no parent)',
+      tags: ['Geography'],
+      responses: {
+        200: { description: 'Top-level units', schema: envelope(z.array(geographyUnitSchema)) },
+        401: errorResponse(401),
+        500: errorResponse(500),
+      },
+    },
+    authenticate(signer),
+    asyncHandler(async (_req, res) => {
+      res.json(ok(await service.getRoots()));
+    }),
+  );
+
   doc.get(
     '/geography-units/:id',
     {
@@ -87,6 +107,29 @@ export function createGeographyRouter(service: GeographyService, signer: TokenSi
     validate(geographyUnitIdParamsSchema, 'params'),
     asyncHandler(async (req, res) => {
       res.json(ok(await service.getAncestors(req.params.id)));
+    }),
+  );
+
+  doc.get(
+    '/geography-units/:id/children',
+    {
+      summary: 'List the direct children of a geography unit',
+      tags: ['Geography'],
+      params: geographyUnitIdParamsSchema,
+      responses: {
+        200: {
+          description: 'Direct children of the requested unit (empty array if it is a leaf)',
+          schema: envelope(z.array(geographyUnitSchema)),
+        },
+        401: errorResponse(401),
+        404: errorResponse(404, { message: 'Geography unit not found.' }),
+        500: errorResponse(500),
+      },
+    },
+    authenticate(signer),
+    validate(geographyUnitIdParamsSchema, 'params'),
+    asyncHandler(async (req, res) => {
+      res.json(ok(await service.getChildren(req.params.id)));
     }),
   );
 
