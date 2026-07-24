@@ -1,0 +1,72 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../../../node_modules/.prisma/client-reporting-etl-service"
+}
+
+datasource db {
+  provider  = "postgresql"
+  directUrl = env("DIRECT_URL")
+  url       = env("DATABASE_URL")
+}
+
+// reporting-etl-service owns these Postgres tables only (forklift rule).
+// Field/table definitions sourced from docs/Arogya_Sakhi_Database_Design_ERD_Table_Definitions.docx.md
+// section §4.8 "Sync, Audit, ETL, and Report Export" (etl_runs, report_exports).
+//
+// NOTE: the ClickHouse warehouse objects (dim_*, fact_*, linelist views) in the
+// same ERD section are NOT modeled here — they live in ClickHouse, not Postgres,
+// and are populated by Airflow. This schema owns only the two operational
+// Postgres tables that track ETL execution and report-export audit.
+//
+// Cross-service FK columns are plain scalars (no Prisma relation), per the
+// forklift rule: user_id and all created_by/updated_by_user_id reference
+// users.user_id, owned by auth-service.
+
+enum EtlRunStatus {
+  STARTED
+  SUCCESS
+  FAILED
+  PARTIAL
+}
+
+// etl_runs — Airflow ETL run metadata (ERD §4.8).
+model EtlRun {
+  id              String       @id @default(uuid()) @map("etl_run_id")
+  dagId           String       @map("dag_id") @db.VarChar(120)
+  runStartedAt    DateTime     @map("run_started_at")
+  runCompletedAt  DateTime?    @map("run_completed_at")
+  sourceWatermark DateTime?    @map("source_watermark")
+  targetWatermark DateTime?    @map("target_watermark")
+  status          EtlRunStatus
+  rowsProcessed   BigInt       @default(0) @map("rows_processed")
+  errorSummary    String?      @map("error_summary")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  createdByUserId String?      @map("created_by_user_id")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+  updatedByUserId String?      @map("updated_by_user_id")
+  isDeleted       Boolean      @default(false) @map("is_deleted")
+  deletedAt       DateTime?    @map("deleted_at")
+
+  @@map("etl_runs")
+}
+
+// report_exports — report download/export audit (ERD §4.8).
+model ReportExport {
+  id                String    @id @default(uuid()) @map("report_export_id")
+  // users.user_id — owned by auth-service, scalar.
+  userId            String    @map("user_id")
+  reportCode        String    @map("report_code") @db.VarChar(100)
+  filterJson        Json?     @map("filter_json")
+  exportedAt        DateTime  @map("exported_at")
+  fileUri           String?   @map("file_uri") @db.VarChar(512)
+  rowCount          BigInt?   @map("row_count")
+  downloadTimestamp DateTime  @map("download_timestamp")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  createdByUserId   String?   @map("created_by_user_id")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+  updatedByUserId   String?   @map("updated_by_user_id")
+  isDeleted         Boolean   @default(false) @map("is_deleted")
+  deletedAt         DateTime? @map("deleted_at")
+
+  @@map("report_exports")
+}

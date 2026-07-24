@@ -1,22 +1,12 @@
 generator client {
-  provider        = "prisma-client-js"
-  output          = "../../../node_modules/.prisma/client-auth-service"
-  previewFeatures = ["multiSchema"]
+  provider = "prisma-client-js"
+  output   = "../../../node_modules/.prisma/client-auth-service"
 }
 
-// schemas is set explicitly (rather than relying on the connection URL's
-// ?schema= param) because Supabase's transaction pooler (port 6543, used for
-// DATABASE_URL at runtime) does not honor per-session search_path changes —
-// confirmed live: `show search_path` stays "public" over the pooler even with
-// ?schema=auth_service in the URL, but correctly becomes "auth_service" over
-// the session pooler (port 5432, used only for DIRECT_URL/migrations). Baking
-// the schema into every generated query via @@schema(...) works regardless of
-// which pooler mode is used.
 datasource db {
   provider  = "postgresql"
   directUrl = env("DIRECT_URL")
   url       = env("DATABASE_URL")
-  schemas   = ["auth_service"]
 }
 
 // auth-service owns these tables only (forklift rule).
@@ -33,7 +23,6 @@ enum UserStatus {
   PAUSED
   DELETED
 
-  @@schema("auth_service")
 }
 
 enum UserRoleStatus {
@@ -42,7 +31,6 @@ enum UserRoleStatus {
   REVOKED
   INACTIVE
 
-  @@schema("auth_service")
 }
 
 model User {
@@ -74,7 +62,6 @@ model User {
   sakhiProfile SakhiProfile?
 
   @@map("users")
-  @@schema("auth_service")
 }
 
 model Role {
@@ -93,18 +80,17 @@ model Role {
   userRoles UserRole[]
 
   @@map("roles")
-  @@schema("auth_service")
 }
 
 model UserRole {
-  id        String         @id @default(uuid()) @map("user_role_id")
-  userId    String         @map("user_id")
-  roleId    String         @map("role_id")
+  id              String         @id @default(uuid()) @map("user_role_id")
+  userId          String         @map("user_id")
+  roleId          String         @map("role_id")
   // projects live in this same schema (auth-service also owns project/funder
   // master data — see the Funder/Project models below), so this is a real
   // Prisma relation, not a cross-service scalar.
-  projectId String?        @map("project_id")
-  project   Project?       @relation(fields: [projectId], references: [projectId])
+  projectId       String?        @map("project_id")
+  project         Project?       @relation(fields: [projectId], references: [projectId])
   // geography_units.geography_unit_id — same schema too, but no relation is
   // declared here yet; left as a plain scalar until a caller actually needs it.
   geographyUnitId String?        @map("geography_unit_id")
@@ -122,7 +108,6 @@ model UserRole {
   role Role @relation(fields: [roleId], references: [id])
 
   @@map("user_roles")
-  @@schema("auth_service")
 }
 
 model UserSession {
@@ -145,7 +130,6 @@ model UserSession {
   user User @relation(fields: [userId], references: [id])
 
   @@map("user_sessions")
-  @@schema("auth_service")
 }
 
 // Column set matches ERD Appendix A.1 (funders, projects) exactly.
@@ -154,7 +138,6 @@ enum FunderStatus {
   ACTIVE
   INACTIVE
 
-  @@schema("auth_service")
 }
 
 model Funder {
@@ -172,7 +155,6 @@ model Funder {
   projects Project[]
 
   @@map("funders")
-  @@schema("auth_service")
 }
 
 enum ProjectStatus {
@@ -180,7 +162,6 @@ enum ProjectStatus {
   PAUSED
   CLOSED
 
-  @@schema("auth_service")
 }
 
 model Project {
@@ -204,7 +185,6 @@ model Project {
   sakhiProfiles SakhiProfile[]
 
   @@map("projects")
-  @@schema("auth_service")
 }
 
 // Column set matches ERD Appendix A.1 ("sakhi_profiles") exactly.
@@ -235,7 +215,6 @@ model SakhiProfile {
   deletedAt        DateTime? @map("deleted_at")
 
   @@map("sakhi_profiles")
-  @@schema("auth_service")
 }
 
 // Column set matches ERD Appendix A.1 (geography_units) exactly. Scoped to the
@@ -252,14 +231,12 @@ enum GeoType {
   VILLAGE
   PADA
 
-  @@schema("auth_service")
 }
 
 enum GeographyUnitStatus {
   ACTIVE
   INACTIVE
 
-  @@schema("auth_service")
 }
 
 model GeographyUnit {
@@ -280,7 +257,6 @@ model GeographyUnit {
 
   @@unique([parentId, geoType, geoCode])
   @@map("geography_units")
-  @@schema("auth_service")
 }
 
 // Column set matches ERD's lookup_categories/lookup_values tables. All
@@ -289,42 +265,219 @@ model GeographyUnit {
 // schema_json stores a published snapshot for offline rendering, but this
 // stays the live managed master (see ERD note after lookup_values).
 model LookupCategory {
-  id              String        @id @default(uuid()) @map("lookup_category_id")
-  categoryCode    String        @unique @map("category_code") @db.VarChar(80)
-  categoryName    String        @map("category_name") @db.VarChar(160)
+  id              String   @id @default(uuid()) @map("lookup_category_id")
+  categoryCode    String   @unique @map("category_code") @db.VarChar(80)
+  categoryName    String   @map("category_name") @db.VarChar(160)
   description     String?
-  isActive        Boolean       @default(true) @map("is_active")
-  createdAt       DateTime      @default(now()) @map("created_at")
-  createdByUserId String?       @map("created_by_user_id")
-  updatedAt       DateTime      @updatedAt @map("updated_at")
-  updatedByUserId String?       @map("updated_by_user_id")
+  isActive        Boolean  @default(true) @map("is_active")
+  createdAt       DateTime @default(now()) @map("created_at")
+  createdByUserId String?  @map("created_by_user_id")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  updatedByUserId String?  @map("updated_by_user_id")
 
   values LookupValue[]
 
   @@map("lookup_categories")
-  @@schema("auth_service")
 }
 
 model LookupValue {
-  id                 String          @id @default(uuid()) @map("lookup_value_id")
-  lookupCategoryId   String          @map("lookup_category_id")
-  category           LookupCategory  @relation(fields: [lookupCategoryId], references: [id])
-  valueCode          String          @map("value_code") @db.VarChar(80)
-  valueLabel         String          @map("value_label") @db.VarChar(160)
-  sortOrder          Int             @default(0) @map("sort_order")
+  id                  String         @id @default(uuid()) @map("lookup_value_id")
+  lookupCategoryId    String         @map("lookup_category_id")
+  category            LookupCategory @relation(fields: [lookupCategoryId], references: [id])
+  valueCode           String         @map("value_code") @db.VarChar(80)
+  valueLabel          String         @map("value_label") @db.VarChar(160)
+  sortOrder           Int            @default(0) @map("sort_order")
   // Self-relation for dependent dropdowns (e.g. District depends on State) —
   // the parent must belong to the same category; enforced in the service
   // layer since Prisma can't express a same-table cross-row column check.
   parentLookupValueId String?        @map("parent_lookup_value_id")
   parent              LookupValue?   @relation("LookupValueHierarchy", fields: [parentLookupValueId], references: [id])
-  children             LookupValue[] @relation("LookupValueHierarchy")
+  children            LookupValue[]  @relation("LookupValueHierarchy")
   isActive            Boolean        @default(true) @map("is_active")
   createdAt           DateTime       @default(now()) @map("created_at")
-  createdByUserId      String?       @map("created_by_user_id")
-  updatedAt            DateTime      @updatedAt @map("updated_at")
-  updatedByUserId       String?      @map("updated_by_user_id")
+  createdByUserId     String?        @map("created_by_user_id")
+  updatedAt           DateTime       @updatedAt @map("updated_at")
+  updatedByUserId     String?        @map("updated_by_user_id")
 
   @@unique([lookupCategoryId, valueCode])
   @@map("lookup_values")
-  @@schema("auth_service")
+}
+
+// ---------------------------------------------------------------------------
+// ERD "Access, Project, and Geography" (§4.1) tables previously unmodeled.
+// All FK columns point at tables auth-service owns (users, projects,
+// geography_units, sakhi_profiles, funders, lookup_values), but — matching the
+// existing convention in this file (UserRole.geographyUnitId,
+// SakhiProfile.supervisorId) — they are kept as plain scalar columns with an
+// explanatory comment rather than declared as Prisma @relation edges, until a
+// query actually needs the join. This avoids adding reverse-relation arrays to
+// the six existing models purely for referential decoration.
+// ---------------------------------------------------------------------------
+
+// supervisor_profiles — ERD Appendix A (§4.1). Referenced by
+// SakhiProfile.supervisorId (above) and, later, supervisor-operations tables.
+model SupervisorProfile {
+  id              String    @id @default(uuid()) @map("supervisor_id")
+  // users.user_id — same schema, kept scalar per this file's convention.
+  userId          String    @unique @map("user_id")
+  managerUserId   String?   @map("manager_user_id")
+  // geography_units.geography_unit_id — the supervisor's geography scope.
+  geographyUnitId String?   @map("geography_unit_id")
+  activeFrom      DateTime  @map("active_from") @db.Date
+  activeTo        DateTime? @map("active_to") @db.Date
+  createdAt       DateTime  @default(now()) @map("created_at")
+  createdByUserId String?   @map("created_by_user_id")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  updatedByUserId String?   @map("updated_by_user_id")
+  isDeleted       Boolean   @default(false) @map("is_deleted")
+  deletedAt       DateTime? @map("deleted_at")
+
+  @@map("supervisor_profiles")
+}
+
+enum DevicePlatform {
+  ANDROID
+  WEB
+
+}
+
+// ERD device_registry.status text is malformed ("REPLACED,PAUSED BLOCKED,Inactive");
+// normalized here to the intended six-value set.
+enum DeviceStatus {
+  ACTIVE
+  LOST
+  REPLACED
+  PAUSED
+  BLOCKED
+  INACTIVE
+
+}
+
+// device_registry — ERD Appendix A (§4.1). Referenced by user_sessions.device_id
+// (kept scalar there) and sync_batches (owned by sync-service).
+model DeviceRegistry {
+  id              String         @id @default(uuid()) @map("device_id")
+  // users.user_id — same schema, kept scalar per convention.
+  userId          String         @map("user_id")
+  deviceUuid      String         @unique @map("device_uuid") @db.VarChar(128)
+  platform        DevicePlatform
+  osVersion       String?        @map("os_version") @db.VarChar(60)
+  appVersion      String?        @map("app_version") @db.VarChar(40)
+  lastSyncAt      DateTime?      @map("last_sync_at")
+  status          DeviceStatus   @default(ACTIVE)
+  createdAt       DateTime       @default(now()) @map("created_at")
+  createdByUserId String?        @map("created_by_user_id")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+  updatedByUserId String?        @map("updated_by_user_id")
+  isDeleted       Boolean        @default(false) @map("is_deleted")
+  deletedAt       DateTime?      @map("deleted_at")
+
+  @@map("device_registry")
+}
+
+// project_geographies — ERD Appendix A (§4.1). Maps projects to geography units.
+model ProjectGeography {
+  id              String    @id @default(uuid()) @map("project_geo_id")
+  // projects.project_id / geography_units.geography_unit_id — same schema, scalar.
+  projectId       String    @map("project_id")
+  geographyUnitId String    @map("geography_unit_id")
+  activeFrom      DateTime  @map("active_from") @db.Date
+  activeTo        DateTime? @map("active_to") @db.Date
+  createdAt       DateTime  @default(now()) @map("created_at")
+  createdByUserId String?   @map("created_by_user_id")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  updatedByUserId String?   @map("updated_by_user_id")
+  isDeleted       Boolean   @default(false) @map("is_deleted")
+  deletedAt       DateTime? @map("deleted_at")
+
+  @@map("project_geographies")
+}
+
+enum TargetPeriodType {
+  MONTHLY
+  QUARTERLY
+  ANNUAL
+  PROJECT_PERIOD
+
+}
+
+// project_registration_targets — ERD §4.1 (merged canonical definition). Per the
+// ERD's own merge note, keeps case_type_lookup_id / registration_target /
+// status_lookup_id (not the discarded beneficiary_type / registration_target_count
+// / status ENUM variants). The ERD's merged definition intentionally has NO
+// is_deleted/deleted_at columns — followed here rather than force-standardized.
+model ProjectRegistrationTarget {
+  id                 String            @id @default(uuid()) @map("target_id")
+  // funders.funder_id / projects.project_id / geography_units.geography_unit_id /
+  // lookup_values.lookup_value_id — all same schema, kept scalar per convention.
+  funderId           String?           @map("funder_id")
+  projectId          String            @map("project_id")
+  // NULL means a project-level (not geography-scoped) target.
+  geographyUnitId    String?           @map("geography_unit_id")
+  // NULL means a combined Mother+Child target (not split by case type).
+  caseTypeLookupId   String?           @map("case_type_lookup_id")
+  targetPeriodType   TargetPeriodType? @map("target_period_type")
+  targetPeriodStart  DateTime          @map("target_period_start") @db.Date
+  targetPeriodEnd    DateTime          @map("target_period_end") @db.Date
+  registrationTarget Int?              @map("registration_target")
+  statusLookupId     String?           @map("status_lookup_id")
+  createdAt          DateTime          @default(now()) @map("created_at")
+  createdByUserId    String?           @map("created_by_user_id")
+  updatedAt          DateTime          @updatedAt @map("updated_at")
+  updatedByUserId    String?           @map("updated_by_user_id")
+
+  @@map("project_registration_targets")
+}
+
+enum SakhiAssignmentType {
+  PRIMARY
+  SECONDARY
+  TEMPORARY_COVERAGE
+  PAUSED
+  STOPPED
+
+}
+
+// sakhi_assignments — ERD Appendix A (§4.1). A Sakhi's project + geography scope.
+model SakhiAssignment {
+  id              String              @id @default(uuid()) @map("assignment_id")
+  // sakhi_profiles.sakhi_id / projects.project_id / geography_units.geography_unit_id.
+  sakhiId         String              @map("sakhi_id")
+  projectId       String              @map("project_id")
+  geographyUnitId String              @map("geography_unit_id")
+  assignmentType  SakhiAssignmentType @default(PRIMARY) @map("assignment_type")
+  activeFrom      DateTime            @map("active_from") @db.Date
+  activeTo        DateTime?           @map("active_to") @db.Date
+  createdAt       DateTime            @default(now()) @map("created_at")
+  createdByUserId String?             @map("created_by_user_id")
+  updatedAt       DateTime            @updatedAt @map("updated_at")
+  updatedByUserId String?             @map("updated_by_user_id")
+  isDeleted       Boolean             @default(false) @map("is_deleted")
+  deletedAt       DateTime?           @map("deleted_at")
+
+  // ERD §6 "Required Indexes and Constraints" calls for this composite index.
+  @@index([sakhiId, projectId, geographyUnitId, activeTo])
+  @@map("sakhi_assignments")
+}
+
+// sakhi_location_assignments — ERD (§4.1 geography cluster). Assigns a Sakhi to a
+// village (and optional pada). NOTE: the ERD FKs village_id -> villages and
+// pada_id -> padas, but this codebase models villages/padas as geography_units
+// rows (geoType VILLAGE / PADA) — there are no separate villages/padas tables.
+// So both columns are geography_units.geography_unit_id references (scalar), and
+// the geoType is expected to be VILLAGE / PADA respectively. The ERD gives this
+// table no audit columns; kept minimal to match the ERD.
+model SakhiLocationAssignment {
+  id             String    @id @default(uuid()) @map("sakhi_location_assignment_id")
+  sakhiId        String    @map("sakhi_id")
+  projectId      String    @map("project_id")
+  // geography_units.geography_unit_id with geoType VILLAGE.
+  villageId      String    @map("village_id")
+  // geography_units.geography_unit_id with geoType PADA (optional / hamlet level).
+  padaId         String?   @map("pada_id")
+  effectiveFrom  DateTime  @map("effective_from") @db.Date
+  effectiveTo    DateTime? @map("effective_to") @db.Date
+  statusLookupId String?   @map("status_lookup_id")
+
+  @@map("sakhi_location_assignments")
 }

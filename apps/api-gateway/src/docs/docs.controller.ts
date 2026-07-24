@@ -21,6 +21,7 @@ const DOCS_SERVICES: readonly DocsService[] = [
   { key: 'sync', url: appConfig.SYNC_SERVICE_URL },
   { key: 'media', url: appConfig.MEDIA_SERVICE_URL },
   { key: 'audit', url: appConfig.AUDIT_SERVICE_URL },
+  { key: 'supervisor-operations', url: appConfig.SUPERVISOR_OPERATIONS_SERVICE_URL },
 ];
 
 const PLATFORM_INFO = {

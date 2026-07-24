@@ -3,17 +3,22 @@
  * Runs a Prisma command against every service schema in apps/*\/prisma/schema.prisma.
  *
  * Each service owns its own isolated Prisma client (see the `output` in each
- * schema) AND its own Postgres schema namespace (e.g. schema=beneficiary,
- * schema=auth-service) so the 12 services never collide in one database.
+ * schema). All services now share a single Postgres schema (`public`) —
+ * per-service table names stay unique via `@@map(...)`, so there's no
+ * namespace collision even without a dedicated schema per service. Per-service
+ * schema targeting was dropped after Supabase's pgbouncer transaction pooler
+ * proved unable to honor per-session `search_path`, which silently misrouted
+ * migrations to the wrong schema.
  *
- * For `db push`/`db pull`/`migrate`, this script derives a per-service
- * DATABASE_URL/DIRECT_URL by taking the base connection from the root .env and
- * appending each service's `schema=` (read from apps/<svc>/.env or .env.example).
+ * For `db push`/`db pull`/`migrate`, this script still supports an optional
+ * per-service `schema=` override (read from apps/<svc>/.env or .env.example)
+ * for anyone who reintroduces one — if none is set, it just uses the root
+ * .env's DATABASE_URL/DIRECT_URL as-is (i.e. `public`).
  * For `generate` (no DB needed), it just runs per schema.
  *
  * Usage:
  *   node tools/prisma-foreach.js generate          # generate all service clients
- *   node tools/prisma-foreach.js db push            # push each schema to its namespace
+ *   node tools/prisma-foreach.js db push --yes      # push each schema (needs explicit --yes)
  */
 const { execFileSync } = require('node:child_process');
 const { readdirSync, existsSync, readFileSync } = require('node:fs');
@@ -59,7 +64,38 @@ const rootEnv = join(__dirname, '..', '.env');
 const baseDb = readEnvVar(rootEnv, 'DATABASE_URL');
 const baseDirect = readEnvVar(rootEnv, 'DIRECT_URL') || baseDb;
 
-console.log(`Running "prisma ${args.join(' ')}" for ${services.length} service(s)…`);
+const isDbPush = args[0] === 'db' && args[1] === 'push';
+// `--yes`/`--force` are wrapper-only opt-in flags (checked once, up front,
+// below) — strip them before the args are forwarded to the real `prisma`
+// CLI, which doesn't recognize either one.
+const wrapperConfirmed = args.includes('--yes') || args.includes('--force');
+const prismaArgs = args.filter((a) => a !== '--yes' && a !== '--force');
+
+if (isDbPush && !prismaArgs.includes('--accept-data-loss')) {
+  // Every service now shares one physical Postgres database (see header
+  // comment), so a `db push` run through this script has platform-wide
+  // blast radius — Prisma's own interactive safety prompt would normally
+  // catch a destructive change, and appending --accept-data-loss below
+  // silently forces that prompt off. Require the caller to opt in
+  // explicitly on the wrapper itself rather than defaulting to it.
+  if (!wrapperConfirmed) {
+    console.error(
+      '✗ Refusing to run "db push" without an explicit --yes/--force on this ' +
+        'wrapper. Every service now shares one physical database, so this command ' +
+        'has platform-wide blast radius. Re-run with ' +
+        '"node tools/prisma-foreach.js db push --yes" once you have confirmed the ' +
+        'change is safe to apply to every service.',
+    );
+    process.exit(1);
+  }
+  console.warn(
+    '⚠ Running "db push --accept-data-loss" against the shared public schema — ' +
+      'this affects every service in the database, not just the one being pushed.',
+  );
+  prismaArgs.push('--accept-data-loss');
+}
+
+console.log(`Running "prisma ${prismaArgs.join(' ')}" for ${services.length} service(s)…`);
 let failed = 0;
 for (const service of services) {
   const dir = join(appsDir, service);
@@ -77,16 +113,12 @@ for (const service of services) {
       env.DATABASE_URL = withSchema(baseDb, schema);
       env.DIRECT_URL = withSchema(baseDirect, schema);
     }
-    // db push needs --accept-data-loss to be non-interactive on a shared DB.
-    if (args[0] === 'db' && args[1] === 'push' && !args.includes('--accept-data-loss')) {
-      args.push('--accept-data-loss');
-    }
   }
 
   try {
-    execFileSync('npx', ['prisma', ...args, '--schema', schemaFile], { stdio: 'inherit', env });
+    execFileSync('npx', ['prisma', ...prismaArgs, '--schema', schemaFile], { stdio: 'inherit', env });
   } catch {
-    console.error(`✗ ${service}: prisma ${args.join(' ')} failed`);
+    console.error(`✗ ${service}: prisma ${prismaArgs.join(' ')} failed`);
     failed++;
   }
 }

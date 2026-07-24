@@ -1,0 +1,26 @@
+{
+  "name": "supervisor-operations-service",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/supervisor-operations-service/src",
+  "projectType": "application",
+  "tags": ["scope:supervisor-operations-service", "type:service"],
+  "targets": {
+    "build": {
+      "executor": "@nx/webpack:webpack",
+      "outputs": ["{options.outputPath}"],
+      "options": {
+        "outputPath": "dist/apps/supervisor-operations-service",
+        "webpackConfig": "apps/supervisor-operations-service/webpack.config.js"
+      }
+    },
+    "serve": {
+      "executor": "@nx/js:node",
+      "options": { "buildTarget": "supervisor-operations-service:build" }
+    },
+    "lint": { "executor": "@nx/eslint:lint" },
+    "test": {
+      "executor": "@nx/jest:jest",
+      "options": { "jestConfig": "apps/supervisor-operations-service/jest.config.ts" }
+    }
+  }
+}
