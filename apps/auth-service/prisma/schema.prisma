@@ -455,6 +455,8 @@ model SakhiAssignment {
   isDeleted       Boolean             @default(false) @map("is_deleted")
   deletedAt       DateTime?           @map("deleted_at")
 
+  // ERD §6 "Required Indexes and Constraints" calls for this composite index.
+  @@index([sakhiId, projectId, geographyUnitId, activeTo])
   @@map("sakhi_assignments")
 }
 

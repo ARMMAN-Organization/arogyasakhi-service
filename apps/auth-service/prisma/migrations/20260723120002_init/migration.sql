@@ -368,6 +368,9 @@ CREATE UNIQUE INDEX "supervisor_profiles_user_id_key" ON "supervisor_profiles"("
 -- CreateIndex
 CREATE UNIQUE INDEX "device_registry_device_uuid_key" ON "device_registry"("device_uuid");
 
+-- CreateIndex
+CREATE INDEX "sakhi_assignments_sakhi_id_project_id_geography_unit_id_a_idx" ON "sakhi_assignments"("sakhi_id", "project_id", "geography_unit_id", "active_to");
+
 -- AddForeignKey
 ALTER TABLE "user_roles" ADD CONSTRAINT "user_roles_project_id_fkey" FOREIGN KEY ("project_id") REFERENCES "projects"("project_id") ON DELETE SET NULL ON UPDATE CASCADE;
 
