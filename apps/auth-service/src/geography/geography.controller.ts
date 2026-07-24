@@ -64,9 +64,9 @@ export function createGeographyRouter(service: GeographyService, signer: TokenSi
   // Registered above `/geography-units/:id` for readability (list before
   // single-item reads); ordering isn't load-bearing here since Express
   // matches by path segment count and `/geography-units` (2 segments) can
-  // never collide with `/geography-units/:id` (3 segments) — unlike PR #60's
-  // `/geography-units/roots` vs `/:id`, which are both 3 segments and do
-  // genuinely need the ordering.
+  // never collide with `/geography-units/:id` (3 segments) — unlike
+  // `/geography-units/roots` vs `/:id` below, which are both 3 segments and
+  // do genuinely need the ordering.
   doc.get(
     '/geography-units',
     {
@@ -87,6 +87,26 @@ export function createGeographyRouter(service: GeographyService, signer: TokenSi
     validate(listGeographyUnitsQuerySchema, 'query'),
     asyncHandler(async (req, res) => {
       res.json(ok(await service.list(req.query as { geoType?: string; parentId?: string })));
+    }),
+  );
+
+  // Registered before `/geography-units/:id` — Express matches routes in
+  // registration order, and `:id` would otherwise capture the literal
+  // "roots" segment as an id value.
+  doc.get(
+    '/geography-units/roots',
+    {
+      summary: 'List all top-level geography units (STATEs — no parent)',
+      tags: ['Geography'],
+      responses: {
+        200: { description: 'Top-level units', schema: envelope(z.array(geographyUnitSchema)) },
+        401: errorResponse(401),
+        500: errorResponse(500),
+      },
+    },
+    authenticate(signer),
+    asyncHandler(async (_req, res) => {
+      res.json(ok(await service.getRoots()));
     }),
   );
 
@@ -130,6 +150,29 @@ export function createGeographyRouter(service: GeographyService, signer: TokenSi
     validate(geographyUnitIdParamsSchema, 'params'),
     asyncHandler(async (req, res) => {
       res.json(ok(await service.getAncestors(req.params.id)));
+    }),
+  );
+
+  doc.get(
+    '/geography-units/:id/children',
+    {
+      summary: 'List the direct children of a geography unit',
+      tags: ['Geography'],
+      params: geographyUnitIdParamsSchema,
+      responses: {
+        200: {
+          description: 'Direct children of the requested unit (empty array if it is a leaf)',
+          schema: envelope(z.array(geographyUnitSchema)),
+        },
+        401: errorResponse(401),
+        404: errorResponse(404, { message: 'Geography unit not found.' }),
+        500: errorResponse(500),
+      },
+    },
+    authenticate(signer),
+    validate(geographyUnitIdParamsSchema, 'params'),
+    asyncHandler(async (req, res) => {
+      res.json(ok(await service.getChildren(req.params.id)));
     }),
   );
 

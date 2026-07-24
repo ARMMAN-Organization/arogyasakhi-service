@@ -36,6 +36,25 @@ export class GeographyService {
   }
 
   /**
+   * Returns the direct children of `id` (one level down — e.g. all districts under a
+   * state). Throws 404 only if `id` itself doesn't exist/is soft-deleted; a valid
+   * parent with zero children returns `[]`, which is a normal result, not an error.
+   */
+  async getChildren(id: string) {
+    const parent = await this.repository.findById(id);
+    if (!parent) throw notFound('Geography unit not found.');
+
+    const children = await this.repository.findChildren(id);
+    return children.map((u) => toApiGeographyUnit(u as unknown as Record<string, unknown>));
+  }
+
+  /** Returns all top-level units (no parent, i.e. all STATEs). An empty result is valid. */
+  async getRoots() {
+    const roots = await this.repository.findRoots();
+    return roots.map((u) => toApiGeographyUnit(u as unknown as Record<string, unknown>));
+  }
+
+  /**
    * Lists geography units for cascading-dropdown selection, filtered by
    * `geoType` and/or `parentId`. An empty result is a normal outcome (200 with
    * `[]`), not a 404 — this is a query, not a fetch-by-id. See the repository

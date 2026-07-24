@@ -38,6 +38,22 @@ export class GeographyRepository {
     return chain;
   }
 
+  /** Direct children of `parentId` (one level down), excluding soft-deleted, ordered by geoCode. */
+  findChildren(parentId: string) {
+    return this.prisma.geographyUnit.findMany({
+      where: { parentId, isDeleted: false },
+      orderBy: { geoCode: 'asc' },
+    });
+  }
+
+  /** Top-level units (no parent — i.e. all STATEs), excluding soft-deleted, ordered by geoCode. */
+  findRoots() {
+    return this.prisma.geographyUnit.findMany({
+      where: { parentId: null, isDeleted: false },
+      orderBy: { geoCode: 'asc' },
+    });
+  }
+
   /**
    * Lists geography units for cascading-dropdown selection (SRS FR line 971),
    * excluding soft-deleted rows, ordered by geoCode. Filters:

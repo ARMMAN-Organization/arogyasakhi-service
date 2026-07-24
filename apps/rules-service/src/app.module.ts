@@ -12,6 +12,7 @@ import { appConfig } from './config/app-config';
 import { PrismaService } from './prisma/prisma.service';
 import { createHealthRouter } from './health/health.controller';
 import { createRuleSetModule } from './rules/ruleSet.module';
+import { createRuleVersionModule } from './rules/ruleVersion.module';
 import { buildRulesServiceOpenApiDocument } from './docs/openapi';
 
 // Re-export shared HTTP helpers so feature routers can import from a single place.
@@ -19,7 +20,9 @@ export {
   asyncHandler,
   ok,
   fail,
+  validate,
   validateBody,
+  unauthorized,
   requireRoles,
   trustGatewayIdentity,
   createDocumentedRouter,
@@ -50,15 +53,21 @@ export function createApp(prisma: PrismaService): Application {
   app.use(requestId);
 
   const ruleSetModule = createRuleSetModule(prisma);
+  const ruleVersionModule = createRuleVersionModule(prisma);
 
   // All routes live under the global `api/v1` prefix.
   const api = express.Router();
   api.use(createHealthRouter(prisma));
-  // Built from ruleSetModule.registry — every route registered via
+  // Built from every feature module's registry — every route registered via
   // createDocumentedRouter() above is already in the spec, so this can never
   // drift from what's actually mounted.
-  api.use(createSwaggerRouter(buildRulesServiceOpenApiDocument(ruleSetModule.registry)));
+  api.use(
+    createSwaggerRouter(
+      buildRulesServiceOpenApiDocument(ruleSetModule.registry, ruleVersionModule.registry),
+    ),
+  );
   api.use(ruleSetModule.router);
+  api.use(ruleVersionModule.router);
   app.use('/api/v1', api);
 
   app.use(notFoundHandler);
