@@ -61,8 +61,12 @@ function envelope<T extends z.ZodTypeAny>(data: T) {
 export function createGeographyRouter(service: GeographyService, signer: TokenSigner) {
   const doc = createDocumentedRouter();
 
-  // Registered before `/geography-units/:id` so the bare `/geography-units`
-  // list path isn't captured by the `:id` route.
+  // Registered above `/geography-units/:id` for readability (list before
+  // single-item reads); ordering isn't load-bearing here since Express
+  // matches by path segment count and `/geography-units` (2 segments) can
+  // never collide with `/geography-units/:id` (3 segments) — unlike PR #60's
+  // `/geography-units/roots` vs `/:id`, which are both 3 segments and do
+  // genuinely need the ordering.
   doc.get(
     '/geography-units',
     {
