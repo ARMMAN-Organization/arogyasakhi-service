@@ -5,7 +5,6 @@ describe('RuleVersionService', () => {
   const repository = {
     findSetById: jest.fn(),
     findPublishedBySetId: jest.fn(),
-    countVersions: jest.fn(),
     publishNewVersion: jest.fn(),
   } as unknown as jest.Mocked<RuleVersionRepository>;
   let service: RuleVersionService;
@@ -64,21 +63,20 @@ describe('RuleVersionService', () => {
   });
 
   describe('publish', () => {
-    it('creates a new PUBLISHED version with the next version number and a checksum', async () => {
+    it('creates a new PUBLISHED version, delegating versionNo derivation to the repository transaction', async () => {
       repository.findSetById.mockResolvedValue({ id: setId } as never);
-      repository.countVersions.mockResolvedValue(2);
       repository.publishNewVersion.mockImplementation(
-        async (data) => ({ id: 'ver-3', ...data, status: 'PUBLISHED' }) as never,
+        async (data) => ({ id: 'ver-3', ...data, versionNo: 'v3', status: 'PUBLISHED' }) as never,
       );
 
       const result = await service.publish(setId, { rulesJson: { rules: [1] } }, 'admin-1');
 
       const arg = repository.publishNewVersion.mock.calls[0][0];
       expect(arg.ruleSetId).toBe(setId);
-      expect(arg.versionNo).toBe('v3'); // countVersions 2 -> next is v3
+      expect(arg).not.toHaveProperty('versionNo'); // computed inside the repo's transaction now
       expect(arg.publishedByUserId).toBe('admin-1');
       expect(Buffer.isBuffer(arg.checksum)).toBe(true); // computed SHA-256
-      expect(result).toMatchObject({ status: 'PUBLISHED', ruleSetId: setId });
+      expect(result).toMatchObject({ status: 'PUBLISHED', ruleSetId: setId, versionNo: 'v3' });
       expect(result).not.toHaveProperty('checksum');
     });
 
@@ -88,6 +86,32 @@ describe('RuleVersionService', () => {
         status: 404,
       });
       expect(repository.publishNewVersion).not.toHaveBeenCalled();
+    });
+
+    it('throws 409 when a concurrent publish for the same rule set collides (P2002)', async () => {
+      repository.findSetById.mockResolvedValue({ id: setId } as never);
+      repository.publishNewVersion.mockRejectedValue({ code: 'P2002' });
+
+      await expect(
+        service.publish(setId, { rulesJson: { rules: [] } }, 'admin-1'),
+      ).rejects.toMatchObject({ status: 409 });
+    });
+
+    it('throws 409 when the SERIALIZABLE transaction aborts on a concurrent publish (P2034)', async () => {
+      repository.findSetById.mockResolvedValue({ id: setId } as never);
+      repository.publishNewVersion.mockRejectedValue({ code: 'P2034' });
+
+      await expect(
+        service.publish(setId, { rulesJson: { rules: [] } }, 'admin-1'),
+      ).rejects.toMatchObject({ status: 409 });
+    });
+
+    it('rethrows unrelated errors from publishNewVersion unchanged', async () => {
+      repository.findSetById.mockResolvedValue({ id: setId } as never);
+      const dbError = new Error('connection lost');
+      repository.publishNewVersion.mockRejectedValue(dbError);
+
+      await expect(service.publish(setId, { rulesJson: {} }, 'admin-1')).rejects.toBe(dbError);
     });
   });
 });
