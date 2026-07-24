@@ -47,6 +47,7 @@ describe('AuthService', () => {
     revokeSessionByRefreshTokenHash: jest.fn(),
     findRoleByCode: jest.fn(),
     createUserWithRole: jest.fn(),
+    updateUser: jest.fn(),
   } as unknown as jest.Mocked<AuthRepository>;
 
   const signer = {
@@ -497,6 +498,56 @@ describe('AuthService', () => {
     it('returns null for a non-existent user', async () => {
       repository.findUserByIdWithProfile.mockResolvedValue(null);
       await expect(service.getProfile('missing')).resolves.toBeNull();
+    });
+  });
+
+  describe('updateUser', () => {
+    const UPDATED_USER = {
+      id: 'user-1',
+      username: 'test.sakhi',
+      mobileNumber: '+919876543210',
+      displayName: 'Renamed Sakhi',
+      email: 'test.sakhi@example.org',
+      status: 'ACTIVE' as const,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    };
+
+    it('updates the user and returns the projected fields', async () => {
+      repository.updateUser.mockResolvedValue(UPDATED_USER as never);
+
+      const result = await service.updateUser('user-1', { displayName: 'Renamed Sakhi' });
+
+      expect(repository.updateUser).toHaveBeenCalledWith('user-1', {
+        displayName: 'Renamed Sakhi',
+      });
+      expect(result).toEqual({
+        id: 'user-1',
+        username: 'test.sakhi',
+        mobileNumber: '+919876543210',
+        displayName: 'Renamed Sakhi',
+        email: 'test.sakhi@example.org',
+        status: 'ACTIVE',
+        createdAt: UPDATED_USER.createdAt,
+      });
+    });
+
+    it('throws 404 when the user does not exist or is soft-deleted', async () => {
+      repository.updateUser.mockResolvedValue(null);
+      await expect(service.updateUser('missing', { displayName: 'X' })).rejects.toMatchObject({
+        status: 404,
+      });
+    });
+
+    it('maps a duplicate mobile number or email to a 409 conflict', async () => {
+      repository.updateUser.mockRejectedValue({ code: 'P2002' });
+      await expect(
+        service.updateUser('user-1', { mobileNumber: '+919876543210' }),
+      ).rejects.toMatchObject({ status: 409 });
+    });
+
+    it('propagates unrelated repository errors unchanged', async () => {
+      repository.updateUser.mockRejectedValue(new Error('db down'));
+      await expect(service.updateUser('user-1', { displayName: 'X' })).rejects.toThrow('db down');
     });
   });
 });

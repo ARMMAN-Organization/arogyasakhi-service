@@ -4,6 +4,7 @@ import type { AuthService } from './auth.service';
 import { loginSchema } from './dto/login.dto';
 import { refreshSchema } from './dto/refresh.dto';
 import { createUserSchema } from './dto/create-user.dto';
+import { updateUserSchema } from './dto/update-user.dto';
 import {
   asyncHandler,
   authenticate,
@@ -12,6 +13,7 @@ import {
   ok,
   requireRoles,
   unauthorized,
+  validate,
   validateBody,
 } from '../app.module';
 import type { TokenSigner } from '@armman/service-commons';
@@ -82,6 +84,10 @@ const userProfileSchema = z.object({
     description: "Sakhi profile's supervisor — null for non-SAKHI roles.",
   }),
 });
+
+const userIdParamsSchema = z
+  .object({ id: z.string().uuid().openapi({ example: 'cc85addf-5214-45e3-b207-c2a3dadcc52f' }) })
+  .strict();
 
 const createdUserSchema = z.object({
   id: z.string().uuid(),
@@ -205,6 +211,33 @@ export function createAuthRouter(service: AuthService, signer: TokenSigner) {
       if (!req.user) return next(unauthorized());
       const user = await service.createUser(req.body, req.user.roles);
       res.status(201).json(ok(user));
+    }),
+  );
+
+  doc.patch(
+    '/users/:id',
+    {
+      summary: 'Update a user (displayName/mobileNumber/email/status; ADMIN only)',
+      tags: ['Users'],
+      params: userIdParamsSchema,
+      responses: {
+        200: { description: 'User updated', schema: envelope(createdUserSchema) },
+        400: errorResponse(400, { message: 'At least one field must be provided.' }),
+        401: errorResponse(401),
+        403: errorResponse(403),
+        404: errorResponse(404, { message: 'User not found.' }),
+        409: errorResponse(409, {
+          message: 'A user with this mobile number or email already exists.',
+        }),
+        500: errorResponse(500),
+      },
+    },
+    authenticate(signer),
+    requireRoles('ADMIN'),
+    validate(userIdParamsSchema, 'params'),
+    validateBody(updateUserSchema),
+    asyncHandler(async (req, res) => {
+      res.json(ok(await service.updateUser(req.params.id, req.body)));
     }),
   );
 

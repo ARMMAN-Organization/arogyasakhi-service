@@ -7,6 +7,7 @@ import { parseDurationMs } from './duration';
 import { toUserProfile, type AuthTokens, type CreatedUser, type UserProfile } from './auth.mapper';
 import type { LoginInput } from './dto/login.dto';
 import type { CreateUserInput } from './dto/create-user.dto';
+import type { UpdateUserInput } from './dto/update-user.dto';
 
 // Re-exported so importers of `./auth.service` keep resolving these types;
 // their definitions live in auth.mapper.ts.
@@ -117,6 +118,27 @@ export class AuthService {
     } catch (err) {
       if (isUniqueConstraintViolation(err)) {
         throw conflict('A user with this username, mobile number, or email already exists.');
+      }
+      throw err;
+    }
+  }
+
+  async updateUser(id: string, input: UpdateUserInput): Promise<CreatedUser> {
+    try {
+      const user = await this.repository.updateUser(id, input);
+      if (!user) throw notFound('User not found.');
+      return {
+        id: user.id,
+        username: user.username,
+        mobileNumber: user.mobileNumber,
+        displayName: user.displayName,
+        email: user.email,
+        status: user.status,
+        createdAt: user.createdAt,
+      };
+    } catch (err) {
+      if (isUniqueConstraintViolation(err)) {
+        throw conflict('A user with this mobile number or email already exists.');
       }
       throw err;
     }
