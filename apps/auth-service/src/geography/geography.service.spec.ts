@@ -7,6 +7,7 @@ describe('GeographyService', () => {
     findAncestors: jest.fn(),
     findChildren: jest.fn(),
     findRoots: jest.fn(),
+    findMany: jest.fn(),
   } as unknown as jest.Mocked<GeographyRepository>;
 
   let service: GeographyService;
@@ -193,6 +194,43 @@ describe('GeographyService', () => {
       repository.findRoots.mockResolvedValue([]);
       const result = await service.getRoots();
       expect(result).toEqual([]);
+    });
+  });
+
+  describe('list', () => {
+    it('returns the projected units for the given filters', async () => {
+      repository.findMany.mockResolvedValue([
+        {
+          geographyUnitId: 'state-1',
+          parentId: null,
+          geoType: 'STATE',
+          geoCode: 'MH',
+          name: 'Maharashtra',
+          status: 'ACTIVE',
+          createdByUserId: 'u',
+          isDeleted: false,
+        },
+      ] as never);
+
+      const result = await service.list({ geoType: 'STATE' });
+
+      expect(repository.findMany).toHaveBeenCalledWith({ geoType: 'STATE' });
+      expect(result).toEqual([
+        {
+          geographyUnitId: 'state-1',
+          parentId: null,
+          geoType: 'STATE',
+          geoCode: 'MH',
+          name: 'Maharashtra',
+          status: 'ACTIVE',
+        },
+      ]);
+      expect(result[0]).not.toHaveProperty('createdByUserId');
+    });
+
+    it('returns an empty array (not a 404) when no units match', async () => {
+      repository.findMany.mockResolvedValue([]);
+      await expect(service.list({ parentId: 'no-such-parent' })).resolves.toEqual([]);
     });
   });
 });

@@ -53,4 +53,15 @@ export class GeographyService {
     const roots = await this.repository.findRoots();
     return roots.map((u) => toApiGeographyUnit(u as unknown as Record<string, unknown>));
   }
+
+  /**
+   * Lists geography units for cascading-dropdown selection, filtered by
+   * `geoType` and/or `parentId`. An empty result is a normal outcome (200 with
+   * `[]`), not a 404 — this is a query, not a fetch-by-id. See the repository
+   * for the no-filter default (top-level STATEs only).
+   */
+  async list(filters: { geoType?: string; parentId?: string }) {
+    const units = await this.repository.findMany(filters);
+    return units.map((u) => toApiGeographyUnit(u as unknown as Record<string, unknown>));
+  }
 }
