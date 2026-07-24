@@ -1,131 +1,156 @@
 import * as argon2 from 'argon2';
+import { z } from 'zod';
 import { PrismaClient } from '../../../node_modules/.prisma/client-auth-service';
-import { GEOGRAPHY_UNITS, LOOKUP_CATEGORIES, ROLES, type SeedResult } from './seed-data';
+import {
+  GEOGRAPHY_UNITS,
+  LOOKUP_CATEGORIES,
+  SEED_USER_ENV_VARS,
+  type SeedResult,
+} from './seed-data';
+import { seedRoles, seedAdminUsers } from '../src/prisma/startup-seed';
 
 const prisma = new PrismaClient();
 
-async function seedRoles(): Promise<SeedResult> {
-  // Only seed when the roles table is empty (e.g. first boot on a fresh DB).
-  // Once roles exist, leave them untouched so runtime edits are never reverted.
-  const existingCount = await prisma.role.count();
-  if (existingCount > 0) {
-    return {
-      step: 'roles',
-      created: false,
-      message: `Roles already present (${existingCount}) — skipped.`,
-    };
+// Non-ADMIN test/dev users only (SAKHI/SUPERVISOR/MANAGER) — ADMIN + roles
+// are seeded at app startup (src/prisma/startup-seed.ts) and reused here so
+// running this script manually never drifts from what boot already does.
+const MANUAL_SEED_USER_ENV_VARS = SEED_USER_ENV_VARS.filter((spec) => spec.roleCode !== 'ADMIN');
+
+const seedUserSchema = z.object({
+  username: z.string().min(1),
+  password: z.string().min(1),
+  displayName: z.string().min(1),
+});
+
+/**
+ * Parses one role's env var (a JSON array of `{ username, password,
+ * displayName }`). Throws with the env var name on malformed JSON or a
+ * shape mismatch, per this repo's "fail fast on invalid config, never start
+ * misconfigured" standard — a typo in deployment config should be loud, not
+ * silently skipped.
+ */
+function parseSeedUsersEnv(envVar: string): z.infer<typeof seedUserSchema>[] {
+  const raw = process.env[envVar];
+  if (!raw) return [];
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(
+      `${envVar} must be valid JSON (an array of {username, password, displayName}).`,
+    );
   }
 
-  await prisma.role.createMany({ data: ROLES });
-  return { step: 'roles', created: true, message: `Seeded ${ROLES.length} roles.` };
+  const result = z.array(seedUserSchema).safeParse(parsed);
+  if (!result.success) {
+    throw new Error(`${envVar} is malformed: ${result.error.message}`);
+  }
+  return result.data;
 }
 
 /**
- * Bootstraps the initial ADMIN user from environment variables so no admin
- * credential is ever hardcoded in the repo. Runs in every environment
- * (including production) when ADMIN_USERNAME, ADMIN_MOBILE_NUMBER, and
- * ADMIN_PASSWORD are all set; if any is missing it returns a skipped result,
- * so a fresh env is never blocked from seeding. Only creates the admin when
- * no user with that username exists yet — an existing user is left
- * untouched (never re-created and never has its password rotated by the
- * seed). Login is username + password only, for every role; mobileNumber is
- * stored as a real `users` column (per the ERD) but never used to
- * authenticate.
+ * Finds the next free `+91900000<4-digit>` slot starting at `mobileOffset +
+ * 1`, skipping any number already taken by a pre-existing row (this DB may
+ * have other ad hoc users seeded outside this script's control). Bounded to
+ * 1000 attempts — one offset band (e.g. SUPERVISOR's 100-199) — since running
+ * out would mean the whole band is exhausted, which should surface as an
+ * error rather than silently spill into the next role's band.
  */
-async function seedAdminUser(): Promise<SeedResult> {
-  const username = process.env.ADMIN_USERNAME;
-  const mobileNumber = process.env.ADMIN_MOBILE_NUMBER;
-  const password = process.env.ADMIN_PASSWORD;
-
-  if (!username || !mobileNumber || !password) {
-    return {
-      step: 'admin',
-      created: false,
-      message: 'ADMIN_USERNAME / ADMIN_MOBILE_NUMBER / ADMIN_PASSWORD not set — skipped.',
-    };
+async function nextFreeMobileNumber(mobileOffset: number, startIndex: number): Promise<string> {
+  for (let i = startIndex; i < startIndex + 1000; i++) {
+    const candidate = `+91900000${String(mobileOffset + i + 1).padStart(4, '0')}`;
+    const existing = await prisma.user.findUnique({ where: { mobileNumber: candidate } });
+    if (!existing) return candidate;
   }
-
-  if (!/^\+91\d{10}$/.test(mobileNumber)) {
-    throw new Error('ADMIN_MOBILE_NUMBER must be in the format +91XXXXXXXXXX.');
-  }
-
-  // Seed only when this admin does not already exist.
-  const existing = await prisma.user.findUnique({ where: { username } });
-  if (existing) {
-    return {
-      step: 'admin',
-      created: false,
-      message: `Admin user ${username} already exists — skipped.`,
-    };
-  }
-
-  const passwordHash = await argon2.hash(password);
-  const adminRole = await prisma.role.findUniqueOrThrow({ where: { roleCode: 'ADMIN' } });
-
-  // Create the user and their ADMIN role assignment atomically.
-  await prisma.$transaction(async (tx) => {
-    const user = await tx.user.create({
-      data: {
-        username,
-        mobileNumber,
-        passwordHash,
-        displayName: 'System Administrator',
-        status: 'ACTIVE',
-      },
-    });
-    await tx.userRole.create({
-      data: { userId: user.id, roleId: adminRole.id, effectiveFrom: new Date(), status: 'ACTIVE' },
-    });
-  });
-
-  return { step: 'admin', created: true, message: `Seeded ADMIN user ${username}.` };
+  throw new Error(`No free mobile number slot found for offset ${mobileOffset}.`);
 }
 
 /**
- * A single local-login test user, gated to non-production environments only.
- * Never runs against production — this is test data, not master data.
+ * Seeds test/dev users for one role from its env var (SAKHI/SUPERVISOR/
+ * MANAGER only — ADMIN is seeded at app startup, see src/prisma/startup-seed.ts).
+ * Always skipped when NODE_ENV=production, since these are dev/test
+ * fixtures, not master data. A user already existing by username is left
+ * untouched (never re-created, password never rotated by the seed).
+ * mobileNumber is not part of the env payload (login is username + password
+ * only) — it's derived deterministically so re-running the seed is stable.
+ * `scope.projectId`/`scope.geographyUnitId` are assigned on the created
+ * user_roles row so a fresh environment's seeded users are immediately
+ * usable end-to-end (e.g. POST /visits needs a real project/geography scope)
+ * instead of surfacing as projectId: null, geographyUnitId: null on login.
  */
-async function seedTestUser(): Promise<SeedResult> {
+async function seedUsersFromEnv(
+  spec: { envVar: string; roleCode: string; mobileOffset: number },
+  scope: { projectId: string; geographyUnitId: string },
+): Promise<SeedResult[]> {
   if (process.env.NODE_ENV === 'production') {
-    return { step: 'testUser', created: false, message: 'NODE_ENV=production — skipped.' };
-  }
-
-  const username = 'test.sakhi';
-  const mobileNumber = '+919000000001';
-
-  // Seed only when this test user does not already exist.
-  const existing = await prisma.user.findUnique({ where: { username } });
-  if (existing) {
-    return {
-      step: 'testUser',
-      created: false,
-      message: `Test user ${username} already exists — skipped.`,
-    };
-  }
-
-  const passwordHash = await argon2.hash('Test@1234');
-  const sakhiRole = await prisma.role.findUniqueOrThrow({ where: { roleCode: 'SAKHI' } });
-
-  await prisma.$transaction(async (tx) => {
-    const user = await tx.user.create({
-      data: {
-        username,
-        mobileNumber,
-        passwordHash,
-        displayName: 'Test Sakhi',
-        status: 'ACTIVE',
+    return [
+      {
+        step: `seedUser:${spec.envVar}`,
+        created: false,
+        message: 'NODE_ENV=production — skipped.',
       },
-    });
-    await tx.userRole.create({
-      data: { userId: user.id, roleId: sakhiRole.id, effectiveFrom: new Date(), status: 'ACTIVE' },
-    });
-  });
+    ];
+  }
 
-  return {
-    step: 'testUser',
-    created: true,
-    message: `Seeded test user ${username} (password: Test@1234) with SAKHI role.`,
-  };
+  const users = parseSeedUsersEnv(spec.envVar);
+  if (users.length === 0) {
+    return [
+      {
+        step: `seedUser:${spec.envVar}`,
+        created: false,
+        message: `${spec.envVar} not set or empty — skipped.`,
+      },
+    ];
+  }
+
+  const role = await prisma.role.findUniqueOrThrow({ where: { roleCode: spec.roleCode } });
+  const results: SeedResult[] = [];
+
+  for (const [index, user] of users.entries()) {
+    const existing = await prisma.user.findUnique({ where: { username: user.username } });
+    if (existing) {
+      results.push({
+        step: `seedUser:${user.username}`,
+        created: false,
+        message: `User ${user.username} already exists — skipped.`,
+      });
+      continue;
+    }
+
+    const passwordHash = await argon2.hash(user.password);
+    const mobileNumber = await nextFreeMobileNumber(spec.mobileOffset, index);
+
+    await prisma.$transaction(async (tx) => {
+      const created = await tx.user.create({
+        data: {
+          username: user.username,
+          mobileNumber,
+          passwordHash,
+          displayName: user.displayName,
+          status: 'ACTIVE',
+        },
+      });
+      await tx.userRole.create({
+        data: {
+          userId: created.id,
+          roleId: role.id,
+          projectId: scope.projectId,
+          geographyUnitId: scope.geographyUnitId,
+          effectiveFrom: new Date(),
+          status: 'ACTIVE',
+        },
+      });
+    });
+
+    results.push({
+      step: `seedUser:${user.username}`,
+      created: true,
+      message: `Seeded ${spec.roleCode} user ${user.username} (mobile ${mobileNumber}, project ${scope.projectId}, geography ${scope.geographyUnitId}).`,
+    });
+  }
+
+  return results;
 }
 
 async function seedLookups(): Promise<SeedResult> {
@@ -171,7 +196,12 @@ async function seedLookups(): Promise<SeedResult> {
  * Inserted in hierarchy order (each row's parentCode must already exist)
  * since parentId is a self-relation FK.
  */
-async function seedGeographyUnits(): Promise<SeedResult> {
+/**
+ * Returns the leaf unit's (last entry in GEOGRAPHY_UNITS — Test Pada)
+ * geographyUnitId alongside the usual result, so callers can assign seeded
+ * test users to a real geography scope instead of leaving it null.
+ */
+async function seedGeographyUnits(): Promise<SeedResult & { leafGeographyUnitId: string }> {
   let created = 0;
   const idByCode = new Map<string, string>();
 
@@ -197,28 +227,84 @@ async function seedGeographyUnits(): Promise<SeedResult> {
     created += 1;
   }
 
+  const leafGeographyUnitId = idByCode.get(GEOGRAPHY_UNITS[GEOGRAPHY_UNITS.length - 1].geoCode);
+  if (!leafGeographyUnitId) {
+    throw new Error('seedGeographyUnits: leaf unit was not created or found — cannot continue.');
+  }
+
   if (created === 0) {
     return {
       step: 'geographyUnits',
       created: false,
       message: 'All geography units already present — skipped.',
+      leafGeographyUnitId,
     };
   }
   return {
     step: 'geographyUnits',
     created: true,
     message: `Seeded ${created} geography unit(s).`,
+    leafGeographyUnitId,
+  };
+}
+
+const TEST_PROJECT_CODE = 'TEST-PROJ-SEED-01';
+
+/**
+ * A single test/dev Project so seeded SAKHI/SUPERVISOR/MANAGER users get a
+ * real projectId on their user_roles row instead of null — without this,
+ * every fresh environment produces users whose token/`/me` response shows
+ * projectId: null, geographyUnitId: null, which is what surfaced the gap
+ * this function fixes.
+ */
+async function seedTestProject(): Promise<SeedResult & { projectId: string }> {
+  const existing = await prisma.project.findUnique({ where: { projectCode: TEST_PROJECT_CODE } });
+  if (existing) {
+    return {
+      step: 'testProject',
+      created: false,
+      message: `Test project ${TEST_PROJECT_CODE} already exists — skipped.`,
+      projectId: existing.projectId,
+    };
+  }
+
+  const project = await prisma.project.create({
+    data: {
+      projectCode: TEST_PROJECT_CODE,
+      projectName: 'Test Project (seeded)',
+      financialYear: '2026-2027',
+      startDate: new Date('2026-01-01'),
+      status: 'ACTIVE',
+    },
+  });
+
+  return {
+    step: 'testProject',
+    created: true,
+    message: `Seeded test project ${TEST_PROJECT_CODE}.`,
+    projectId: project.projectId,
   };
 }
 
 async function main(): Promise<void> {
-  const results = [
-    await seedRoles(),
-    await seedAdminUser(),
-    await seedTestUser(),
-    await seedLookups(),
-    await seedGeographyUnits(),
-  ];
+  const results = [await seedRoles(prisma), ...(await seedAdminUsers(prisma))];
+
+  // Geography + project must exist before seeding users, so their
+  // user_roles row can be assigned a real projectId/geographyUnitId instead
+  // of null.
+  const geographyResult = await seedGeographyUnits();
+  const projectResult = await seedTestProject();
+  results.push(geographyResult, projectResult);
+
+  for (const spec of MANUAL_SEED_USER_ENV_VARS) {
+    results.push(
+      ...(await seedUsersFromEnv(spec, {
+        projectId: projectResult.projectId,
+        geographyUnitId: geographyResult.leafGeographyUnitId,
+      })),
+    );
+  }
+  results.push(await seedLookups());
 
   console.log('\nSeed summary:');
   for (const r of results) {

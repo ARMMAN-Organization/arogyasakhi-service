@@ -182,6 +182,24 @@ export const LOOKUP_CATEGORIES: {
 ];
 
 /**
+ * One seed-user env var per role — SAKHI/SUPERVISOR/MANAGER/ADMIN — each a
+ * JSON array of `{ username, password, displayName }`. Kept in one place so
+ * seed.ts (parsing/validation) and its spec share the same source of truth
+ * for which env vars exist and their DB role code.
+ *
+ * mobileNumber is NOT read from these env vars: it's a NOT NULL UNIQUE `users`
+ * column but plays no role in login (login is username + password only, per
+ * the SRS), so seed.ts derives a deterministic placeholder per role+index
+ * instead of asking every environment to supply one.
+ */
+export const SEED_USER_ENV_VARS: { envVar: string; roleCode: string; mobileOffset: number }[] = [
+  { envVar: 'SAKHI', roleCode: 'SAKHI', mobileOffset: 0 },
+  { envVar: 'SUPERVISOR', roleCode: 'SUPERVISOR', mobileOffset: 100 },
+  { envVar: 'MANAGER', roleCode: 'MANAGER', mobileOffset: 200 },
+  { envVar: 'ADMIN', roleCode: 'ADMIN', mobileOffset: 300 },
+];
+
+/**
  * Minimal geography_units seed — one row per level of the SRS's 7-level
  * hierarchy (State > District > Block > PHC > Sub-centre > Village > Pada),
  * linked by parentCode. Test/dev data only: real state/district/etc. names
