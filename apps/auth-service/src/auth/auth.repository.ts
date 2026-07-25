@@ -182,8 +182,13 @@ export class AuthRepository {
   }
 
   /**
-   * Applies the `users`/`user_roles`/`sakhi_profiles` portions of an update in
-   * one transaction — either every requested field lands, or none does.
+   * Applies the `users`/`user_roles`/`sakhi_profiles` portions of an update,
+   * and — when `revokeSessions` is set — the session revocation that must
+   * accompany a username/password change, all in one transaction: either
+   * everything requested lands (including revocation), or none of it does.
+   * Revocation is folded in here rather than issued as a separate call after
+   * this transaction commits, so a credential change can never land without
+   * its accompanying forced-logout also landing.
    * `userRoleId`/`sakhiProfileId` are pre-resolved by the caller (service),
    * which already validated they exist, so this only ever writes to rows
    * known to exist.
@@ -194,6 +199,7 @@ export class AuthRepository {
       user: Record<string, unknown>;
       userRole?: { id: string; data: Record<string, unknown> };
       sakhiProfile?: { id: string; data: Record<string, unknown> };
+      revokeSessions?: boolean;
     },
   ) {
     return this.prisma.$transaction(async (tx) => {
@@ -209,6 +215,12 @@ export class AuthRepository {
           data: fields.sakhiProfile.data,
         });
       }
+      if (fields.revokeSessions) {
+        await tx.userSession.updateMany({
+          where: { userId: id, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+      }
       return tx.user.findUnique({
         where: { id },
         include: {
@@ -220,13 +232,6 @@ export class AuthRepository {
           sakhiProfile: true,
         },
       });
-    });
-  }
-
-  revokeAllSessionsForUser(userId: string) {
-    return this.prisma.userSession.updateMany({
-      where: { userId, revokedAt: null },
-      data: { revokedAt: new Date() },
     });
   }
 }

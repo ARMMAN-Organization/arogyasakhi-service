@@ -200,12 +200,9 @@ export class AuthService {
             }
           : undefined,
         sakhiProfile: sakhiProfileId ? { id: sakhiProfileId, data: sakhiProfileFields } : undefined,
+        revokeSessions: input.username !== undefined || input.password !== undefined,
       });
       if (!user) throw notFound('User not found.');
-
-      if (input.username !== undefined || input.password !== undefined) {
-        await this.repository.revokeAllSessionsForUser(id);
-      }
 
       return toUserProfile(user);
     } catch (err) {

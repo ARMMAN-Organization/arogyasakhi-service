@@ -74,7 +74,6 @@ describe('AuthService', () => {
     findActiveUserRole: jest.fn(),
     findSakhiProfileByUserId: jest.fn(),
     updateUserTransaction: jest.fn(),
-    revokeAllSessionsForUser: jest.fn(),
   } as unknown as jest.Mocked<AuthRepository>;
 
   const signer = {
@@ -544,9 +543,9 @@ describe('AuthService', () => {
         user: { displayName: 'Renamed Sakhi' },
         userRole: undefined,
         sakhiProfile: undefined,
+        revokeSessions: false,
       });
       expect(result.displayName).toBe('Renamed Sakhi');
-      expect(repository.revokeAllSessionsForUser).not.toHaveBeenCalled();
     });
 
     it('throws 404 when the user does not exist or is soft-deleted', async () => {
@@ -577,7 +576,7 @@ describe('AuthService', () => {
     });
 
     describe('username', () => {
-      it('updates username and revokes all active sessions', async () => {
+      it('updates username and revokes all active sessions in the same transaction', async () => {
         repository.updateUserTransaction.mockResolvedValue(
           updatedUserRow({ username: 'new.username' }) as never,
         );
@@ -588,8 +587,8 @@ describe('AuthService', () => {
           user: { username: 'new.username' },
           userRole: undefined,
           sakhiProfile: undefined,
+          revokeSessions: true,
         });
-        expect(repository.revokeAllSessionsForUser).toHaveBeenCalledWith('user-1');
         expect(result.username).toBe('new.username');
       });
 
@@ -602,7 +601,7 @@ describe('AuthService', () => {
     });
 
     describe('password', () => {
-      it('hashes the new password, sets passwordChangedAt, and revokes all active sessions', async () => {
+      it('hashes the new password, sets passwordChangedAt, and revokes all active sessions in the same transaction', async () => {
         repository.updateUserTransaction.mockResolvedValue(updatedUserRow() as never);
 
         await service.updateUser('user-1', { password: 'NewStr0ngPass!' });
@@ -614,8 +613,8 @@ describe('AuthService', () => {
           },
           userRole: undefined,
           sakhiProfile: undefined,
+          revokeSessions: true,
         });
-        expect(repository.revokeAllSessionsForUser).toHaveBeenCalledWith('user-1');
       });
 
       it('never includes passwordHash or plaintext password in the returned profile', async () => {
@@ -660,6 +659,7 @@ describe('AuthService', () => {
             data: { projectId: 'project-2', geographyUnitId: 'geo-2' },
           },
           sakhiProfile: undefined,
+          revokeSessions: false,
         });
       });
 
@@ -693,6 +693,7 @@ describe('AuthService', () => {
           user: {},
           userRole: { id: 'user-role-1', data: { projectId: null } },
           sakhiProfile: undefined,
+          revokeSessions: false,
         });
       });
     });
@@ -712,6 +713,7 @@ describe('AuthService', () => {
           user: {},
           userRole: undefined,
           sakhiProfile: { id: 'sakhi-profile-1', data: { employeeCode: 'EMP-00999' } },
+          revokeSessions: false,
         });
         expect(result.cardNumber).toBe('EMP-00999');
       });
@@ -744,6 +746,7 @@ describe('AuthService', () => {
           user: {},
           userRole: undefined,
           sakhiProfile: { id: 'sakhi-profile-1', data: { supervisorId: 'supervisor-2' } },
+          revokeSessions: false,
         });
       });
 
@@ -779,11 +782,12 @@ describe('AuthService', () => {
             id: 'sakhi-profile-1',
             data: { activeFrom: new Date('2026-01-01'), activeTo: new Date('2026-12-31') },
           },
+          revokeSessions: false,
         });
       });
     });
 
-    it('applies users, user_roles, and sakhi_profiles updates together in one call', async () => {
+    it('applies users, user_roles, sakhi_profiles, and session revocation together in one transaction', async () => {
       repository.findActiveUserRole.mockResolvedValue({ id: 'user-role-1' } as never);
       repository.findSakhiProfileByUserId.mockResolvedValue({ id: 'sakhi-profile-1' } as never);
       repository.updateUserTransaction.mockResolvedValue(updatedUserRow() as never);
@@ -799,8 +803,8 @@ describe('AuthService', () => {
         user: { username: 'new.username' },
         userRole: { id: 'user-role-1', data: { geographyUnitId: 'geo-2' } },
         sakhiProfile: { id: 'sakhi-profile-1', data: { employeeCode: 'EMP-00999' } },
+        revokeSessions: true,
       });
-      expect(repository.revokeAllSessionsForUser).toHaveBeenCalledWith('user-1');
     });
   });
 });
