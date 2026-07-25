@@ -1,4 +1,5 @@
 import type { PrismaService } from '../prisma/prisma.service';
+import type { UpdateUserInput } from './dto/update-user.dto';
 
 /** Data access for authentication: users, their role assignments, and sessions. */
 export class AuthRepository {
@@ -160,5 +161,13 @@ export class AuthRepository {
       });
       return user;
     });
+  }
+
+  /** Returns null if `id` doesn't exist or is soft-deleted; caller maps that to a 404. */
+  async updateUser(id: string, data: UpdateUserInput) {
+    const existing = await this.prisma.user.findFirst({ where: { id, isDeleted: false } });
+    if (!existing) return null;
+
+    return this.prisma.user.update({ where: { id }, data });
   }
 }

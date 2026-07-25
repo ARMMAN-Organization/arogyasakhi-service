@@ -2,7 +2,10 @@ import { GeographyRepository } from './geography.repository';
 
 describe('GeographyRepository', () => {
   const findMany = jest.fn();
-  const prisma = { geographyUnit: { findMany } } as never;
+  const findFirst = jest.fn();
+  const create = jest.fn();
+  const update = jest.fn();
+  const prisma = { geographyUnit: { findMany, findFirst, create, update } } as never;
   let repository: GeographyRepository;
 
   beforeEach(() => {
@@ -106,6 +109,93 @@ describe('GeographyRepository', () => {
         orderBy: { geoCode: 'asc' },
         take: 500,
       });
+    });
+  });
+
+  describe('createUnit', () => {
+    it('creates a unit with the given fields, defaulting parentId/geoCode to null, and stamps audit columns', async () => {
+      create.mockResolvedValue({ geographyUnitId: 'district-1' });
+
+      await repository.createUnit({ geoType: 'STATE', name: 'Maharashtra' } as never, 'admin-1');
+
+      expect(create).toHaveBeenCalledWith({
+        data: {
+          parentId: null,
+          geoType: 'STATE',
+          geoCode: null,
+          name: 'Maharashtra',
+          createdByUserId: 'admin-1',
+          updatedByUserId: 'admin-1',
+        },
+      });
+    });
+  });
+
+  describe('updateUnit', () => {
+    it('returns null when the unit does not exist or is soft-deleted', async () => {
+      findFirst.mockResolvedValue(null);
+
+      const result = await repository.updateUnit('missing', { name: 'New Name' }, 'admin-1');
+
+      expect(result).toBeNull();
+      expect(update).not.toHaveBeenCalled();
+    });
+
+    it('updates the unit and stamps updatedByUserId when it exists', async () => {
+      findFirst.mockResolvedValue({ geographyUnitId: 'district-1' });
+      update.mockResolvedValue({ geographyUnitId: 'district-1', name: 'New Name' });
+
+      const result = await repository.updateUnit('district-1', { name: 'New Name' }, 'admin-1');
+
+      expect(update).toHaveBeenCalledWith({
+        where: { geographyUnitId: 'district-1' },
+        data: { name: 'New Name', updatedByUserId: 'admin-1' },
+      });
+      expect(result).toEqual({ geographyUnitId: 'district-1', name: 'New Name' });
+    });
+  });
+
+  describe('hasActiveChildren', () => {
+    it('returns true when a non-deleted child exists', async () => {
+      findFirst.mockResolvedValue({ geographyUnitId: 'district-1' });
+
+      const result = await repository.hasActiveChildren('state-1');
+
+      expect(findFirst).toHaveBeenCalledWith({
+        where: { parentId: 'state-1', isDeleted: false },
+        select: { geographyUnitId: true },
+      });
+      expect(result).toBe(true);
+    });
+
+    it('returns false when no non-deleted child exists', async () => {
+      findFirst.mockResolvedValue(null);
+      const result = await repository.hasActiveChildren('pada-1');
+      expect(result).toBe(false);
+    });
+  });
+
+  describe('softDelete', () => {
+    it('returns null when the unit does not exist or is soft-deleted', async () => {
+      findFirst.mockResolvedValue(null);
+
+      const result = await repository.softDelete('missing', 'admin-1');
+
+      expect(result).toBeNull();
+      expect(update).not.toHaveBeenCalled();
+    });
+
+    it('sets isDeleted/deletedAt/updatedByUserId when the unit exists', async () => {
+      findFirst.mockResolvedValue({ geographyUnitId: 'pada-1' });
+      update.mockResolvedValue({ geographyUnitId: 'pada-1', isDeleted: true });
+
+      const result = await repository.softDelete('pada-1', 'admin-1');
+
+      expect(update).toHaveBeenCalledWith({
+        where: { geographyUnitId: 'pada-1' },
+        data: expect.objectContaining({ isDeleted: true, updatedByUserId: 'admin-1' }),
+      });
+      expect(result).toEqual({ geographyUnitId: 'pada-1', isDeleted: true });
     });
   });
 });

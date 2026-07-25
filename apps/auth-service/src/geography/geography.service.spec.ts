@@ -8,6 +8,10 @@ describe('GeographyService', () => {
     findChildren: jest.fn(),
     findRoots: jest.fn(),
     findMany: jest.fn(),
+    createUnit: jest.fn(),
+    updateUnit: jest.fn(),
+    hasActiveChildren: jest.fn(),
+    softDelete: jest.fn(),
   } as unknown as jest.Mocked<GeographyRepository>;
 
   let service: GeographyService;
@@ -231,6 +235,186 @@ describe('GeographyService', () => {
     it('returns an empty array (not a 404) when no units match', async () => {
       repository.findMany.mockResolvedValue([]);
       await expect(service.list({ parentId: 'no-such-parent' })).resolves.toEqual([]);
+    });
+  });
+
+  describe('create', () => {
+    it('creates a STATE with no parentId', async () => {
+      repository.createUnit.mockResolvedValue({
+        geographyUnitId: 'state-1',
+        parentId: null,
+        geoType: 'STATE',
+        geoCode: 'MH',
+        name: 'Maharashtra',
+        status: 'ACTIVE',
+      } as never);
+
+      const result = await service.create(
+        { geoType: 'STATE', name: 'Maharashtra', geoCode: 'MH' } as never,
+        'admin-1',
+      );
+
+      expect(repository.createUnit).toHaveBeenCalledWith(
+        { geoType: 'STATE', name: 'Maharashtra', geoCode: 'MH' },
+        'admin-1',
+      );
+      expect(result).toEqual({
+        geographyUnitId: 'state-1',
+        parentId: null,
+        geoType: 'STATE',
+        geoCode: 'MH',
+        name: 'Maharashtra',
+        status: 'ACTIVE',
+      });
+    });
+
+    it('rejects a STATE that has a parentId', async () => {
+      await expect(
+        service.create(
+          { geoType: 'STATE', parentId: 'x', name: 'Maharashtra' } as never,
+          'admin-1',
+        ),
+      ).rejects.toMatchObject({ status: 400 });
+      expect(repository.createUnit).not.toHaveBeenCalled();
+    });
+
+    it('rejects a non-STATE unit with no parentId', async () => {
+      await expect(
+        service.create({ geoType: 'DISTRICT', name: 'Nandurbar' } as never, 'admin-1'),
+      ).rejects.toMatchObject({ status: 400 });
+      expect(repository.createUnit).not.toHaveBeenCalled();
+    });
+
+    it('rejects a parentId that does not exist', async () => {
+      repository.findById.mockResolvedValue(null);
+
+      await expect(
+        service.create(
+          { geoType: 'DISTRICT', parentId: 'missing', name: 'Nandurbar' } as never,
+          'admin-1',
+        ),
+      ).rejects.toMatchObject({ status: 404 });
+    });
+
+    it('rejects creating a child under an inactive parent', async () => {
+      repository.findById.mockResolvedValue({ geoType: 'STATE', status: 'INACTIVE' } as never);
+
+      await expect(
+        service.create(
+          { geoType: 'DISTRICT', parentId: 'state-1', name: 'Nandurbar' } as never,
+          'admin-1',
+        ),
+      ).rejects.toMatchObject({ status: 400 });
+      expect(repository.createUnit).not.toHaveBeenCalled();
+    });
+
+    it('rejects a geoType that is not exactly one level below the parent', async () => {
+      repository.findById.mockResolvedValue({ geoType: 'STATE', status: 'ACTIVE' } as never);
+
+      await expect(
+        service.create(
+          { geoType: 'BLOCK', parentId: 'state-1', name: 'Dhadgaon' } as never,
+          'admin-1',
+        ),
+      ).rejects.toMatchObject({ status: 400 });
+      expect(repository.createUnit).not.toHaveBeenCalled();
+    });
+
+    it('creates a unit one level below a valid parent', async () => {
+      repository.findById.mockResolvedValue({ geoType: 'STATE', status: 'ACTIVE' } as never);
+      repository.createUnit.mockResolvedValue({
+        geographyUnitId: 'district-1',
+        parentId: 'state-1',
+        geoType: 'DISTRICT',
+        geoCode: 'NANDURBAR',
+        name: 'Nandurbar',
+        status: 'ACTIVE',
+      } as never);
+
+      const result = await service.create(
+        {
+          geoType: 'DISTRICT',
+          parentId: 'state-1',
+          name: 'Nandurbar',
+          geoCode: 'NANDURBAR',
+        } as never,
+        'admin-1',
+      );
+
+      expect(result).toMatchObject({ geographyUnitId: 'district-1', geoType: 'DISTRICT' });
+    });
+
+    it('maps a unique-constraint violation to 409', async () => {
+      repository.findById.mockResolvedValue({ geoType: 'STATE', status: 'ACTIVE' } as never);
+      repository.createUnit.mockRejectedValue({ code: 'P2002' });
+
+      await expect(
+        service.create(
+          { geoType: 'DISTRICT', parentId: 'state-1', name: 'Nandurbar' } as never,
+          'admin-1',
+        ),
+      ).rejects.toMatchObject({ status: 409 });
+    });
+  });
+
+  describe('update', () => {
+    it('returns the updated unit (projected)', async () => {
+      repository.updateUnit.mockResolvedValue({
+        geographyUnitId: 'district-1',
+        parentId: 'state-1',
+        geoType: 'DISTRICT',
+        geoCode: 'NANDURBAR',
+        name: 'Nandurbar Renamed',
+        status: 'ACTIVE',
+      } as never);
+
+      const result = await service.update('district-1', { name: 'Nandurbar Renamed' }, 'admin-1');
+
+      expect(repository.updateUnit).toHaveBeenCalledWith(
+        'district-1',
+        { name: 'Nandurbar Renamed' },
+        'admin-1',
+      );
+      expect(result).toMatchObject({ name: 'Nandurbar Renamed' });
+    });
+
+    it('throws 404 when the unit does not exist', async () => {
+      repository.updateUnit.mockResolvedValue(null);
+      await expect(service.update('missing', { name: 'X' }, 'admin-1')).rejects.toMatchObject({
+        status: 404,
+      });
+    });
+
+    it('maps a unique-constraint violation to 409', async () => {
+      repository.updateUnit.mockRejectedValue({ code: 'P2002' });
+      await expect(
+        service.update('district-1', { geoCode: 'DUP' }, 'admin-1'),
+      ).rejects.toMatchObject({ status: 409 });
+    });
+  });
+
+  describe('remove', () => {
+    it('soft-deletes a unit with no active children', async () => {
+      repository.findById.mockResolvedValue({ geographyUnitId: 'pada-1' } as never);
+      repository.hasActiveChildren.mockResolvedValue(false);
+
+      await service.remove('pada-1', 'admin-1');
+
+      expect(repository.softDelete).toHaveBeenCalledWith('pada-1', 'admin-1');
+    });
+
+    it('throws 404 when the unit does not exist', async () => {
+      repository.findById.mockResolvedValue(null);
+      await expect(service.remove('missing', 'admin-1')).rejects.toMatchObject({ status: 404 });
+      expect(repository.softDelete).not.toHaveBeenCalled();
+    });
+
+    it('throws 409 when the unit has active children', async () => {
+      repository.findById.mockResolvedValue({ geographyUnitId: 'state-1' } as never);
+      repository.hasActiveChildren.mockResolvedValue(true);
+
+      await expect(service.remove('state-1', 'admin-1')).rejects.toMatchObject({ status: 409 });
+      expect(repository.softDelete).not.toHaveBeenCalled();
     });
   });
 });

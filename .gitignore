@@ -12,5 +12,5 @@ coverage/
 .DS_Store
 postman/
 
-# Local DB backups (may contain PII) — never commit
-db-backups/
+# Local test-run records (test cases + verification notes) — never commit
+docs/test-runs/

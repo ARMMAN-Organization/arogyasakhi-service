@@ -1,5 +1,7 @@
 import type { GeographyUnit } from '../../../../node_modules/.prisma/client-auth-service';
 import type { PrismaService } from '../prisma/prisma.service';
+import type { CreateGeographyUnitInput } from './dto/create-geography-unit.dto';
+import type { UpdateGeographyUnitInput } from './dto/update-geography-unit.dto';
 
 /** Data access for geography_units master data (State/District/Block/PHC/Sub-centre/Village/Pada). */
 export class GeographyRepository {
@@ -81,6 +83,48 @@ export class GeographyRepository {
       where,
       orderBy: { geoCode: 'asc' },
       take: 500,
+    });
+  }
+
+  createUnit(data: CreateGeographyUnitInput, createdByUserId: string) {
+    return this.prisma.geographyUnit.create({
+      data: {
+        parentId: data.parentId ?? null,
+        geoType: data.geoType,
+        geoCode: data.geoCode ?? null,
+        name: data.name,
+        createdByUserId,
+        updatedByUserId: createdByUserId,
+      },
+    });
+  }
+
+  async updateUnit(id: string, data: UpdateGeographyUnitInput, updatedByUserId: string) {
+    const existing = await this.findById(id);
+    if (!existing) return null;
+
+    return this.prisma.geographyUnit.update({
+      where: { geographyUnitId: id },
+      data: { ...data, updatedByUserId },
+    });
+  }
+
+  /** True if `id` has any non-soft-deleted direct child — used to block delete. */
+  async hasActiveChildren(id: string): Promise<boolean> {
+    const child = await this.prisma.geographyUnit.findFirst({
+      where: { parentId: id, isDeleted: false },
+      select: { geographyUnitId: true },
+    });
+    return child !== null;
+  }
+
+  async softDelete(id: string, updatedByUserId: string) {
+    const existing = await this.findById(id);
+    if (!existing) return null;
+
+    return this.prisma.geographyUnit.update({
+      where: { geographyUnitId: id },
+      data: { isDeleted: true, deletedAt: new Date(), updatedByUserId },
     });
   }
 }

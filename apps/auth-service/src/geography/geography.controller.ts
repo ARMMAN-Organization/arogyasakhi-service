@@ -8,8 +8,13 @@ import {
   createDocumentedRouter,
   errorResponse,
   ok,
+  requireRoles,
+  unauthorized,
   validate,
+  validateBody,
 } from '../app.module';
+import { createGeographyUnitSchema } from './dto/create-geography-unit.dto';
+import { updateGeographyUnitSchema } from './dto/update-geography-unit.dto';
 
 extendZodWithOpenApi(z);
 
@@ -173,6 +178,93 @@ export function createGeographyRouter(service: GeographyService, signer: TokenSi
     validate(geographyUnitIdParamsSchema, 'params'),
     asyncHandler(async (req, res) => {
       res.json(ok(await service.getChildren(req.params.id)));
+    }),
+  );
+
+  doc.post(
+    '/geography-units',
+    {
+      summary: 'Create a geography unit (ADMIN only)',
+      tags: ['Geography'],
+      responses: {
+        201: { description: 'Geography unit created', schema: envelope(geographyUnitSchema) },
+        400: errorResponse(400, {
+          message: "geoType: Must be exactly one level below the parent's geoType (STATE).",
+        }),
+        401: errorResponse(401),
+        403: errorResponse(403),
+        404: errorResponse(404, { message: 'Parent geography unit not found.' }),
+        409: errorResponse(409, {
+          message: 'A geography unit with this parent, geoType, and geoCode already exists.',
+        }),
+        500: errorResponse(500),
+      },
+    },
+    authenticate(signer),
+    requireRoles('ADMIN'),
+    validateBody(createGeographyUnitSchema),
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const created = await service.create(req.body, req.user.id);
+      res.status(201).json(ok(created));
+    }),
+  );
+
+  doc.patch(
+    '/geography-units/:id',
+    {
+      summary: 'Update a geography unit (name/geoCode/status only, ADMIN only)',
+      tags: ['Geography'],
+      params: geographyUnitIdParamsSchema,
+      responses: {
+        200: { description: 'Geography unit updated', schema: envelope(geographyUnitSchema) },
+        400: errorResponse(400, { message: 'At least one field must be provided.' }),
+        401: errorResponse(401),
+        403: errorResponse(403),
+        404: errorResponse(404, { message: 'Geography unit not found.' }),
+        409: errorResponse(409, {
+          message: 'A geography unit with this parent, geoType, and geoCode already exists.',
+        }),
+        500: errorResponse(500),
+      },
+    },
+    authenticate(signer),
+    requireRoles('ADMIN'),
+    validate(geographyUnitIdParamsSchema, 'params'),
+    validateBody(updateGeographyUnitSchema),
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      res.json(ok(await service.update(req.params.id, req.body, req.user.id)));
+    }),
+  );
+
+  doc.delete(
+    '/geography-units/:id',
+    {
+      summary: 'Soft-delete a geography unit (ADMIN only; blocked if it has active children)',
+      tags: ['Geography'],
+      params: geographyUnitIdParamsSchema,
+      responses: {
+        200: {
+          description: 'Geography unit deleted',
+          schema: envelope(z.object({ deleted: z.literal(true) })),
+        },
+        401: errorResponse(401),
+        403: errorResponse(403),
+        404: errorResponse(404, { message: 'Geography unit not found.' }),
+        409: errorResponse(409, {
+          message: 'Cannot delete a geography unit that has active child units.',
+        }),
+        500: errorResponse(500),
+      },
+    },
+    authenticate(signer),
+    requireRoles('ADMIN'),
+    validate(geographyUnitIdParamsSchema, 'params'),
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      await service.remove(req.params.id, req.user.id);
+      res.json(ok({ deleted: true }));
     }),
   );
 
