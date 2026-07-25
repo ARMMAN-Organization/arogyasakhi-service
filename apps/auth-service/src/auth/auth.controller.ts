@@ -217,17 +217,20 @@ export function createAuthRouter(service: AuthService, signer: TokenSigner) {
   doc.patch(
     '/users/:id',
     {
-      summary: 'Update a user (displayName/mobileNumber/email/status; ADMIN only)',
+      summary:
+        'Update a user — identity/contact/status/credentials (users), project/geography scope ' +
+        'for an existing role (user_roles), and Sakhi profile fields (sakhi_profiles); ADMIN only',
       tags: ['Users'],
       params: userIdParamsSchema,
       responses: {
-        200: { description: 'User updated', schema: envelope(createdUserSchema) },
+        200: { description: 'User updated', schema: envelope(userProfileSchema) },
         400: errorResponse(400, { message: 'At least one field must be provided.' }),
         401: errorResponse(401),
         403: errorResponse(403),
         404: errorResponse(404, { message: 'User not found.' }),
         409: errorResponse(409, {
-          message: 'A user with this mobile number or email already exists.',
+          message:
+            'A user with this username, mobile number, email, or employee code already exists.',
         }),
         500: errorResponse(500),
       },

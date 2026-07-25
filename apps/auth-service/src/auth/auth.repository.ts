@@ -1,5 +1,4 @@
 import type { PrismaService } from '../prisma/prisma.service';
-import type { UpdateUserInput } from './dto/update-user.dto';
 
 /** Data access for authentication: users, their role assignments, and sessions. */
 export class AuthRepository {
@@ -163,11 +162,76 @@ export class AuthRepository {
     });
   }
 
-  /** Returns null if `id` doesn't exist or is soft-deleted; caller maps that to a 404. */
-  async updateUser(id: string, data: UpdateUserInput) {
-    const existing = await this.prisma.user.findFirst({ where: { id, isDeleted: false } });
-    if (!existing) return null;
+  findProjectById(projectId: string) {
+    return this.prisma.project.findFirst({ where: { projectId, isDeleted: false } });
+  }
 
-    return this.prisma.user.update({ where: { id }, data });
+  /**
+   * Finds the user's currently-active `user_roles` row for `roleCode` — the
+   * row {@link updateUserTransaction} will update. Returns null if the user
+   * holds no such active role (caller maps that to a 404).
+   */
+  findActiveUserRole(userId: string, roleCode: string) {
+    return this.prisma.userRole.findFirst({
+      where: { userId, status: 'ACTIVE', isDeleted: false, role: { roleCode } },
+    });
+  }
+
+  findSakhiProfileByUserId(userId: string) {
+    return this.prisma.sakhiProfile.findFirst({ where: { userId, isDeleted: false } });
+  }
+
+  /**
+   * Applies the `users`/`user_roles`/`sakhi_profiles` portions of an update,
+   * and — when `revokeSessions` is set — the session revocation that must
+   * accompany a username/password change, all in one transaction: either
+   * everything requested lands (including revocation), or none of it does.
+   * Revocation is folded in here rather than issued as a separate call after
+   * this transaction commits, so a credential change can never land without
+   * its accompanying forced-logout also landing.
+   * `userRoleId`/`sakhiProfileId` are pre-resolved by the caller (service),
+   * which already validated they exist, so this only ever writes to rows
+   * known to exist.
+   */
+  updateUserTransaction(
+    id: string,
+    fields: {
+      user: Record<string, unknown>;
+      userRole?: { id: string; data: Record<string, unknown> };
+      sakhiProfile?: { id: string; data: Record<string, unknown> };
+      revokeSessions?: boolean;
+    },
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      if (Object.keys(fields.user).length > 0) {
+        await tx.user.update({ where: { id }, data: fields.user });
+      }
+      if (fields.userRole) {
+        await tx.userRole.update({ where: { id: fields.userRole.id }, data: fields.userRole.data });
+      }
+      if (fields.sakhiProfile) {
+        await tx.sakhiProfile.update({
+          where: { id: fields.sakhiProfile.id },
+          data: fields.sakhiProfile.data,
+        });
+      }
+      if (fields.revokeSessions) {
+        await tx.userSession.updateMany({
+          where: { userId: id, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+      }
+      return tx.user.findUnique({
+        where: { id },
+        include: {
+          userRoles: {
+            where: { status: 'ACTIVE', isDeleted: false },
+            orderBy: { createdAt: 'asc' },
+            include: { role: true, project: true },
+          },
+          sakhiProfile: true,
+        },
+      });
+    });
   }
 }

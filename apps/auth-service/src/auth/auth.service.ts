@@ -1,5 +1,5 @@
 import type { TokenSigner } from '@armman/service-commons';
-import { conflict, forbidden, notFound, unauthorized } from '@armman/service-commons';
+import { conflict, notFound, forbidden, unauthorized, encryptPii } from '@armman/service-commons';
 import type { AuthRepository } from './auth.repository';
 import { hashPassword, verifyPassword } from './password';
 import { generateRefreshToken, hashRefreshToken } from './refresh-token';
@@ -123,22 +123,93 @@ export class AuthService {
     }
   }
 
-  async updateUser(id: string, input: UpdateUserInput): Promise<CreatedUser> {
+  /**
+   * Updates a user across `users`, the caller's currently-active `user_roles`
+   * row (project/geography scope only), and `sakhi_profiles` in one request —
+   * per product decision, one endpoint rather than four. All three writes
+   * happen in a single transaction (see `AuthRepository.updateUserTransaction`):
+   * either everything requested lands, or nothing does.
+   *
+   * `roleCode`/`employeeCode` existence and target-row lookups happen here
+   * (not in the transaction) so a 404 can be thrown before any write starts.
+   */
+  async updateUser(id: string, input: UpdateUserInput): Promise<UserProfile> {
+    const existing = await this.repository.findUserById(id);
+    if (!existing || existing.isDeleted) throw notFound('User not found.');
+
+    let userRoleId: string | undefined;
+    if (input.roleCode) {
+      const activeRole = await this.repository.findActiveUserRole(id, input.roleCode);
+      if (!activeRole) {
+        throw notFound(`User has no active ${input.roleCode} role assignment.`);
+      }
+      if (input.projectId) {
+        const project = await this.repository.findProjectById(input.projectId);
+        if (!project) throw notFound('Project not found.');
+      }
+      userRoleId = activeRole.id;
+    }
+
+    let sakhiProfileId: string | undefined;
+    const sakhiProfileFields: Record<string, unknown> = {};
+    if (input.employeeCode !== undefined) sakhiProfileFields.employeeCode = input.employeeCode;
+    if (input.supervisorId !== undefined) sakhiProfileFields.supervisorId = input.supervisorId;
+    if (input.phoneNumber !== undefined) sakhiProfileFields.phoneNumber = input.phoneNumber;
+    if (input.backupContact !== undefined) sakhiProfileFields.backupContact = input.backupContact;
+    if (input.ifscCode !== undefined) sakhiProfileFields.ifscCode = input.ifscCode;
+    if (input.activeFrom !== undefined) sakhiProfileFields.activeFrom = new Date(input.activeFrom);
+    if (input.activeTo !== undefined) {
+      sakhiProfileFields.activeTo = input.activeTo ? new Date(input.activeTo) : null;
+    }
+    if (input.panNumber !== undefined) sakhiProfileFields.panToken = encryptPii(input.panNumber);
+    if (input.aadhaarNumber !== undefined) {
+      sakhiProfileFields.aadhaarToken = encryptPii(input.aadhaarNumber);
+    }
+    if (input.bankAccountNumber !== undefined) {
+      sakhiProfileFields.bankAccountToken = encryptPii(input.bankAccountNumber);
+    }
+    if (Object.keys(sakhiProfileFields).length > 0) {
+      const profile = await this.repository.findSakhiProfileByUserId(id);
+      if (!profile) throw notFound('User has no Sakhi profile.');
+      sakhiProfileId = profile.id;
+    }
+
+    const userFields: Record<string, unknown> = {};
+    if (input.username !== undefined) userFields.username = input.username;
+    if (input.displayName !== undefined) userFields.displayName = input.displayName;
+    if (input.mobileNumber !== undefined) userFields.mobileNumber = input.mobileNumber;
+    if (input.email !== undefined) userFields.email = input.email;
+    if (input.status !== undefined) userFields.status = input.status;
+    if (input.password !== undefined) {
+      userFields.passwordHash = await hashPassword(input.password);
+      userFields.passwordChangedAt = new Date();
+    }
+
     try {
-      const user = await this.repository.updateUser(id, input);
+      const user = await this.repository.updateUserTransaction(id, {
+        user: userFields,
+        userRole: userRoleId
+          ? {
+              id: userRoleId,
+              data: {
+                ...(input.projectId !== undefined && { projectId: input.projectId }),
+                ...(input.geographyUnitId !== undefined && {
+                  geographyUnitId: input.geographyUnitId,
+                }),
+              },
+            }
+          : undefined,
+        sakhiProfile: sakhiProfileId ? { id: sakhiProfileId, data: sakhiProfileFields } : undefined,
+        revokeSessions: input.username !== undefined || input.password !== undefined,
+      });
       if (!user) throw notFound('User not found.');
-      return {
-        id: user.id,
-        username: user.username,
-        mobileNumber: user.mobileNumber,
-        displayName: user.displayName,
-        email: user.email,
-        status: user.status,
-        createdAt: user.createdAt,
-      };
+
+      return toUserProfile(user);
     } catch (err) {
       if (isUniqueConstraintViolation(err)) {
-        throw conflict('A user with this mobile number or email already exists.');
+        throw conflict(
+          'A user with this username, mobile number, email, or employee code already exists.',
+        );
       }
       throw err;
     }
