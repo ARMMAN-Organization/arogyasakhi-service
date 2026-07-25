@@ -97,6 +97,9 @@ export class GeographyService {
 
       const parent = await this.repository.findById(input.parentId);
       if (!parent) throw notFound('Parent geography unit not found.');
+      if (parent.status !== 'ACTIVE') {
+        throw badRequest('parentId: Cannot create a child unit under an inactive parent.');
+      }
 
       const parentLevel = GEO_TYPE_ORDER.indexOf(parent.geoType as (typeof GEO_TYPE_ORDER)[number]);
       const childLevel = GEO_TYPE_ORDER.indexOf(input.geoType);

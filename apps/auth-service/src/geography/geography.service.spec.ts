@@ -296,8 +296,20 @@ describe('GeographyService', () => {
       ).rejects.toMatchObject({ status: 404 });
     });
 
+    it('rejects creating a child under an inactive parent', async () => {
+      repository.findById.mockResolvedValue({ geoType: 'STATE', status: 'INACTIVE' } as never);
+
+      await expect(
+        service.create(
+          { geoType: 'DISTRICT', parentId: 'state-1', name: 'Nandurbar' } as never,
+          'admin-1',
+        ),
+      ).rejects.toMatchObject({ status: 400 });
+      expect(repository.createUnit).not.toHaveBeenCalled();
+    });
+
     it('rejects a geoType that is not exactly one level below the parent', async () => {
-      repository.findById.mockResolvedValue({ geoType: 'STATE' } as never);
+      repository.findById.mockResolvedValue({ geoType: 'STATE', status: 'ACTIVE' } as never);
 
       await expect(
         service.create(
@@ -309,7 +321,7 @@ describe('GeographyService', () => {
     });
 
     it('creates a unit one level below a valid parent', async () => {
-      repository.findById.mockResolvedValue({ geoType: 'STATE' } as never);
+      repository.findById.mockResolvedValue({ geoType: 'STATE', status: 'ACTIVE' } as never);
       repository.createUnit.mockResolvedValue({
         geographyUnitId: 'district-1',
         parentId: 'state-1',
@@ -333,7 +345,7 @@ describe('GeographyService', () => {
     });
 
     it('maps a unique-constraint violation to 409', async () => {
-      repository.findById.mockResolvedValue({ geoType: 'STATE' } as never);
+      repository.findById.mockResolvedValue({ geoType: 'STATE', status: 'ACTIVE' } as never);
       repository.createUnit.mockRejectedValue({ code: 'P2002' });
 
       await expect(
