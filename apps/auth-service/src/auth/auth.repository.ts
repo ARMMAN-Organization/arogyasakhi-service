@@ -189,16 +189,31 @@ export class AuthRepository {
    * Revocation is folded in here rather than issued as a separate call after
    * this transaction commits, so a credential change can never land without
    * its accompanying forced-logout also landing.
-   * `userRoleId`/`sakhiProfileId` are pre-resolved by the caller (service),
-   * which already validated they exist, so this only ever writes to rows
-   * known to exist.
+   *
+   * `sakhiProfile` is either `{ id, data }` (update an existing row — id
+   * pre-resolved by the caller, which already validated it exists) or
+   * `{ create, data }` (no existing profile — create one; `create` carries
+   * the required `userId`/`primaryProjectId`/`phoneNumber`/`activeFrom`
+   * pre-validated by the caller, so this only ever writes to rows known to
+   * exist or known to be creatable).
+   * `userRoleId` is likewise pre-resolved by the caller.
    */
   updateUserTransaction(
     id: string,
     fields: {
       user: Record<string, unknown>;
       userRole?: { id: string; data: Record<string, unknown> };
-      sakhiProfile?: { id: string; data: Record<string, unknown> };
+      sakhiProfile?:
+        | { id: string; data: Record<string, unknown> }
+        | {
+            create: {
+              userId: string;
+              primaryProjectId: string;
+              phoneNumber: string;
+              activeFrom: Date;
+            };
+            data: Record<string, unknown>;
+          };
       revokeSessions?: boolean;
     },
   ) {
@@ -210,10 +225,16 @@ export class AuthRepository {
         await tx.userRole.update({ where: { id: fields.userRole.id }, data: fields.userRole.data });
       }
       if (fields.sakhiProfile) {
-        await tx.sakhiProfile.update({
-          where: { id: fields.sakhiProfile.id },
-          data: fields.sakhiProfile.data,
-        });
+        if ('create' in fields.sakhiProfile) {
+          await tx.sakhiProfile.create({
+            data: { ...fields.sakhiProfile.create, ...fields.sakhiProfile.data },
+          });
+        } else {
+          await tx.sakhiProfile.update({
+            where: { id: fields.sakhiProfile.id },
+            data: fields.sakhiProfile.data,
+          });
+        }
       }
       if (fields.revokeSessions) {
         await tx.userSession.updateMany({
