@@ -20,23 +20,31 @@ export interface SeedResult {
 }
 
 /**
- * Seeds role master data (SAKHI/SUPERVISOR/MANAGER/ADMIN) only when the
- * `roles` table is empty (e.g. first boot on a fresh DB). Once roles exist,
- * they're left untouched so runtime edits are never reverted by a later
- * deploy/restart.
+ * Seeds role master data (SAKHI/SUPERVISOR/MANAGER/ADMIN), creating only
+ * whichever of the 4 roles don't already exist by `roleCode` — so adding a
+ * new role to `ROLES` later, or a partially-seeded DB missing just one role,
+ * is picked up on the next boot/seed run instead of being skipped wholesale.
+ * Existing roles are left untouched so runtime edits are never reverted.
  */
 export async function seedRoles(prisma: SeedPrismaClient): Promise<SeedResult> {
-  const existingCount = await prisma.role.count();
-  if (existingCount > 0) {
+  const existing = await prisma.role.findMany({ select: { roleCode: true } });
+  const existingCodes = new Set(existing.map((r) => r.roleCode));
+  const missing = ROLES.filter((r) => !existingCodes.has(r.roleCode));
+
+  if (missing.length === 0) {
     return {
       step: 'roles',
       created: false,
-      message: `Roles already present (${existingCount}) — skipped.`,
+      message: `All ${ROLES.length} roles already present — skipped.`,
     };
   }
 
-  await prisma.role.createMany({ data: ROLES });
-  return { step: 'roles', created: true, message: `Seeded ${ROLES.length} roles.` };
+  await prisma.role.createMany({ data: missing });
+  return {
+    step: 'roles',
+    created: true,
+    message: `Seeded ${missing.length} missing role(s): ${missing.map((r) => r.roleCode).join(', ')}.`,
+  };
 }
 
 const seedAdminUserSchema = z.object({
