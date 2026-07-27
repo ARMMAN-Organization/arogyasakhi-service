@@ -13,6 +13,35 @@ import {
 
 extendZodWithOpenApi(z);
 
+// Request DTO annotated with examples for Swagger UI; validation behavior is
+// unchanged (`.openapi()` only attaches documentation metadata).
+// checksum is z.instanceof(Buffer) (see create-mediaAsset.dto.ts) —
+// zod-to-openapi cannot introspect z.instanceof() on its own, so an explicit
+// string/binary type is required here to short-circuit its type inference.
+const createMediaAssetRequestSchema = createMediaAssetSchema.extend({
+  checksum: createMediaAssetSchema.shape.checksum.openapi({
+    type: 'string',
+    format: 'binary',
+    description: 'SHA-256 checksum of the uploaded file.',
+  }),
+});
+
+// Documentation-only view of the request body (passed via `doc.post`'s
+// `body` option, not to `validateBody`): `sizeBytes` is `z.coerce.bigint()`
+// on the real schema, required by Prisma's BigInt column, but
+// zod-to-openapi's own `.isOptionalSchema()` check calls `.isOptional()` on
+// it, which runs the real coercion against `undefined` and throws instead of
+// failing gracefully — no `.openapi()` metadata can suppress that, since the
+// crash happens before metadata is consulted. Substituting a plain
+// `z.string()` here only changes what Swagger *displays*; `validateBody`
+// below still validates/coerces the real bigint.
+const createMediaAssetDocSchema = createMediaAssetRequestSchema.extend({
+  sizeBytes: z.string().openapi({
+    example: '204800',
+    description: 'File size in bytes.',
+  }),
+});
+
 const mediaAssetSchema = z.object({
   id: z.string().uuid(),
   assetType: z.string().openapi({ example: 'CONSENT_PHOTO' }),
@@ -82,6 +111,7 @@ export function createMediaAssetRouter(service: MediaAssetService) {
     {
       summary: 'Create a media asset record',
       tags: ['Media'],
+      body: createMediaAssetDocSchema,
       responses: {
         201: { description: 'Media asset created', schema: envelope(mediaAssetSchema) },
         400: { description: 'Validation error', schema: apiErrorSchema },
@@ -91,7 +121,7 @@ export function createMediaAssetRouter(service: MediaAssetService) {
     },
     trustGatewayIdentity,
     requireRoles('SAKHI'),
-    validateBody(createMediaAssetSchema),
+    validateBody(createMediaAssetRequestSchema),
     asyncHandler(async (req, res) => {
       const created = await service.create(req.body);
       res.status(201).json(ok(created));

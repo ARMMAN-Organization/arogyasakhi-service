@@ -13,6 +13,18 @@ import {
 
 extendZodWithOpenApi(z);
 
+// Request DTO annotated with examples for Swagger UI; validation behavior is
+// unchanged (`.openapi()` only attaches documentation metadata).
+// topicsJson is built on z.lazy() (see create-supervisorEvent.dto.ts) —
+// zod-to-openapi cannot introspect z.lazy() on its own, so `type: 'object'`
+// is required here to short-circuit its type inference.
+const createSupervisorEventRequestSchema = createSupervisorEventSchema.extend({
+  topicsJson: createSupervisorEventSchema.shape.topicsJson.openapi({
+    type: 'object',
+    example: {},
+  }),
+});
+
 const supervisorEventSchema = z.object({
   id: z.string().uuid(),
   projectId: z.string().uuid(),
@@ -127,7 +139,7 @@ export function createOperationsRouter(service: OperationsService) {
     },
     trustGatewayIdentity,
     requireRoles('SUPERVISOR'),
-    validateBody(createSupervisorEventSchema),
+    validateBody(createSupervisorEventRequestSchema),
     asyncHandler(async (req, res) => {
       const created = await service.createEvent(req.body);
       res.status(201).json(ok(created));

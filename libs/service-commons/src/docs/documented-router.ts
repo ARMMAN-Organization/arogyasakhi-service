@@ -14,6 +14,15 @@ export interface RouteDocOptions {
    * present for the doc router to infer from. */
   params?: AnyZodObject;
   query?: AnyZodObject;
+  /**
+   * Overrides the body schema documented in OpenAPI, independent of what
+   * `validateBody(...)` actually validates against. Needed when the real
+   * validation schema contains a Zod type `zod-to-openapi` cannot safely
+   * introspect (e.g. `z.coerce.bigint()`, whose own `.isOptional()` check
+   * throws instead of failing gracefully) — `validateBody` still enforces
+   * the real schema; only the *documented* shape differs.
+   */
+  body?: ZodTypeAny;
 }
 
 function hasValidationMarker(fn: unknown): fn is RequestHandler & ValidationMarker {
@@ -70,7 +79,7 @@ export function createDocumentedRouter() {
         tags: doc.tags,
         requiresAuth: inferred.requiresAuth,
         request: {
-          body: inferred.body,
+          body: doc.body ?? inferred.body,
           params: doc.params ?? inferred.params,
           query: doc.query ?? inferred.query,
         },

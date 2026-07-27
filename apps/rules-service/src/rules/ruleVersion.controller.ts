@@ -20,7 +20,12 @@ const setIdParamsSchema = z
   .strict();
 
 const publishRuleVersionRequestSchema = publishRuleVersionSchema.extend({
+  // `rulesJson` is a recursive z.lazy() type (see publish-ruleVersion.dto.ts) —
+  // zod-to-openapi cannot introspect z.lazy() on its own, so `type: 'object'`
+  // is required here to short-circuit its type inference (same pattern as
+  // crossFieldRuleSchema in visit-form-service's form-field.dto.ts).
   rulesJson: publishRuleVersionSchema.shape.rulesJson.openapi({
+    type: 'object',
     example: { rules: [], version: 'gorules-decision-graph' },
   }),
 });
