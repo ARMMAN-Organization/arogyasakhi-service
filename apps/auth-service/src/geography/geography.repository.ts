@@ -86,6 +86,19 @@ export class GeographyRepository {
     });
   }
 
+  /**
+   * All geography units — including soft-deleted rows, so a delta client can
+   * tell a deletion apart from "never existed" — with `updatedAt` after
+   * `since` (or every row, when `since` is omitted). `updatedAt` covers both
+   * creates and updates: Prisma's `@updatedAt` sets it on insert too.
+   */
+  findUpdatedSince(since: Date | undefined) {
+    return this.prisma.geographyUnit.findMany({
+      where: since ? { updatedAt: { gt: since } } : undefined,
+      orderBy: { updatedAt: 'asc' },
+    });
+  }
+
   createUnit(data: CreateGeographyUnitInput, createdByUserId: string) {
     return this.prisma.geographyUnit.create({
       data: {

@@ -112,6 +112,31 @@ describe('GeographyRepository', () => {
     });
   });
 
+  describe('findUpdatedSince', () => {
+    it('queries with no where filter (including soft-deleted rows) when since is undefined', async () => {
+      findMany.mockResolvedValue([]);
+
+      await repository.findUpdatedSince(undefined);
+
+      expect(findMany).toHaveBeenCalledWith({
+        where: undefined,
+        orderBy: { updatedAt: 'asc' },
+      });
+    });
+
+    it('filters by updatedAt greater than since when provided', async () => {
+      findMany.mockResolvedValue([]);
+      const since = new Date('2026-01-01T00:00:00.000Z');
+
+      await repository.findUpdatedSince(since);
+
+      expect(findMany).toHaveBeenCalledWith({
+        where: { updatedAt: { gt: since } },
+        orderBy: { updatedAt: 'asc' },
+      });
+    });
+  });
+
   describe('createUnit', () => {
     it('creates a unit with the given fields, defaulting parentId/geoCode to null, and stamps audit columns', async () => {
       create.mockResolvedValue({ geographyUnitId: 'district-1' });
