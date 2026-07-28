@@ -8,7 +8,7 @@ jest.mock('argon2', () => ({
 describe('startup-seed', () => {
   const originalEnv = { ...process.env };
   let prisma: {
-    role: { count: jest.Mock; createMany: jest.Mock; findUniqueOrThrow: jest.Mock };
+    role: { findMany: jest.Mock; createMany: jest.Mock; findUniqueOrThrow: jest.Mock };
     user: { findUnique: jest.Mock; create: jest.Mock };
     userRole: { create: jest.Mock };
     $transaction: jest.Mock;
@@ -20,7 +20,7 @@ describe('startup-seed', () => {
 
     prisma = {
       role: {
-        count: jest.fn(),
+        findMany: jest.fn(),
         createMany: jest.fn(),
         findUniqueOrThrow: jest.fn(),
       },
@@ -41,7 +41,7 @@ describe('startup-seed', () => {
 
   describe('seedRoles', () => {
     it('seeds all 4 roles when the roles table is empty', async () => {
-      prisma.role.count.mockResolvedValue(0);
+      prisma.role.findMany.mockResolvedValue([]);
 
       const result = await seedRoles(prisma as unknown as PrismaService);
 
@@ -56,13 +56,35 @@ describe('startup-seed', () => {
       expect(result).toMatchObject({ step: 'roles', created: true });
     });
 
-    it('skips when roles already exist', async () => {
-      prisma.role.count.mockResolvedValue(4);
+    it('skips when all 4 roles already exist', async () => {
+      prisma.role.findMany.mockResolvedValue([
+        { roleCode: 'SAKHI' },
+        { roleCode: 'SUPERVISOR' },
+        { roleCode: 'MANAGER' },
+        { roleCode: 'ADMIN' },
+      ]);
 
       const result = await seedRoles(prisma as unknown as PrismaService);
 
       expect(prisma.role.createMany).not.toHaveBeenCalled();
       expect(result).toMatchObject({ step: 'roles', created: false });
+    });
+
+    it('creates only the roles missing from a partially-seeded table', async () => {
+      prisma.role.findMany.mockResolvedValue([{ roleCode: 'ADMIN' }, { roleCode: 'SAKHI' }]);
+
+      const result = await seedRoles(prisma as unknown as PrismaService);
+
+      expect(prisma.role.createMany).toHaveBeenCalledWith({
+        data: [
+          expect.objectContaining({ roleCode: 'SUPERVISOR' }),
+          expect.objectContaining({ roleCode: 'MANAGER' }),
+        ],
+      });
+      expect(result).toMatchObject({ step: 'roles', created: true });
+      expect(result.message).toContain('SUPERVISOR');
+      expect(result.message).toContain('MANAGER');
+      expect(result.message).not.toContain('ADMIN');
     });
   });
 
@@ -176,7 +198,12 @@ describe('startup-seed', () => {
   describe('seedOnStartup', () => {
     it('runs seedRoles then seedAdminUsers and logs a summary line per step', async () => {
       const logSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
-      prisma.role.count.mockResolvedValue(4);
+      prisma.role.findMany.mockResolvedValue([
+        { roleCode: 'SAKHI' },
+        { roleCode: 'SUPERVISOR' },
+        { roleCode: 'MANAGER' },
+        { roleCode: 'ADMIN' },
+      ]);
 
       await seedOnStartup(prisma as unknown as PrismaService);
 

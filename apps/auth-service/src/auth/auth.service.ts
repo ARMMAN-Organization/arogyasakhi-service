@@ -1,5 +1,12 @@
 import type { TokenSigner } from '@armman/service-commons';
-import { conflict, notFound, forbidden, unauthorized, encryptPii } from '@armman/service-commons';
+import {
+  conflict,
+  notFound,
+  forbidden,
+  badRequest,
+  unauthorized,
+  encryptPii,
+} from '@armman/service-commons';
 import type { AuthRepository } from './auth.repository';
 import { hashPassword, verifyPassword } from './password';
 import { generateRefreshToken, hashRefreshToken } from './refresh-token';
@@ -151,6 +158,9 @@ export class AuthService {
     }
 
     let sakhiProfileId: string | undefined;
+    let sakhiProfileCreate:
+      | { userId: string; primaryProjectId: string; phoneNumber: string; activeFrom: Date }
+      | undefined;
     const sakhiProfileFields: Record<string, unknown> = {};
     if (input.employeeCode !== undefined) sakhiProfileFields.employeeCode = input.employeeCode;
     if (input.supervisorId !== undefined) sakhiProfileFields.supervisorId = input.supervisorId;
@@ -170,8 +180,35 @@ export class AuthService {
     }
     if (Object.keys(sakhiProfileFields).length > 0) {
       const profile = await this.repository.findSakhiProfileByUserId(id);
-      if (!profile) throw notFound('User has no Sakhi profile.');
-      sakhiProfileId = profile.id;
+      if (profile) {
+        sakhiProfileId = profile.id;
+      } else {
+        // No profile yet — auto-create one (see the PATCH /users/:id design
+        // note above). Requires the caller to supply enough to satisfy
+        // sakhi_profiles' NOT NULL columns not already covered by
+        // sakhiProfileFields: phoneNumber (validated above) and
+        // primaryProjectId (derived from the user's active SAKHI role).
+        const sakhiRole = await this.repository.findActiveUserRole(id, 'SAKHI');
+        if (!sakhiRole) {
+          throw badRequest(
+            'User does not hold an active SAKHI role; cannot create a Sakhi profile.',
+          );
+        }
+        if (!sakhiRole.projectId) {
+          throw badRequest(
+            "User's SAKHI role has no project assigned; cannot create a Sakhi profile.",
+          );
+        }
+        if (input.phoneNumber === undefined) {
+          throw badRequest('phoneNumber: Required to create a Sakhi profile.');
+        }
+        sakhiProfileCreate = {
+          userId: id,
+          primaryProjectId: sakhiRole.projectId,
+          phoneNumber: input.phoneNumber,
+          activeFrom: input.activeFrom ? new Date(input.activeFrom) : new Date(),
+        };
+      }
     }
 
     const userFields: Record<string, unknown> = {};
@@ -199,7 +236,11 @@ export class AuthService {
               },
             }
           : undefined,
-        sakhiProfile: sakhiProfileId ? { id: sakhiProfileId, data: sakhiProfileFields } : undefined,
+        sakhiProfile: sakhiProfileId
+          ? { id: sakhiProfileId, data: sakhiProfileFields }
+          : sakhiProfileCreate
+            ? { create: sakhiProfileCreate, data: sakhiProfileFields }
+            : undefined,
         revokeSessions: input.username !== undefined || input.password !== undefined,
       });
       if (!user) throw notFound('User not found.');

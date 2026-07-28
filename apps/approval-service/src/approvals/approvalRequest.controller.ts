@@ -13,6 +13,23 @@ import {
 
 extendZodWithOpenApi(z);
 
+// Request DTO annotated with examples for Swagger UI; validation behavior is
+// unchanged (`.openapi()` only attaches documentation metadata).
+// requestPayloadJson/decisionPayloadJson are built on z.lazy() (see
+// create-approvalRequest.dto.ts) — zod-to-openapi cannot introspect z.lazy()
+// on its own, so `type: 'object'` is required here to short-circuit its type
+// inference.
+const createApprovalRequestRequestSchema = createApprovalRequestSchema.extend({
+  requestPayloadJson: createApprovalRequestSchema.shape.requestPayloadJson.openapi({
+    type: 'object',
+    example: {},
+  }),
+  decisionPayloadJson: createApprovalRequestSchema.shape.decisionPayloadJson.openapi({
+    type: 'object',
+    example: {},
+  }),
+});
+
 const approvalRequestSchema = z.object({
   id: z.string().uuid(),
   requestType: z.enum([
@@ -102,7 +119,7 @@ export function createApprovalRequestRouter(service: ApprovalRequestService) {
     },
     trustGatewayIdentity,
     requireRoles('SAKHI', 'SUPERVISOR'),
-    validateBody(createApprovalRequestSchema),
+    validateBody(createApprovalRequestRequestSchema),
     asyncHandler(async (req, res) => {
       const created = await service.create(req.body);
       res.status(201).json(ok(created));

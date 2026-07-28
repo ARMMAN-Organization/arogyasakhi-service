@@ -26,6 +26,13 @@ const createReferralRequestSchema = createReferralSchema.extend({
     example: '2026-07-16T00:00:00.000Z',
   }),
   status: createReferralSchema.shape.status.openapi({ example: 'INITIATED' }),
+  // Built on z.lazy() (see create-referral.dto.ts) — zod-to-openapi cannot
+  // introspect z.lazy() on its own, so `type: 'object'` is required here to
+  // short-circuit its type inference.
+  triggerConditionListJson: createReferralSchema.shape.triggerConditionListJson.openapi({
+    type: 'object',
+    example: { conditions: [] },
+  }),
 });
 
 const referralSchema = z.object({
