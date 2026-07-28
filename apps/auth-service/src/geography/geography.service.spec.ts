@@ -12,6 +12,7 @@ describe('GeographyService', () => {
     updateUnit: jest.fn(),
     hasActiveChildren: jest.fn(),
     softDelete: jest.fn(),
+    stateGeoCodeExists: jest.fn(),
   } as unknown as jest.Mocked<GeographyRepository>;
 
   let service: GeographyService;
@@ -240,6 +241,7 @@ describe('GeographyService', () => {
 
   describe('create', () => {
     it('creates a STATE with no parentId', async () => {
+      repository.stateGeoCodeExists.mockResolvedValue(false);
       repository.createUnit.mockResolvedValue({
         geographyUnitId: 'state-1',
         parentId: null,
@@ -276,6 +278,29 @@ describe('GeographyService', () => {
         ),
       ).rejects.toMatchObject({ status: 400 });
       expect(repository.createUnit).not.toHaveBeenCalled();
+    });
+
+    it('rejects a STATE whose geoCode already exists on another STATE (DB unique constraint cannot catch this since every STATE has parentId=null)', async () => {
+      repository.stateGeoCodeExists.mockResolvedValue(true);
+
+      await expect(
+        service.create({ geoType: 'STATE', name: 'Karnataka', geoCode: 'KA' } as never, 'admin-1'),
+      ).rejects.toMatchObject({ status: 409 });
+      expect(repository.createUnit).not.toHaveBeenCalled();
+    });
+
+    it('allows creating a STATE with no geoCode without checking for duplicates', async () => {
+      repository.createUnit.mockResolvedValue({
+        geographyUnitId: 'state-1',
+        parentId: null,
+        geoType: 'STATE',
+        name: 'Maharashtra',
+        status: 'ACTIVE',
+      } as never);
+
+      await service.create({ geoType: 'STATE', name: 'Maharashtra' } as never, 'admin-1');
+
+      expect(repository.stateGeoCodeExists).not.toHaveBeenCalled();
     });
 
     it('rejects a non-STATE unit with no parentId', async () => {
@@ -386,10 +411,40 @@ describe('GeographyService', () => {
     });
 
     it('maps a unique-constraint violation to 409', async () => {
+      repository.findById.mockResolvedValue({ geoType: 'DISTRICT' } as never);
       repository.updateUnit.mockRejectedValue({ code: 'P2002' });
       await expect(
         service.update('district-1', { geoCode: 'DUP' }, 'admin-1'),
       ).rejects.toMatchObject({ status: 409 });
+    });
+
+    it('rejects renaming a STATE to a geoCode already used by another STATE (DB unique constraint cannot catch this since every STATE has parentId=null)', async () => {
+      repository.findById.mockResolvedValue({ geoType: 'STATE' } as never);
+      repository.stateGeoCodeExists.mockResolvedValue(true);
+
+      await expect(service.update('state-1', { geoCode: 'KA' }, 'admin-1')).rejects.toMatchObject({
+        status: 409,
+      });
+      expect(repository.updateUnit).not.toHaveBeenCalled();
+    });
+
+    it('excludes the unit itself when checking for a STATE geoCode collision', async () => {
+      repository.findById.mockResolvedValue({ geoType: 'STATE' } as never);
+      repository.stateGeoCodeExists.mockResolvedValue(false);
+      repository.updateUnit.mockResolvedValue({ geographyUnitId: 'state-1' } as never);
+
+      await service.update('state-1', { geoCode: 'KA' }, 'admin-1');
+
+      expect(repository.stateGeoCodeExists).toHaveBeenCalledWith('KA', 'state-1');
+    });
+
+    it('does not check for STATE duplicates when geoCode is not part of the update', async () => {
+      repository.updateUnit.mockResolvedValue({ geographyUnitId: 'district-1' } as never);
+
+      await service.update('district-1', { name: 'Renamed' }, 'admin-1');
+
+      expect(repository.stateGeoCodeExists).not.toHaveBeenCalled();
+      expect(repository.findById).not.toHaveBeenCalled();
     });
   });
 

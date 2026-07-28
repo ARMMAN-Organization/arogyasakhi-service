@@ -90,6 +90,12 @@ export class GeographyService {
       if (input.parentId) {
         throw badRequest('parentId: Must be omitted for a STATE-level unit.');
       }
+      // The DB's @@unique([parentId, geoType, geoCode]) can't catch STATE
+      // duplicates — every STATE row has parentId = null, and Postgres never
+      // treats two NULLs as equal in a unique index. Check explicitly here.
+      if (input.geoCode && (await this.repository.stateGeoCodeExists(input.geoCode))) {
+        throw conflict('A geography unit with this parent, geoType, and geoCode already exists.');
+      }
     } else {
       if (!input.parentId) {
         throw badRequest('parentId: Required for every geoType except STATE.');
@@ -122,6 +128,19 @@ export class GeographyService {
   }
 
   async update(id: string, input: UpdateGeographyUnitInput, updatedByUserId: string) {
+    // Same NULL-parentId gap as create(): the DB's @@unique([parentId,
+    // geoType, geoCode]) never fires for STATE rows, so a geoCode change on a
+    // STATE needs its own check before hitting the repository.
+    if (input.geoCode) {
+      const existing = await this.repository.findById(id);
+      if (
+        existing?.geoType === 'STATE' &&
+        (await this.repository.stateGeoCodeExists(input.geoCode, id))
+      ) {
+        throw conflict('A geography unit with this parent, geoType, and geoCode already exists.');
+      }
+    }
+
     try {
       const updated = await this.repository.updateUnit(id, input, updatedByUserId);
       if (!updated) throw notFound('Geography unit not found.');
