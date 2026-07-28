@@ -217,11 +217,10 @@ model SakhiProfile {
   @@map("sakhi_profiles")
 }
 
-// Column set matches ERD Appendix A.1 (geography_units) exactly. Scoped to the
-// SRS's 7-level hierarchy only (State > District > Block > PHC > Sub-centre >
-// Village > Pada) — no Taluka, no Panchayat (SRS treated as final over the
-// ERD's alternate, per-level table design).
-
+// DEPRECATED — superseded by the 7 per-level tables below (states, districts,
+// blocks, phcs, sub_centres, villages, padas). Kept temporarily, unused by any
+// application code, as a rollback safety net after the data backfill; slated
+// for removal in a follow-up once the new tables are verified in production.
 enum GeoType {
   STATE
   DISTRICT
@@ -257,6 +256,154 @@ model GeographyUnit {
 
   @@unique([parentId, geoType, geoCode])
   @@map("geography_units")
+}
+
+// Column set matches ERD Appendix A.1's legacy per-level design, scoped to the
+// SRS's 7-level hierarchy only (State > District > Block > PHC > Sub-centre >
+// Village > Pada) — no Taluka, no Panchayat, no many-to-many mapping tables
+// (SRS treated as final over the ERD's taluka/mapping-table variant). Replaces
+// the single-table GeographyUnit model above: one dedicated table per level,
+// each with a direct FK to its parent level instead of a generic parent_id +
+// geo_type discriminator.
+
+enum GeographyStatus {
+  ACTIVE
+  INACTIVE
+}
+
+model State {
+  stateId         String    @id @default(uuid()) @map("state_id")
+  stateCode       String    @unique @map("state_code") @db.VarChar(80)
+  name            String    @db.VarChar(180)
+  status          GeographyStatus @default(ACTIVE)
+  createdAt       DateTime  @default(now()) @map("created_at")
+  createdByUserId String?   @map("created_by_user_id")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  updatedByUserId String?   @map("updated_by_user_id")
+  isDeleted       Boolean   @default(false) @map("is_deleted")
+  deletedAt       DateTime? @map("deleted_at")
+
+  districts District[]
+
+  @@map("states")
+}
+
+model District {
+  districtId      String    @id @default(uuid()) @map("district_id")
+  stateId         String    @map("state_id")
+  state           State     @relation(fields: [stateId], references: [stateId], onDelete: Restrict)
+  districtCode    String    @map("district_code") @db.VarChar(80)
+  name            String    @db.VarChar(180)
+  status          GeographyStatus @default(ACTIVE)
+  createdAt       DateTime  @default(now()) @map("created_at")
+  createdByUserId String?   @map("created_by_user_id")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  updatedByUserId String?   @map("updated_by_user_id")
+  isDeleted       Boolean   @default(false) @map("is_deleted")
+  deletedAt       DateTime? @map("deleted_at")
+
+  blocks Block[]
+
+  @@unique([stateId, districtCode])
+  @@map("districts")
+}
+
+model Block {
+  blockId         String    @id @default(uuid()) @map("block_id")
+  districtId      String    @map("district_id")
+  district        District  @relation(fields: [districtId], references: [districtId], onDelete: Restrict)
+  blockCode       String    @map("block_code") @db.VarChar(80)
+  name            String    @db.VarChar(180)
+  status          GeographyStatus @default(ACTIVE)
+  createdAt       DateTime  @default(now()) @map("created_at")
+  createdByUserId String?   @map("created_by_user_id")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  updatedByUserId String?   @map("updated_by_user_id")
+  isDeleted       Boolean   @default(false) @map("is_deleted")
+  deletedAt       DateTime? @map("deleted_at")
+
+  phcs Phc[]
+
+  @@unique([districtId, blockCode])
+  @@map("blocks")
+}
+
+model Phc {
+  phcId           String    @id @default(uuid()) @map("phc_id")
+  blockId         String    @map("block_id")
+  block           Block     @relation(fields: [blockId], references: [blockId], onDelete: Restrict)
+  phcCode         String    @map("phc_code") @db.VarChar(80)
+  name            String    @db.VarChar(180)
+  status          GeographyStatus @default(ACTIVE)
+  createdAt       DateTime  @default(now()) @map("created_at")
+  createdByUserId String?   @map("created_by_user_id")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  updatedByUserId String?   @map("updated_by_user_id")
+  isDeleted       Boolean   @default(false) @map("is_deleted")
+  deletedAt       DateTime? @map("deleted_at")
+
+  subCentres SubCentre[]
+
+  @@unique([blockId, phcCode])
+  @@map("phcs")
+}
+
+model SubCentre {
+  subCentreId     String    @id @default(uuid()) @map("sub_centre_id")
+  phcId           String    @map("phc_id")
+  phc             Phc       @relation(fields: [phcId], references: [phcId], onDelete: Restrict)
+  subCentreCode   String    @map("sub_centre_code") @db.VarChar(80)
+  name            String    @db.VarChar(180)
+  status          GeographyStatus @default(ACTIVE)
+  createdAt       DateTime  @default(now()) @map("created_at")
+  createdByUserId String?   @map("created_by_user_id")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  updatedByUserId String?   @map("updated_by_user_id")
+  isDeleted       Boolean   @default(false) @map("is_deleted")
+  deletedAt       DateTime? @map("deleted_at")
+
+  villages Village[]
+
+  @@unique([phcId, subCentreCode])
+  @@map("sub_centres")
+}
+
+model Village {
+  villageId       String    @id @default(uuid()) @map("village_id")
+  subCentreId     String    @map("sub_centre_id")
+  subCentre       SubCentre @relation(fields: [subCentreId], references: [subCentreId], onDelete: Restrict)
+  villageCode     String    @map("village_code") @db.VarChar(80)
+  name            String    @db.VarChar(180)
+  status          GeographyStatus @default(ACTIVE)
+  createdAt       DateTime  @default(now()) @map("created_at")
+  createdByUserId String?   @map("created_by_user_id")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  updatedByUserId String?   @map("updated_by_user_id")
+  isDeleted       Boolean   @default(false) @map("is_deleted")
+  deletedAt       DateTime? @map("deleted_at")
+
+  padas Pada[]
+
+  @@unique([subCentreId, villageCode])
+  @@map("villages")
+}
+
+model Pada {
+  padaId          String    @id @default(uuid()) @map("pada_id")
+  villageId       String    @map("village_id")
+  village         Village   @relation(fields: [villageId], references: [villageId], onDelete: Restrict)
+  padaCode        String    @map("pada_code") @db.VarChar(80)
+  name            String    @db.VarChar(180)
+  status          GeographyStatus @default(ACTIVE)
+  createdAt       DateTime  @default(now()) @map("created_at")
+  createdByUserId String?   @map("created_by_user_id")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  updatedByUserId String?   @map("updated_by_user_id")
+  isDeleted       Boolean   @default(false) @map("is_deleted")
+  deletedAt       DateTime? @map("deleted_at")
+
+  @@unique([villageId, padaCode])
+  @@map("padas")
 }
 
 // Column set matches ERD's lookup_categories/lookup_values tables. All
