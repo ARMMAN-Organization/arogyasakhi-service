@@ -69,6 +69,12 @@ export class MasterDataService {
 
   async getDeltas(since: string | undefined) {
     const sinceDate = since ? new Date(since) : undefined;
+    // Captured before the queries run (not after Promise.all resolves) so a
+    // row updated during/after query execution is still >= this timestamp —
+    // otherwise it could land strictly between "query ran" and "now" and be
+    // silently skipped forever, since the client replays serverTime as its
+    // next `since` and the filter is a strict `updatedAt > since`.
+    const capturedAt = new Date();
 
     const [geographyUnits, projects, funders] = await Promise.all([
       this.geographyRepository.findUpdatedSince(sinceDate),
@@ -77,7 +83,7 @@ export class MasterDataService {
     ]);
 
     return {
-      serverTime: new Date(),
+      serverTime: capturedAt,
       geographyUnits: geographyUnits.map((u) =>
         toApiGeographyUnit(u as unknown as Record<string, unknown>),
       ),
