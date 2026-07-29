@@ -57,6 +57,19 @@ export interface DocsRouterOptions {
 }
 
 /**
+ * Appends `/api/v1` to a base URL exactly once. `PUBLIC_BASE_URLS` is
+ * configured inconsistently across this platform's deployed environments —
+ * some already include the `/api/v1` suffix, some don't — so this strips any
+ * trailing slash and existing `/api/v1` before appending, rather than
+ * assuming one convention and risking a doubled path like
+ * `.../api/v1/api/v1` in the Servers dropdown.
+ */
+export function withApiPrefix(url: string): string {
+  const trimmed = url.replace(/\/+$/, '');
+  return trimmed.endsWith('/api/v1') ? trimmed : `${trimmed}/api/v1`;
+}
+
+/**
  * Mounts the single aggregated Swagger UI for the whole platform:
  *   GET /docs       — interactive Swagger UI over the merged spec
  *   GET /docs.json  — the raw merged OpenAPI 3.0 document
@@ -76,7 +89,7 @@ export function createDocsRouter(options: DocsRouterOptions = {}): Router {
 
   const servers =
     appConfig.PUBLIC_BASE_URLS.length > 0
-      ? appConfig.PUBLIC_BASE_URLS.map((url) => ({ url: `${url}/api/v1` }))
+      ? appConfig.PUBLIC_BASE_URLS.map((url) => ({ url: withApiPrefix(url) }))
       : [{ url: `http://localhost:${appConfig.PORT}/api/v1`, description: 'Local (gateway)' }];
 
   const aggregate = createOpenApiAggregator({
