@@ -228,7 +228,7 @@ export function createOperationsRouter(service: OperationsService) {
   );
 
   doc.get(
-    '/sakhis/:sakhiId/inventory-transactions',
+    '/inventory-transactions/by-sakhi/:sakhiId',
     {
       summary: "One Sakhi's inventory transaction history",
       tags: ['Supervisor Operations'],
