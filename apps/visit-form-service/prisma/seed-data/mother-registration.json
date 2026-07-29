@@ -95,11 +95,11 @@
       "question_code": "unique_id"
     },
     {
-      "label": "Registrtion date",
+      "label": "Registration date",
       "section": "Personal Info",
       "required": true,
       "input_type": "date",
-      "question_code": "registrtion_date"
+      "question_code": "registration_date"
     },
     {
       "label": "Project name",

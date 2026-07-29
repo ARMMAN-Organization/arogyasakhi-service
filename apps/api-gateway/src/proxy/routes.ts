@@ -54,6 +54,9 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
   { prefix: '/lookups', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
   { prefix: '/geography-units', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
   { prefix: '/master-data', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
+  // Sakhi profile reads (list under a project, single lookup) — used by the
+  // Supervisor's Sakhi picker/detail header on inventory/meeting screens.
+  { prefix: '/sakhis', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
   // NOTE: `/docs` is NOT proxied here. The gateway serves ONE aggregated
   // Swagger UI at `/api/v1/docs` (see docs/docs.controller.ts) that merges
   // every service's own `/docs.json` into a single page — there is no single
