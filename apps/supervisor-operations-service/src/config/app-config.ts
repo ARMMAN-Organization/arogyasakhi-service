@@ -16,6 +16,11 @@ const schema = z.object({
         .filter(Boolean),
     ),
   PUBLIC_BASE_URLS: publicBaseUrlsSchema,
+  // Base URL of the gateway to reach auth-service's /sakhis/:id endpoint
+  // through (same naming/default as beneficiary-service's geography.client.ts)
+  // — used to verify a Sakhi's assigned supervisor before returning/writing
+  // her inventory-transaction history.
+  AUTH_SERVICE_BASE_URL: z.string().url().default('http://localhost:3000'),
 });
 
 export type AppConfig = z.infer<typeof schema>;

@@ -2,12 +2,17 @@ import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
 import { z } from 'zod';
 import type { OperationsService } from './operations.service';
 import { createSupervisorEventSchema } from './dto/create-supervisorEvent.dto';
+import { createInventoryItemSchema } from './dto/create-inventory-item.dto';
+import { createInventoryTransactionSchema } from './dto/create-inventory-transaction.dto';
+import { updateInventoryTransactionSchema } from './dto/update-inventory-transaction.dto';
 import {
   asyncHandler,
   createDocumentedRouter,
   ok,
   requireRoles,
   trustGatewayIdentity,
+  unauthorized,
+  validate,
   validateBody,
 } from '../app.module';
 
@@ -87,6 +92,20 @@ const callLogSchema = z.object({
   updatedAt: z.string().datetime(),
 });
 
+const sakhiIdParamsSchema = z
+  .object({
+    sakhiId: z.string().uuid(),
+  })
+  .strict();
+
+const transactionIdParamsSchema = z
+  .object({
+    id: z.string().uuid(),
+  })
+  .strict();
+
+const createInventoryTransactionRequestSchema = createInventoryTransactionSchema;
+
 const apiErrorSchema = z.object({
   success: z.literal(false),
   message: z.string(),
@@ -164,6 +183,29 @@ export function createOperationsRouter(service: OperationsService) {
     }),
   );
 
+  doc.post(
+    '/inventory-items',
+    {
+      summary: 'Create an inventory item (consumables/instruments master data)',
+      tags: ['Supervisor Operations'],
+      responses: {
+        201: { description: 'Inventory item created', schema: envelope(inventoryItemSchema) },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+        409: { description: 'itemCode already exists', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('ADMIN'),
+    validateBody(createInventoryItemSchema),
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const created = await service.createInventoryItem(req.body, req.user.id);
+      res.status(201).json(ok(created));
+    }),
+  );
+
   doc.get(
     '/inventory-transactions',
     {
@@ -182,6 +224,117 @@ export function createOperationsRouter(service: OperationsService) {
     requireRoles('SUPERVISOR', 'MANAGER'),
     asyncHandler(async (_req, res) => {
       res.json(ok(await service.listInventoryTransactions()));
+    }),
+  );
+
+  doc.get(
+    '/sakhis/:sakhiId/inventory-transactions',
+    {
+      summary: "One Sakhi's inventory transaction history",
+      tags: ['Supervisor Operations'],
+      params: sakhiIdParamsSchema,
+      responses: {
+        200: {
+          description: 'Inventory transactions for this Sakhi',
+          schema: envelope(z.array(inventoryTransactionSchema)),
+        },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER'),
+    validate(sakhiIdParamsSchema, 'params'),
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      res.json(
+        ok(
+          await service.listInventoryTransactionsBySakhi(
+            req.params.sakhiId,
+            req.user,
+            authorizationHeader,
+          ),
+        ),
+      );
+    }),
+  );
+
+  doc.post(
+    '/inventory-transactions',
+    {
+      summary: 'Record an inventory transaction (one or more items)',
+      tags: ['Supervisor Operations'],
+      responses: {
+        201: {
+          description: 'Inventory transaction(s) created',
+          schema: envelope(z.array(inventoryTransactionSchema)),
+        },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+        422: { description: 'Referenced item not found or inactive', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR'),
+    validateBody(createInventoryTransactionRequestSchema),
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const created = await service.createInventoryTransactions(req.body, req.user);
+      res.status(201).json(ok(created));
+    }),
+  );
+
+  doc.put(
+    '/inventory-transactions/:id',
+    {
+      summary: "Edit a transaction's quantity/date/remarks",
+      tags: ['Supervisor Operations'],
+      params: transactionIdParamsSchema,
+      responses: {
+        200: { description: 'Transaction updated', schema: envelope(inventoryTransactionSchema) },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+        404: { description: 'Transaction not found', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR'),
+    validate(transactionIdParamsSchema, 'params'),
+    validateBody(updateInventoryTransactionSchema),
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const updated = await service.updateInventoryTransaction(req.params.id, req.body, req.user);
+      res.json(ok(updated));
+    }),
+  );
+
+  doc.delete(
+    '/inventory-transactions/:id',
+    {
+      summary: 'Delete an inventory transaction (soft delete)',
+      tags: ['Supervisor Operations'],
+      params: transactionIdParamsSchema,
+      responses: {
+        200: {
+          description: 'Transaction deleted',
+          schema: envelope(z.object({ deleted: z.literal(true) })),
+        },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+        404: { description: 'Transaction not found', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR'),
+    validate(transactionIdParamsSchema, 'params'),
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      await service.deleteInventoryTransaction(req.params.id, req.user);
+      res.json(ok({ deleted: true }));
     }),
   );
 
