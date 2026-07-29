@@ -49,6 +49,27 @@ export class ProjectRepository {
     });
   }
 
+  /**
+   * All projects — including soft-deleted and non-ACTIVE rows, so a delta
+   * client can tell a deletion/pause apart from "never existed" — with
+   * `updatedAt` after `since` (or every row, when `since` is omitted).
+   */
+  findProjectsUpdatedSince(since: Date | undefined) {
+    return this.prisma.project.findMany({
+      where: since ? { updatedAt: { gt: since } } : undefined,
+      orderBy: { updatedAt: 'asc' },
+      include: { funder: true },
+    });
+  }
+
+  /** Same as {@link findProjectsUpdatedSince}, for funders. */
+  findFundersUpdatedSince(since: Date | undefined) {
+    return this.prisma.funder.findMany({
+      where: since ? { updatedAt: { gt: since } } : undefined,
+      orderBy: { updatedAt: 'asc' },
+    });
+  }
+
   findManyFunders() {
     return this.prisma.funder.findMany({
       where: { isDeleted: false, status: 'ACTIVE' },

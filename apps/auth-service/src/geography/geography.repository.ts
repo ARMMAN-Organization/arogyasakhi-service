@@ -57,6 +57,29 @@ export class GeographyRepository {
   }
 
   /**
+   * True if a non-deleted STATE with `geoCode` already exists (other than
+   * `excludeId`, so an update can check against sibling STATEs without
+   * tripping over its own current row). `@@unique([parentId, geoType,
+   * geoCode])` can't catch this at the DB level — every STATE row has
+   * `parentId = null`, and Postgres never treats two NULLs as equal in a
+   * unique index, so duplicate STATEs silently bypass the constraint. This
+   * app-level check is the only thing enforcing STATE geoCode uniqueness.
+   */
+  async stateGeoCodeExists(geoCode: string, excludeId?: string): Promise<boolean> {
+    const existing = await this.prisma.geographyUnit.findFirst({
+      where: {
+        parentId: null,
+        geoType: 'STATE',
+        geoCode,
+        isDeleted: false,
+        ...(excludeId ? { geographyUnitId: { not: excludeId } } : {}),
+      },
+      select: { geographyUnitId: true },
+    });
+    return existing !== null;
+  }
+
+  /**
    * Lists geography units for cascading-dropdown selection (SRS FR line 971),
    * excluding soft-deleted rows, ordered by geoCode. Filters:
    * - both/neither absent: with no filter at all, defaults to top-level units
@@ -83,6 +106,19 @@ export class GeographyRepository {
       where,
       orderBy: { geoCode: 'asc' },
       take: 500,
+    });
+  }
+
+  /**
+   * All geography units — including soft-deleted rows, so a delta client can
+   * tell a deletion apart from "never existed" — with `updatedAt` after
+   * `since` (or every row, when `since` is omitted). `updatedAt` covers both
+   * creates and updates: Prisma's `@updatedAt` sets it on insert too.
+   */
+  findUpdatedSince(since: Date | undefined) {
+    return this.prisma.geographyUnit.findMany({
+      where: since ? { updatedAt: { gt: since } } : undefined,
+      orderBy: { updatedAt: 'asc' },
     });
   }
 

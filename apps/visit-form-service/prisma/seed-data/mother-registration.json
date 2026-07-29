@@ -109,11 +109,25 @@
       "question_code": "project_name"
     },
     {
-      "label": "Beneficary name (First name Middle Name Last Name)",
+      "label": "First name",
       "section": "Personal Info",
       "required": true,
       "input_type": "text",
-      "question_code": "beneficary_name_first_name_middle_name_last_name"
+      "question_code": "first_name"
+    },
+    {
+      "label": "Middle name",
+      "section": "Personal Info",
+      "required": false,
+      "input_type": "text",
+      "question_code": "middle_name"
+    },
+    {
+      "label": "Last name",
+      "section": "Personal Info",
+      "required": true,
+      "input_type": "text",
+      "question_code": "last_name"
     },
     {
       "label": "Date of birth",
@@ -370,6 +384,7 @@
       "section": "Personal Info",
       "required": true,
       "input_type": "number",
+      "numericRange": { "max": 9, "min": 0 },
       "question_code": "how_many_children_under_5_years_of_age_are_in_your_household"
     },
     {
