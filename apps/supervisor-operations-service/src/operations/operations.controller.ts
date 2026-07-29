@@ -177,7 +177,7 @@ export function createOperationsRouter(service: OperationsService) {
       },
     },
     trustGatewayIdentity,
-    requireRoles('SUPERVISOR', 'MANAGER'),
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
     asyncHandler(async (_req, res) => {
       res.json(ok(await service.listInventoryItems()));
     }),
@@ -221,7 +221,7 @@ export function createOperationsRouter(service: OperationsService) {
       },
     },
     trustGatewayIdentity,
-    requireRoles('SUPERVISOR', 'MANAGER'),
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
     asyncHandler(async (_req, res) => {
       res.json(ok(await service.listInventoryTransactions()));
     }),
@@ -243,7 +243,7 @@ export function createOperationsRouter(service: OperationsService) {
       },
     },
     trustGatewayIdentity,
-    requireRoles('SUPERVISOR', 'MANAGER'),
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
     validate(sakhiIdParamsSchema, 'params'),
     asyncHandler(async (req, res, next) => {
       if (!req.user) return next(unauthorized());
@@ -278,7 +278,7 @@ export function createOperationsRouter(service: OperationsService) {
       },
     },
     trustGatewayIdentity,
-    requireRoles('SUPERVISOR'),
+    requireRoles('SUPERVISOR', 'ADMIN'),
     validateBody(createInventoryTransactionRequestSchema),
     asyncHandler(async (req, res, next) => {
       if (!req.user) return next(unauthorized());
@@ -308,7 +308,7 @@ export function createOperationsRouter(service: OperationsService) {
       },
     },
     trustGatewayIdentity,
-    requireRoles('SUPERVISOR'),
+    requireRoles('SUPERVISOR', 'ADMIN'),
     validate(transactionIdParamsSchema, 'params'),
     validateBody(updateInventoryTransactionSchema),
     asyncHandler(async (req, res, next) => {
@@ -335,7 +335,7 @@ export function createOperationsRouter(service: OperationsService) {
       },
     },
     trustGatewayIdentity,
-    requireRoles('SUPERVISOR'),
+    requireRoles('SUPERVISOR', 'ADMIN'),
     validate(transactionIdParamsSchema, 'params'),
     asyncHandler(async (req, res, next) => {
       if (!req.user) return next(unauthorized());

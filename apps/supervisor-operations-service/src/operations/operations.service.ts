@@ -25,6 +25,11 @@ export interface CallerIdentity {
   readonly roles: readonly string[];
 }
 
+/** MANAGER and ADMIN are unrestricted across all inventory ownership checks. */
+function isPrivileged(caller: CallerIdentity): boolean {
+  return caller.roles.includes('MANAGER') || caller.roles.includes('ADMIN');
+}
+
 /** Supervisor operations domain logic. Data access is delegated to the repository. */
 export class OperationsService {
   constructor(
@@ -68,15 +73,14 @@ export class OperationsService {
   /**
    * A SUPERVISOR may only see a Sakhi's history if that Sakhi is actually
    * assigned to them (checked via auth-service, since sakhi_profiles isn't
-   * this service's table — forklift rule). A MANAGER oversees multiple
-   * Supervisors' Sakhis, so is unrestricted here.
+   * this service's table — forklift rule). MANAGER and ADMIN are unrestricted.
    */
   async listInventoryTransactionsBySakhi(
     sakhiId: string,
     caller: CallerIdentity,
     authorizationHeader: string,
   ) {
-    if (!caller.roles.includes('MANAGER')) {
+    if (!isPrivileged(caller)) {
       const sakhi = await this.sakhiClient.findById(sakhiId, authorizationHeader);
       if (!sakhi) throw notFound('Sakhi not found.');
       if (sakhi.supervisorId !== caller.id) {
@@ -90,21 +94,24 @@ export class OperationsService {
    * A SUPERVISOR may only record a transaction against a Sakhi actually
    * assigned to them — same ownership check as listInventoryTransactionsBySakhi,
    * so a Supervisor can't write inventory history onto another Supervisor's
-   * Sakhi (MANAGER is exempt, matching the read path). Then validates every
-   * referenced item exists and is ACTIVE before writing anything (fails the
-   * whole submission up front rather than partway through the atomic
-   * create), then persists one row per item.
+   * Sakhi (MANAGER and ADMIN are exempt, matching the read path). Then
+   * validates every referenced item exists and is ACTIVE before writing
+   * anything (fails the whole submission up front rather than partway
+   * through the atomic create), then persists one row per item.
    *
    * `supervisorId` is never taken from the client-supplied body — it's
    * always the authenticated caller's own id, so a Supervisor can never
-   * record a transaction under another Supervisor's name.
+   * record a transaction under another Supervisor's name. When a MANAGER or
+   * ADMIN records one directly, the row is stamped with their own id too —
+   * they aren't a real Supervisor, but every transaction needs a recorder,
+   * and this still traces back to exactly who created it.
    */
   async createInventoryTransactions(
     dto: CreateInventoryTransactionInput,
     caller: CallerIdentity,
     authorizationHeader: string,
   ) {
-    if (!caller.roles.includes('MANAGER')) {
+    if (!isPrivileged(caller)) {
       const sakhi = await this.sakhiClient.findById(dto.sakhiId, authorizationHeader);
       if (!sakhi) throw unprocessable('sakhiId: Sakhi not found.');
       if (sakhi.supervisorId !== caller.id) {
@@ -130,6 +137,7 @@ export class OperationsService {
     return this.repository.createInventoryTransactions(rows, caller.id);
   }
 
+  /** A SUPERVISOR may only edit their own transactions. MANAGER and ADMIN are unrestricted. */
   async updateInventoryTransaction(
     id: string,
     dto: UpdateInventoryTransactionInput,
@@ -137,7 +145,7 @@ export class OperationsService {
   ) {
     const existing = await this.repository.findInventoryTransactionById(id);
     if (!existing) throw notFound('Inventory transaction not found.');
-    if (existing.supervisorId !== caller.id) {
+    if (existing.supervisorId !== caller.id && !isPrivileged(caller)) {
       throw forbidden('You do not have access to this transaction.');
     }
 
@@ -146,10 +154,11 @@ export class OperationsService {
     return updated;
   }
 
+  /** A SUPERVISOR may only delete their own transactions. MANAGER and ADMIN are unrestricted. */
   async deleteInventoryTransaction(id: string, caller: CallerIdentity) {
     const existing = await this.repository.findInventoryTransactionById(id);
     if (!existing) throw notFound('Inventory transaction not found.');
-    if (existing.supervisorId !== caller.id) {
+    if (existing.supervisorId !== caller.id && !isPrivileged(caller)) {
       throw forbidden('You do not have access to this transaction.');
     }
 

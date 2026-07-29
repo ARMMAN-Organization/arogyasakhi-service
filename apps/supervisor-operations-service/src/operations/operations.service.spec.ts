@@ -35,6 +35,7 @@ describe('OperationsService', () => {
   };
   const otherSupervisorCaller = { id: 'other-supervisor', roles: ['SUPERVISOR'] };
   const managerCaller = { id: 'manager-1', roles: ['MANAGER'] };
+  const adminCaller = { id: 'admin-1', roles: ['ADMIN'] };
 
   beforeEach(() => {
     jest.resetAllMocks();
@@ -313,6 +314,18 @@ describe('OperationsService', () => {
       ).resolves.toEqual([inventoryTransactionRow]);
       expect(sakhiClient.findById).not.toHaveBeenCalled();
     });
+
+    it('allows an ADMIN regardless of Sakhi assignment, without calling the Sakhi client', async () => {
+      repository.findInventoryTransactionsBySakhi.mockResolvedValue([inventoryTransactionRow]);
+      await expect(
+        service.listInventoryTransactionsBySakhi(
+          '44444444-4444-4444-4444-444444444444',
+          adminCaller,
+          'Bearer token',
+        ),
+      ).resolves.toEqual([inventoryTransactionRow]);
+      expect(sakhiClient.findById).not.toHaveBeenCalled();
+    });
   });
 
   describe('createInventoryTransactions', () => {
@@ -388,6 +401,19 @@ describe('OperationsService', () => {
 
       expect(sakhiClient.findById).not.toHaveBeenCalled();
       expect(repository.createInventoryTransactions).toHaveBeenCalled();
+    });
+
+    it('allows an ADMIN regardless of Sakhi assignment, stamping their own id as supervisorId', async () => {
+      repository.findInventoryItemById.mockResolvedValue(activeItem);
+      repository.createInventoryTransactions.mockResolvedValue([inventoryTransactionRow]);
+
+      await service.createInventoryTransactions(baseDto, adminCaller, 'Bearer token');
+
+      expect(sakhiClient.findById).not.toHaveBeenCalled();
+      expect(repository.createInventoryTransactions).toHaveBeenCalledWith(
+        expect.arrayContaining([expect.objectContaining({ supervisorId: adminCaller.id })]),
+        adminCaller.id,
+      );
     });
 
     it('rejects when a referenced item does not exist, without creating anything', async () => {
@@ -475,6 +501,24 @@ describe('OperationsService', () => {
       ).rejects.toMatchObject({ status: 403 });
       expect(repository.updateInventoryTransaction).not.toHaveBeenCalled();
     });
+
+    it('allows an ADMIN to update a transaction they do not own', async () => {
+      repository.findInventoryTransactionById.mockResolvedValue(inventoryTransactionRow);
+      repository.updateInventoryTransaction.mockResolvedValue(inventoryTransactionRow);
+
+      const result = await service.updateInventoryTransaction(
+        'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+        { quantity: 3 },
+        adminCaller,
+      );
+
+      expect(repository.updateInventoryTransaction).toHaveBeenCalledWith(
+        'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+        { quantity: 3 },
+        adminCaller.id,
+      );
+      expect(result).toBe(inventoryTransactionRow);
+    });
   });
 
   describe('deleteInventoryTransaction', () => {
@@ -507,6 +551,16 @@ describe('OperationsService', () => {
         ),
       ).rejects.toMatchObject({ status: 403 });
       expect(repository.softDeleteInventoryTransaction).not.toHaveBeenCalled();
+    });
+
+    it('allows an ADMIN to delete a transaction they do not own', async () => {
+      repository.findInventoryTransactionById.mockResolvedValue(inventoryTransactionRow);
+      repository.softDeleteInventoryTransaction.mockResolvedValue(inventoryTransactionRow);
+      await service.deleteInventoryTransaction('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', adminCaller);
+      expect(repository.softDeleteInventoryTransaction).toHaveBeenCalledWith(
+        'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+        adminCaller.id,
+      );
     });
   });
 
