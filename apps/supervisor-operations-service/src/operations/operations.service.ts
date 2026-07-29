@@ -87,15 +87,31 @@ export class OperationsService {
   }
 
   /**
-   * Validates every referenced item exists and is ACTIVE before writing
-   * anything (fails the whole submission up front rather than partway
-   * through the atomic create), then persists one row per item.
+   * A SUPERVISOR may only record a transaction against a Sakhi actually
+   * assigned to them — same ownership check as listInventoryTransactionsBySakhi,
+   * so a Supervisor can't write inventory history onto another Supervisor's
+   * Sakhi (MANAGER is exempt, matching the read path). Then validates every
+   * referenced item exists and is ACTIVE before writing anything (fails the
+   * whole submission up front rather than partway through the atomic
+   * create), then persists one row per item.
    *
    * `supervisorId` is never taken from the client-supplied body — it's
    * always the authenticated caller's own id, so a Supervisor can never
    * record a transaction under another Supervisor's name.
    */
-  async createInventoryTransactions(dto: CreateInventoryTransactionInput, caller: CallerIdentity) {
+  async createInventoryTransactions(
+    dto: CreateInventoryTransactionInput,
+    caller: CallerIdentity,
+    authorizationHeader: string,
+  ) {
+    if (!caller.roles.includes('MANAGER')) {
+      const sakhi = await this.sakhiClient.findById(dto.sakhiId, authorizationHeader);
+      if (!sakhi) throw unprocessable('sakhiId: Sakhi not found.');
+      if (sakhi.supervisorId !== caller.id) {
+        throw forbidden('You do not have access to this Sakhi.');
+      }
+    }
+
     for (const { itemId } of dto.items) {
       const item = await this.repository.findInventoryItemById(itemId);
       if (!item) throw unprocessable(`items: item ${itemId} not found.`);

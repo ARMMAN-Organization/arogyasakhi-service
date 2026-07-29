@@ -324,11 +324,22 @@ describe('OperationsService', () => {
       items: [{ itemId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', quantity: 2 }],
     };
 
+    const sakhi = {
+      sakhiId: '44444444-4444-4444-4444-444444444444',
+      supervisorId: supervisorCaller.id,
+      primaryProjectId: '22222222-2222-2222-2222-222222222222',
+    };
+
     it('creates one row per item, using the caller’s own id as supervisorId (never client-supplied)', async () => {
+      sakhiClient.findById.mockResolvedValue(sakhi);
       repository.findInventoryItemById.mockResolvedValue(activeItem);
       repository.createInventoryTransactions.mockResolvedValue([inventoryTransactionRow]);
 
-      const result = await service.createInventoryTransactions(baseDto, supervisorCaller);
+      const result = await service.createInventoryTransactions(
+        baseDto,
+        supervisorCaller,
+        'Bearer token',
+      );
 
       expect(repository.findInventoryItemById).toHaveBeenCalledWith(
         'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
@@ -350,25 +361,57 @@ describe('OperationsService', () => {
       expect(result).toEqual([inventoryTransactionRow]);
     });
 
+    it('rejects a Supervisor posting for a Sakhi assigned to another Supervisor, without creating anything', async () => {
+      sakhiClient.findById.mockResolvedValue(sakhi);
+
+      await expect(
+        service.createInventoryTransactions(baseDto, otherSupervisorCaller, 'Bearer token'),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(repository.findInventoryItemById).not.toHaveBeenCalled();
+      expect(repository.createInventoryTransactions).not.toHaveBeenCalled();
+    });
+
+    it('rejects when the Sakhi does not exist, without creating anything', async () => {
+      sakhiClient.findById.mockResolvedValue(null);
+
+      await expect(
+        service.createInventoryTransactions(baseDto, supervisorCaller, 'Bearer token'),
+      ).rejects.toMatchObject({ status: 422 });
+      expect(repository.createInventoryTransactions).not.toHaveBeenCalled();
+    });
+
+    it('allows a MANAGER regardless of Sakhi assignment, without calling the Sakhi client', async () => {
+      repository.findInventoryItemById.mockResolvedValue(activeItem);
+      repository.createInventoryTransactions.mockResolvedValue([inventoryTransactionRow]);
+
+      await service.createInventoryTransactions(baseDto, managerCaller, 'Bearer token');
+
+      expect(sakhiClient.findById).not.toHaveBeenCalled();
+      expect(repository.createInventoryTransactions).toHaveBeenCalled();
+    });
+
     it('rejects when a referenced item does not exist, without creating anything', async () => {
+      sakhiClient.findById.mockResolvedValue(sakhi);
       repository.findInventoryItemById.mockResolvedValue(null);
 
       await expect(
-        service.createInventoryTransactions(baseDto, supervisorCaller),
+        service.createInventoryTransactions(baseDto, supervisorCaller, 'Bearer token'),
       ).rejects.toMatchObject({ status: 422 });
       expect(repository.createInventoryTransactions).not.toHaveBeenCalled();
     });
 
     it('rejects when a referenced item is inactive, without creating anything', async () => {
+      sakhiClient.findById.mockResolvedValue(sakhi);
       repository.findInventoryItemById.mockResolvedValue({ ...activeItem, status: 'INACTIVE' });
 
       await expect(
-        service.createInventoryTransactions(baseDto, supervisorCaller),
+        service.createInventoryTransactions(baseDto, supervisorCaller, 'Bearer token'),
       ).rejects.toMatchObject({ status: 422 });
       expect(repository.createInventoryTransactions).not.toHaveBeenCalled();
     });
 
     it('creates multiple rows for a multi-item submission', async () => {
+      sakhiClient.findById.mockResolvedValue(sakhi);
       repository.findInventoryItemById.mockResolvedValue(activeItem);
       repository.createInventoryTransactions.mockResolvedValue([
         inventoryTransactionRow,
@@ -383,7 +426,7 @@ describe('OperationsService', () => {
         ],
       };
 
-      await service.createInventoryTransactions(dto, supervisorCaller);
+      await service.createInventoryTransactions(dto, supervisorCaller, 'Bearer token');
 
       expect(repository.createInventoryTransactions).toHaveBeenCalledWith(
         expect.arrayContaining([

@@ -282,7 +282,13 @@ export function createOperationsRouter(service: OperationsService) {
     validateBody(createInventoryTransactionRequestSchema),
     asyncHandler(async (req, res, next) => {
       if (!req.user) return next(unauthorized());
-      const created = await service.createInventoryTransactions(req.body, req.user);
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const created = await service.createInventoryTransactions(
+        req.body,
+        req.user,
+        authorizationHeader,
+      );
       res.status(201).json(ok(created));
     }),
   );
