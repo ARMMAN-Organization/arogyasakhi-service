@@ -2,6 +2,7 @@ import { Router, type NextFunction, type Request, type Response } from 'express'
 import swaggerUi from 'swagger-ui-express';
 import { appConfig } from '../config/app-config';
 import { createOpenApiAggregator, type DocsService } from './aggregate-openapi';
+import { withApiPrefix } from './with-api-prefix';
 
 /**
  * Every service that publishes an OpenAPI doc, in the order sections should
@@ -76,7 +77,7 @@ export function createDocsRouter(options: DocsRouterOptions = {}): Router {
 
   const servers =
     appConfig.PUBLIC_BASE_URLS.length > 0
-      ? appConfig.PUBLIC_BASE_URLS.map((url) => ({ url: `${url}/api/v1` }))
+      ? appConfig.PUBLIC_BASE_URLS.map((url) => ({ url: withApiPrefix(url) }))
       : [{ url: `http://localhost:${appConfig.PORT}/api/v1`, description: 'Local (gateway)' }];
 
   const aggregate = createOpenApiAggregator({
