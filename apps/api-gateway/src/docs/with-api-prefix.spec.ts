@@ -1,4 +1,4 @@
-import { withApiPrefix } from './docs.controller';
+import { withApiPrefix } from './with-api-prefix';
 
 describe('withApiPrefix', () => {
   it('appends /api/v1 to a bare base URL', () => {

@@ -2,6 +2,7 @@ import { Router, type NextFunction, type Request, type Response } from 'express'
 import swaggerUi from 'swagger-ui-express';
 import { appConfig } from '../config/app-config';
 import { createOpenApiAggregator, type DocsService } from './aggregate-openapi';
+import { withApiPrefix } from './with-api-prefix';
 
 /**
  * Every service that publishes an OpenAPI doc, in the order sections should
@@ -54,19 +55,6 @@ export interface DocsRouterOptions {
    * would keep `/api/v1/docs` reachable in prod regardless of what any
    * individual service decides, so this must gate the same way. */
   enabled?: boolean;
-}
-
-/**
- * Appends `/api/v1` to a base URL exactly once. `PUBLIC_BASE_URLS` is
- * configured inconsistently across this platform's deployed environments —
- * some already include the `/api/v1` suffix, some don't — so this strips any
- * trailing slash and existing `/api/v1` before appending, rather than
- * assuming one convention and risking a doubled path like
- * `.../api/v1/api/v1` in the Servers dropdown.
- */
-export function withApiPrefix(url: string): string {
-  const trimmed = url.replace(/\/+$/, '');
-  return trimmed.endsWith('/api/v1') ? trimmed : `${trimmed}/api/v1`;
 }
 
 /**
