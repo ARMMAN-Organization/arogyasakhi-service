@@ -70,6 +70,7 @@ export class BeneficiaryRepository {
         // status timeline, not just the case/PII/consent rows.
         riskConditionSummaries: true,
         statusHistory: { orderBy: { changedAt: 'desc' } },
+        socioDemographics: true,
       },
     });
   }

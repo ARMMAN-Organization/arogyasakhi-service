@@ -16,7 +16,8 @@
 // Tables owned by this service (beneficiary_pii, beneficiary_search_tokens, beneficiary_cases,
 // mother_case_details, child_case_details, consent_records,
 // beneficiary_risk_condition_summary, beneficiary_status_history,
-// beneficiary_current_summary) DO get proper Prisma @relation edges between each other.
+// beneficiary_current_summary, beneficiary_socio_demographics) DO get proper
+// Prisma @relation edges between each other.
 
 generator client {
   provider = "prisma-client-js"
@@ -151,6 +152,46 @@ model BeneficiaryPii {
   @@map("beneficiary_pii")
 }
 
+// Registration-time socio-demographic answers per SRS v3.0 / "Revised App Form
+// Final (20 March 2026)" Registration_PW_D sheet, rows 23-34. 1:1 with
+// BeneficiaryCase (not BeneficiaryPii): these are dropdown/count answers, not
+// person-identifying data, so they don't need encryption. Address and mobile
+// number themselves already exist (encrypted) on BeneficiaryPii — this table
+// only adds the fields that had no column anywhere yet.
+model BeneficiarySocioDemographics {
+  id            String  @id @default(uuid()) @map("socio_demographics_id")
+  beneficiaryId String  @unique @map("beneficiary_id")
+  // lookup_values.lookup_value_id (category PHONE_OWNER) — owned by another service.
+  phoneOwnerLookupId                 String? @map("phone_owner_lookup_id")
+  // lookup_values.lookup_value_id (category MOBILE_NETWORK_AVAILABILITY) — owned by another service.
+  mobileNetworkAvailabilityLookupId  String? @map("mobile_network_availability_lookup_id")
+  // lookup_values.lookup_value_id (category EDUCATION_LEVEL) — owned by another service.
+  educationLevelLookupId             String? @map("education_level_lookup_id")
+  // lookup_values.lookup_value_id (category EDUCATION_LEVEL) — owned by another service.
+  partnerEducationLevelLookupId      String? @map("partner_education_level_lookup_id")
+  // lookup_values.lookup_value_id (category PARTNER_OCCUPATION) — owned by another service.
+  partnerOccupationLookupId          String? @map("partner_occupation_lookup_id")
+  yearsInVillage                     Int?    @map("years_in_village")
+  // lookup_values.lookup_value_id (category MIGRATION_PATTERN) — owned by another service.
+  migrationPatternLookupId           String? @map("migration_pattern_lookup_id")
+  // lookup_values.lookup_value_id (category MONTHLY_INCOME_BRACKET) — owned by another service.
+  monthlyIncomeLookupId              String? @map("monthly_income_lookup_id")
+  // lookup_values.lookup_value_id (category RELIGION) — owned by another service.
+  religionLookupId                   String? @map("religion_lookup_id")
+  // lookup_values.lookup_value_id (category SOCIAL_CATEGORY) — owned by another service.
+  socialCategoryLookupId             String? @map("social_category_lookup_id")
+  familyMembersCount                 Int?    @map("family_members_count")
+  childrenUnder5Count                Int?    @map("children_under_5_count")
+  createdAt                          DateTime  @default(now()) @map("created_at")
+  createdByUserId                    String?   @map("created_by_user_id")
+  updatedAt                          DateTime  @updatedAt @map("updated_at")
+  updatedByUserId                    String?   @map("updated_by_user_id")
+
+  beneficiaryCase BeneficiaryCase @relation(fields: [beneficiaryId], references: [id])
+
+  @@map("beneficiary_socio_demographics")
+}
+
 model BeneficiarySearchToken {
   id               String   @id @default(uuid()) @map("search_token_id")
   beneficiaryId    String   @map("beneficiary_id")
@@ -217,6 +258,7 @@ model BeneficiaryCase {
   riskConditionSummaries BeneficiaryRiskConditionSummary[]
   statusHistory          BeneficiaryStatusHistory[]
   currentSummary         BeneficiaryCurrentSummary?
+  socioDemographics      BeneficiarySocioDemographics?
 
   @@map("beneficiary_cases")
 }

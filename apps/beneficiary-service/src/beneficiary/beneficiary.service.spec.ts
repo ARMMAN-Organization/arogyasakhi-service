@@ -160,6 +160,35 @@ describe('BeneficiaryService', () => {
       repository.findById.mockResolvedValue(null);
       await expect(service.getById('missing')).rejects.toMatchObject({ status: 404 });
     });
+
+    it('passes through socioDemographics from the repository', async () => {
+      const found = {
+        id: 'x',
+        pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
+        socioDemographics: { familyMembersCount: 4, childrenUnder5Count: 1 },
+      };
+      repository.findById.mockResolvedValue(found as never);
+
+      const result = await service.getById('x');
+
+      expect(result.socioDemographics).toMatchObject({
+        familyMembersCount: 4,
+        childrenUnder5Count: 1,
+      });
+    });
+
+    it('returns null socioDemographics for a case with no row yet', async () => {
+      const found = {
+        id: 'x',
+        pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
+        socioDemographics: null,
+      };
+      repository.findById.mockResolvedValue(found as never);
+
+      const result = await service.getById('x');
+
+      expect(result.socioDemographics).toBeNull();
+    });
   });
 
   describe('create — idempotent replay on localCaseUuid', () => {

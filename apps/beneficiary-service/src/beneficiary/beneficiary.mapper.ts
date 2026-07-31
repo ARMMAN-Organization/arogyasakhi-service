@@ -5,6 +5,8 @@ import { decryptPii } from '@armman/service-commons';
 export interface PiiRow {
   id: string;
   fullNameEnc: Buffer;
+  phoneEnc: Buffer | null;
+  addressLineEnc: Buffer | null;
   villageId: string | null;
   padaId: string | null;
   healthSubCentreId: string | null;
@@ -20,16 +22,17 @@ export interface PiiRow {
 /**
  * Projects a raw beneficiary_case Prisma row down to EXACTLY the fields the
  * API documents (beneficiaryCaseSchema / beneficiaryCaseDetailSchema in
- * beneficiary.controller.ts), decrypting `pii.fullName` for display. Every
- * level is allow-listed — the case, `pii`, and each nested relation — so
- * internal columns (createdByUserId/updatedByUserId/isDeleted/deletedAt,
- * encrypted/hash PII columns, undocumented case fields like
- * pregnancySequenceNo/journeyEndDate, and nested audit columns) can never
- * leak into a response even as the Prisma rows gain columns.
+ * beneficiary.controller.ts), decrypting `pii.fullName`/`pii.mobileNumber`/
+ * `pii.address` for display. Every level is allow-listed — the case, `pii`,
+ * and each nested relation — so internal columns
+ * (createdByUserId/updatedByUserId/isDeleted/deletedAt, encrypted/hash PII
+ * columns, undocumented case fields like pregnancySequenceNo/journeyEndDate,
+ * and nested audit columns) can never leak into a response even as the
+ * Prisma rows gain columns.
  *
  * Nested relations are only projected when present, so this serves both the
  * list rows (case + pii only) and the detail view (case + pii + mother/child
- * details + consent + risk/status).
+ * details + consent + risk/status + socioDemographics).
  */
 export function withDecryptedName<T extends { pii: PiiRow; [k: string]: unknown }>(caseRow: T) {
   const c = caseRow as Record<string, unknown>;
@@ -55,6 +58,8 @@ export function withDecryptedName<T extends { pii: PiiRow; [k: string]: unknown 
     pii: {
       id: pii.id,
       fullName: decryptPii(pii.fullNameEnc),
+      mobileNumber: pii.phoneEnc ? decryptPii(pii.phoneEnc) : null,
+      address: pii.addressLineEnc ? decryptPii(pii.addressLineEnc) : null,
       villageId: pii.villageId,
       padaId: pii.padaId,
       healthSubCentreId: pii.healthSubCentreId,
@@ -128,6 +133,25 @@ export function withDecryptedName<T extends { pii: PiiRow; [k: string]: unknown 
       changedAt: h.changedAt,
       notes: h.notes,
     }));
+  }
+  const socioDemographics = c.socioDemographics as Record<string, unknown> | null | undefined;
+  if (socioDemographics !== undefined) {
+    projected.socioDemographics = socioDemographics
+      ? {
+          phoneOwnerLookupId: socioDemographics.phoneOwnerLookupId,
+          mobileNetworkAvailabilityLookupId: socioDemographics.mobileNetworkAvailabilityLookupId,
+          educationLevelLookupId: socioDemographics.educationLevelLookupId,
+          partnerEducationLevelLookupId: socioDemographics.partnerEducationLevelLookupId,
+          partnerOccupationLookupId: socioDemographics.partnerOccupationLookupId,
+          yearsInVillage: socioDemographics.yearsInVillage,
+          migrationPatternLookupId: socioDemographics.migrationPatternLookupId,
+          monthlyIncomeLookupId: socioDemographics.monthlyIncomeLookupId,
+          religionLookupId: socioDemographics.religionLookupId,
+          socialCategoryLookupId: socioDemographics.socialCategoryLookupId,
+          familyMembersCount: socioDemographics.familyMembersCount,
+          childrenUnder5Count: socioDemographics.childrenUnder5Count,
+        }
+      : null;
   }
 
   return projected;
