@@ -37,16 +37,16 @@ describe('SakhiRepository', () => {
   });
 
   describe('findById', () => {
-    it('queries a single Sakhi by id, excluding soft-deleted', async () => {
-      findFirst.mockResolvedValue({ id: 'sakhi-1', user: { displayName: 'Priya' } });
+    it('queries a single Sakhi by user id, excluding soft-deleted', async () => {
+      findFirst.mockResolvedValue({ id: 'sakhi-1', user: { id: 'user-1', displayName: 'Priya' } });
 
-      const result = await repository.findById('sakhi-1');
+      const result = await repository.findById('user-1');
 
       expect(findFirst).toHaveBeenCalledWith({
-        where: { id: 'sakhi-1', isDeleted: false },
+        where: { userId: 'user-1', isDeleted: false },
         include: { user: true },
       });
-      expect(result).toEqual({ id: 'sakhi-1', user: { displayName: 'Priya' } });
+      expect(result).toEqual({ id: 'sakhi-1', user: { id: 'user-1', displayName: 'Priya' } });
     });
 
     it('returns null when the Sakhi does not exist', async () => {
