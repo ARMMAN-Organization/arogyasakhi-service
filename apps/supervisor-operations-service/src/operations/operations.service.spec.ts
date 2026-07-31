@@ -4,6 +4,7 @@ import type { SakhiClient } from './sakhi.client';
 import type { CreateSupervisorEventInput } from './dto/create-supervisorEvent.dto';
 import type {
   SupervisorEvent,
+  EventAttendance,
   InventoryItem,
   InventoryTransaction,
   CallLog,
@@ -13,6 +14,10 @@ describe('OperationsService', () => {
   const repository = {
     findEvents: jest.fn(),
     createEvent: jest.fn(),
+    findEventById: jest.fn(),
+    updateEventStatus: jest.fn(),
+    findAttendanceByEvent: jest.fn(),
+    upsertAttendance: jest.fn(),
     findInventoryItems: jest.fn(),
     createInventoryItem: jest.fn(),
     findInventoryTransactions: jest.fn(),
@@ -23,6 +28,11 @@ describe('OperationsService', () => {
     updateInventoryTransaction: jest.fn(),
     softDeleteInventoryTransaction: jest.fn(),
     findCallLogs: jest.fn(),
+    createCallLog: jest.fn(),
+    findCallLogById: jest.fn(),
+    findCallLogsBySakhi: jest.fn(),
+    findRecentCallLogsBySakhi: jest.fn(),
+    updateCallLog: jest.fn(),
   } as unknown as jest.Mocked<OperationsRepository>;
   const sakhiClient = {
     findById: jest.fn(),
@@ -127,6 +137,338 @@ describe('OperationsService', () => {
     repository.createEvent.mockResolvedValue(eventRow);
     await expect(service.createEvent(dto)).resolves.toBe(eventRow);
     expect(repository.createEvent).toHaveBeenCalledWith(dto);
+  });
+
+  it('lists events with filters via repository', async () => {
+    repository.findEvents.mockResolvedValue([eventRow]);
+    await service.listEvents({ status: 'SCHEDULED', eventType: 'TRAINING' });
+    expect(repository.findEvents).toHaveBeenCalledWith({
+      status: 'SCHEDULED',
+      eventType: 'TRAINING',
+    });
+  });
+
+  describe('getEvent', () => {
+    it('returns the event when it exists', async () => {
+      repository.findEventById.mockResolvedValue(eventRow);
+      await expect(service.getEvent(eventRow.id)).resolves.toBe(eventRow);
+    });
+
+    it('throws 404 when the event does not exist', async () => {
+      repository.findEventById.mockResolvedValue(null);
+      await expect(service.getEvent('missing')).rejects.toMatchObject({ status: 404 });
+    });
+  });
+
+  describe('cancelEvent', () => {
+    const cancelledRow: SupervisorEvent = { ...eventRow, status: 'CANCELLED' };
+
+    it('cancels a SCHEDULED event owned by the caller', async () => {
+      repository.findEventById.mockResolvedValue(eventRow);
+      repository.updateEventStatus.mockResolvedValue(cancelledRow);
+
+      const result = await service.cancelEvent(eventRow.id, supervisorCaller);
+
+      expect(repository.updateEventStatus).toHaveBeenCalledWith(
+        eventRow.id,
+        'CANCELLED',
+        supervisorCaller.id,
+      );
+      expect(result).toBe(cancelledRow);
+    });
+
+    it('throws 404 when the event does not exist', async () => {
+      repository.findEventById.mockResolvedValue(null);
+      await expect(service.cancelEvent('missing', supervisorCaller)).rejects.toMatchObject({
+        status: 404,
+      });
+    });
+
+    it('rejects a Supervisor who does not own the event, without updating anything', async () => {
+      repository.findEventById.mockResolvedValue(eventRow);
+      await expect(service.cancelEvent(eventRow.id, otherSupervisorCaller)).rejects.toMatchObject({
+        status: 403,
+      });
+      expect(repository.updateEventStatus).not.toHaveBeenCalled();
+    });
+
+    it('throws 409 when the event is already COMPLETED', async () => {
+      repository.findEventById.mockResolvedValue({ ...eventRow, status: 'COMPLETED' });
+      await expect(service.cancelEvent(eventRow.id, supervisorCaller)).rejects.toMatchObject({
+        status: 409,
+      });
+      expect(repository.updateEventStatus).not.toHaveBeenCalled();
+    });
+
+    it('throws 409 when the event is already CANCELLED', async () => {
+      repository.findEventById.mockResolvedValue(cancelledRow);
+      await expect(service.cancelEvent(eventRow.id, supervisorCaller)).rejects.toMatchObject({
+        status: 409,
+      });
+      expect(repository.updateEventStatus).not.toHaveBeenCalled();
+    });
+
+    it('allows an ADMIN to cancel an event they do not own', async () => {
+      repository.findEventById.mockResolvedValue(eventRow);
+      repository.updateEventStatus.mockResolvedValue(cancelledRow);
+      await expect(service.cancelEvent(eventRow.id, adminCaller)).resolves.toBe(cancelledRow);
+    });
+
+    it('allows a MANAGER to cancel an event they do not own', async () => {
+      repository.findEventById.mockResolvedValue(eventRow);
+      repository.updateEventStatus.mockResolvedValue(cancelledRow);
+      await expect(service.cancelEvent(eventRow.id, managerCaller)).resolves.toBe(cancelledRow);
+    });
+  });
+
+  describe('completeEvent', () => {
+    const eventWithPhoto: SupervisorEvent = {
+      ...eventRow,
+      photoMediaId: '55555555-5555-5555-5555-555555555555',
+    };
+    const completedRow: SupervisorEvent = { ...eventWithPhoto, status: 'COMPLETED' };
+    const attendanceRow: EventAttendance = {
+      id: '66666666-6666-6666-6666-666666666666',
+      eventId: eventRow.id,
+      sakhiId: '44444444-4444-4444-4444-444444444444',
+      attendanceStatus: 'PRESENT',
+      preTrainingScore: null,
+      postTrainingScore: null,
+      remarks: null,
+      createdAt: new Date(),
+      createdByUserId: null,
+      updatedAt: new Date(),
+      updatedByUserId: null,
+      isDeleted: false,
+      deletedAt: null,
+    };
+
+    it('completes a SCHEDULED event with a photo and existing attendance', async () => {
+      repository.findEventById.mockResolvedValue(eventWithPhoto);
+      repository.findAttendanceByEvent.mockResolvedValue([attendanceRow]);
+      repository.updateEventStatus.mockResolvedValue(completedRow);
+
+      const result = await service.completeEvent(eventRow.id, supervisorCaller);
+
+      expect(repository.updateEventStatus).toHaveBeenCalledWith(
+        eventRow.id,
+        'COMPLETED',
+        supervisorCaller.id,
+      );
+      expect(result).toBe(completedRow);
+    });
+
+    it('throws 422 when photoMediaId is missing', async () => {
+      repository.findEventById.mockResolvedValue(eventRow);
+      await expect(service.completeEvent(eventRow.id, supervisorCaller)).rejects.toMatchObject({
+        status: 422,
+      });
+      expect(repository.updateEventStatus).not.toHaveBeenCalled();
+    });
+
+    it('throws 422 when no attendance rows exist for the event', async () => {
+      repository.findEventById.mockResolvedValue(eventWithPhoto);
+      repository.findAttendanceByEvent.mockResolvedValue([]);
+      await expect(service.completeEvent(eventRow.id, supervisorCaller)).rejects.toMatchObject({
+        status: 422,
+      });
+      expect(repository.updateEventStatus).not.toHaveBeenCalled();
+    });
+
+    it('throws 404 when the event does not exist', async () => {
+      repository.findEventById.mockResolvedValue(null);
+      await expect(service.completeEvent('missing', supervisorCaller)).rejects.toMatchObject({
+        status: 404,
+      });
+    });
+
+    it('rejects a Supervisor who does not own the event, without completing it', async () => {
+      repository.findEventById.mockResolvedValue(eventWithPhoto);
+      await expect(service.completeEvent(eventRow.id, otherSupervisorCaller)).rejects.toMatchObject(
+        { status: 403 },
+      );
+      expect(repository.updateEventStatus).not.toHaveBeenCalled();
+    });
+
+    it('throws 409 when the event is already COMPLETED', async () => {
+      repository.findEventById.mockResolvedValue(completedRow);
+      await expect(service.completeEvent(eventRow.id, supervisorCaller)).rejects.toMatchObject({
+        status: 409,
+      });
+      expect(repository.updateEventStatus).not.toHaveBeenCalled();
+    });
+
+    it('throws 409 when the event is already CANCELLED', async () => {
+      repository.findEventById.mockResolvedValue({ ...eventWithPhoto, status: 'CANCELLED' });
+      await expect(service.completeEvent(eventRow.id, supervisorCaller)).rejects.toMatchObject({
+        status: 409,
+      });
+      expect(repository.updateEventStatus).not.toHaveBeenCalled();
+    });
+
+    it('allows an ADMIN to complete an event they do not own', async () => {
+      repository.findEventById.mockResolvedValue(eventWithPhoto);
+      repository.findAttendanceByEvent.mockResolvedValue([attendanceRow]);
+      repository.updateEventStatus.mockResolvedValue(completedRow);
+      await expect(service.completeEvent(eventRow.id, adminCaller)).resolves.toBe(completedRow);
+    });
+
+    it('allows a MANAGER to complete an event they do not own', async () => {
+      repository.findEventById.mockResolvedValue(eventWithPhoto);
+      repository.findAttendanceByEvent.mockResolvedValue([attendanceRow]);
+      repository.updateEventStatus.mockResolvedValue(completedRow);
+      await expect(service.completeEvent(eventRow.id, managerCaller)).resolves.toBe(completedRow);
+    });
+  });
+
+  describe('getEventAttendance', () => {
+    const attendanceRow: EventAttendance = {
+      id: '66666666-6666-6666-6666-666666666666',
+      eventId: eventRow.id,
+      sakhiId: '44444444-4444-4444-4444-444444444444',
+      attendanceStatus: 'PRESENT',
+      preTrainingScore: null,
+      postTrainingScore: null,
+      remarks: null,
+      createdAt: new Date(),
+      createdByUserId: null,
+      updatedAt: new Date(),
+      updatedByUserId: null,
+      isDeleted: false,
+      deletedAt: null,
+    };
+
+    it('returns attendance rows for an event owned by the caller', async () => {
+      repository.findEventById.mockResolvedValue(eventRow);
+      repository.findAttendanceByEvent.mockResolvedValue([attendanceRow]);
+      await expect(service.getEventAttendance(eventRow.id, supervisorCaller)).resolves.toEqual([
+        attendanceRow,
+      ]);
+    });
+
+    it('throws 404 when the event does not exist', async () => {
+      repository.findEventById.mockResolvedValue(null);
+      await expect(service.getEventAttendance('missing', supervisorCaller)).rejects.toMatchObject({
+        status: 404,
+      });
+    });
+
+    it('rejects a Supervisor who does not own the event', async () => {
+      repository.findEventById.mockResolvedValue(eventRow);
+      await expect(
+        service.getEventAttendance(eventRow.id, otherSupervisorCaller),
+      ).rejects.toMatchObject({ status: 403 });
+    });
+
+    it('returns an empty array when the event has no attendance yet', async () => {
+      repository.findEventById.mockResolvedValue(eventRow);
+      repository.findAttendanceByEvent.mockResolvedValue([]);
+      await expect(service.getEventAttendance(eventRow.id, supervisorCaller)).resolves.toEqual([]);
+    });
+
+    it('allows a MANAGER to view attendance for an event they do not own', async () => {
+      repository.findEventById.mockResolvedValue(eventRow);
+      repository.findAttendanceByEvent.mockResolvedValue([attendanceRow]);
+      await expect(service.getEventAttendance(eventRow.id, managerCaller)).resolves.toEqual([
+        attendanceRow,
+      ]);
+    });
+
+    it('allows an ADMIN to view attendance for an event they do not own', async () => {
+      repository.findEventById.mockResolvedValue(eventRow);
+      repository.findAttendanceByEvent.mockResolvedValue([attendanceRow]);
+      await expect(service.getEventAttendance(eventRow.id, adminCaller)).resolves.toEqual([
+        attendanceRow,
+      ]);
+    });
+  });
+
+  describe('updateEventAttendance', () => {
+    const attendanceRow: EventAttendance = {
+      id: '66666666-6666-6666-6666-666666666666',
+      eventId: eventRow.id,
+      sakhiId: '44444444-4444-4444-4444-444444444444',
+      attendanceStatus: 'PRESENT',
+      preTrainingScore: null,
+      postTrainingScore: null,
+      remarks: null,
+      createdAt: new Date(),
+      createdByUserId: null,
+      updatedAt: new Date(),
+      updatedByUserId: null,
+      isDeleted: false,
+      deletedAt: null,
+    };
+    const dto = {
+      attendance: [
+        { sakhiId: '44444444-4444-4444-4444-444444444444', attendanceStatus: 'PRESENT' as const },
+      ],
+    };
+
+    it('upserts attendance via repository for an event owned by the caller', async () => {
+      repository.findEventById.mockResolvedValue(eventRow);
+      repository.upsertAttendance.mockResolvedValue([attendanceRow]);
+
+      const result = await service.updateEventAttendance(eventRow.id, dto, supervisorCaller);
+
+      expect(repository.upsertAttendance).toHaveBeenCalledWith(
+        eventRow.id,
+        dto.attendance,
+        supervisorCaller.id,
+      );
+      expect(result).toEqual([attendanceRow]);
+    });
+
+    it('throws 404 when the event does not exist', async () => {
+      repository.findEventById.mockResolvedValue(null);
+      await expect(
+        service.updateEventAttendance('missing', dto, supervisorCaller),
+      ).rejects.toMatchObject({ status: 404 });
+      expect(repository.upsertAttendance).not.toHaveBeenCalled();
+    });
+
+    it('rejects a Supervisor who does not own the event, without writing anything', async () => {
+      repository.findEventById.mockResolvedValue(eventRow);
+      await expect(
+        service.updateEventAttendance(eventRow.id, dto, otherSupervisorCaller),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(repository.upsertAttendance).not.toHaveBeenCalled();
+    });
+
+    it('allows an ADMIN to write attendance for an event they do not own', async () => {
+      repository.findEventById.mockResolvedValue(eventRow);
+      repository.upsertAttendance.mockResolvedValue([attendanceRow]);
+      await expect(service.updateEventAttendance(eventRow.id, dto, adminCaller)).resolves.toEqual([
+        attendanceRow,
+      ]);
+    });
+
+    it('allows a MANAGER to write attendance for an event they do not own', async () => {
+      repository.findEventById.mockResolvedValue(eventRow);
+      repository.upsertAttendance.mockResolvedValue([attendanceRow]);
+      await expect(service.updateEventAttendance(eventRow.id, dto, managerCaller)).resolves.toEqual(
+        [attendanceRow],
+      );
+    });
+
+    it('writes multiple attendance rows for a multi-Sakhi submission', async () => {
+      const multiDto = {
+        attendance: [
+          { sakhiId: '44444444-4444-4444-4444-444444444444', attendanceStatus: 'PRESENT' as const },
+          { sakhiId: '55555555-5555-5555-5555-555555555555', attendanceStatus: 'ABSENT' as const },
+        ],
+      };
+      repository.findEventById.mockResolvedValue(eventRow);
+      repository.upsertAttendance.mockResolvedValue([attendanceRow, attendanceRow]);
+
+      await service.updateEventAttendance(eventRow.id, multiDto, supervisorCaller);
+
+      expect(repository.upsertAttendance).toHaveBeenCalledWith(
+        eventRow.id,
+        multiDto.attendance,
+        supervisorCaller.id,
+      );
+    });
   });
 
   it('lists inventory items via repository', async () => {
@@ -588,5 +930,372 @@ describe('OperationsService', () => {
     ];
     repository.findCallLogs.mockResolvedValue(rows);
     await expect(service.listCallLogs()).resolves.toBe(rows);
+  });
+
+  const callLogRow: CallLog = {
+    id: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
+    projectId: '22222222-2222-2222-2222-222222222222',
+    supervisorId: '33333333-3333-3333-3333-333333333333',
+    sakhiId: '44444444-4444-4444-4444-444444444444',
+    callDatetime: new Date('2026-07-01T10:00:00Z'),
+    callStatus: 'CONNECTED',
+    notes: null,
+    followupAction: null,
+    callStartAt: new Date('2026-07-01T10:00:00Z'),
+    callEndAt: new Date('2026-07-01T10:05:00Z'),
+    callDurationSeconds: 300,
+    createdAt: new Date(),
+    createdByUserId: null,
+    updatedAt: new Date(),
+    updatedByUserId: null,
+    isDeleted: false,
+    deletedAt: null,
+  };
+
+  const sakhi = {
+    sakhiId: '44444444-4444-4444-4444-444444444444',
+    supervisorId: supervisorCaller.id,
+    primaryProjectId: '22222222-2222-2222-2222-222222222222',
+  };
+
+  describe('createCallLog', () => {
+    const baseDto = {
+      projectId: '22222222-2222-2222-2222-222222222222',
+      sakhiId: '44444444-4444-4444-4444-444444444444',
+      callDatetime: new Date('2026-07-01T10:00:00Z'),
+      callStatus: 'CONNECTED' as const,
+      callStartAt: new Date('2026-07-01T10:00:00Z'),
+    };
+
+    it('creates a call log via repository, using the caller’s own id as supervisorId', async () => {
+      sakhiClient.findById.mockResolvedValue(sakhi);
+      repository.createCallLog.mockResolvedValue(callLogRow);
+
+      const result = await service.createCallLog(baseDto, supervisorCaller, 'Bearer token');
+
+      expect(repository.createCallLog).toHaveBeenCalledWith(
+        { ...baseDto, supervisorId: supervisorCaller.id },
+        supervisorCaller.id,
+      );
+      expect(result).toBe(callLogRow);
+    });
+
+    it('rejects a Supervisor logging a call for a Sakhi assigned to another Supervisor', async () => {
+      sakhiClient.findById.mockResolvedValue(sakhi);
+      await expect(
+        service.createCallLog(baseDto, otherSupervisorCaller, 'Bearer token'),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(repository.createCallLog).not.toHaveBeenCalled();
+    });
+
+    it('rejects when the Sakhi does not exist, without creating anything', async () => {
+      sakhiClient.findById.mockResolvedValue(null);
+      await expect(
+        service.createCallLog(baseDto, supervisorCaller, 'Bearer token'),
+      ).rejects.toMatchObject({ status: 422 });
+      expect(repository.createCallLog).not.toHaveBeenCalled();
+    });
+
+    it('allows a MANAGER regardless of Sakhi assignment, without calling the Sakhi client', async () => {
+      repository.createCallLog.mockResolvedValue(callLogRow);
+      await service.createCallLog(baseDto, managerCaller, 'Bearer token');
+      expect(sakhiClient.findById).not.toHaveBeenCalled();
+      expect(repository.createCallLog).toHaveBeenCalledWith(
+        { ...baseDto, supervisorId: managerCaller.id },
+        managerCaller.id,
+      );
+    });
+
+    it('allows an ADMIN regardless of Sakhi assignment, stamping their own id as supervisorId', async () => {
+      repository.createCallLog.mockResolvedValue(callLogRow);
+      await service.createCallLog(baseDto, adminCaller, 'Bearer token');
+      expect(sakhiClient.findById).not.toHaveBeenCalled();
+      expect(repository.createCallLog).toHaveBeenCalledWith(
+        { ...baseDto, supervisorId: adminCaller.id },
+        adminCaller.id,
+      );
+    });
+
+    it('propagates repository errors on createCallLog', async () => {
+      sakhiClient.findById.mockResolvedValue(sakhi);
+      repository.createCallLog.mockRejectedValue(new Error('db down'));
+      await expect(
+        service.createCallLog(baseDto, supervisorCaller, 'Bearer token'),
+      ).rejects.toThrow('db down');
+    });
+  });
+
+  describe('getCallLog', () => {
+    it('returns the call log when the caller owns it', async () => {
+      repository.findCallLogById.mockResolvedValue(callLogRow);
+      await expect(
+        service.getCallLog('cccccccc-cccc-cccc-cccc-cccccccccccc', supervisorCaller),
+      ).resolves.toBe(callLogRow);
+    });
+
+    it('throws 404 when the call log does not exist', async () => {
+      repository.findCallLogById.mockResolvedValue(null);
+      await expect(service.getCallLog('missing', supervisorCaller)).rejects.toMatchObject({
+        status: 404,
+      });
+    });
+
+    it('rejects a Supervisor who does not own the call log', async () => {
+      repository.findCallLogById.mockResolvedValue(callLogRow);
+      await expect(
+        service.getCallLog('cccccccc-cccc-cccc-cccc-cccccccccccc', otherSupervisorCaller),
+      ).rejects.toMatchObject({ status: 403 });
+    });
+
+    it('allows a MANAGER to fetch a call log they do not own', async () => {
+      repository.findCallLogById.mockResolvedValue(callLogRow);
+      await expect(
+        service.getCallLog('cccccccc-cccc-cccc-cccc-cccccccccccc', managerCaller),
+      ).resolves.toBe(callLogRow);
+    });
+
+    it('allows an ADMIN to fetch a call log they do not own', async () => {
+      repository.findCallLogById.mockResolvedValue(callLogRow);
+      await expect(
+        service.getCallLog('cccccccc-cccc-cccc-cccc-cccccccccccc', adminCaller),
+      ).resolves.toBe(callLogRow);
+    });
+  });
+
+  describe('updateCallLog', () => {
+    it('updates via repository and returns the updated row when the caller owns the call log', async () => {
+      repository.findCallLogById.mockResolvedValue(callLogRow);
+      repository.updateCallLog.mockResolvedValue(callLogRow);
+
+      const result = await service.updateCallLog(
+        'cccccccc-cccc-cccc-cccc-cccccccccccc',
+        { callStatus: 'FOLLOWUP_REQUIRED' },
+        supervisorCaller,
+      );
+
+      expect(repository.updateCallLog).toHaveBeenCalledWith(
+        'cccccccc-cccc-cccc-cccc-cccccccccccc',
+        { callStatus: 'FOLLOWUP_REQUIRED' },
+        supervisorCaller.id,
+      );
+      expect(result).toBe(callLogRow);
+    });
+
+    it('throws 404 when the call log does not exist', async () => {
+      repository.findCallLogById.mockResolvedValue(null);
+      await expect(
+        service.updateCallLog('missing', { callStatus: 'BUSY' }, supervisorCaller),
+      ).rejects.toMatchObject({ status: 404 });
+    });
+
+    it('rejects a Supervisor who does not own the call log, without updating anything', async () => {
+      repository.findCallLogById.mockResolvedValue(callLogRow);
+      await expect(
+        service.updateCallLog(
+          'cccccccc-cccc-cccc-cccc-cccccccccccc',
+          { callStatus: 'BUSY' },
+          otherSupervisorCaller,
+        ),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(repository.updateCallLog).not.toHaveBeenCalled();
+    });
+
+    it('allows an ADMIN to update a call log they do not own', async () => {
+      repository.findCallLogById.mockResolvedValue(callLogRow);
+      repository.updateCallLog.mockResolvedValue(callLogRow);
+
+      const result = await service.updateCallLog(
+        'cccccccc-cccc-cccc-cccc-cccccccccccc',
+        { callStatus: 'BUSY' },
+        adminCaller,
+      );
+
+      expect(repository.updateCallLog).toHaveBeenCalledWith(
+        'cccccccc-cccc-cccc-cccc-cccccccccccc',
+        { callStatus: 'BUSY' },
+        adminCaller.id,
+      );
+      expect(result).toBe(callLogRow);
+    });
+
+    it('allows a MANAGER to update a call log they do not own', async () => {
+      repository.findCallLogById.mockResolvedValue(callLogRow);
+      repository.updateCallLog.mockResolvedValue(callLogRow);
+
+      await service.updateCallLog(
+        'cccccccc-cccc-cccc-cccc-cccccccccccc',
+        { callStatus: 'BUSY' },
+        managerCaller,
+      );
+
+      expect(repository.updateCallLog).toHaveBeenCalledWith(
+        'cccccccc-cccc-cccc-cccc-cccccccccccc',
+        { callStatus: 'BUSY' },
+        managerCaller.id,
+      );
+    });
+  });
+
+  describe('listCallLogsBySakhi', () => {
+    it('lists a Sakhi’s call logs via repository when the caller is her assigned Supervisor', async () => {
+      sakhiClient.findById.mockResolvedValue(sakhi);
+      repository.findCallLogsBySakhi.mockResolvedValue([callLogRow]);
+
+      await expect(
+        service.listCallLogsBySakhi(
+          '44444444-4444-4444-4444-444444444444',
+          supervisorCaller,
+          'Bearer token',
+        ),
+      ).resolves.toEqual([callLogRow]);
+      expect(repository.findCallLogsBySakhi).toHaveBeenCalledWith(
+        '44444444-4444-4444-4444-444444444444',
+      );
+    });
+
+    it('rejects a Supervisor who is not this Sakhi’s assigned Supervisor', async () => {
+      sakhiClient.findById.mockResolvedValue(sakhi);
+      await expect(
+        service.listCallLogsBySakhi(
+          '44444444-4444-4444-4444-444444444444',
+          otherSupervisorCaller,
+          'Bearer token',
+        ),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(repository.findCallLogsBySakhi).not.toHaveBeenCalled();
+    });
+
+    it('throws 404 when the Sakhi does not exist', async () => {
+      sakhiClient.findById.mockResolvedValue(null);
+      await expect(
+        service.listCallLogsBySakhi('missing', supervisorCaller, 'Bearer token'),
+      ).rejects.toMatchObject({ status: 404 });
+    });
+
+    it('returns an empty array (not an error) when the Sakhi has no call logs', async () => {
+      sakhiClient.findById.mockResolvedValue(sakhi);
+      repository.findCallLogsBySakhi.mockResolvedValue([]);
+      await expect(
+        service.listCallLogsBySakhi(
+          '44444444-4444-4444-4444-444444444444',
+          supervisorCaller,
+          'Bearer token',
+        ),
+      ).resolves.toEqual([]);
+    });
+
+    it('allows a MANAGER regardless of Sakhi assignment, without calling the Sakhi client', async () => {
+      repository.findCallLogsBySakhi.mockResolvedValue([callLogRow]);
+      await expect(
+        service.listCallLogsBySakhi(
+          '44444444-4444-4444-4444-444444444444',
+          managerCaller,
+          'Bearer token',
+        ),
+      ).resolves.toEqual([callLogRow]);
+      expect(sakhiClient.findById).not.toHaveBeenCalled();
+    });
+
+    it('allows an ADMIN regardless of Sakhi assignment, without calling the Sakhi client', async () => {
+      repository.findCallLogsBySakhi.mockResolvedValue([callLogRow]);
+      await expect(
+        service.listCallLogsBySakhi(
+          '44444444-4444-4444-4444-444444444444',
+          adminCaller,
+          'Bearer token',
+        ),
+      ).resolves.toEqual([callLogRow]);
+      expect(sakhiClient.findById).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('listRecentCallLogsBySakhi', () => {
+    it('lists recent call logs using the default window when the caller is her assigned Supervisor', async () => {
+      sakhiClient.findById.mockResolvedValue(sakhi);
+      repository.findRecentCallLogsBySakhi.mockResolvedValue([callLogRow]);
+
+      await expect(
+        service.listRecentCallLogsBySakhi(
+          '44444444-4444-4444-4444-444444444444',
+          supervisorCaller,
+          'Bearer token',
+        ),
+      ).resolves.toEqual([callLogRow]);
+      expect(repository.findRecentCallLogsBySakhi).toHaveBeenCalledWith(
+        '44444444-4444-4444-4444-444444444444',
+        expect.any(Date),
+      );
+    });
+
+    it('respects a custom withinHours window', async () => {
+      sakhiClient.findById.mockResolvedValue(sakhi);
+      repository.findRecentCallLogsBySakhi.mockResolvedValue([]);
+
+      await service.listRecentCallLogsBySakhi(
+        '44444444-4444-4444-4444-444444444444',
+        supervisorCaller,
+        'Bearer token',
+        24,
+      );
+
+      const [, sinceDate] = repository.findRecentCallLogsBySakhi.mock.calls[0];
+      const hoursAgo = (Date.now() - sinceDate.getTime()) / (60 * 60 * 1000);
+      expect(hoursAgo).toBeCloseTo(24, 0);
+    });
+
+    it('rejects a Supervisor who is not this Sakhi’s assigned Supervisor', async () => {
+      sakhiClient.findById.mockResolvedValue(sakhi);
+      await expect(
+        service.listRecentCallLogsBySakhi(
+          '44444444-4444-4444-4444-444444444444',
+          otherSupervisorCaller,
+          'Bearer token',
+        ),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(repository.findRecentCallLogsBySakhi).not.toHaveBeenCalled();
+    });
+
+    it('throws 404 when the Sakhi does not exist', async () => {
+      sakhiClient.findById.mockResolvedValue(null);
+      await expect(
+        service.listRecentCallLogsBySakhi('missing', supervisorCaller, 'Bearer token'),
+      ).rejects.toMatchObject({ status: 404 });
+    });
+
+    it('returns an empty array when no calls fall within the window', async () => {
+      sakhiClient.findById.mockResolvedValue(sakhi);
+      repository.findRecentCallLogsBySakhi.mockResolvedValue([]);
+      await expect(
+        service.listRecentCallLogsBySakhi(
+          '44444444-4444-4444-4444-444444444444',
+          supervisorCaller,
+          'Bearer token',
+        ),
+      ).resolves.toEqual([]);
+    });
+
+    it('allows a MANAGER regardless of Sakhi assignment, without calling the Sakhi client', async () => {
+      repository.findRecentCallLogsBySakhi.mockResolvedValue([callLogRow]);
+      await expect(
+        service.listRecentCallLogsBySakhi(
+          '44444444-4444-4444-4444-444444444444',
+          managerCaller,
+          'Bearer token',
+        ),
+      ).resolves.toEqual([callLogRow]);
+      expect(sakhiClient.findById).not.toHaveBeenCalled();
+    });
+
+    it('allows an ADMIN regardless of Sakhi assignment, without calling the Sakhi client', async () => {
+      repository.findRecentCallLogsBySakhi.mockResolvedValue([callLogRow]);
+      await expect(
+        service.listRecentCallLogsBySakhi(
+          '44444444-4444-4444-4444-444444444444',
+          adminCaller,
+          'Bearer token',
+        ),
+      ).resolves.toEqual([callLogRow]);
+      expect(sakhiClient.findById).not.toHaveBeenCalled();
+    });
   });
 });
