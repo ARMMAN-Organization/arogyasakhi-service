@@ -2,6 +2,7 @@ import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
 import { z } from 'zod';
 import type { MediaAssetService } from './mediaAsset.service';
 import { createMediaAssetSchema } from './dto/create-mediaAsset.dto';
+import type { MediaAsset } from '../../../../node_modules/.prisma/client-media-service';
 import {
   asyncHandler,
   createDocumentedRouter,
@@ -13,29 +14,38 @@ import {
 
 extendZodWithOpenApi(z);
 
-// Request DTO annotated with examples for Swagger UI; validation behavior is
-// unchanged (`.openapi()` only attaches documentation metadata).
-// checksum is z.instanceof(Buffer) (see create-mediaAsset.dto.ts) —
-// zod-to-openapi cannot introspect z.instanceof() on its own, so an explicit
-// string/binary type is required here to short-circuit its type inference.
-const createMediaAssetRequestSchema = createMediaAssetSchema.extend({
-  checksum: createMediaAssetSchema.shape.checksum.openapi({
-    type: 'string',
-    format: 'binary',
-    description: 'SHA-256 checksum of the uploaded file.',
-  }),
-});
+/**
+ * Maps a Prisma row to its wire shape: `sizeBytes` is a `BigInt` on the
+ * Prisma model (backing the `Bytes`-range `size_bytes` column), but
+ * `JSON.stringify`/`res.json()` cannot serialize a raw `BigInt` — it throws
+ * at response time, after the DB write has already succeeded. Converting to
+ * a string here matches what `mediaAssetSchema` already documents
+ * ("BigInt serialized as string").
+ */
+function toResponse(asset: MediaAsset) {
+  return { ...asset, sizeBytes: asset.sizeBytes.toString() };
+}
 
 // Documentation-only view of the request body (passed via `doc.post`'s
-// `body` option, not to `validateBody`): `sizeBytes` is `z.coerce.bigint()`
-// on the real schema, required by Prisma's BigInt column, but
-// zod-to-openapi's own `.isOptionalSchema()` check calls `.isOptional()` on
-// it, which runs the real coercion against `undefined` and throws instead of
-// failing gracefully — no `.openapi()` metadata can suppress that, since the
-// crash happens before metadata is consulted. Substituting a plain
-// `z.string()` here only changes what Swagger *displays*; `validateBody`
-// below still validates/coerces the real bigint.
-const createMediaAssetDocSchema = createMediaAssetRequestSchema.extend({
+// `body` option, not to `validateBody`):
+// - `sizeBytes` is `z.coerce.bigint()` on the real schema, required by
+//   Prisma's BigInt column, but zod-to-openapi's own `.isOptionalSchema()`
+//   check calls `.isOptional()` on it, which runs the real coercion against
+//   `undefined` and throws instead of failing gracefully — no `.openapi()`
+//   metadata can suppress that, since the crash happens before metadata is
+//   consulted.
+// - `checksum` is a hex string piped through `.transform()` on the real
+//   schema (see create-mediaAsset.dto.ts) — zod-to-openapi cannot introspect
+//   a `ZodEffects`/transform chain and crashes doc generation at startup
+//   (same class of issue as z.coerce.*/z.lazy()/z.instanceof() elsewhere in
+//   this repo).
+// Substituting plain `z.string()` schemas here only changes what Swagger
+// *displays*; `validateBody` below still runs the real coercion/transform.
+const createMediaAssetDocSchema = createMediaAssetSchema.extend({
+  checksum: z.string().openapi({
+    example: 'a'.repeat(64),
+    description: '64-character hex-encoded SHA-256 checksum of the uploaded file.',
+  }),
   sizeBytes: z.string().openapi({
     example: '204800',
     description: 'File size in bytes.',
@@ -102,7 +112,7 @@ export function createMediaAssetRouter(service: MediaAssetService) {
     trustGatewayIdentity,
     requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER'),
     asyncHandler(async (_req, res) => {
-      res.json(ok(await service.list()));
+      res.json(ok((await service.list()).map(toResponse)));
     }),
   );
 
@@ -121,10 +131,10 @@ export function createMediaAssetRouter(service: MediaAssetService) {
     },
     trustGatewayIdentity,
     requireRoles('SAKHI'),
-    validateBody(createMediaAssetRequestSchema),
+    validateBody(createMediaAssetSchema),
     asyncHandler(async (req, res) => {
       const created = await service.create(req.body);
-      res.status(201).json(ok(created));
+      res.status(201).json(ok(toResponse(created)));
     }),
   );
 
