@@ -190,11 +190,14 @@ export function createBeneficiaryRouter(service: BeneficiaryService) {
       },
     },
     trustGatewayIdentity,
-    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER'),
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
     validate(listBeneficiariesQuerySchema, 'query'),
-    asyncHandler(async (req, res) => {
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
       const query = req.query as unknown as z.infer<typeof listBeneficiariesQuerySchema>;
-      res.json(ok(await service.list(query)));
+      res.json(ok(await service.list(query, req.user, authorizationHeader)));
     }),
   );
 

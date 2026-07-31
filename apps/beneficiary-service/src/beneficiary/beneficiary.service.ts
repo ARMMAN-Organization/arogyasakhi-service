@@ -5,6 +5,7 @@ import {
   notFound,
   normalizeForSearch,
   unprocessable,
+  type AuthenticatedUser,
 } from '@armman/service-commons';
 import type {
   BeneficiaryRiskConditionSummary,
@@ -16,6 +17,7 @@ import { computeBmi, withDecryptedName } from './beneficiary.mapper';
 import type { BeneficiaryListFilters, BeneficiaryRepository } from './beneficiary.repository';
 import { deriveFullName, type CreateBeneficiaryInput } from './dto/create-beneficiary.dto';
 import { resolveHealthBlockIdFromPhc } from '../geography/geography.client';
+import { listSakhiIdsForSupervisor } from '../sakhi/sakhi.client';
 
 const GESTATION_DAYS = 280;
 
@@ -37,11 +39,20 @@ export class BeneficiaryService {
   constructor(private readonly repository: BeneficiaryRepository) {}
 
   /**
-   * Lists beneficiary cases per SRS FR-S-9.2 / HLD's filter set (scope
-   * enforcement added with the auth layer). Each row's name is decrypted
-   * server-side for display — the search hash itself is never returned.
+   * Lists beneficiary cases per SRS FR-S-9.2 / HLD's filter set, scoped by
+   * the caller's role: a SAKHI only ever sees their own cases (their own id
+   * always wins over anything else), a SUPERVISOR only sees cases belonging
+   * to their own Sakhis (resolved via auth-service's existing
+   * `/projects/:projectId/sakhis`, filtered by supervisorId — no new
+   * auth-service endpoint), and MANAGER/ADMIN see everything unscoped. Each
+   * row's name is decrypted server-side for display — the search hash
+   * itself is never returned.
    */
-  async list(query: ListBeneficiariesQuery) {
+  async list(
+    query: ListBeneficiariesQuery,
+    caller: AuthenticatedUser,
+    authorizationHeader: string,
+  ) {
     const filters: BeneficiaryListFilters = {
       projectId: query.projectId,
       villageId: query.villageId,
@@ -54,6 +65,16 @@ export class BeneficiaryService {
         ? hashForSearch(normalizeForSearch(query.mobileNumber))
         : undefined,
     };
+
+    if (caller.roles.includes('SAKHI')) {
+      filters.sakhiId = caller.id;
+    } else if (caller.roles.includes('SUPERVISOR')) {
+      filters.sakhiIds = await listSakhiIdsForSupervisor(
+        caller.projectId ?? '',
+        caller.id,
+        authorizationHeader,
+      );
+    }
 
     const cases = await this.repository.findMany(filters);
     return cases.map(withDecryptedName);

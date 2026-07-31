@@ -48,6 +48,8 @@ export class BeneficiaryRepository {
     if (filters.atRiskOnly) {
       where.riskConditionSummaries = { some: { everAtRiskFlag: true } };
     }
+    if (filters.sakhiId) where.sakhiId = filters.sakhiId;
+    if (filters.sakhiIds) where.sakhiId = { in: filters.sakhiIds };
 
     return this.prisma.beneficiaryCase.findMany({
       where,
