@@ -1,0 +1,195 @@
+name: CD Dev
+
+# Redeploys the dev box (self-hosted runner on the box itself) with only the
+# services whose code actually changed.
+#
+# Also callable — redeploy-dev.yml uses it for manual runs. When `services` is
+# empty the affected set is computed; "all" or a comma-separated list overrides it.
+
+on:
+  push:
+    branches: [develop]
+  workflow_call:
+    inputs:
+      services:
+        description: 'Empty = only what changed. "all", or a comma-separated list of service names.'
+        type: string
+        required: false
+        default: ''
+
+# Never cancel a deploy in flight, and never run two at once: both would race
+# `git reset --hard` in the same directory on the same box. Queue instead.
+concurrency:
+  group: cd-dev
+  cancel-in-progress: false
+
+env:
+  DEV_WORKSPACE: ${{ vars.DEV_WORKSPACE || '/opt/dev/armaan/arogyasakhi-service' }}
+  # PM2 runs the services via `nx serve` in fork mode, so a reload restarts a
+  # webpack dev server that must rebuild before it listens. Measured at 12s for
+  # auth-service on an otherwise-quiet box; the margin here is for the case where
+  # a shared-lib change has every watcher rebuilding at once and the box is
+  # contended. Too tight fails a healthy deploy; too loose only delays reporting
+  # a broken one.
+  HEALTH_TIMEOUT_SECONDS: 120
+
+defaults:
+  run:
+    # Login shell so nvm's init is sourced. node/npm/npx/pm2 live under
+    # ~/.nvm/versions/node/<v>/bin and are absent from a non-login PATH, which
+    # is what a runner step gets by default.
+    shell: bash -leo pipefail {0}
+
+jobs:
+  detect:
+    runs-on: self-hosted
+    outputs:
+      matrix: ${{ steps.resolve.outputs.matrix }}
+      count: ${{ steps.resolve.outputs.count }}
+    steps:
+      # Proved first, because everything below depends on it and the failure
+      # mode ("pm2: command not found") is otherwise confusing.
+      - name: Verify toolchain is on PATH
+        run: |
+          which node npm npx pm2 git jq
+          echo "node $(node -v) · npm $(npm -v) · pm2 $(pm2 -v)"
+
+      - name: Sync workspace and resolve services to deploy
+        id: resolve
+        env:
+          SERVICES_INPUT: ${{ inputs.services }}
+        run: |
+          cd "$DEV_WORKSPACE"
+
+          # The box's current HEAD *is* what is deployed, so it is the only
+          # trustworthy base. Captured before fetching. This is deliberately not
+          # nrwl/nx-set-shas: that keys off the last *successful run*, so a single
+          # failed deploy would leave those services looking already-shipped and
+          # they would never be redeployed.
+          base=$(git rev-parse HEAD)
+
+          git fetch origin "${{ github.ref_name }}"
+          # FETCH_HEAD rather than github.sha: if runs queued behind the
+          # concurrency group, deploying the newest commit is correct, and the
+          # superseded run then sees base == target and does nothing.
+          target=$(git rev-parse FETCH_HEAD)
+          echo "base=$base target=$target"
+
+          # No `git clean` anywhere: the box legitimately holds untracked files
+          # (ecosystem.config.js — PM2's own config — create_envs.py, notes).
+          git reset --hard "$target"
+
+          if git diff --name-only "$base" "$target" | grep -qx 'package-lock.json'; then
+            echo "::warning::package-lock.json changed. Not running npm ci — the box is on $(node -v) while CI pins 20.11.0, and installing here is what causes lockfile drift. If a service fails to boot on a missing dependency, install manually."
+          fi
+
+          all_apps=$(npx nx show projects --type app --json)
+
+          requested=$(printf '%s' "${SERVICES_INPUT:-}" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
+          if [ "$requested" = 'all' ]; then
+            apps="$all_apps"
+          elif [ -n "$requested" ]; then
+            apps=$(printf '%s' "$requested" \
+              | jq -Rc 'split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0)) | unique')
+            unknown=$(jq -nc --argjson w "$apps" --argjson h "$all_apps" '$w - $h')
+            if [ "$(jq 'length' <<<"$unknown")" -gt 0 ]; then
+              echo "::error::Unknown service(s): $(jq -r 'join(", ")' <<<"$unknown")"
+              exit 1
+            fi
+          elif [ "$base" = "$target" ]; then
+            apps='[]'
+          else
+            apps=$(npx nx show projects --affected --type app --base="$base" --head="$target" --json)
+          fi
+
+          count=$(jq 'length' <<<"$apps")
+          echo "Deploying ($count): $(jq -r 'join(", ")' <<<"$apps")"
+
+          # env_secret is derived here because GitHub expressions have no
+          # upper-casing function and so cannot turn "auth-service" into
+          # ENV_AUTH_SERVICE on their own.
+          matrix=$(jq -c '{
+            include: [ .[] | {
+              service: .,
+              env_secret: ("ENV_" + (. | ascii_upcase | gsub("-"; "_")))
+            } ]
+          }' <<<"$apps")
+
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+      # `nx serve` needs these built; documented prerequisite of the box's
+      # ecosystem.config.js. Once per run, not once per service. Nx caches it,
+      # so it is near-free when the libs did not change.
+      - name: Rebuild shared libraries
+        if: steps.resolve.outputs.count != '0'
+        run: |
+          cd "$DEV_WORKSPACE"
+          npx nx run-many -t build --projects=service-commons,core
+
+  deploy:
+    needs: detect
+    if: needs.detect.outputs.count != '0'
+    runs-on: self-hosted
+    strategy:
+      # Sequential: 17 concurrent webpack cold-builds would exhaust the box
+      # (81.9% RAM at idle). fail-fast off so one bad service does not strand
+      # the rest un-deployed.
+      max-parallel: 1
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.detect.outputs.matrix) }}
+    steps:
+      - name: Write .env from GitHub secret
+        env:
+          # Passed via env, never as a shell argument — an argument is visible
+          # in `ps` to every user on the box.
+          ENV_BODY: ${{ secrets[matrix.env_secret] }}
+        run: |
+          cd "$DEV_WORKSPACE"
+          if [ -z "${ENV_BODY:-}" ]; then
+            echo "::warning::${{ matrix.service }}: secret ${{ matrix.env_secret }} is not set — reloading against the .env already on the box."
+            exit 0
+          fi
+          printf '%s\n' "$ENV_BODY" > "apps/${{ matrix.service }}/.env"
+          chmod 600 "apps/${{ matrix.service }}/.env"
+          echo "Wrote apps/${{ matrix.service }}/.env from ${{ matrix.env_secret }}"
+
+      - name: Reload and wait for readiness
+        env:
+          SVC: ${{ matrix.service }}
+        run: |
+          cd "$DEV_WORKSPACE"
+
+          # A service present in git but not in PM2 has never been bootstrapped
+          # on this box. Auto-starting it would boot it with no .env straight
+          # into its Zod fail-fast, so skip — but loudly, because a silently
+          # never-deployed service is the worst outcome here.
+          if ! pm2 describe "$SVC" >/dev/null 2>&1; then
+            echo "::warning::$SVC is not registered in PM2 — skipping. Bootstrap it once on the box with pm2 start, then it will deploy normally."
+            exit 0
+          fi
+
+          # PM2's own env is the authoritative port: it is what injects PORT
+          # into each service, so no port table is needed anywhere here.
+          port=$(pm2 jlist | jq -r --arg s "$SVC" '.[] | select(.name == $s) | .pm2_env.env.PORT // empty')
+          if [ -z "$port" ]; then
+            echo "::error::Could not determine PORT for $SVC from PM2."
+            exit 1
+          fi
+
+          pm2 reload "$SVC" --update-env
+
+          # `pm2 reload` exiting 0 only means the process was signalled, not
+          # that the app rebuilt and bound its socket. Health is mounted under
+          # the global api/v1 prefix.
+          url="http://localhost:$port/api/v1/health/ready"
+          deadline=$((SECONDS + HEALTH_TIMEOUT_SECONDS))
+          until curl -fsS -o /dev/null "$url"; do
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::$SVC not ready after ${HEALTH_TIMEOUT_SECONDS}s at $url"
+              pm2 logs "$SVC" --lines 40 --nostream || true
+              exit 1
+            fi
+            sleep 3
+          done
+          echo "$SVC ready on port $port"
