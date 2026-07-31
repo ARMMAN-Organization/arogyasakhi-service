@@ -1,0 +1,34 @@
+name: Redeploy Dev (manual)
+
+# Manual trigger for the dev deploy. Actions → "Redeploy Dev (manual)" → Run
+# workflow. All the logic lives in cd-dev.yml; this only supplies the input.
+#
+# What this is for:
+#   - forcing a redeploy of a service the affected-detection skipped
+#   - redeploying after creating or fixing an ENV_<SERVICE> secret
+#
+# What it is NOT: a rollback. By the time a deploy has failed the box's HEAD has
+# already advanced, so re-running deploys the same broken commit. Rolling back is
+# manual on the box:
+#   cd /opt/dev/armaan/arogyasakhi-service
+#   git reset --hard <previous-sha> && pm2 reload <service> --update-env
+#
+# NOTE: the branch you select in the Run-workflow dialog is the branch the dev
+# box gets reset to — dispatching from a feature branch deploys that branch.
+
+on:
+  workflow_dispatch:
+    inputs:
+      services:
+        description: 'Leave empty for only what changed. Or "all" (expensive — every service rebuilds), or a comma-separated list e.g. auth-service,rules-service'
+        type: string
+        required: false
+        default: ''
+
+jobs:
+  redeploy:
+    uses: ./.github/workflows/cd-dev.yml
+    with:
+      services: ${{ inputs.services }}
+    # Required for cd-dev.yml to read the per-service ENV_* secrets.
+    secrets: inherit
