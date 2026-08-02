@@ -1,6 +1,7 @@
 import { addDays } from '@armman/core';
 import {
   encryptPii,
+  forbidden,
   hashForSearch,
   notFound,
   normalizeForSearch,
@@ -69,8 +70,14 @@ export class BeneficiaryService {
     if (caller.roles.includes('SAKHI')) {
       filters.sakhiId = caller.id;
     } else if (caller.roles.includes('SUPERVISOR')) {
+      // Per the SRS, a Supervisor has exactly one project — a caller missing
+      // this claim is an invalid/inconsistent identity, not a "no project"
+      // case to silently degrade into a malformed `/projects//sakhis` path.
+      if (!caller.projectId) {
+        throw forbidden('Supervisor caller has no project scope.');
+      }
       filters.sakhiIds = await listSakhiIdsForSupervisor(
-        caller.projectId ?? '',
+        caller.projectId,
         caller.id,
         authorizationHeader,
       );

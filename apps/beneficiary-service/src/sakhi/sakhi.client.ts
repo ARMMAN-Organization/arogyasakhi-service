@@ -18,6 +18,12 @@ interface ApiSakhi {
  * Called through the gateway (per AUTH_SERVICE_BASE_URL) so the gateway can
  * verify `authorizationHeader` — the original Supervisor caller's own bearer
  * token, forwarded unchanged, matching geography.client.ts's convention.
+ *
+ * Reads the full response body with no pagination handling — safe today
+ * because `SakhiRepository.findByProject` (auth-service) queries with no
+ * `take`/`skip`. If that endpoint is ever paginated, this must change too,
+ * or a Supervisor with Sakhis beyond the first page would silently see an
+ * under-scoped (incomplete) beneficiary list instead of an error.
  */
 export async function listSakhiIdsForSupervisor(
   projectId: string,

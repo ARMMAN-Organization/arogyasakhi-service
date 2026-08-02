@@ -190,6 +190,18 @@ describe('BeneficiaryService', () => {
       expect(call.sakhiIds).toEqual([]);
     });
 
+    it('rejects a SUPERVISOR caller with no projectId instead of resolving Sakhis with an empty path', async () => {
+      await expect(
+        service.list(
+          {},
+          caller({ id: 'sup-1', roles: ['SUPERVISOR'], projectId: null }),
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(listSakhiIdsForSupervisorMock).not.toHaveBeenCalled();
+      expect(repository.findMany).not.toHaveBeenCalled();
+    });
+
     it('MANAGER caller sees all beneficiaries — no sakhi scoping applied', async () => {
       repository.findMany.mockResolvedValue([]);
 
