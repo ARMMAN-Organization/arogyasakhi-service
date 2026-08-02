@@ -22,6 +22,21 @@ export const updateAttendanceSchema = z
   .object({
     attendance: z.array(attendanceEntrySchema).min(1),
   })
-  .strict();
+  .strict()
+  .refine(
+    (data) => {
+      const ids = data.attendance.map((entry) => entry.sakhiId);
+      return new Set(ids).size === ids.length;
+    },
+    {
+      // There is no DB unique constraint on (eventId, sakhiId) — see
+      // operations.repository.ts's upsertAttendance comment — so a duplicate
+      // sakhiId here would silently create two rows for the same Sakhi
+      // instead of one, since upsertAttendance's existing-row lookup runs
+      // once before the loop and can't see a sibling entry's insert.
+      message: 'attendance: sakhiId must not repeat within one submission.',
+      path: ['attendance'],
+    },
+  );
 
 export type UpdateAttendanceInput = z.infer<typeof updateAttendanceSchema>;

@@ -206,15 +206,16 @@ export function createOperationsRouter(service: OperationsService) {
       responses: {
         200: { description: 'Supervisor event', schema: envelope(supervisorEventSchema) },
         401: { description: 'Unauthenticated', schema: apiErrorSchema },
-        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+        403: { description: 'Caller does not own this event', schema: apiErrorSchema },
         404: { description: 'Event not found', schema: apiErrorSchema },
       },
     },
     trustGatewayIdentity,
     requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
     validate(eventIdParamsSchema, 'params'),
-    asyncHandler(async (req, res) => {
-      res.json(ok(await service.getEvent(req.params.id)));
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      res.json(ok(await service.getEvent(req.params.id, req.user)));
     }),
   );
 

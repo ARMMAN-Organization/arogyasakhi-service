@@ -149,14 +149,33 @@ describe('OperationsService', () => {
   });
 
   describe('getEvent', () => {
-    it('returns the event when it exists', async () => {
+    it('returns the event when it exists and is owned by the caller', async () => {
       repository.findEventById.mockResolvedValue(eventRow);
-      await expect(service.getEvent(eventRow.id)).resolves.toBe(eventRow);
+      await expect(service.getEvent(eventRow.id, supervisorCaller)).resolves.toBe(eventRow);
     });
 
     it('throws 404 when the event does not exist', async () => {
       repository.findEventById.mockResolvedValue(null);
-      await expect(service.getEvent('missing')).rejects.toMatchObject({ status: 404 });
+      await expect(service.getEvent('missing', supervisorCaller)).rejects.toMatchObject({
+        status: 404,
+      });
+    });
+
+    it('rejects a Supervisor who does not own the event', async () => {
+      repository.findEventById.mockResolvedValue(eventRow);
+      await expect(service.getEvent(eventRow.id, otherSupervisorCaller)).rejects.toMatchObject({
+        status: 403,
+      });
+    });
+
+    it('allows MANAGER to fetch any event', async () => {
+      repository.findEventById.mockResolvedValue(eventRow);
+      await expect(service.getEvent(eventRow.id, managerCaller)).resolves.toBe(eventRow);
+    });
+
+    it('allows ADMIN to fetch any event', async () => {
+      repository.findEventById.mockResolvedValue(eventRow);
+      await expect(service.getEvent(eventRow.id, adminCaller)).resolves.toBe(eventRow);
     });
   });
 

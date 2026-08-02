@@ -58,9 +58,13 @@ export class OperationsService {
     return this.repository.createEvent(dto);
   }
 
-  async getEvent(id: string) {
+  /** A SUPERVISOR may only fetch their own events. MANAGER and ADMIN are unrestricted. */
+  async getEvent(id: string, caller: CallerIdentity) {
     const event = await this.repository.findEventById(id);
     if (!event) throw notFound('Event not found.');
+    if (event.supervisorId !== caller.id && !isPrivileged(caller)) {
+      throw forbidden('You do not have access to this event.');
+    }
     return event;
   }
 
