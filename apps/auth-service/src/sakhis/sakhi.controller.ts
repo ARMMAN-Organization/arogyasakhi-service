@@ -21,6 +21,8 @@ const projectIdParamsSchema = z
   })
   .strict();
 
+// sakhiId is the Sakhi's users.user_id (the JWT sub), not the sakhi_profiles
+// row's own PK — see sakhi.service.ts's toApiSakhi() comment.
 const sakhiIdParamsSchema = z
   .object({
     sakhiId: z.string().uuid().openapi({ example: 'c9f8e2b1-6a3d-4f0e-9b1a-2d4e5f6a7b8c' }),

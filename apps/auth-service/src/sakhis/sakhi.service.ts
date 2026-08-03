@@ -11,11 +11,18 @@ export interface CallerScope {
  * (panToken/aadhaarToken/bankAccountToken), passwordHash, or other audit
  * columns. Combines User (identity) and SakhiProfile (program assignment)
  * fields, since a Sakhi is 1:1 across the two tables.
+ *
+ * `sakhiId` is the Sakhi's `users.user_id` (not the `sakhi_profiles` row's
+ * own PK) — this is the id every other service treats as "the Sakhi's
+ * identity" (it's the JWT `sub`, and what `beneficiary_cases.sakhi_id` and
+ * beneficiary-service's own-case filter both key on). Returning the profile
+ * PK here instead would silently break Supervisor-scoped queries downstream,
+ * since it's a different id for the same person.
  */
 function toApiSakhi(profile: Record<string, unknown>) {
   const user = profile.user as Record<string, unknown>;
   return {
-    sakhiId: profile.id,
+    sakhiId: user.id,
     displayName: user.displayName,
     mobileNumber: user.mobileNumber,
     status: user.status,

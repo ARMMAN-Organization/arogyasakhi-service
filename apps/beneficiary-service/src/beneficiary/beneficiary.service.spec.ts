@@ -1,11 +1,13 @@
 import { randomBytes } from 'node:crypto';
-import { encryptPii } from '@armman/service-commons';
+import { encryptPii, type AuthenticatedUser } from '@armman/service-commons';
 import { BeneficiaryService } from './beneficiary.service';
 import type { BeneficiaryRepository } from './beneficiary.repository';
 import type { CreateBeneficiaryInput } from './dto/create-beneficiary.dto';
 import { resolveHealthBlockIdFromPhc } from '../geography/geography.client';
+import { listSakhiIdsForSupervisor } from '../sakhi/sakhi.client';
 
 jest.mock('../geography/geography.client');
+jest.mock('../sakhi/sakhi.client');
 
 describe('BeneficiaryService', () => {
   const originalEnv = { ...process.env };
@@ -21,6 +23,17 @@ describe('BeneficiaryService', () => {
   const CALLER_ID = '99999999-9999-9999-9999-999999999999';
   const AUTH_HEADER = 'Bearer test-token';
   const resolveHealthBlockIdFromPhcMock = jest.mocked(resolveHealthBlockIdFromPhc);
+  const listSakhiIdsForSupervisorMock = jest.mocked(listSakhiIdsForSupervisor);
+
+  function caller(overrides: Partial<AuthenticatedUser> = {}): AuthenticatedUser {
+    return {
+      id: CALLER_ID,
+      roles: ['SAKHI'],
+      projectId: '11111111-1111-1111-1111-111111111111',
+      geographyUnitId: null,
+      ...overrides,
+    };
+  }
 
   // All SRS FR-S-2.1 required PII fields present (phone, dob, the 7 geography
   // levels, rchNumber). Geography ids are uuid-shaped to satisfy the type.
@@ -96,7 +109,7 @@ describe('BeneficiaryService', () => {
         { id: 'x', pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') } },
       ] as never);
 
-      const result = await service.list({});
+      const result = await service.list({}, caller({ roles: ['ADMIN'] }), AUTH_HEADER);
 
       expect(result).toEqual([
         expect.objectContaining({
@@ -109,14 +122,18 @@ describe('BeneficiaryService', () => {
     it('passes query filters through to the repository as search hashes/scalars', async () => {
       repository.findMany.mockResolvedValue([]);
 
-      await service.list({
-        projectId: 'project-1',
-        status: 'ACTIVE',
-        caseType: 'MOTHER',
-        atRiskOnly: true,
-        name: 'Jane Doe',
-        mobileNumber: '9876543210',
-      });
+      await service.list(
+        {
+          projectId: 'project-1',
+          status: 'ACTIVE',
+          caseType: 'MOTHER',
+          atRiskOnly: true,
+          name: 'Jane Doe',
+          mobileNumber: '9876543210',
+        },
+        caller({ roles: ['ADMIN'] }),
+        AUTH_HEADER,
+      );
 
       const call = repository.findMany.mock.calls[0][0];
       expect(call.projectId).toBe('project-1');
@@ -125,6 +142,96 @@ describe('BeneficiaryService', () => {
       expect(call.atRiskOnly).toBe(true);
       expect(call.nameHash).toBeInstanceOf(Buffer);
       expect(call.phoneHash).toBeInstanceOf(Buffer);
+    });
+
+    it('SAKHI caller is forced to see only their own cases, regardless of query params', async () => {
+      repository.findMany.mockResolvedValue([]);
+
+      await service.list(
+        { projectId: 'some-other-project' },
+        caller({ id: 'sakhi-1', roles: ['SAKHI'] }),
+        AUTH_HEADER,
+      );
+
+      const call = repository.findMany.mock.calls[0][0];
+      expect(call.sakhiId).toBe('sakhi-1');
+      expect(call.sakhiIds).toBeUndefined();
+      expect(listSakhiIdsForSupervisorMock).not.toHaveBeenCalled();
+    });
+
+    it('SUPERVISOR caller sees only their own Sakhis, resolved via the Sakhi lookup', async () => {
+      repository.findMany.mockResolvedValue([]);
+      listSakhiIdsForSupervisorMock.mockResolvedValue(['sakhi-a', 'sakhi-b']);
+
+      await service.list(
+        {},
+        caller({ id: 'sup-1', roles: ['SUPERVISOR'], projectId: 'project-1' }),
+        AUTH_HEADER,
+      );
+
+      expect(listSakhiIdsForSupervisorMock).toHaveBeenCalledWith('project-1', 'sup-1', AUTH_HEADER);
+      const call = repository.findMany.mock.calls[0][0];
+      expect(call.sakhiIds).toEqual(['sakhi-a', 'sakhi-b']);
+      expect(call.sakhiId).toBeUndefined();
+    });
+
+    it('SUPERVISOR with zero Sakhis gets an empty result, not all beneficiaries', async () => {
+      listSakhiIdsForSupervisorMock.mockResolvedValue([]);
+      repository.findMany.mockResolvedValue([]);
+
+      const result = await service.list(
+        {},
+        caller({ id: 'sup-1', roles: ['SUPERVISOR'] }),
+        AUTH_HEADER,
+      );
+
+      expect(result).toEqual([]);
+      const call = repository.findMany.mock.calls[0][0];
+      expect(call.sakhiIds).toEqual([]);
+    });
+
+    it('rejects a SUPERVISOR caller with no projectId instead of resolving Sakhis with an empty path', async () => {
+      await expect(
+        service.list(
+          {},
+          caller({ id: 'sup-1', roles: ['SUPERVISOR'], projectId: null }),
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(listSakhiIdsForSupervisorMock).not.toHaveBeenCalled();
+      expect(repository.findMany).not.toHaveBeenCalled();
+    });
+
+    it('MANAGER caller sees all beneficiaries — no sakhi scoping applied', async () => {
+      repository.findMany.mockResolvedValue([]);
+
+      await service.list({}, caller({ roles: ['MANAGER'] }), AUTH_HEADER);
+
+      const call = repository.findMany.mock.calls[0][0];
+      expect(call.sakhiId).toBeUndefined();
+      expect(call.sakhiIds).toBeUndefined();
+      expect(listSakhiIdsForSupervisorMock).not.toHaveBeenCalled();
+    });
+
+    it('ADMIN caller sees all beneficiaries — no sakhi scoping applied', async () => {
+      repository.findMany.mockResolvedValue([]);
+
+      await service.list({}, caller({ roles: ['ADMIN'] }), AUTH_HEADER);
+
+      const call = repository.findMany.mock.calls[0][0];
+      expect(call.sakhiId).toBeUndefined();
+      expect(call.sakhiIds).toBeUndefined();
+    });
+
+    it("propagates an auth-service failure while resolving a Supervisor's Sakhis", async () => {
+      listSakhiIdsForSupervisorMock.mockRejectedValue(
+        Object.assign(new Error('bad gateway'), { status: 502 }),
+      );
+
+      await expect(
+        service.list({}, caller({ roles: ['SUPERVISOR'] }), AUTH_HEADER),
+      ).rejects.toMatchObject({ status: 502 });
+      expect(repository.findMany).not.toHaveBeenCalled();
     });
 
     it('passes through risk condition summaries and status history from the repository', async () => {
@@ -159,6 +266,35 @@ describe('BeneficiaryService', () => {
     it('throws 404 when the case is not found', async () => {
       repository.findById.mockResolvedValue(null);
       await expect(service.getById('missing')).rejects.toMatchObject({ status: 404 });
+    });
+
+    it('passes through socioDemographics from the repository', async () => {
+      const found = {
+        id: 'x',
+        pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
+        socioDemographics: { familyMembersCount: 4, childrenUnder5Count: 1 },
+      };
+      repository.findById.mockResolvedValue(found as never);
+
+      const result = await service.getById('x');
+
+      expect(result.socioDemographics).toMatchObject({
+        familyMembersCount: 4,
+        childrenUnder5Count: 1,
+      });
+    });
+
+    it('returns null socioDemographics for a case with no row yet', async () => {
+      const found = {
+        id: 'x',
+        pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
+        socioDemographics: null,
+      };
+      repository.findById.mockResolvedValue(found as never);
+
+      const result = await service.getById('x');
+
+      expect(result.socioDemographics).toBeNull();
     });
   });
 

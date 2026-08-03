@@ -16,6 +16,19 @@ const mediaAssetTypeSchema = z.enum([
 ]);
 
 /**
+ * SHA-256 checksum, sent as a 64-char hex string (the only representation a
+ * JSON request body can carry) and converted to the `Buffer` the `Bytes`
+ * Prisma column expects. `z.instanceof(Buffer)` was used here previously,
+ * but `express.json()` never produces a `Buffer` from a JSON field — that
+ * made this endpoint unreachable over real HTTP with any client.
+ */
+const checksumSchema = z
+  .string()
+  .trim()
+  .regex(/^[0-9a-f]{64}$/i, 'must be a 64-character hex-encoded SHA-256 checksum')
+  .transform((hex) => Buffer.from(hex, 'hex'));
+
+/**
  * Validation schema for creating a media asset. `.strict()` rejects unknown
  * fields, matching the previous global ValidationPipe `forbidNonWhitelisted: true`.
  */
@@ -23,7 +36,7 @@ export const createMediaAssetSchema = z
   .object({
     assetType: mediaAssetTypeSchema,
     storageUri: z.string().trim().min(1).max(512),
-    checksum: z.instanceof(Buffer),
+    checksum: checksumSchema,
     mimeType: z.string().trim().min(1).max(120),
     sizeBytes: z.coerce.bigint(),
     uploadedByUserId: z.string().uuid().optional(),

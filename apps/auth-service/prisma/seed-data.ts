@@ -46,12 +46,13 @@ export const ROLES: { roleCode: string; roleName: string; description: string }[
  * ReferralType, ClosureReason), so each service's migration can backfill its
  * new lookup-value-id column by looking up the row with a matching code.
  *
- * PHONE_OWNER and EDUCATION_LEVEL have no confirmed source yet — the SRS
- * cites an external "Revised App Form Final (20 March 2026)" Excel document
- * as the authoritative source for these two categories' values, and that
- * document is not available in this repo. The values below are provisional
- * placeholders (common options in Indian maternal-health programs) and MUST
- * be reviewed/replaced once the real source document is available.
+ * PHONE_OWNER, EDUCATION_LEVEL, MOBILE_NETWORK_AVAILABILITY,
+ * PARTNER_OCCUPATION, MIGRATION_PATTERN, MONTHLY_INCOME_BRACKET, RELIGION,
+ * and SOCIAL_CATEGORY value sets are sourced from the "Revised App Form
+ * Final (20 March 2026)" Excel document (transcribed at
+ * docs/Revised_App_Form_Final_20.3.26.xlsx.md in beneficiary-service,
+ * Registration_PW_D sheet rows 23-32) — the SRS's authoritative source for
+ * these categories, now available in-repo.
  */
 export const LOOKUP_CATEGORIES: {
   categoryCode: string;
@@ -74,26 +75,140 @@ export const LOOKUP_CATEGORIES: {
     categoryCode: 'PHONE_OWNER',
     categoryName: 'Phone Owner',
     description:
-      'PROVISIONAL — placeholder values pending the "Revised App Form Final (20 March 2026)" source document.',
+      'Registration form "Who owns the phone?" (Revised App Form Final, Registration_PW_D row 23).',
     values: [
       { valueCode: 'SELF', valueLabel: 'Self', sortOrder: 0 },
       { valueCode: 'HUSBAND', valueLabel: 'Husband', sortOrder: 1 },
-      { valueCode: 'FATHER_IN_LAW', valueLabel: 'Father-in-law', sortOrder: 2 },
-      { valueCode: 'OTHER_FAMILY_MEMBER', valueLabel: 'Other family member', sortOrder: 3 },
+      { valueCode: 'FAMILY_MEMBER', valueLabel: 'Family member', sortOrder: 2 },
+      { valueCode: 'ASHA', valueLabel: 'ASHA', sortOrder: 3 },
+      { valueCode: 'NEIGHBOUR', valueLabel: 'Neighbour', sortOrder: 4 },
     ],
   },
   {
     categoryCode: 'EDUCATION_LEVEL',
     categoryName: 'Education Level',
     description:
-      'PROVISIONAL — placeholder values pending the "Revised App Form Final (20 March 2026)" source document.',
+      'Registration form "Highest level of education completed" — shared by beneficiary and partner education questions (Revised App Form Final, Registration_PW_D rows 25-26).',
     values: [
-      { valueCode: 'ILLITERATE', valueLabel: 'Illiterate', sortOrder: 0 },
-      { valueCode: 'PRIMARY', valueLabel: 'Primary', sortOrder: 1 },
-      { valueCode: 'SECONDARY', valueLabel: 'Secondary', sortOrder: 2 },
-      { valueCode: 'HIGHER_SECONDARY', valueLabel: 'Higher secondary', sortOrder: 3 },
-      { valueCode: 'GRADUATE', valueLabel: 'Graduate', sortOrder: 4 },
-      { valueCode: 'POST_GRADUATE', valueLabel: 'Post-graduate', sortOrder: 5 },
+      { valueCode: 'NO_FORMAL_EDUCATION', valueLabel: 'No formal education', sortOrder: 0 },
+      { valueCode: 'PRIMARY', valueLabel: 'Primary education (Class 1-5)', sortOrder: 1 },
+      {
+        valueCode: 'UPPER_PRIMARY_MIDDLE',
+        valueLabel: 'Upper primary / Middle school (Class 6-9)',
+        sortOrder: 2,
+      },
+      { valueCode: 'TENTH_PASS', valueLabel: '10th Pass', sortOrder: 3 },
+      { valueCode: 'TWELFTH_PASS', valueLabel: '12th Pass', sortOrder: 4 },
+      { valueCode: 'DIPLOMA', valueLabel: 'Diploma', sortOrder: 5 },
+      { valueCode: 'GRADUATE', valueLabel: 'Graduate (College degree)', sortOrder: 6 },
+      { valueCode: 'POST_GRADUATE', valueLabel: 'Post Graduate and above', sortOrder: 7 },
+    ],
+  },
+  {
+    categoryCode: 'MOBILE_NETWORK_AVAILABILITY',
+    categoryName: 'Mobile Network Availability',
+    description:
+      'Registration form "Availability of Mobile Network" (Revised App Form Final, Registration_PW_D row 24).',
+    values: [
+      { valueCode: 'NO_NETWORK', valueLabel: 'No Network', sortOrder: 0 },
+      {
+        valueCode: 'VERY_POOR_NETWORK',
+        valueLabel: 'Very Poor Network (Have to go height which is 10 minutes walk away)',
+        sortOrder: 1,
+      },
+      {
+        valueCode: 'AVAILABLE_OUTSIDE_HOME_SPECIFIC_TIME',
+        valueLabel: 'Network Available outside the home at some specific time',
+        sortOrder: 2,
+      },
+      {
+        valueCode: 'AVAILABLE_OUTSIDE_HOME_ALL_TIME',
+        valueLabel: 'Network available only outside home all time',
+        sortOrder: 3,
+      },
+      { valueCode: 'FULL_NETWORK_AVAILABLE', valueLabel: 'Full Network Available', sortOrder: 4 },
+    ],
+  },
+  {
+    categoryCode: 'PARTNER_OCCUPATION',
+    categoryName: 'Partner Occupation',
+    description:
+      'Registration form "Occupation of your partner" (Revised App Form Final, Registration_PW_D row 27).',
+    values: [
+      { valueCode: 'LABOUR', valueLabel: 'Labour', sortOrder: 0 },
+      { valueCode: 'PRIVATE_JOB', valueLabel: 'Private Job', sortOrder: 1 },
+      { valueCode: 'GOVERNMENT_JOB', valueLabel: 'Government Job', sortOrder: 2 },
+      { valueCode: 'BUSINESS', valueLabel: 'Business', sortOrder: 3 },
+      { valueCode: 'FARMER', valueLabel: 'Farmer', sortOrder: 4 },
+      { valueCode: 'OTHER', valueLabel: 'Other', sortOrder: 5 },
+    ],
+  },
+  {
+    categoryCode: 'MIGRATION_PATTERN',
+    categoryName: 'Migration Pattern',
+    description:
+      'Registration form "Household\'s migration pattern" (Revised App Form Final, Registration_PW_D row 29).',
+    values: [
+      { valueCode: 'PERMANENT_MIGRATION', valueLabel: 'Permanent migration', sortOrder: 0 },
+      {
+        valueCode: 'SEASONAL_MIGRATION',
+        valueLabel: 'Seasonal migration (leave for work during specific months)',
+        sortOrder: 1,
+      },
+      {
+        valueCode: 'CIRCULAR_MIGRATION',
+        valueLabel: 'Circular migration (move between two places repeatedly)',
+        sortOrder: 2,
+      },
+      {
+        valueCode: 'TEMPORARY_MIGRATION_FOR_EMPLOYMENT',
+        valueLabel: 'Temporary migration for employment',
+        sortOrder: 3,
+      },
+      {
+        valueCode: 'DISPLACEMENT_DUE_TO_CRISIS',
+        valueLabel: 'Displacement due to crisis (disaster, conflict, eviction)',
+        sortOrder: 4,
+      },
+    ],
+  },
+  {
+    categoryCode: 'MONTHLY_INCOME_BRACKET',
+    categoryName: 'Monthly Income Bracket',
+    description:
+      'Registration form "Income of the family per month" (Revised App Form Final, Registration_PW_D row 30).',
+    values: [
+      { valueCode: 'UPTO_10000', valueLabel: '<=10000', sortOrder: 0 },
+      { valueCode: 'FROM_10001_TO_15000', valueLabel: '10001-15000', sortOrder: 1 },
+      { valueCode: 'FROM_15001_TO_20000', valueLabel: '15001-20000', sortOrder: 2 },
+      { valueCode: 'FROM_20001_TO_25000', valueLabel: '20001-25000', sortOrder: 3 },
+      { valueCode: 'ABOVE_25000', valueLabel: '>25000', sortOrder: 4 },
+    ],
+  },
+  {
+    categoryCode: 'RELIGION',
+    categoryName: 'Religion',
+    description: 'Registration form "Religion" (Revised App Form Final, Registration_PW_D row 31).',
+    values: [
+      { valueCode: 'BUDDHIST', valueLabel: 'Buddhist', sortOrder: 0 },
+      { valueCode: 'CHRISTIAN', valueLabel: 'Christian', sortOrder: 1 },
+      { valueCode: 'HINDU', valueLabel: 'Hindu', sortOrder: 2 },
+      { valueCode: 'JAIN', valueLabel: 'Jain', sortOrder: 3 },
+      { valueCode: 'MUSLIM', valueLabel: 'Muslim', sortOrder: 4 },
+      { valueCode: 'SIKH', valueLabel: 'Sikh', sortOrder: 5 },
+      { valueCode: 'OTHER', valueLabel: 'Other', sortOrder: 6 },
+    ],
+  },
+  {
+    categoryCode: 'SOCIAL_CATEGORY',
+    categoryName: 'Social Category',
+    description: 'Registration form "Category" (Revised App Form Final, Registration_PW_D row 32).',
+    values: [
+      { valueCode: 'GENERAL', valueLabel: 'General', sortOrder: 0 },
+      { valueCode: 'OBC', valueLabel: 'OBC', sortOrder: 1 },
+      { valueCode: 'OTHER', valueLabel: 'Other', sortOrder: 2 },
+      { valueCode: 'SC', valueLabel: 'SC', sortOrder: 3 },
+      { valueCode: 'ST', valueLabel: 'ST', sortOrder: 4 },
     ],
   },
   {

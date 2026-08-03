@@ -12,6 +12,14 @@ export interface BeneficiaryListFilters {
   nameHash?: Buffer;
   /** hashForSearch(normalizeForSearch(mobileNumber)) — exact-match only. */
   phoneHash?: Buffer;
+  /** Role-based scoping: a SAKHI caller only ever sees their own cases. */
+  sakhiId?: string;
+  /**
+   * Role-based scoping: a SUPERVISOR caller only sees cases belonging to
+   * their own Sakhis. An empty array must return no rows — it is a
+   * default-deny result (supervisor has no Sakhis), never "no filter".
+   */
+  sakhiIds?: string[];
 }
 
 export interface DuplicateSearchTokens {

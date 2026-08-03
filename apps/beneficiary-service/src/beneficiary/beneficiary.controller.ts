@@ -32,6 +32,10 @@ const piiResponseSchema = z.object({
   // Decrypted server-side for display (see BeneficiaryService.list/getById) —
   // never the raw fullNameEnc/fullNameSearchHash.
   fullName: z.string().openapi({ example: 'Jane Doe' }),
+  // Decrypted server-side for display, same as fullName — never the raw
+  // phoneEnc/addressLineEnc columns.
+  mobileNumber: z.string().nullable().openapi({ example: '9876543210' }),
+  address: z.string().nullable(),
   villageId: z.string().uuid().nullable(),
   padaId: z.string().uuid().nullable(),
   healthSubCentreId: z.string().uuid().nullable(),
@@ -83,6 +87,25 @@ const childCaseDetailsSchema = z.object({
   linkedAncCase: z.boolean(),
 });
 
+// Registration-time socio-demographic answers per SRS v3.0 / "Revised App
+// Form Final (20 March 2026)" Registration_PW_D sheet, rows 23-34.
+// *LookupId fields reference lookup_values owned by another service (plain
+// scalar ids per the forklift rule) — not resolved to labels here.
+const socioDemographicsSchema = z.object({
+  phoneOwnerLookupId: z.string().uuid().nullable(),
+  mobileNetworkAvailabilityLookupId: z.string().uuid().nullable(),
+  educationLevelLookupId: z.string().uuid().nullable(),
+  partnerEducationLevelLookupId: z.string().uuid().nullable(),
+  partnerOccupationLookupId: z.string().uuid().nullable(),
+  yearsInVillage: z.number().int().nullable(),
+  migrationPatternLookupId: z.string().uuid().nullable(),
+  monthlyIncomeLookupId: z.string().uuid().nullable(),
+  religionLookupId: z.string().uuid().nullable(),
+  socialCategoryLookupId: z.string().uuid().nullable(),
+  familyMembersCount: z.number().int().nullable(),
+  childrenUnder5Count: z.number().int().nullable(),
+});
+
 const consentRecordSchema = z.object({
   consentType: z.string().openapi({ example: 'PROGRAM_ENROLLMENT' }),
   consentStatus: z.enum(API_CONSENT_STATUSES),
@@ -118,6 +141,7 @@ const beneficiaryCaseDetailSchema = beneficiaryCaseSchema.extend({
   consentRecords: z.array(consentRecordSchema),
   riskConditionSummaries: z.array(riskConditionSummarySchema),
   statusHistory: z.array(statusHistoryEntrySchema),
+  socioDemographics: socioDemographicsSchema.nullable(),
 });
 
 // List rows carry PII (decrypted name) but not the full detail-view
@@ -166,11 +190,14 @@ export function createBeneficiaryRouter(service: BeneficiaryService) {
       },
     },
     trustGatewayIdentity,
-    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER'),
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
     validate(listBeneficiariesQuerySchema, 'query'),
-    asyncHandler(async (req, res) => {
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
       const query = req.query as unknown as z.infer<typeof listBeneficiariesQuerySchema>;
-      res.json(ok(await service.list(query)));
+      res.json(ok(await service.list(query, req.user, authorizationHeader)));
     }),
   );
 

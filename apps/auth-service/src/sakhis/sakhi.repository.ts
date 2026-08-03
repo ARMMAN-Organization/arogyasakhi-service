@@ -12,9 +12,12 @@ export class SakhiRepository {
     });
   }
 
-  findById(id: string) {
+  /** `userId` here is the Sakhi's `users.user_id` — the id `GET /sakhis/:sakhiId`
+   * takes and the id `toApiSakhi()` returns as `sakhiId`, not the
+   * `sakhi_profiles` row's own PK (see sakhi.service.ts's `toApiSakhi` comment). */
+  findById(userId: string) {
     return this.prisma.sakhiProfile.findFirst({
-      where: { id, isDeleted: false },
+      where: { userId, isDeleted: false },
       include: { user: true },
     });
   }

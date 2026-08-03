@@ -28,6 +28,7 @@ describe('SakhiService', () => {
     aadhaarToken: Buffer.from('secret'),
     bankAccountToken: Buffer.from('secret'),
     user: {
+      id: 'user-1',
       displayName: 'Priya Sharma',
       mobileNumber: '+919000000123',
       status: 'ACTIVE',
@@ -43,7 +44,7 @@ describe('SakhiService', () => {
 
       expect(result).toEqual([
         {
-          sakhiId: 'sakhi-1',
+          sakhiId: 'user-1',
           displayName: 'Priya Sharma',
           mobileNumber: '+919000000123',
           status: 'ACTIVE',
@@ -92,9 +93,9 @@ describe('SakhiService', () => {
     it('returns the projected Sakhi', async () => {
       repository.findById.mockResolvedValue(rawProfile() as never);
 
-      const result = await service.getById('sakhi-1', unscopedCaller);
+      const result = await service.getById('user-1', unscopedCaller);
 
-      expect(result).toMatchObject({ sakhiId: 'sakhi-1', displayName: 'Priya Sharma' });
+      expect(result).toMatchObject({ sakhiId: 'user-1', displayName: 'Priya Sharma' });
       expect(result).not.toHaveProperty('passwordHash');
     });
 
@@ -107,14 +108,14 @@ describe('SakhiService', () => {
 
     it('allows a scoped caller (SUPERVISOR) to fetch a Sakhi in their own project', async () => {
       repository.findById.mockResolvedValue(rawProfile() as never);
-      await expect(service.getById('sakhi-1', scopedCaller('project-1'))).resolves.toMatchObject({
-        sakhiId: 'sakhi-1',
+      await expect(service.getById('user-1', scopedCaller('project-1'))).resolves.toMatchObject({
+        sakhiId: 'user-1',
       });
     });
 
     it('rejects a scoped caller fetching a Sakhi from a different project', async () => {
       repository.findById.mockResolvedValue(rawProfile() as never);
-      await expect(service.getById('sakhi-1', scopedCaller('project-2'))).rejects.toMatchObject({
+      await expect(service.getById('user-1', scopedCaller('project-2'))).rejects.toMatchObject({
         status: 403,
       });
     });

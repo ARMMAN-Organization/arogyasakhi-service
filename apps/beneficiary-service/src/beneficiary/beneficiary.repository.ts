@@ -48,6 +48,8 @@ export class BeneficiaryRepository {
     if (filters.atRiskOnly) {
       where.riskConditionSummaries = { some: { everAtRiskFlag: true } };
     }
+    if (filters.sakhiId) where.sakhiId = filters.sakhiId;
+    if (filters.sakhiIds) where.sakhiId = { in: filters.sakhiIds };
 
     return this.prisma.beneficiaryCase.findMany({
       where,
@@ -70,6 +72,7 @@ export class BeneficiaryRepository {
         // status timeline, not just the case/PII/consent rows.
         riskConditionSummaries: true,
         statusHistory: { orderBy: { changedAt: 'desc' } },
+        socioDemographics: true,
       },
     });
   }
