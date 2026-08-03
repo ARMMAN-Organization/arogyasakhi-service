@@ -3,6 +3,8 @@ import type { SakhiRepository } from './sakhi.repository';
 
 /** The calling principal's own scope, as carried on their JWT/trusted-identity headers. */
 export interface CallerScope {
+  readonly id: string;
+  readonly roles: string[];
   readonly projectId: string | null;
 }
 
@@ -34,6 +36,19 @@ function toApiSakhi(profile: Record<string, unknown>) {
   };
 }
 
+/**
+ * MANAGER and ADMIN are unrestricted across all Sakhi-scoping checks —
+ * checked as the absence of an elevated role, not the presence of a
+ * restrictive one (SUPERVISOR), since a caller can hold multiple role
+ * assignments at once (see auth.service.ts's issueTokens) and must not be
+ * scoped down just because one of their roles is restrictive. Matches
+ * the same isPrivileged() pattern in
+ * supervisor-operations-service/operations.service.ts.
+ */
+function isPrivileged(caller: CallerScope): boolean {
+  return caller.roles.includes('MANAGER') || caller.roles.includes('ADMIN');
+}
+
 /** Business logic for Sakhi profile reads. */
 export class SakhiService {
   constructor(private readonly repository: SakhiRepository) {}
@@ -41,15 +56,25 @@ export class SakhiService {
   /**
    * A caller with a project scope on their JWT (typically SUPERVISOR — one
    * project per Supervisor per SRS) may only see that project's Sakhis. A
-   * caller with no project scope (MANAGER/ADMIN, who oversee multiple
-   * projects — HLD's dashboard "Project Selector") is unrestricted here.
+   * privileged caller (MANAGER/ADMIN, who oversee multiple projects — HLD's
+   * dashboard "Project Selector") is unrestricted here.
+   *
+   * A non-privileged (SUPERVISOR) caller is further scoped to only their
+   * own assigned Sakhis (supervisorId === caller.id) — otherwise every
+   * Supervisor sharing a project sees every other Supervisor's Sakhis too,
+   * since project membership alone doesn't imply ownership. MANAGER/ADMIN
+   * see every Sakhi in the project, matching the project-level check above.
    */
   async listByProject(projectId: string, caller: CallerScope) {
     if (caller.projectId && caller.projectId !== projectId) {
       throw forbidden('You do not have access to this project.');
     }
     const profiles = await this.repository.findByProject(projectId);
-    return profiles.map((p) => toApiSakhi(p as unknown as Record<string, unknown>));
+    const mapped = profiles.map((p) => toApiSakhi(p as unknown as Record<string, unknown>));
+    if (isPrivileged(caller)) {
+      return mapped;
+    }
+    return mapped.filter((s) => s.supervisorId === caller.id);
   }
 
   async getById(id: string, caller: CallerScope) {

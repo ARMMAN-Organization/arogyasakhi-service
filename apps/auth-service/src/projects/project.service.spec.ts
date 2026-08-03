@@ -19,16 +19,54 @@ describe('ProjectService', () => {
   });
 
   describe('list', () => {
+    const projects = [
+      { projectId: 'p1', projectName: 'P1', createdByUserId: 'u', isDeleted: false },
+      { projectId: 'p2', projectName: 'P2', createdByUserId: 'u', isDeleted: false },
+    ];
+
     it('returns active projects projected to the documented fields (no internal columns)', async () => {
-      const projects = [
-        { projectId: 'p1', projectName: 'P1', createdByUserId: 'u', isDeleted: false },
-      ];
       repository.findManyActiveProjects.mockResolvedValue(projects as never);
 
-      const result = await service.list();
+      const result = await service.list({ roles: ['ADMIN'], projectId: null });
       expect(result[0]).toEqual(expect.objectContaining({ projectId: 'p1', projectName: 'P1' }));
       expect(result[0]).not.toHaveProperty('createdByUserId');
       expect(result[0]).not.toHaveProperty('isDeleted');
+    });
+
+    it('returns all projects unrestricted for ADMIN', async () => {
+      repository.findManyActiveProjects.mockResolvedValue(projects as never);
+      const result = await service.list({ roles: ['ADMIN'], projectId: null });
+      expect(result).toHaveLength(2);
+    });
+
+    it('returns all projects unrestricted for MANAGER', async () => {
+      repository.findManyActiveProjects.mockResolvedValue(projects as never);
+      const result = await service.list({ roles: ['MANAGER'], projectId: null });
+      expect(result).toHaveLength(2);
+    });
+
+    it("scopes to only the caller's own project for SUPERVISOR", async () => {
+      repository.findManyActiveProjects.mockResolvedValue(projects as never);
+      const result = await service.list({ roles: ['SUPERVISOR'], projectId: 'p2' });
+      expect(result).toEqual([expect.objectContaining({ projectId: 'p2' })]);
+    });
+
+    it("scopes to only the caller's own project for SAKHI", async () => {
+      repository.findManyActiveProjects.mockResolvedValue(projects as never);
+      const result = await service.list({ roles: ['SAKHI'], projectId: 'p1' });
+      expect(result).toEqual([expect.objectContaining({ projectId: 'p1' })]);
+    });
+
+    it('returns an empty array for a SUPERVISOR whose own project is not in the active list', async () => {
+      repository.findManyActiveProjects.mockResolvedValue(projects as never);
+      const result = await service.list({ roles: ['SUPERVISOR'], projectId: 'missing-project' });
+      expect(result).toEqual([]);
+    });
+
+    it('does not scope down a caller who holds SUPERVISOR alongside an elevated role', async () => {
+      repository.findManyActiveProjects.mockResolvedValue(projects as never);
+      const result = await service.list({ roles: ['SUPERVISOR', 'MANAGER'], projectId: 'p1' });
+      expect(result).toHaveLength(2);
     });
   });
 

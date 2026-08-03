@@ -188,9 +188,17 @@ model Project {
 }
 
 // Column set matches ERD Appendix A.1 ("sakhi_profiles") exactly.
-// supervisorId references supervisor_profiles.supervisor_id, which is not
-// modeled anywhere yet — left as a plain scalar (no relation) rather than
-// invented.
+// supervisorId is documented in the ERD as referencing
+// supervisor_profiles.supervisor_id, but that table has no application code
+// anywhere reading or writing it (dead schema) — every real write path
+// (auth.service.ts's updateUser, via PATCH /users/:id) stores the
+// Supervisor's users.user_id here instead, matching the JWT `sub` every
+// other service treats as "the Supervisor's identity" (e.g.
+// sakhi.service.ts's listByProject SUPERVISOR-ownership filter). Kept as a
+// plain scalar (no relation) rather than inventing one, since there is
+// nothing to relate to yet — but if supervisor_profiles is ever wired up,
+// this column's actual contents (users.user_id) must be reconciled with
+// whatever id space that table ends up using.
 model SakhiProfile {
   id               String    @id @default(uuid()) @map("sakhi_id")
   userId           String    @unique @map("user_id")

@@ -4,6 +4,12 @@ import type { CreateFunderInput } from './dto/create-funder.dto';
 import type { CreateProjectInput } from './dto/create-project.dto';
 import type { UpdateProjectInput } from './dto/update-project.dto';
 
+/** The calling principal's own scope, as carried on their JWT/trusted-identity headers. */
+export interface CallerScope {
+  readonly roles: string[];
+  readonly projectId: string | null;
+}
+
 /** Prisma unique-constraint violation code (projectCode/funderCode). */
 const PRISMA_UNIQUE_CONSTRAINT_CODE = 'P2002';
 
@@ -37,13 +43,38 @@ function toApiProject(p: Record<string, unknown>) {
   };
 }
 
+/**
+ * MANAGER and ADMIN are unrestricted across all project-scoping checks —
+ * checked as the absence of an elevated role, not the presence of a
+ * restrictive one (SAKHI/SUPERVISOR), since a caller can hold multiple
+ * role assignments at once (see auth.service.ts's issueTokens) and must
+ * not be scoped down just because one of their roles is restrictive.
+ * Matches the same isPrivileged() pattern in
+ * supervisor-operations-service/operations.service.ts.
+ */
+function isPrivileged(caller: CallerScope): boolean {
+  return caller.roles.includes('MANAGER') || caller.roles.includes('ADMIN');
+}
+
 /** Business logic for project/funder master data. */
 export class ProjectService {
   constructor(private readonly repository: ProjectRepository) {}
 
-  async list() {
+  /**
+   * A caller with a project scope on their JWT (SAKHI/SUPERVISOR — one
+   * project per person per the SRS) only ever sees their own project. A
+   * privileged caller (MANAGER/ADMIN, who oversee multiple projects) is
+   * unrestricted. This prevents a SAKHI/SUPERVISOR client from picking a
+   * project it has no access to out of an unscoped list and then 403ing
+   * on a follow-up call (e.g. GET /projects/:id/sakhis).
+   */
+  async list(caller: CallerScope) {
     const projects = await this.repository.findManyActiveProjects();
-    return projects.map((p) => toApiProject(p as unknown as Record<string, unknown>));
+    const mapped = projects.map((p) => toApiProject(p as unknown as Record<string, unknown>));
+    if (isPrivileged(caller)) {
+      return mapped;
+    }
+    return mapped.filter((p) => p.projectId === caller.projectId);
   }
 
   async getById(id: string) {

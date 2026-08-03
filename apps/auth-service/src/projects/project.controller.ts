@@ -12,6 +12,7 @@ import {
   errorResponse,
   ok,
   requireRoles,
+  unauthorized,
   validate,
   validateBody,
 } from '../app.module';
@@ -72,8 +73,9 @@ export function createProjectRouter(service: ProjectService, signer: TokenSigner
       },
     },
     authenticate(signer),
-    asyncHandler(async (_req, res) => {
-      res.json(ok(await service.list()));
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      res.json(ok(await service.list(req.user)));
     }),
   );
 
