@@ -62,6 +62,12 @@ describe('ProjectService', () => {
       const result = await service.list({ roles: ['SUPERVISOR'], projectId: 'missing-project' });
       expect(result).toEqual([]);
     });
+
+    it('does not scope down a caller who holds SUPERVISOR alongside an elevated role', async () => {
+      repository.findManyActiveProjects.mockResolvedValue(projects as never);
+      const result = await service.list({ roles: ['SUPERVISOR', 'MANAGER'], projectId: 'p1' });
+      expect(result).toHaveLength(2);
+    });
   });
 
   describe('getById', () => {

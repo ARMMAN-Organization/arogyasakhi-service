@@ -43,6 +43,19 @@ function toApiProject(p: Record<string, unknown>) {
   };
 }
 
+/**
+ * MANAGER and ADMIN are unrestricted across all project-scoping checks —
+ * checked as the absence of an elevated role, not the presence of a
+ * restrictive one (SAKHI/SUPERVISOR), since a caller can hold multiple
+ * role assignments at once (see auth.service.ts's issueTokens) and must
+ * not be scoped down just because one of their roles is restrictive.
+ * Matches the same isPrivileged() pattern in
+ * supervisor-operations-service/operations.service.ts.
+ */
+function isPrivileged(caller: CallerScope): boolean {
+  return caller.roles.includes('MANAGER') || caller.roles.includes('ADMIN');
+}
+
 /** Business logic for project/funder master data. */
 export class ProjectService {
   constructor(private readonly repository: ProjectRepository) {}
@@ -50,19 +63,18 @@ export class ProjectService {
   /**
    * A caller with a project scope on their JWT (SAKHI/SUPERVISOR — one
    * project per person per the SRS) only ever sees their own project. A
-   * caller with no single-project scope (MANAGER/ADMIN, who oversee
-   * multiple projects) is unrestricted. This prevents a SAKHI/SUPERVISOR
-   * client from picking a project it has no access to out of an unscoped
-   * list and then 403ing on a follow-up call (e.g. GET /projects/:id/sakhis).
+   * privileged caller (MANAGER/ADMIN, who oversee multiple projects) is
+   * unrestricted. This prevents a SAKHI/SUPERVISOR client from picking a
+   * project it has no access to out of an unscoped list and then 403ing
+   * on a follow-up call (e.g. GET /projects/:id/sakhis).
    */
   async list(caller: CallerScope) {
     const projects = await this.repository.findManyActiveProjects();
     const mapped = projects.map((p) => toApiProject(p as unknown as Record<string, unknown>));
-    const isScoped = caller.roles.includes('SAKHI') || caller.roles.includes('SUPERVISOR');
-    if (isScoped) {
-      return mapped.filter((p) => p.projectId === caller.projectId);
+    if (isPrivileged(caller)) {
+      return mapped;
     }
-    return mapped;
+    return mapped.filter((p) => p.projectId === caller.projectId);
   }
 
   async getById(id: string) {

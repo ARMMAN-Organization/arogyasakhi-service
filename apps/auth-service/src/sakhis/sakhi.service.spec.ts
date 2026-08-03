@@ -119,6 +119,25 @@ describe('SakhiService', () => {
 
       expect(result).toHaveLength(2);
     });
+
+    it('does not scope down a caller who holds SUPERVISOR alongside an elevated role', async () => {
+      const profileA = { ...rawProfile(), supervisorId: 'supervisor-1' };
+      const profileB = {
+        ...rawProfile(),
+        supervisorId: 'other-supervisor',
+        user: { ...rawProfile().user, id: 'user-2', displayName: 'Other Sakhi' },
+      };
+      repository.findByProject.mockResolvedValue([profileA, profileB] as never);
+
+      const dualRoleCaller = {
+        id: 'supervisor-1',
+        roles: ['SUPERVISOR', 'ADMIN'],
+        projectId: null,
+      };
+      const result = await service.listByProject('project-1', dualRoleCaller);
+
+      expect(result).toHaveLength(2);
+    });
   });
 
   describe('getById', () => {
