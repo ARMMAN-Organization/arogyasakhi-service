@@ -9,8 +9,12 @@ describe('SakhiService', () => {
 
   let service: SakhiService;
 
-  const unscopedCaller = { projectId: null };
-  const scopedCaller = (projectId: string) => ({ projectId });
+  const unscopedCaller = { id: 'admin-1', roles: ['ADMIN'], projectId: null };
+  const scopedCaller = (projectId: string, id = 'supervisor-1') => ({
+    id,
+    roles: ['SUPERVISOR'],
+    projectId,
+  });
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -86,6 +90,34 @@ describe('SakhiService', () => {
         service.listByProject('project-1', scopedCaller('project-2')),
       ).rejects.toMatchObject({ status: 403 });
       expect(repository.findByProject).not.toHaveBeenCalled();
+    });
+
+    it('scopes a SUPERVISOR caller to only their own assigned Sakhis', async () => {
+      const ownProfile = { ...rawProfile(), supervisorId: 'supervisor-1' };
+      const otherProfile = {
+        ...rawProfile(),
+        supervisorId: 'other-supervisor',
+        user: { ...rawProfile().user, id: 'user-2', displayName: 'Other Sakhi' },
+      };
+      repository.findByProject.mockResolvedValue([ownProfile, otherProfile] as never);
+
+      const result = await service.listByProject('project-1', scopedCaller('project-1'));
+
+      expect(result).toEqual([expect.objectContaining({ supervisorId: 'supervisor-1' })]);
+    });
+
+    it('does not scope a MANAGER/ADMIN caller — sees every Sakhi in the project', async () => {
+      const profileA = { ...rawProfile(), supervisorId: 'supervisor-1' };
+      const profileB = {
+        ...rawProfile(),
+        supervisorId: 'other-supervisor',
+        user: { ...rawProfile().user, id: 'user-2', displayName: 'Other Sakhi' },
+      };
+      repository.findByProject.mockResolvedValue([profileA, profileB] as never);
+
+      const result = await service.listByProject('project-1', unscopedCaller);
+
+      expect(result).toHaveLength(2);
     });
   });
 

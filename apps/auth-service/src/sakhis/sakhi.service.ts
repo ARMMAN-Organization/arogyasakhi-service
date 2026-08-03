@@ -3,6 +3,8 @@ import type { SakhiRepository } from './sakhi.repository';
 
 /** The calling principal's own scope, as carried on their JWT/trusted-identity headers. */
 export interface CallerScope {
+  readonly id: string;
+  readonly roles: string[];
   readonly projectId: string | null;
 }
 
@@ -43,13 +45,23 @@ export class SakhiService {
    * project per Supervisor per SRS) may only see that project's Sakhis. A
    * caller with no project scope (MANAGER/ADMIN, who oversee multiple
    * projects — HLD's dashboard "Project Selector") is unrestricted here.
+   *
+   * A SUPERVISOR caller is further scoped to only their own assigned
+   * Sakhis (supervisorId === caller.id) — otherwise every Supervisor
+   * sharing a project sees every other Supervisor's Sakhis too, since
+   * project membership alone doesn't imply ownership. MANAGER/ADMIN see
+   * every Sakhi in the project, matching the project-level check above.
    */
   async listByProject(projectId: string, caller: CallerScope) {
     if (caller.projectId && caller.projectId !== projectId) {
       throw forbidden('You do not have access to this project.');
     }
     const profiles = await this.repository.findByProject(projectId);
-    return profiles.map((p) => toApiSakhi(p as unknown as Record<string, unknown>));
+    const mapped = profiles.map((p) => toApiSakhi(p as unknown as Record<string, unknown>));
+    if (caller.roles.includes('SUPERVISOR')) {
+      return mapped.filter((s) => s.supervisorId === caller.id);
+    }
+    return mapped;
   }
 
   async getById(id: string, caller: CallerScope) {
