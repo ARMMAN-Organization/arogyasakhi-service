@@ -933,12 +933,13 @@ describe('OperationsService', () => {
         supervisorId: '33333333-3333-3333-3333-333333333333',
         sakhiId: '44444444-4444-4444-4444-444444444444',
         callDatetime: new Date('2026-07-01T10:00:00Z'),
-        callStatus: 'CONNECTED',
+        callStatus: 'PICKED_UP_TALKED',
         notes: null,
         followupAction: null,
         callStartAt: new Date('2026-07-01T10:00:00Z'),
         callEndAt: new Date('2026-07-01T10:05:00Z'),
         callDurationSeconds: 300,
+        responder: null,
         createdAt: new Date(),
         createdByUserId: null,
         updatedAt: new Date(),
@@ -957,12 +958,13 @@ describe('OperationsService', () => {
     supervisorId: '33333333-3333-3333-3333-333333333333',
     sakhiId: '44444444-4444-4444-4444-444444444444',
     callDatetime: new Date('2026-07-01T10:00:00Z'),
-    callStatus: 'CONNECTED',
+    callStatus: 'PICKED_UP_TALKED',
     notes: null,
     followupAction: null,
     callStartAt: new Date('2026-07-01T10:00:00Z'),
     callEndAt: new Date('2026-07-01T10:05:00Z'),
     callDurationSeconds: 300,
+    responder: null,
     createdAt: new Date(),
     createdByUserId: null,
     updatedAt: new Date(),
@@ -982,7 +984,7 @@ describe('OperationsService', () => {
       projectId: '22222222-2222-2222-2222-222222222222',
       sakhiId: '44444444-4444-4444-4444-444444444444',
       callDatetime: new Date('2026-07-01T10:00:00Z'),
-      callStatus: 'CONNECTED' as const,
+      callStatus: 'PICKED_UP_TALKED' as const,
       callStartAt: new Date('2026-07-01T10:00:00Z'),
     };
 
@@ -1088,13 +1090,13 @@ describe('OperationsService', () => {
 
       const result = await service.updateCallLog(
         'cccccccc-cccc-cccc-cccc-cccccccccccc',
-        { callStatus: 'FOLLOWUP_REQUIRED' },
+        { callStatus: 'CALL_BACK' },
         supervisorCaller,
       );
 
       expect(repository.updateCallLog).toHaveBeenCalledWith(
         'cccccccc-cccc-cccc-cccc-cccccccccccc',
-        { callStatus: 'FOLLOWUP_REQUIRED' },
+        { callStatus: 'CALL_BACK' },
         supervisorCaller.id,
       );
       expect(result).toBe(callLogRow);
@@ -1103,7 +1105,7 @@ describe('OperationsService', () => {
     it('throws 404 when the call log does not exist', async () => {
       repository.findCallLogById.mockResolvedValue(null);
       await expect(
-        service.updateCallLog('missing', { callStatus: 'BUSY' }, supervisorCaller),
+        service.updateCallLog('missing', { callStatus: 'RINGING' }, supervisorCaller),
       ).rejects.toMatchObject({ status: 404 });
     });
 
@@ -1112,7 +1114,7 @@ describe('OperationsService', () => {
       await expect(
         service.updateCallLog(
           'cccccccc-cccc-cccc-cccc-cccccccccccc',
-          { callStatus: 'BUSY' },
+          { callStatus: 'RINGING' },
           otherSupervisorCaller,
         ),
       ).rejects.toMatchObject({ status: 403 });
@@ -1125,13 +1127,13 @@ describe('OperationsService', () => {
 
       const result = await service.updateCallLog(
         'cccccccc-cccc-cccc-cccc-cccccccccccc',
-        { callStatus: 'BUSY' },
+        { callStatus: 'RINGING' },
         adminCaller,
       );
 
       expect(repository.updateCallLog).toHaveBeenCalledWith(
         'cccccccc-cccc-cccc-cccc-cccccccccccc',
-        { callStatus: 'BUSY' },
+        { callStatus: 'RINGING' },
         adminCaller.id,
       );
       expect(result).toBe(callLogRow);
@@ -1143,13 +1145,13 @@ describe('OperationsService', () => {
 
       await service.updateCallLog(
         'cccccccc-cccc-cccc-cccc-cccccccccccc',
-        { callStatus: 'BUSY' },
+        { callStatus: 'RINGING' },
         managerCaller,
       );
 
       expect(repository.updateCallLog).toHaveBeenCalledWith(
         'cccccccc-cccc-cccc-cccc-cccccccccccc',
-        { callStatus: 'BUSY' },
+        { callStatus: 'RINGING' },
         managerCaller.id,
       );
     });

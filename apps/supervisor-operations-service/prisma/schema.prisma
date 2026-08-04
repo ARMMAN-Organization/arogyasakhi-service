@@ -57,12 +57,21 @@ enum InventoryTransactionType {
 }
 
 enum CallStatus {
-  CONNECTED
-  NOT_CONNECTED
-  FOLLOWUP_REQUIRED
-  BUSY
-  SWITCHED_OFF
-  WRONG_NUMBER
+  PICKED_UP_TALKED
+  PICKED_UP_NO_ONE_TALKING
+  PICKED_UP_CUT_MIDWAY
+  CALL_BACK
+  NOT_PICKED_UP
+  RINGING
+  PHONE_OFF
+  OUT_OF_NETWORK
+}
+
+enum Responder {
+  RELATIVE
+  HUSBAND
+  SAKHI
+  PERSON_WHO_DOES_NOT_KNOW_WOMAN
 }
 
 // Master-data active/inactive status, mirroring InventoryItemStatus — kept as
@@ -187,6 +196,7 @@ model CallLog {
   callStartAt         DateTime   @map("call_start_at")
   callEndAt           DateTime?  @map("call_end_at")
   callDurationSeconds Int?       @map("call_duration_seconds")
+  responder           Responder?
   createdAt           DateTime   @default(now()) @map("created_at")
   createdByUserId     String?    @map("created_by_user_id")
   updatedAt           DateTime   @updatedAt @map("updated_at")
