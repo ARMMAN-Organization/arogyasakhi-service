@@ -1,22 +1,23 @@
-name: CD Dev
+name: CD Dev (direct SSH)
 
-# Redeploys the dev box over SSH with only the services whose code changed.
+# Redeploys the dev box over direct SSH with only the services whose code changed.
 #
-# Also callable — redeploy-dev.yml uses it for manual runs. When `services` is
-# empty the affected set is computed; "all" or a comma-separated list overrides it.
+# INTERIM — THIS FILE IS MEANT TO BE DELETED
+# The permanent path is cd-dev.yml, which tunnels ssh through AWS Session Manager
+# and needs no inbound port. This direct-SSH copy exists only while tcp/22 is open
+# again for developer access. Once the tunnel is proven end to end:
+#   1. re-point the `push` trigger onto cd-dev.yml
+#   2. delete this file, and the DEV_HOST / DEV_SSH_HOST_KEY secrets
+# Until then this is the deploy path on push, and cd-dev.yml is triggered manually
+# for testing only — deliberately, so the two can never deploy the same commit
+# twice. Both share the `cd-dev` concurrency group, so they also cannot race.
 #
-# STATUS: this is the intended permanent deploy path, but it is NOT wired to push
-# yet — cd-dev-ssh.yml is, over direct SSH, while tcp/22 is open for developer
-# access. Prove this one first (it is currently blocked on the IAM policy granting
-# ssm:StartSession on the AWS-StartSSHSession document), then take the push
-# trigger back and delete cd-dev-ssh.yml.
+# Kept as a standalone duplicate rather than a transport switch inside cd-dev.yml
+# because it is short-lived; the cost is that any fix to the deploy logic below
+# must be applied to cd-dev.yml as well until this file goes away.
 #
-# HOW IT CONNECTS
-# SSH tunnelled through AWS Session Manager: `aws ssm start-session` with the
-# AWS-StartSSHSession document as an ssh ProxyCommand. The security group has NO
-# inbound tcp/22 rule — the tunnel terminates at the box's own local sshd, which
-# must therefore stay running. Disabling sshd as "hardening" breaks every deploy
-# with no security-group change to point at. Targets are instance IDs, not hosts.
+# Also callable — redeploy-dev.yml currently points at cd-dev.yml (the SSM path).
+# Re-point it here if you want manual redeploys over direct SSH.
 #
 # WHY THE LOGIC RUNS ON THE BOX, NOT THE RUNNER
 # Affected-detection needs Nx and node_modules. The box already has both, so the
@@ -27,22 +28,9 @@ name: CD Dev
 # per-user, so connecting as anyone else finds an empty process list and every
 # reload fails with "process not found".
 
-# No `push` trigger while cd-dev-ssh.yml holds that role — two workflows on the
-# same trigger would deploy every service twice per push. Restore `push:
-# branches: [develop]` here and delete cd-dev-ssh.yml once the tunnel is proven.
-#
-# To test the tunnel before then: open any previous run of this workflow and use
-# "Re-run jobs". A workflow_dispatch button will not appear until .github/ exists
-# on the default branch (main) — GitHub only surfaces manual triggers for
-# workflows present there, which is also why redeploy-dev.yml has no Run button.
 on:
-  workflow_dispatch:
-    inputs:
-      services:
-        description: 'Empty = only what changed. "all", or a comma-separated list of service names.'
-        type: string
-        required: false
-        default: ''
+  push:
+    branches: [develop]
   workflow_call:
     inputs:
       services:
@@ -51,17 +39,14 @@ on:
         required: false
         default: ''
 
-# id-token is unused while AWS access keys are in play, but is what
-# configure-aws-credentials needs to request a short-lived token once the account
-# switches to OIDC federation. Declared here — and mirrored in redeploy-dev.yml,
-# because a reusable workflow cannot grant itself more than its caller allows —
-# so that swap is a credentials change only.
 permissions:
   contents: read
-  id-token: write
 
 # Never cancel a deploy in flight, and never run two at once: both would race
 # `git reset --hard` in the same directory on the same box. Queue instead.
+#
+# Shares the group with cd-dev.yml deliberately: a manual tunnel test and a push
+# deploy would otherwise reset the same working tree at the same time.
 concurrency:
   group: cd-dev
   cancel-in-progress: false
@@ -75,12 +60,6 @@ env:
   # contended. Too tight fails a healthy deploy; too loose only delays reporting
   # a broken one.
   HEALTH_TIMEOUT_SECONDS: 120
-  # Was 15 when this connected straight to tcp/22. Establishing the tunnel now
-  # also covers AWS CLI start-up, the StartSession API call, launching
-  # session-manager-plugin and the websocket handshake — so a direct-connect
-  # timeout fails intermittently and looks like a network fault rather than a
-  # too-tight setting.
-  SSH_CONNECT_TIMEOUT: 60
 
 jobs:
   detect:
@@ -89,69 +68,48 @@ jobs:
       matrix: ${{ steps.resolve.outputs.matrix }}
       count: ${{ steps.resolve.outputs.count }}
     steps:
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ vars.AWS_REGION || 'ap-south-1' }}
-
-      # Duplicated verbatim in the deploy job below. Kept inline rather than
-      # extracted to a composite action, because a local action resolves from the
-      # workspace and would force `actions/checkout` into a workflow that
-      # deliberately never checks out (see the header).
-      - name: Set up SSH over Session Manager
+      - name: Set up SSH
         env:
           DEV_SSH_KEY: ${{ secrets.DEV_SSH_KEY }}
-          DEV_INSTANCE_ID: ${{ vars.DEV_INSTANCE_ID }}
-          DEV_USER: ${{ secrets.DEV_USER || 'ssm-user' }}
+          DEV_HOST: ${{ secrets.DEV_HOST }}
+          DEV_SSH_HOST_KEY: ${{ secrets.DEV_SSH_HOST_KEY }}
         run: |
           set -euo pipefail
-          [ -n "${DEV_INSTANCE_ID:-}" ] || { echo "::error::Variable DEV_INSTANCE_ID is empty or unset."; exit 1; }
-          [ -n "${DEV_SSH_KEY:-}" ]     || { echo "::error::Secret DEV_SSH_KEY is empty or unset."; exit 1; }
-
-          # Not preinstalled on ubuntu-latest, and the ProxyCommand below cannot
-          # work without it — `aws ssm start-session` shells out to this binary.
-          curl -fsS -o /tmp/session-manager-plugin.deb \
-            https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb \
-            || { echo "::error::Could not download session-manager-plugin."; exit 1; }
-          sudo dpkg -i /tmp/session-manager-plugin.deb >/dev/null
-          # Positive confirmation the binary runs. Without it, a bad install
-          # surfaces later as `ssh: Connection closed` from the ProxyCommand,
-          # which reads as a network or IAM problem rather than a missing plugin.
-          session-manager-plugin --version
-
+          [ -n "${DEV_HOST:-}" ]    || { echo "::error::Secret DEV_HOST is empty or unset."; exit 1; }
+          [ -n "${DEV_SSH_KEY:-}" ] || { echo "::error::Secret DEV_SSH_KEY is empty or unset."; exit 1; }
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$DEV_SSH_KEY" > ~/.ssh/id_deploy
           chmod 600 ~/.ssh/id_deploy
-
-          # %h/%p must reach ssh unexpanded — it substitutes the target and port.
-          # ServerAliveInterval keeps bytes moving because Session Manager closes
-          # an idle channel, and the resolve step below sits quiet through an Nx
-          # build. accept-new rather than a pinned key: the SSM channel already
-          # authenticates the target by instance ID through IAM, so the
-          # internet-MITM case a pinned host key defended against is gone.
-          cat > ~/.ssh/config <<'CFG'
-          Host i-* mi-*
-            ProxyCommand sh -c "aws ssm start-session --target %h --document-name AWS-StartSSHSession --parameters portNumber=%p"
-            ServerAliveInterval 30
-            ServerAliveCountMax 10
-            StrictHostKeyChecking accept-new
-          CFG
-          chmod 600 ~/.ssh/config
-
-          # Replaces the old ssh-keyscan probe, which cannot run through a
-          # ProxyCommand. Stronger anyway: it exercises credentials, IAM, the SSM
-          # agent, the tunnel and the key at once, so a misconfiguration fails
-          # here with a named cause instead of as a mid-deploy disconnect.
-          ssh -o BatchMode=yes -o ConnectTimeout="$SSH_CONNECT_TIMEOUT" \
-              -i ~/.ssh/id_deploy "$DEV_USER@$DEV_INSTANCE_ID" true \
-            || { echo "::error::Cannot reach $DEV_INSTANCE_ID over Session Manager. Check, in order: the AWS credentials allow ssm:StartSession on this instance and on the AWS-StartSSHSession document; the agent is Online (aws ssm describe-instance-information); sshd is running on the box; DEV_SSH_KEY is present in ${DEV_USER}'s authorized_keys."; exit 1; }
+          if [ -n "${DEV_SSH_HOST_KEY:-}" ]; then
+            printf '%s\n' "$DEV_SSH_HOST_KEY" > ~/.ssh/known_hosts
+          else
+            # Trust-on-first-use, and it matters on this path: the connection
+            # crosses the public internet to a port that has to be open to
+            # 0.0.0.0/0, so an unpinned host key means no MITM protection at all.
+            #
+            # Pin it by reading the key off the box rather than scanning for it —
+            # the box stays reachable over Session Manager whatever the port is
+            # doing:
+            #   aws ssm start-session --target <instance-id>
+            #   cat /etc/ssh/ssh_host_ed25519_key.pub
+            # then set DEV_SSH_HOST_KEY to "<host> ssh-ed25519 AAAA…".
+            #
+            # Avoid piping `ssh-keyscan` straight into `gh secret set`: against a
+            # closed or filtered port it prints nothing, and that stores an EMPTY
+            # secret which looks fine in the UI and fails opaquely later.
+            echo "::warning::DEV_SSH_HOST_KEY is not set — falling back to ssh-keyscan, which cannot detect a man-in-the-middle. Pin it from /etc/ssh/ssh_host_ed25519_key.pub, read over Session Manager."
+            ssh-keyscan -T 10 -H "$DEV_HOST" > ~/.ssh/known_hosts 2>/dev/null || true
+          fi
+          if [ ! -s ~/.ssh/known_hosts ]; then
+            echo "::error::No host key for $DEV_HOST — the runner cannot reach it on port 22. This workflow needs tcp/22 open to the internet on the instance's security group (GitHub publishes ~7300 egress ranges, so an allowlist is not possible). Verify with: nc -vz $DEV_HOST 22 — or use cd-dev.yml, which tunnels over Session Manager and needs no inbound rule."
+            exit 1
+          fi
+          chmod 600 ~/.ssh/known_hosts
 
       - name: Sync workspace and resolve services to deploy
         id: resolve
         env:
-          DEV_INSTANCE_ID: ${{ vars.DEV_INSTANCE_ID }}
+          DEV_HOST: ${{ secrets.DEV_HOST }}
           DEV_USER: ${{ secrets.DEV_USER || 'ssm-user' }}
           SERVICES_INPUT: ${{ inputs.services }}
           REF_NAME: ${{ github.ref_name }}
@@ -218,8 +176,8 @@ jobs:
 
           echo "APPS_JSON=$apps"
           REMOTE
-          } | ssh -o BatchMode=yes -o ConnectTimeout="$SSH_CONNECT_TIMEOUT" -i ~/.ssh/id_deploy \
-                "$DEV_USER@$DEV_INSTANCE_ID" 'bash -l -s' > remote.out || {
+          } | ssh -o BatchMode=yes -o ConnectTimeout=15 -i ~/.ssh/id_deploy \
+                "$DEV_USER@$DEV_HOST" 'bash -l -s' > remote.out || {
                   echo "::error::Remote resolve step failed."; cat remote.out; exit 1;
                 }
 
@@ -260,57 +218,35 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.detect.outputs.matrix) }}
     steps:
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ vars.AWS_REGION || 'ap-south-1' }}
-
-      # Duplicated from the detect job above — see the comment there for why it is
-      # not a composite action. Keep the two copies in step.
-      - name: Set up SSH over Session Manager
+      - name: Set up SSH
         env:
           DEV_SSH_KEY: ${{ secrets.DEV_SSH_KEY }}
-          DEV_INSTANCE_ID: ${{ vars.DEV_INSTANCE_ID }}
-          DEV_USER: ${{ secrets.DEV_USER || 'ssm-user' }}
+          DEV_HOST: ${{ secrets.DEV_HOST }}
+          DEV_SSH_HOST_KEY: ${{ secrets.DEV_SSH_HOST_KEY }}
         run: |
           set -euo pipefail
-          [ -n "${DEV_INSTANCE_ID:-}" ] || { echo "::error::Variable DEV_INSTANCE_ID is empty or unset."; exit 1; }
-          [ -n "${DEV_SSH_KEY:-}" ]     || { echo "::error::Secret DEV_SSH_KEY is empty or unset."; exit 1; }
-
-          curl -fsS -o /tmp/session-manager-plugin.deb \
-            https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb \
-            || { echo "::error::Could not download session-manager-plugin."; exit 1; }
-          sudo dpkg -i /tmp/session-manager-plugin.deb >/dev/null
-          # Positive confirmation the binary runs. Without it, a bad install
-          # surfaces later as `ssh: Connection closed` from the ProxyCommand,
-          # which reads as a network or IAM problem rather than a missing plugin.
-          session-manager-plugin --version
-
+          [ -n "${DEV_HOST:-}" ]    || { echo "::error::Secret DEV_HOST is empty or unset."; exit 1; }
+          [ -n "${DEV_SSH_KEY:-}" ] || { echo "::error::Secret DEV_SSH_KEY is empty or unset."; exit 1; }
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$DEV_SSH_KEY" > ~/.ssh/id_deploy
           chmod 600 ~/.ssh/id_deploy
-
-          cat > ~/.ssh/config <<'CFG'
-          Host i-* mi-*
-            ProxyCommand sh -c "aws ssm start-session --target %h --document-name AWS-StartSSHSession --parameters portNumber=%p"
-            ServerAliveInterval 30
-            ServerAliveCountMax 10
-            StrictHostKeyChecking accept-new
-          CFG
-          chmod 600 ~/.ssh/config
-
-          ssh -o BatchMode=yes -o ConnectTimeout="$SSH_CONNECT_TIMEOUT" \
-              -i ~/.ssh/id_deploy "$DEV_USER@$DEV_INSTANCE_ID" true \
-            || { echo "::error::Cannot reach $DEV_INSTANCE_ID over Session Manager. See the detect job for the checklist."; exit 1; }
+          if [ -n "${DEV_SSH_HOST_KEY:-}" ]; then
+            printf '%s\n' "$DEV_SSH_HOST_KEY" > ~/.ssh/known_hosts
+          else
+            ssh-keyscan -T 10 -H "$DEV_HOST" > ~/.ssh/known_hosts 2>/dev/null || true
+          fi
+          if [ ! -s ~/.ssh/known_hosts ]; then
+            echo "::error::No host key for $DEV_HOST — the runner cannot reach it on port 22. See the detect job for details."
+            exit 1
+          fi
+          chmod 600 ~/.ssh/known_hosts
 
       - name: Upload .env from GitHub secret
         env:
           # Written to a file and scp'd — never passed as an ssh/scp argument,
           # where it would be visible in `ps` to every user on the box.
           ENV_BODY: ${{ secrets[matrix.env_secret] }}
-          DEV_INSTANCE_ID: ${{ vars.DEV_INSTANCE_ID }}
+          DEV_HOST: ${{ secrets.DEV_HOST }}
           DEV_USER: ${{ secrets.DEV_USER || 'ssm-user' }}
           SVC: ${{ matrix.service }}
         run: |
@@ -321,16 +257,16 @@ jobs:
           fi
           umask 077
           printf '%s\n' "$ENV_BODY" > env.upload
-          scp -o BatchMode=yes -o ConnectTimeout="$SSH_CONNECT_TIMEOUT" -i ~/.ssh/id_deploy env.upload \
-            "$DEV_USER@$DEV_INSTANCE_ID:$DEV_WORKSPACE/apps/$SVC/.env"
-          ssh -o BatchMode=yes -o ConnectTimeout="$SSH_CONNECT_TIMEOUT" -i ~/.ssh/id_deploy "$DEV_USER@$DEV_INSTANCE_ID" \
+          scp -o BatchMode=yes -i ~/.ssh/id_deploy env.upload \
+            "$DEV_USER@$DEV_HOST:$DEV_WORKSPACE/apps/$SVC/.env"
+          ssh -o BatchMode=yes -i ~/.ssh/id_deploy "$DEV_USER@$DEV_HOST" \
             "chmod 600 '$DEV_WORKSPACE/apps/$SVC/.env'"
           rm -f env.upload
           echo "Wrote apps/$SVC/.env from ${{ matrix.env_secret }}"
 
       - name: Reload and wait for readiness
         env:
-          DEV_INSTANCE_ID: ${{ vars.DEV_INSTANCE_ID }}
+          DEV_HOST: ${{ secrets.DEV_HOST }}
           DEV_USER: ${{ secrets.DEV_USER || 'ssm-user' }}
           SVC: ${{ matrix.service }}
         run: |
@@ -377,8 +313,8 @@ jobs:
           done
           echo "READY $port"
           REMOTE
-          } | ssh -o BatchMode=yes -o ConnectTimeout="$SSH_CONNECT_TIMEOUT" -i ~/.ssh/id_deploy \
-                "$DEV_USER@$DEV_INSTANCE_ID" 'bash -l -s' | tee remote.out || true
+          } | ssh -o BatchMode=yes -o ConnectTimeout=15 -i ~/.ssh/id_deploy \
+                "$DEV_USER@$DEV_HOST" 'bash -l -s' | tee remote.out || true
 
           if grep -q '^SKIPPED_NOT_IN_PM2' remote.out; then
             echo "::warning::$SVC is not registered in PM2 — skipped. Bootstrap it once on the box with pm2 start, then it will deploy normally."
