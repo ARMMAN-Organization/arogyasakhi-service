@@ -159,8 +159,13 @@ jobs:
           #
           # Values are prefixed with %q and the body is a quoted heredoc, so
           # nothing expands on the runner by accident and no quoting can break.
+          # `set -eu`, not `-euo pipefail`: AWS-RunShellScript executes the
+          # commands with /bin/sh, which on Ubuntu is dash — it rejects
+          # `-o pipefail` outright ("Illegal option"), failing on line 1. The
+          # outer wrapper is therefore kept POSIX; the inner script below runs
+          # under `bash -s` and keeps full pipefail.
           {
-            printf 'set -euo pipefail\n'
+            printf 'set -eu\n'
             printf "runuser -l %q -c 'bash -s' <<'INNER'\n" "$DEV_USER"
             printf 'set -euo pipefail\n'
             printf 'WORKSPACE=%q\n' "$DEV_WORKSPACE"
@@ -284,8 +289,11 @@ jobs:
             exit 1
           fi
 
+          # `set -eu`, not `-euo pipefail` — see the detect job: the outer script
+          # is run by /bin/sh (dash), which rejects `-o pipefail`. The inner
+          # script runs under `bash -s` and keeps it.
           {
-            printf 'set -euo pipefail\n'
+            printf 'set -eu\n'
             printf 'cd %q\n' "$DEV_WORKSPACE"
             if [ -n "${ENV_BODY:-}" ]; then
               printf 'umask 077\n'
