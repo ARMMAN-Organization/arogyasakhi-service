@@ -65,6 +65,19 @@ enum CallStatus {
   WRONG_NUMBER
 }
 
+// Master-data active/inactive status, mirroring InventoryItemStatus — kept as
+// its own enum (not reused) since Prisma enums can't be shared/renamed
+// without a migration touching both tables' columns.
+enum TrainingTopicStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum MarkType {
+  PRE
+  POST
+}
+
 // supervisor_events — meetings/training conducted by a supervisor (ERD §4.7).
 model SupervisorEvent {
   id              String                @id @default(uuid()) @map("event_id")
@@ -87,6 +100,8 @@ model SupervisorEvent {
   deletedAt       DateTime?             @map("deleted_at")
 
   attendance EventAttendance[]
+  photos     EventPhoto[]
+  gatherings EventGathering[]
 
   @@map("supervisor_events")
 }
@@ -180,4 +195,136 @@ model CallLog {
   deletedAt           DateTime?  @map("deleted_at")
 
   @@map("call_logs")
+}
+
+// training_topics — reusable topic catalog for the Meeting & Training topic
+// picker (Supervisor App API Requirements doc, Meeting & Training Flow #1).
+// Not in SRS/ERD/HLD — topicsJson on supervisor_events stays freeform;
+// this is additive master data, same ADMIN-managed pattern as InventoryItem.
+model TrainingTopic {
+  id              String              @id @default(uuid()) @map("topic_id")
+  topicCode       String              @unique @map("topic_code") @db.VarChar(80)
+  topicName       String              @map("topic_name") @db.VarChar(160)
+  status          TrainingTopicStatus @default(ACTIVE)
+  createdAt       DateTime            @default(now()) @map("created_at")
+  createdByUserId String?             @map("created_by_user_id")
+  updatedAt       DateTime            @updatedAt @map("updated_at")
+  updatedByUserId String?             @map("updated_by_user_id")
+  isDeleted       Boolean             @default(false) @map("is_deleted")
+  deletedAt       DateTime?           @map("deleted_at")
+
+  gatheringTopics GatheringTopic[]
+  topicMarks      TopicMark[]
+
+  @@map("training_topics")
+}
+
+// event_photos — multi-photo gallery per event (Meeting & Training Flow #3).
+// Additive to, not a replacement for, supervisor_events.photo_media_id, which
+// remains the single mandatory "completion photo" gating COMPLETED status.
+model EventPhoto {
+  id              String    @id @default(uuid()) @map("photo_id")
+  eventId         String    @map("event_id")
+  // media_assets.media_asset_id — owned by media-service, scalar.
+  mediaId         String    @map("media_id")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  createdByUserId String?   @map("created_by_user_id")
+  isDeleted       Boolean   @default(false) @map("is_deleted")
+  deletedAt       DateTime? @map("deleted_at")
+
+  event SupervisorEvent @relation(fields: [eventId], references: [id])
+
+  @@map("event_photos")
+}
+
+// event_gatherings — one row per Training session under a TRAINING event
+// (Meeting & Training Flow #4). Meetings never have gatherings; application
+// logic enforces eventType = TRAINING at creation, not a DB constraint,
+// since Prisma can't express a cross-column check tied to a related row.
+model EventGathering {
+  id              String                @id @default(uuid()) @map("gathering_id")
+  eventId         String                @map("event_id")
+  gatheringDate   DateTime              @map("gathering_date") @db.Date
+  remarks         String?
+  status          SupervisorEventStatus @default(SCHEDULED)
+  createdAt       DateTime              @default(now()) @map("created_at")
+  createdByUserId String?               @map("created_by_user_id")
+  updatedAt       DateTime              @updatedAt @map("updated_at")
+  updatedByUserId String?               @map("updated_by_user_id")
+  isDeleted       Boolean               @default(false) @map("is_deleted")
+  deletedAt       DateTime?             @map("deleted_at")
+
+  event      SupervisorEvent       @relation(fields: [eventId], references: [id])
+  topics     GatheringTopic[]
+  attendance GatheringAttendance[]
+  marks      TopicMark[]
+
+  @@map("event_gatherings")
+}
+
+// gathering_topics — join table: which training_topics belong to one
+// gathering (Meeting & Training Flow #5).
+model GatheringTopic {
+  id              String   @id @default(uuid()) @map("gathering_topic_id")
+  gatheringId     String   @map("gathering_id")
+  topicId         String   @map("topic_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+  createdByUserId String?  @map("created_by_user_id")
+
+  gathering EventGathering @relation(fields: [gatheringId], references: [id])
+  topic     TrainingTopic  @relation(fields: [topicId], references: [id])
+
+  @@unique([gatheringId, topicId])
+  @@map("gathering_topics")
+}
+
+// gathering_attendance — session-level attendance for a Training gathering
+// (Meeting & Training Flow #6/#7). Distinct from event_attendance, which
+// remains the attendance mechanism for MEETING events (gatherings are a
+// TRAINING-only concept). No flat pre/post score columns here — TopicMark
+// is the sole source of truth for Training scores, kept per-topic.
+model GatheringAttendance {
+  id               String           @id @default(uuid()) @map("gathering_attendance_id")
+  gatheringId      String           @map("gathering_id")
+  // sakhi_profiles.sakhi_id — owned by auth-service, scalar.
+  sakhiId          String           @map("sakhi_id")
+  attendanceStatus AttendanceStatus @map("attendance_status")
+  remarks          String?
+  createdAt        DateTime         @default(now()) @map("created_at")
+  createdByUserId  String?          @map("created_by_user_id")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
+  updatedByUserId  String?          @map("updated_by_user_id")
+  isDeleted        Boolean          @default(false) @map("is_deleted")
+  deletedAt        DateTime?        @map("deleted_at")
+
+  gathering EventGathering @relation(fields: [gatheringId], references: [id])
+
+  @@unique([gatheringId, sakhiId])
+  @@map("gathering_attendance")
+}
+
+// topic_marks — per-topic Pre/Post score for one Sakhi in one gathering
+// (Meeting & Training Flow #8/#9/#10). isLocked blocks further edits once a
+// Supervisor submits via POST .../marks/complete — there is no unlock
+// endpoint, matching the one-way SCHEDULED->COMPLETED event status pattern.
+model TopicMark {
+  id              String    @id @default(uuid()) @map("topic_mark_id")
+  gatheringId     String    @map("gathering_id")
+  topicId         String    @map("topic_id")
+  // sakhi_profiles.sakhi_id — owned by auth-service, scalar.
+  sakhiId         String    @map("sakhi_id")
+  markType        MarkType  @map("mark_type")
+  score           Decimal   @db.Decimal(5, 2)
+  isLocked        Boolean   @default(false) @map("is_locked")
+  lockedAt        DateTime? @map("locked_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  createdByUserId String?   @map("created_by_user_id")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  updatedByUserId String?   @map("updated_by_user_id")
+
+  gathering EventGathering @relation(fields: [gatheringId], references: [id])
+  topic     TrainingTopic  @relation(fields: [topicId], references: [id])
+
+  @@unique([gatheringId, topicId, sakhiId, markType])
+  @@map("topic_marks")
 }

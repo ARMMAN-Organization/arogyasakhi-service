@@ -7,6 +7,9 @@ import type { CreateInventoryTransactionInput } from './dto/create-inventory-tra
 import type { UpdateInventoryTransactionInput } from './dto/update-inventory-transaction.dto';
 import type { CreateCallLogInput } from './dto/create-call-log.dto';
 import type { UpdateCallLogInput } from './dto/update-call-log.dto';
+import type { CreateTrainingTopicInput } from './dto/create-training-topic.dto';
+import type { RescheduleEventInput } from './dto/reschedule-event.dto';
+import type { UpdateGatheringAttendanceInput } from './dto/update-gathering-attendance.dto';
 
 /**
  * Data access for supervisor operations. Owns only this service's tables
@@ -250,6 +253,169 @@ export class OperationsRepository {
     return this.prisma.callLog.update({
       where: { id },
       data: { ...data, updatedByUserId },
+    });
+  }
+
+  findTrainingTopics() {
+    return this.prisma.trainingTopic.findMany({
+      where: { status: 'ACTIVE', isDeleted: false },
+      orderBy: { topicName: 'asc' },
+      take: 200,
+    });
+  }
+
+  findTrainingTopicById(id: string) {
+    return this.prisma.trainingTopic.findFirst({ where: { id, isDeleted: false } });
+  }
+
+  /** Every id must resolve to an ACTIVE topic — returns only the ids that do, for the caller to diff against what was requested. */
+  async findActiveTrainingTopicIds(ids: string[]) {
+    const rows = await this.prisma.trainingTopic.findMany({
+      where: { id: { in: ids }, status: 'ACTIVE', isDeleted: false },
+      select: { id: true },
+    });
+    return rows.map((r) => r.id);
+  }
+
+  createTrainingTopic(data: CreateTrainingTopicInput, createdByUserId: string) {
+    return this.prisma.trainingTopic.create({
+      data: { ...data, createdByUserId, updatedByUserId: createdByUserId },
+    });
+  }
+
+  async rescheduleEvent(id: string, data: RescheduleEventInput, updatedByUserId: string) {
+    const existing = await this.findEventById(id);
+    if (!existing) return null;
+
+    return this.prisma.supervisorEvent.update({
+      where: { id },
+      data: { eventDate: data.eventDate, remarks: data.remarks, updatedByUserId },
+    });
+  }
+
+  createEventPhoto(eventId: string, mediaId: string, createdByUserId: string) {
+    return this.prisma.eventPhoto.create({
+      data: { eventId, mediaId, createdByUserId },
+    });
+  }
+
+  /**
+   * Creates one gathering plus its gathering_topics rows atomically — a
+   * gathering with zero topics would fail createGatheringSchema's own
+   * `.min(1)`, so this only guards against a partial write leaving a
+   * gathering row with no topics linked if the transaction fails midway.
+   */
+  createGathering(
+    eventId: string,
+    data: { gatheringDate: Date; topicIds: string[]; remarks?: string },
+    createdByUserId: string,
+  ) {
+    return this.prisma.eventGathering.create({
+      data: {
+        eventId,
+        gatheringDate: data.gatheringDate,
+        remarks: data.remarks ?? null,
+        createdByUserId,
+        updatedByUserId: createdByUserId,
+        topics: {
+          create: data.topicIds.map((topicId) => ({ topicId, createdByUserId })),
+        },
+      },
+      include: { topics: true },
+    });
+  }
+
+  findGatheringById(id: string) {
+    return this.prisma.eventGathering.findFirst({ where: { id, isDeleted: false } });
+  }
+
+  /** A gathering's topics, joined to the topic catalog for display (code/name), in creation order. */
+  findGatheringTopics(gatheringId: string) {
+    return this.prisma.gatheringTopic.findMany({
+      where: { gatheringId },
+      include: { topic: true },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  findGatheringAttendance(gatheringId: string) {
+    return this.prisma.gatheringAttendance.findMany({
+      where: { gatheringId, isDeleted: false },
+    });
+  }
+
+  /**
+   * Upserts one row per Sakhi, keyed by the real DB unique constraint on
+   * (gatheringId, sakhiId) — unlike event_attendance, gathering_attendance
+   * has this constraint, so a genuine `prisma.upsert` works directly instead
+   * of the find-then-branch pattern upsertAttendance needs.
+   */
+  async upsertGatheringAttendance(
+    gatheringId: string,
+    entries: UpdateGatheringAttendanceInput['attendance'],
+    userId: string,
+  ) {
+    return this.prisma.$transaction(
+      entries.map((entry) =>
+        this.prisma.gatheringAttendance.upsert({
+          where: { gatheringId_sakhiId: { gatheringId, sakhiId: entry.sakhiId } },
+          create: {
+            gatheringId,
+            sakhiId: entry.sakhiId,
+            attendanceStatus: entry.attendanceStatus,
+            remarks: entry.remarks ?? null,
+            createdByUserId: userId,
+            updatedByUserId: userId,
+          },
+          update: {
+            attendanceStatus: entry.attendanceStatus,
+            remarks: entry.remarks ?? null,
+            updatedByUserId: userId,
+          },
+        }),
+      ),
+    );
+  }
+
+  findTopicMark(gatheringId: string, topicId: string, sakhiId: string, markType: 'PRE' | 'POST') {
+    return this.prisma.topicMark.findUnique({
+      where: { gatheringId_topicId_sakhiId_markType: { gatheringId, topicId, sakhiId, markType } },
+    });
+  }
+
+  /**
+   * Upserts by the real DB unique constraint on
+   * (gatheringId, topicId, sakhiId, markType) — the service layer checks
+   * `isLocked` before calling this, so an already-locked mark never reaches
+   * here to be silently overwritten.
+   */
+  upsertTopicMark(
+    gatheringId: string,
+    topicId: string,
+    sakhiId: string,
+    markType: 'PRE' | 'POST',
+    score: number,
+    userId: string,
+  ) {
+    return this.prisma.topicMark.upsert({
+      where: { gatheringId_topicId_sakhiId_markType: { gatheringId, topicId, sakhiId, markType } },
+      create: {
+        gatheringId,
+        topicId,
+        sakhiId,
+        markType,
+        score,
+        createdByUserId: userId,
+        updatedByUserId: userId,
+      },
+      update: { score, updatedByUserId: userId },
+    });
+  }
+
+  lockTopicMark(id: string, updatedByUserId: string) {
+    return this.prisma.topicMark.update({
+      where: { id },
+      data: { isLocked: true, lockedAt: new Date(), updatedByUserId },
     });
   }
 }
