@@ -34,6 +34,23 @@ function toApiRuleVersion(v: Record<string, unknown>) {
 export class RuleVersionService {
   constructor(private readonly repository: RuleVersionRepository) {}
 
+  /**
+   * A rule version's id/ruleSetId/status by its own id — open to any
+   * authenticated role (unlike getPublished/publish, which are ADMIN-only),
+   * since other services need to verify a caller-supplied
+   * generatedByRuleVersionId is real and PUBLISHED without needing rules
+   * admin access themselves. Deliberately omits rulesJson/checksum.
+   */
+  async getById(id: string) {
+    const version = await this.repository.findById(id);
+    if (!version) throw notFound('Rule version not found.');
+    return {
+      id: version.id,
+      ruleSetId: version.ruleSetId,
+      status: version.status,
+    };
+  }
+
   /** The currently-published version for a rule set; 404 if the set is unknown or unpublished. */
   async getPublished(ruleSetId: string) {
     const set = await this.repository.findSetById(ruleSetId);

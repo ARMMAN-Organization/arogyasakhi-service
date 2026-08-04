@@ -3,6 +3,7 @@ import type { RuleVersionRepository } from './ruleVersion.repository';
 
 describe('RuleVersionService', () => {
   const repository = {
+    findById: jest.fn(),
     findSetById: jest.fn(),
     findPublishedBySetId: jest.fn(),
     publishNewVersion: jest.fn(),
@@ -15,6 +16,35 @@ describe('RuleVersionService', () => {
   });
 
   const setId = '99999999-9999-9999-9999-999999999999';
+
+  describe('getById', () => {
+    it('returns id/ruleSetId/status only, dropping rulesJson/checksum/audit columns', async () => {
+      repository.findById.mockResolvedValue({
+        id: 'ver-1',
+        ruleSetId: setId,
+        versionNo: 'v1-hardcoded',
+        rulesJson: { note: 'placeholder' },
+        effectiveFrom: new Date('2026-08-01'),
+        effectiveTo: null,
+        publishedByUserId: null,
+        status: 'PUBLISHED',
+        checksum: Buffer.from('x'),
+        createdByUserId: null,
+        isDeleted: false,
+      } as never);
+
+      const result = await service.getById('ver-1');
+
+      expect(result).toEqual({ id: 'ver-1', ruleSetId: setId, status: 'PUBLISHED' });
+      expect(result).not.toHaveProperty('rulesJson');
+      expect(result).not.toHaveProperty('checksum');
+    });
+
+    it('throws 404 when the rule version does not exist', async () => {
+      repository.findById.mockResolvedValue(null);
+      await expect(service.getById('missing')).rejects.toMatchObject({ status: 404 });
+    });
+  });
 
   describe('getPublished', () => {
     it('returns the published version (projected), dropping checksum/audit columns', async () => {
