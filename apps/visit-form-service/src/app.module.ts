@@ -14,6 +14,7 @@ import { createHealthRouter } from './health/health.controller';
 import { createVisitInstanceModule } from './visits/visitInstance.module';
 import { buildVisitFormServiceOpenApiDocument } from './docs/openapi';
 import { createFormModule } from './forms/form.module';
+import { createVisitScheduleModule } from './visit-schedules/visitSchedule.module';
 
 // Re-export shared HTTP helpers so feature routers can import from a single place.
 export {
@@ -27,7 +28,11 @@ export {
   createDocumentedRouter,
   errorResponse,
   unauthorized,
+  badRequest,
+  notFound,
+  conflict,
   unprocessable,
+  payloadTooLarge,
   HttpError,
   ErrorCode,
   type DocumentedRouter,
@@ -56,6 +61,7 @@ export function createApp(prisma: PrismaService): Application {
 
   const visitInstanceModule = createVisitInstanceModule(prisma);
   const formModule = createFormModule(prisma);
+  const visitScheduleModule = createVisitScheduleModule(prisma);
 
   // All routes live under the global `api/v1` prefix.
   const api = express.Router();
@@ -65,11 +71,16 @@ export function createApp(prisma: PrismaService): Application {
   // drift from what's actually mounted.
   api.use(
     createSwaggerRouter(
-      buildVisitFormServiceOpenApiDocument(visitInstanceModule.registry, formModule.registry),
+      buildVisitFormServiceOpenApiDocument(
+        visitInstanceModule.registry,
+        formModule.registry,
+        visitScheduleModule.registry,
+      ),
     ),
   );
   api.use(visitInstanceModule.router);
   api.use(formModule.router);
+  api.use(visitScheduleModule.router);
   app.use('/api/v1', api);
 
   app.use(notFoundHandler);
