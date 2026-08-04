@@ -9,6 +9,16 @@ export class VisitInstanceRepository {
     return this.prisma.visitInstance.findMany({ orderBy: { createdAt: 'desc' }, take: 50 });
   }
 
+  findByLocalVisitUuid(localVisitUuid: string) {
+    return this.prisma.visitInstance.findUnique({ where: { localVisitUuid } });
+  }
+
+  findScheduleById(scheduleId: string) {
+    return this.prisma.visitSchedule.findFirst({
+      where: { id: scheduleId, isDeleted: false },
+    });
+  }
+
   create(data: CreateVisitInstanceInput) {
     return this.prisma.visitInstance.create({ data });
   }
