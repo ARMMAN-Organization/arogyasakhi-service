@@ -14,3 +14,13 @@ postman/
 
 # Local test-run records (test cases + verification notes) — never commit
 docs/test-runs/
+
+# Deploy driver for the dev box. Deliberately untracked: it is placed on the box
+# by hand and lives only there. cd-dev.yml invokes it over SSM Run Command and
+# checks it exists first, so a missing copy fails with a named error.
+#
+# TRADE-OFF: it is not reviewed or versioned, and `git reset --hard` in the
+# deploy leaves it alone (as it does .env and ecosystem.config.js), so the box's
+# copy is authoritative. Any change has to be copied across manually, and a box
+# rebuild needs it restored — keep a copy somewhere durable.
+tools/deploy-dev.sh

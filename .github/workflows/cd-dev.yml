@@ -1,41 +1,52 @@
-name: CD Dev
+name: CD Dev (SSM Run Command)
 
-# Redeploys the dev box over SSH with only the services whose code changed.
+# Redeploys the dev box with only the services whose code changed, over
+# `aws ssm send-command`. No inbound port, and no long-lived AWS credentials:
+# GitHub mints an OIDC token per run and exchanges it for short-lived ones.
 #
-# Also callable — redeploy-dev.yml uses it for manual runs. When `services` is
-# empty the affected set is computed; "all" or a comma-separated list overrides it.
+# WHY RUN COMMAND AND NOT AN SSH TUNNEL
+# The deploy role is permitted `ssm:SendCommand` only. Session Manager's SSH
+# tunnel (AWS-StartSSHSession) would have let this keep using ssh/scp unchanged,
+# but that permission was declined, so Run Command is the available transport.
 #
-# STATUS: this is the intended permanent deploy path, but it is NOT wired to push
-# yet — cd-dev-ssh.yml is, over direct SSH, while tcp/22 is open for developer
-# access. Prove this one first (it is currently blocked on the IAM policy granting
-# ssm:StartSession on the AWS-StartSSHSession document), then take the push
-# trigger back and delete cd-dev-ssh.yml.
+# WHERE THE LOGIC LIVES
+# tools/deploy-dev.sh, on the box — and ONLY on the box. It is gitignored and
+# placed there by hand, so it is neither versioned nor reviewed, and `git reset
+# --hard` below leaves it untouched (as it does .env and ecosystem.config.js).
+# The box's copy is authoritative: changes must be copied across manually, and a
+# rebuilt box needs it restored before deploys work. Each job checks it is
+# present and fails with a named error if not.
 #
-# HOW IT CONNECTS
-# SSH tunnelled through AWS Session Manager: `aws ssm start-session` with the
-# AWS-StartSSHSession document as an ssh ProxyCommand. The security group has NO
-# inbound tcp/22 rule — the tunnel terminates at the box's own local sshd, which
-# must therefore stay running. Disabling sshd as "hardening" breaks every deploy
-# with no security-group change to point at. Targets are instance IDs, not hosts.
+# Run Command has no stdin, so the alternative was embedding the whole deploy in
+# this YAML as a command array — unreviewable either way, and it would put the
+# logic in the API payload on every run. A script keeps each command to one line
+# and stays transport-agnostic, so it survives a move back to ssh later.
+#
+# ROOT vs ssm-user
+# Run Command executes as root in a non-login shell. PM2's daemon is per-user, so
+# as root `pm2 describe` finds nothing and every reload fails with "process not
+# found"; the box also resolves Node 24 through ssm-user's profile, so `npx nx`
+# is only on PATH under `bash -l`. Everything touching git, pm2 or nx therefore
+# runs via `runuser -l ssm-user`. Only the .env write stays as root, then chowns.
+#
+# .env HANDLING — DELIBERATE, NOT AN OVERSIGHT
+# Run Command has no file copy, so each service's .env body travels inside the
+# command document. It is therefore readable by any principal holding
+# `ssm:GetCommandInvocation` and is retained in SSM command history. This was
+# raised and accepted for this dev box. It is written with a heredoc redirect
+# rather than as an argument, so it at least never appears in `ps` on the box.
+# If that trade is ever revisited: hold the bodies in Parameter Store
+# SecureString and let the instance profile read them, so they never transit the
+# command payload at all.
 #
 # WHY THE LOGIC RUNS ON THE BOX, NOT THE RUNNER
 # Affected-detection needs Nx and node_modules. The box already has both, so the
 # runner stays a thin driver and we skip a ~3min `npm ci` on every deploy. The
 # runner never checks the repo out at all.
-#
-# SSH USER: must be the user that owns the PM2 daemon (ssm-user) — PM2's daemon is
-# per-user, so connecting as anyone else finds an empty process list and every
-# reload fails with "process not found".
 
-# No `push` trigger while cd-dev-ssh.yml holds that role — two workflows on the
-# same trigger would deploy every service twice per push. Restore `push:
-# branches: [develop]` here and delete cd-dev-ssh.yml once the tunnel is proven.
-#
-# To test the tunnel before then: open any previous run of this workflow and use
-# "Re-run jobs". A workflow_dispatch button will not appear until .github/ exists
-# on the default branch (main) — GitHub only surfaces manual triggers for
-# workflows present there, which is also why redeploy-dev.yml has no Run button.
 on:
+  push:
+    branches: [develop]
   workflow_dispatch:
     inputs:
       services:
@@ -51,36 +62,39 @@ on:
         required: false
         default: ''
 
-# id-token is unused while AWS access keys are in play, but is what
-# configure-aws-credentials needs to request a short-lived token once the account
-# switches to OIDC federation. Declared here — and mirrored in redeploy-dev.yml,
-# because a reusable workflow cannot grant itself more than its caller allows —
-# so that swap is a credentials change only.
+# id-token is what configure-aws-credentials exchanges for short-lived AWS
+# credentials via OIDC federation — no access keys are stored anywhere. Mirrored
+# in redeploy-dev.yml, because a reusable workflow cannot grant itself more token
+# permission than its caller.
 permissions:
   contents: read
   id-token: write
 
 # Never cancel a deploy in flight, and never run two at once: both would race
 # `git reset --hard` in the same directory on the same box. Queue instead.
+#
+# Shares the group with cd-dev-ssh.yml deliberately, so a test of this path
+# cannot reset the same working tree as a push deploy.
 concurrency:
   group: cd-dev
   cancel-in-progress: false
 
 env:
   DEV_WORKSPACE: ${{ vars.DEV_WORKSPACE || '/opt/dev/armaan/arogyasakhi-service' }}
+  DEV_USER: ${{ secrets.DEV_USER || 'ssm-user' }}
   # PM2 runs the services via `nx serve` in fork mode, so a reload restarts a
   # webpack dev server that must rebuild before it listens. Measured at 12s for
-  # auth-service on an otherwise-quiet box; the margin is for the case where a
-  # shared-lib change has every watcher rebuilding at once and the box is
-  # contended. Too tight fails a healthy deploy; too loose only delays reporting
-  # a broken one.
+  # auth-service on an otherwise-quiet box; the margin covers a shared-lib change
+  # having every watcher rebuild at once on a contended box.
   HEALTH_TIMEOUT_SECONDS: 120
-  # Was 15 when this connected straight to tcp/22. Establishing the tunnel now
-  # also covers AWS CLI start-up, the StartSession API call, launching
-  # session-manager-plugin and the websocket handshake — so a direct-connect
-  # timeout fails intermittently and looks like a network fault rather than a
-  # too-tight setting.
-  SSH_CONNECT_TIMEOUT: 60
+  # Run Command is asynchronous, so completion is polled. `aws ssm wait
+  # command-executed` is deliberately not used: it gives up after roughly 100s
+  # (5s x 20 attempts), and the detect step alone runs an Nx build.
+  POLL_ATTEMPTS: 240
+  POLL_DELAY: 5
+  # Execution budget on the box, passed to the document — comfortably above a
+  # cold Nx build plus the health wait.
+  SSM_EXECUTION_TIMEOUT: 3600
 
 jobs:
   detect:
@@ -92,142 +106,97 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION || 'ap-south-1' }}
-
-      # Duplicated verbatim in the deploy job below. Kept inline rather than
-      # extracted to a composite action, because a local action resolves from the
-      # workspace and would force `actions/checkout` into a workflow that
-      # deliberately never checks out (see the header).
-      - name: Set up SSH over Session Manager
-        env:
-          DEV_SSH_KEY: ${{ secrets.DEV_SSH_KEY }}
-          DEV_INSTANCE_ID: ${{ vars.DEV_INSTANCE_ID }}
-          DEV_USER: ${{ secrets.DEV_USER || 'ssm-user' }}
-        run: |
-          set -euo pipefail
-          [ -n "${DEV_INSTANCE_ID:-}" ] || { echo "::error::Variable DEV_INSTANCE_ID is empty or unset."; exit 1; }
-          [ -n "${DEV_SSH_KEY:-}" ]     || { echo "::error::Secret DEV_SSH_KEY is empty or unset."; exit 1; }
-
-          # Not preinstalled on ubuntu-latest, and the ProxyCommand below cannot
-          # work without it — `aws ssm start-session` shells out to this binary.
-          curl -fsS -o /tmp/session-manager-plugin.deb \
-            https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb \
-            || { echo "::error::Could not download session-manager-plugin."; exit 1; }
-          sudo dpkg -i /tmp/session-manager-plugin.deb >/dev/null
-          # Positive confirmation the binary runs. Without it, a bad install
-          # surfaces later as `ssh: Connection closed` from the ProxyCommand,
-          # which reads as a network or IAM problem rather than a missing plugin.
-          session-manager-plugin --version
-
-          mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          printf '%s\n' "$DEV_SSH_KEY" > ~/.ssh/id_deploy
-          chmod 600 ~/.ssh/id_deploy
-
-          # %h/%p must reach ssh unexpanded — it substitutes the target and port.
-          # ServerAliveInterval keeps bytes moving because Session Manager closes
-          # an idle channel, and the resolve step below sits quiet through an Nx
-          # build. accept-new rather than a pinned key: the SSM channel already
-          # authenticates the target by instance ID through IAM, so the
-          # internet-MITM case a pinned host key defended against is gone.
-          cat > ~/.ssh/config <<'CFG'
-          Host i-* mi-*
-            ProxyCommand sh -c "aws ssm start-session --target %h --document-name AWS-StartSSHSession --parameters portNumber=%p"
-            ServerAliveInterval 30
-            ServerAliveCountMax 10
-            StrictHostKeyChecking accept-new
-          CFG
-          chmod 600 ~/.ssh/config
-
-          # Replaces the old ssh-keyscan probe, which cannot run through a
-          # ProxyCommand. Stronger anyway: it exercises credentials, IAM, the SSM
-          # agent, the tunnel and the key at once, so a misconfiguration fails
-          # here with a named cause instead of as a mid-deploy disconnect.
-          ssh -o BatchMode=yes -o ConnectTimeout="$SSH_CONNECT_TIMEOUT" \
-              -i ~/.ssh/id_deploy "$DEV_USER@$DEV_INSTANCE_ID" true \
-            || { echo "::error::Cannot reach $DEV_INSTANCE_ID over Session Manager. Check, in order: the AWS credentials allow ssm:StartSession on this instance and on the AWS-StartSSHSession document; the agent is Online (aws ssm describe-instance-information); sshd is running on the box; DEV_SSH_KEY is present in ${DEV_USER}'s authorized_keys."; exit 1; }
 
       - name: Sync workspace and resolve services to deploy
         id: resolve
         env:
           DEV_INSTANCE_ID: ${{ vars.DEV_INSTANCE_ID }}
-          DEV_USER: ${{ secrets.DEV_USER || 'ssm-user' }}
           SERVICES_INPUT: ${{ inputs.services }}
           REF_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
+          [ -n "${DEV_INSTANCE_ID:-}" ] || { echo "::error::Variable DEV_INSTANCE_ID is empty or unset."; exit 1; }
 
-          # Values are prefixed onto the remote script with %q rather than
-          # interpolated into an ssh argument, so quoting can't break and nothing
-          # lands in the box's process list.
+          # Send a script file as the document's `commands`, poll to completion,
+          # then write stdout to $3. Built with jq --rawfile rather than shell
+          # interpolation so any content survives, quotes included. Output is not
+          # piped, because a pipeline's exit status would mask a failed command.
+          ssm_run() {
+            local script_file=$1 label=$2 out=$3 cid status=Pending
+            jq -n --rawfile s "$script_file" --arg t "$SSM_EXECUTION_TIMEOUT" \
+              '{commands: ($s | rtrimstr("\n") | split("\n")), executionTimeout: [$t]}' > params.json
+            cid=$(aws ssm send-command \
+                  --instance-ids "$DEV_INSTANCE_ID" \
+                  --document-name AWS-RunShellScript \
+                  --comment "cd-dev ${label:0:80}" \
+                  --parameters file://params.json \
+                  --query Command.CommandId --output text)
+            echo "SSM command id: $cid"
+            for _ in $(seq 1 "$POLL_ATTEMPTS"); do
+              status=$(aws ssm get-command-invocation --command-id "$cid" \
+                       --instance-id "$DEV_INSTANCE_ID" --query Status --output text 2>/dev/null || echo Pending)
+              case "$status" in Success|Failed|Cancelled|TimedOut) break ;; esac
+              sleep "$POLL_DELAY"
+            done
+            aws ssm get-command-invocation --command-id "$cid" --instance-id "$DEV_INSTANCE_ID" \
+              --query StandardErrorContent --output text || true
+            aws ssm get-command-invocation --command-id "$cid" --instance-id "$DEV_INSTANCE_ID" \
+              --query StandardOutputContent --output text > "$out"
+            cat "$out"
+            [ "$status" = Success ] || { echo "::error::SSM command $cid ended as $status ($label)."; return 1; }
+          }
+
+          # HEAD is captured before the reset, and the reset runs here rather than
+          # inside deploy-dev.sh: the script on disk is the previous version until
+          # the reset lands, so it has to run afterwards. bash reads it after the
+          # reset completes, so the new copy is what executes.
+          #
+          # git runs as ssm-user, never root — root git operations in a
+          # ssm-user-owned repo trip "dubious ownership" and leave root-owned
+          # objects behind.
+          #
+          # Values are prefixed with %q and the body is a quoted heredoc, so
+          # nothing expands on the runner by accident and no quoting can break.
           {
+            printf 'set -euo pipefail\n'
+            printf "runuser -l %q -c 'bash -s' <<'INNER'\n" "$DEV_USER"
+            printf 'set -euo pipefail\n'
             printf 'WORKSPACE=%q\n' "$DEV_WORKSPACE"
-            printf 'REQUESTED=%q\n' "${SERVICES_INPUT:-}"
             printf 'REF_NAME=%q\n'  "$REF_NAME"
-            cat <<'REMOTE'
-          set -euo pipefail
+            printf 'REQUESTED=%q\n' "${SERVICES_INPUT:-}"
+            cat <<'INNER_BODY'
           cd "$WORKSPACE"
-
-          # The box's current HEAD *is* what is deployed, so it is the only
-          # trustworthy base. Captured before fetching. Deliberately not
-          # nrwl/nx-set-shas: that keys off the last *successful run*, so one
-          # failed deploy would leave those services looking already-shipped and
-          # they would never be redeployed.
+          if [ ! -f tools/deploy-dev.sh ]; then
+            echo "MISSING_DEPLOY_SCRIPT"
+            exit 1
+          fi
           base=$(git rev-parse HEAD)
-          git fetch origin "$REF_NAME" >&2
-          # FETCH_HEAD rather than the triggering SHA: if runs queued behind the
-          # concurrency group, deploying the newest commit is correct, and the
-          # superseded run then sees base == target and does nothing.
-          target=$(git rev-parse FETCH_HEAD)
-          echo "base=$base target=$target" >&2
-
+          git fetch origin "$REF_NAME"
           # No `git clean` anywhere: the box legitimately holds untracked files
-          # (ecosystem.config.js — PM2's own config — create_envs.py, notes).
-          git reset --hard "$target" >&2
+          # (ecosystem.config.js — PM2's own config — the .env files, notes).
+          git reset --hard FETCH_HEAD
+          DEV_WORKSPACE="$WORKSPACE" bash tools/deploy-dev.sh detect "$base" "$REQUESTED"
+          INNER_BODY
+            printf 'INNER\n'
+          } > script.sh
 
-          if git diff --name-only "$base" "$target" | grep -qx 'package-lock.json'; then
-            echo "LOCKFILE_CHANGED=1"
-          fi
-
-          all_apps=$(npx nx show projects --type app --json 2>/dev/null)
-          requested=$(printf '%s' "$REQUESTED" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
-
-          if [ "$requested" = 'all' ]; then
-            apps="$all_apps"
-          elif [ -n "$requested" ]; then
-            apps=$(printf '%s' "$requested" \
-              | jq -Rc 'split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0)) | unique')
-            unknown=$(jq -nc --argjson w "$apps" --argjson h "$all_apps" '$w - $h')
-            if [ "$(jq 'length' <<<"$unknown")" -gt 0 ]; then
-              echo "UNKNOWN=$(jq -r 'join(", ")' <<<"$unknown")"
-              exit 1
+          ssm_run script.sh detect remote.out || {
+            if grep -q '^MISSING_DEPLOY_SCRIPT' remote.out; then
+              echo "::error::tools/deploy-dev.sh is not present at $DEV_WORKSPACE on the box. It is gitignored and maintained by hand, so a rebuilt box or a wiped workspace needs it copied back before deploys work."
             fi
-          elif [ "$base" = "$target" ]; then
-            apps='[]'
-          else
-            apps=$(npx nx show projects --affected --type app --base="$base" --head="$target" --json 2>/dev/null)
-          fi
-
-          # `nx serve` needs these built; documented prerequisite of the box's
-          # ecosystem.config.js. Once per run, not once per service. Nx caches it,
-          # so it is near-free when the libs did not change.
-          if [ "$(jq 'length' <<<"$apps")" -gt 0 ]; then
-            npx nx run-many -t build --projects=service-commons,core >&2
-          fi
-
-          echo "APPS_JSON=$apps"
-          REMOTE
-          } | ssh -o BatchMode=yes -o ConnectTimeout="$SSH_CONNECT_TIMEOUT" -i ~/.ssh/id_deploy \
-                "$DEV_USER@$DEV_INSTANCE_ID" 'bash -l -s' > remote.out || {
-                  echo "::error::Remote resolve step failed."; cat remote.out; exit 1;
-                }
-
-          cat remote.out
+            exit 1
+          }
 
           if grep -q '^LOCKFILE_CHANGED=1' remote.out; then
             echo "::warning::package-lock.json changed. npm ci is deliberately not run — the box is on Node 24 while CI pins 20.11.0, and installing there is what causes lockfile drift. If a service fails to boot on a missing dependency, install manually."
           fi
+          if grep -q '^UNKNOWN=' remote.out; then
+            echo "::error::Unknown service(s): $(sed -n 's/^UNKNOWN=//p' remote.out)"
+            exit 1
+          fi
+          sed -n 's/^GENERATED=/Regenerated Prisma client for /p' remote.out
 
           apps=$(sed -n 's/^APPS_JSON=//p' remote.out)
           [ -n "$apps" ] || { echo "::error::Could not resolve the app list."; exit 1; }
@@ -253,7 +222,7 @@ jobs:
     if: needs.detect.outputs.count != '0'
     runs-on: ubuntu-latest
     strategy:
-      # Sequential: the box was at 81.9% RAM with everything idle, so parallel
+      # Sequential: the box sits near 81% RAM with everything idle, so parallel
       # webpack rebuilds risk an OOM. fail-fast off so one bad service does not
       # strand the rest un-deployed.
       max-parallel: 1
@@ -263,123 +232,110 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION || 'ap-south-1' }}
 
-      # Duplicated from the detect job above — see the comment there for why it is
-      # not a composite action. Keep the two copies in step.
-      - name: Set up SSH over Session Manager
+      - name: Write .env, migrate and reload
         env:
-          DEV_SSH_KEY: ${{ secrets.DEV_SSH_KEY }}
+          ENV_BODY: ${{ secrets[matrix.env_secret] }}
           DEV_INSTANCE_ID: ${{ vars.DEV_INSTANCE_ID }}
-          DEV_USER: ${{ secrets.DEV_USER || 'ssm-user' }}
+          SVC: ${{ matrix.service }}
         run: |
           set -euo pipefail
           [ -n "${DEV_INSTANCE_ID:-}" ] || { echo "::error::Variable DEV_INSTANCE_ID is empty or unset."; exit 1; }
-          [ -n "${DEV_SSH_KEY:-}" ]     || { echo "::error::Secret DEV_SSH_KEY is empty or unset."; exit 1; }
 
-          curl -fsS -o /tmp/session-manager-plugin.deb \
-            https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb \
-            || { echo "::error::Could not download session-manager-plugin."; exit 1; }
-          sudo dpkg -i /tmp/session-manager-plugin.deb >/dev/null
-          # Positive confirmation the binary runs. Without it, a bad install
-          # surfaces later as `ssh: Connection closed` from the ProxyCommand,
-          # which reads as a network or IAM problem rather than a missing plugin.
-          session-manager-plugin --version
+          # Duplicated from the detect job. Kept inline rather than extracted to a
+          # composite action, because a local action resolves from the workspace
+          # and would force actions/checkout into a workflow that deliberately
+          # never checks out (see the header).
+          ssm_run() {
+            local script_file=$1 label=$2 out=$3 cid status=Pending
+            jq -n --rawfile s "$script_file" --arg t "$SSM_EXECUTION_TIMEOUT" \
+              '{commands: ($s | rtrimstr("\n") | split("\n")), executionTimeout: [$t]}' > params.json
+            cid=$(aws ssm send-command \
+                  --instance-ids "$DEV_INSTANCE_ID" \
+                  --document-name AWS-RunShellScript \
+                  --comment "cd-dev ${label:0:80}" \
+                  --parameters file://params.json \
+                  --query Command.CommandId --output text)
+            echo "SSM command id: $cid"
+            for _ in $(seq 1 "$POLL_ATTEMPTS"); do
+              status=$(aws ssm get-command-invocation --command-id "$cid" \
+                       --instance-id "$DEV_INSTANCE_ID" --query Status --output text 2>/dev/null || echo Pending)
+              case "$status" in Success|Failed|Cancelled|TimedOut) break ;; esac
+              sleep "$POLL_DELAY"
+            done
+            aws ssm get-command-invocation --command-id "$cid" --instance-id "$DEV_INSTANCE_ID" \
+              --query StandardErrorContent --output text || true
+            aws ssm get-command-invocation --command-id "$cid" --instance-id "$DEV_INSTANCE_ID" \
+              --query StandardOutputContent --output text > "$out"
+            cat "$out"
+            [ "$status" = Success ] || { echo "::error::SSM command $cid ended as $status ($label)."; return 1; }
+          }
 
-          mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          printf '%s\n' "$DEV_SSH_KEY" > ~/.ssh/id_deploy
-          chmod 600 ~/.ssh/id_deploy
-
-          cat > ~/.ssh/config <<'CFG'
-          Host i-* mi-*
-            ProxyCommand sh -c "aws ssm start-session --target %h --document-name AWS-StartSSHSession --parameters portNumber=%p"
-            ServerAliveInterval 30
-            ServerAliveCountMax 10
-            StrictHostKeyChecking accept-new
-          CFG
-          chmod 600 ~/.ssh/config
-
-          ssh -o BatchMode=yes -o ConnectTimeout="$SSH_CONNECT_TIMEOUT" \
-              -i ~/.ssh/id_deploy "$DEV_USER@$DEV_INSTANCE_ID" true \
-            || { echo "::error::Cannot reach $DEV_INSTANCE_ID over Session Manager. See the detect job for the checklist."; exit 1; }
-
-      - name: Upload .env from GitHub secret
-        env:
-          # Written to a file and scp'd — never passed as an ssh/scp argument,
-          # where it would be visible in `ps` to every user on the box.
-          ENV_BODY: ${{ secrets[matrix.env_secret] }}
-          DEV_INSTANCE_ID: ${{ vars.DEV_INSTANCE_ID }}
-          DEV_USER: ${{ secrets.DEV_USER || 'ssm-user' }}
-          SVC: ${{ matrix.service }}
-        run: |
-          set -euo pipefail
-          if [ -z "${ENV_BODY:-}" ]; then
-            echo "::warning::$SVC: secret ${{ matrix.env_secret }} is not set — reloading against the .env already on the box."
-            exit 0
-          fi
-          umask 077
-          printf '%s\n' "$ENV_BODY" > env.upload
-          scp -o BatchMode=yes -o ConnectTimeout="$SSH_CONNECT_TIMEOUT" -i ~/.ssh/id_deploy env.upload \
-            "$DEV_USER@$DEV_INSTANCE_ID:$DEV_WORKSPACE/apps/$SVC/.env"
-          ssh -o BatchMode=yes -o ConnectTimeout="$SSH_CONNECT_TIMEOUT" -i ~/.ssh/id_deploy "$DEV_USER@$DEV_INSTANCE_ID" \
-            "chmod 600 '$DEV_WORKSPACE/apps/$SVC/.env'"
-          rm -f env.upload
-          echo "Wrote apps/$SVC/.env from ${{ matrix.env_secret }}"
-
-      - name: Reload and wait for readiness
-        env:
-          DEV_INSTANCE_ID: ${{ vars.DEV_INSTANCE_ID }}
-          DEV_USER: ${{ secrets.DEV_USER || 'ssm-user' }}
-          SVC: ${{ matrix.service }}
-        run: |
-          set -euo pipefail
-          {
-            printf 'WORKSPACE=%q\n' "$DEV_WORKSPACE"
-            printf 'SVC=%q\n'       "$SVC"
-            printf 'TIMEOUT=%q\n'   "$HEALTH_TIMEOUT_SECONDS"
-            cat <<'REMOTE'
-          set -euo pipefail
-          cd "$WORKSPACE"
-
-          # A service present in git but not in PM2 has never been bootstrapped on
-          # this box. Auto-starting it would boot it with no .env straight into its
-          # Zod fail-fast, so skip — but loudly, because a silently never-deployed
-          # service is the worst outcome here.
-          if ! pm2 describe "$SVC" >/dev/null 2>&1; then
-            echo "SKIPPED_NOT_IN_PM2"
-            exit 0
-          fi
-
-          # PM2's own env is the authoritative port: it is what injects PORT into
-          # each service, so no port table is needed anywhere here.
-          port=$(pm2 jlist | jq -r --arg s "$SVC" '.[] | select(.name == $s) | .pm2_env.env.PORT // empty')
-          if [ -z "$port" ]; then
-            echo "NO_PORT"
+          # The .env write runs as root, then chowns — writing it as ssm-user
+          # would mean passing the body through `runuser -c`, where it would show
+          # up in `ps` for every user on the box. A quoted heredoc delimiter stops
+          # anything inside the body being expanded, so $(...), backticks and
+          # quotes all survive verbatim. The one thing that would break out is a
+          # body line exactly matching the delimiter:
+          if printf '%s' "${ENV_BODY:-}" | grep -qx 'AROGYA_ENV_EOF'; then
+            echo "::error::$SVC: ${{ matrix.env_secret }} contains a line reading exactly AROGYA_ENV_EOF, which would terminate the heredoc early and truncate the .env. Rename or remove that line."
             exit 1
           fi
 
-          pm2 reload "$SVC" --update-env >&2
-
-          # `pm2 reload` exiting 0 only means the process was signalled, not that
-          # the app rebuilt and bound its socket. Health is mounted under the
-          # global api/v1 prefix.
-          url="http://localhost:$port/api/v1/health/ready"
-          deadline=$((SECONDS + TIMEOUT))
-          until curl -fsS -o /dev/null "$url"; do
-            if [ "$SECONDS" -ge "$deadline" ]; then
-              echo "NOT_READY $url"
-              pm2 logs "$SVC" --lines 40 --nostream >&2 || true
-              exit 1
+          {
+            printf 'set -euo pipefail\n'
+            printf 'cd %q\n' "$DEV_WORKSPACE"
+            if [ -n "${ENV_BODY:-}" ]; then
+              printf 'umask 077\n'
+              printf "cat > apps/%q/.env <<'AROGYA_ENV_EOF'\n" "$SVC"
+              printf '%s\n' "$ENV_BODY"
+              printf 'AROGYA_ENV_EOF\n'
+              printf 'chown %q:%q apps/%q/.env\n' "$DEV_USER" "$DEV_USER" "$SVC"
+              printf 'chmod 600 apps/%q/.env\n' "$SVC"
+              printf 'echo ENV_WRITTEN\n'
             fi
-            sleep 3
-          done
-          echo "READY $port"
-          REMOTE
-          } | ssh -o BatchMode=yes -o ConnectTimeout="$SSH_CONNECT_TIMEOUT" -i ~/.ssh/id_deploy \
-                "$DEV_USER@$DEV_INSTANCE_ID" 'bash -l -s' | tee remote.out || true
+            printf "runuser -l %q -c 'bash -s' <<'INNER'\n" "$DEV_USER"
+            printf 'set -euo pipefail\n'
+            printf 'WORKSPACE=%q\n' "$DEV_WORKSPACE"
+            printf 'SVC=%q\n'       "$SVC"
+            printf 'TIMEOUT=%q\n'   "$HEALTH_TIMEOUT_SECONDS"
+            cat <<'INNER_BODY'
+          cd "$WORKSPACE"
+          DEV_WORKSPACE="$WORKSPACE" HEALTH_TIMEOUT_SECONDS="$TIMEOUT" \
+            bash tools/deploy-dev.sh deploy "$SVC"
+          INNER_BODY
+            printf 'INNER\n'
+          } > script.sh
 
+          if [ -z "${ENV_BODY:-}" ]; then
+            echo "::warning::$SVC: secret ${{ matrix.env_secret }} is not set — reloading against the .env already on the box."
+          fi
+
+          # Markers are checked below, so a non-zero status here is expected for
+          # the handled cases and must not abort the step first.
+          ssm_run script.sh "deploy $SVC" remote.out || true
+
+          if grep -q '^MISSING_DEPLOY_SCRIPT' remote.out; then
+            echo "::error::tools/deploy-dev.sh is not present at $DEV_WORKSPACE on the box. It is gitignored and maintained by hand, so a rebuilt box or a wiped workspace needs it copied back before deploys work."
+            exit 1
+          fi
+          if grep -q '^ENV_WRITTEN' remote.out; then
+            echo "Wrote apps/$SVC/.env from ${{ matrix.env_secret }}"
+          fi
+          if grep -q '^NO_ENV' remote.out; then
+            echo "::error::$SVC: apps/$SVC/.env is missing on the box, so the database target is unknown. Set the ${{ matrix.env_secret }} secret."
+            exit 1
+          fi
+          if grep -q '^MISSING_ENV' remote.out; then
+            echo "::error::$SVC: $(sed -n 's/^MISSING_ENV //p' remote.out) is not set in apps/$SVC/.env — add it to the ${{ matrix.env_secret }} secret. The schema declares both url and directUrl, so DATABASE_URL and DIRECT_URL are both required."
+            exit 1
+          fi
+          if grep -q '^MIGRATE_FAILED' remote.out; then
+            echo "::error::$SVC: prisma migrate deploy failed — see the log tail above. Prisma has no down-migrations, so a bad migration is fixed forward, not rolled back."
+            exit 1
+          fi
           if grep -q '^SKIPPED_NOT_IN_PM2' remote.out; then
             echo "::warning::$SVC is not registered in PM2 — skipped. Bootstrap it once on the box with pm2 start, then it will deploy normally."
             exit 0
@@ -389,7 +345,7 @@ jobs:
             exit 1
           fi
           if grep -q '^NOT_READY' remote.out; then
-            echo "::error::$SVC not ready after ${HEALTH_TIMEOUT_SECONDS}s."
+            echo "::error::$SVC not ready after ${HEALTH_TIMEOUT_SECONDS}s. Full log on the box: $(sed -n 's/^LOG=//p' remote.out)"
             exit 1
           fi
-          grep -q '^READY' remote.out || { echo "::error::$SVC deploy did not complete."; exit 1; }
+          grep -q '^READY' remote.out || { echo "::error::$SVC deploy did not complete. Full log on the box: $(sed -n 's/^LOG=//p' remote.out)"; exit 1; }

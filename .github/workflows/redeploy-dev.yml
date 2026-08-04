@@ -32,11 +32,12 @@ jobs:
       services: ${{ inputs.services }}
     # Required for cd-dev.yml to read the per-service ENV_* secrets.
     secrets: inherit
-    # A reusable workflow cannot grant itself more token permission than its
-    # caller, so cd-dev.yml's own `permissions` block is capped by this one.
-    # Unused with AWS access keys; omitting it once the account moves to OIDC
-    # would break manual redeploys only, while push-triggered deploys kept
-    # working — an awkward failure to diagnose. Declared now to avoid it.
+    # cd-dev.yml authenticates to AWS by exchanging a GitHub OIDC token for
+    # short-lived credentials, which needs `id-token: write`. A reusable workflow
+    # cannot grant itself more token permission than its caller, so its own
+    # `permissions` block is capped by this one — drop this and manual redeploys
+    # fail at role assumption while push deploys keep working, which is an
+    # awkward asymmetry to debug.
     permissions:
       contents: read
       id-token: write
