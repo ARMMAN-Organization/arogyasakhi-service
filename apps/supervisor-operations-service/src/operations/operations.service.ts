@@ -530,7 +530,9 @@ export class OperationsService {
     }
 
     const gatheringTopics = await this.repository.findGatheringTopics(dto.gatheringId);
-    const belongsToGathering = gatheringTopics.some((gt) => gt.topicId === topicId);
+    const belongsToGathering = gatheringTopics.some(
+      (gt: (typeof gatheringTopics)[number]) => gt.topicId === topicId,
+    );
     if (!belongsToGathering) {
       throw unprocessable('topicId: this topic is not part of the referenced gathering.');
     }
