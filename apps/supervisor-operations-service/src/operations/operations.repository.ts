@@ -241,6 +241,17 @@ export class OperationsRepository {
   }
 
   /**
+   * Call-sheet stats' FOLLOWUP_PENDING count — a call logged as CALL_BACK
+   * (the caller asked to be rung again) with no newer call logged since.
+   * The only one of the 7 call-sheet-stats kinds backed by real data today.
+   */
+  countPendingFollowups(sakhiId: string) {
+    return this.prisma.callLog.count({
+      where: { sakhiId, isDeleted: false, callStatus: 'CALL_BACK' },
+    });
+  }
+
+  /**
    * Only ever writes the fields captured after a call ends (status, end
    * time, duration, notes, followup) — sakhiId/projectId/supervisorId/
    * callStartAt/callDatetime are immutable, matching this repo's
