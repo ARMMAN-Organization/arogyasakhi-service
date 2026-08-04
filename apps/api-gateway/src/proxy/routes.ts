@@ -64,6 +64,7 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
   // replaced by the unified view.
   { prefix: '/beneficiaries', target: appConfig.BENEFICIARY_SERVICE_URL, requiresAuth: true },
   { prefix: '/visits', target: appConfig.VISIT_FORM_SERVICE_URL, requiresAuth: true },
+  { prefix: '/visit-schedules', target: appConfig.VISIT_FORM_SERVICE_URL, requiresAuth: true },
   { prefix: '/forms', target: appConfig.VISIT_FORM_SERVICE_URL, requiresAuth: true },
   // Admin form-authoring routes (create/patch/publish draft versions) live
   // under /admin/forms in visit-form-service — a distinct prefix from /forms,
