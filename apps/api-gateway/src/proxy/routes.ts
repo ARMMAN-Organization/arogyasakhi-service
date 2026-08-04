@@ -86,15 +86,24 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
   { prefix: '/sync', target: appConfig.SYNC_SERVICE_URL, requiresAuth: true },
   { prefix: '/media', target: appConfig.MEDIA_SERVICE_URL, requiresAuth: true },
   { prefix: '/audit', target: appConfig.AUDIT_SERVICE_URL, requiresAuth: true },
-  // supervisor-operations-service owns four sibling prefixes (events, inventory
-  // items/transactions, call logs). Each enforces its own role guard downstream.
+  // supervisor-operations-service owns five sibling prefixes (events, event
+  // attendance under /gatherings, inventory items/transactions, call logs).
+  // Each enforces its own role guard downstream.
   {
     prefix: '/supervisor-events',
     target: appConfig.SUPERVISOR_OPERATIONS_SERVICE_URL,
     requiresAuth: true,
   },
+  // Event attendance only — /gatherings/:id/attendance still keys `:id` off
+  // the same supervisor_events row as /supervisor-events/:id; there is no
+  // separate "gathering" resource/table, this is a route-naming alias only.
   {
-    prefix: '/inventory-items',
+    prefix: '/gatherings',
+    target: appConfig.SUPERVISOR_OPERATIONS_SERVICE_URL,
+    requiresAuth: true,
+  },
+  {
+    prefix: '/items',
     target: appConfig.SUPERVISOR_OPERATIONS_SERVICE_URL,
     requiresAuth: true,
   },

@@ -267,7 +267,7 @@ export function createOperationsRouter(service: OperationsService) {
   );
 
   doc.get(
-    '/supervisor-events/:id/attendance',
+    '/gatherings/:id/attendance',
     {
       summary: "An event's attendance records (FR-SV-2.1/2.4)",
       tags: ['Supervisor Operations'],
@@ -292,7 +292,7 @@ export function createOperationsRouter(service: OperationsService) {
   );
 
   doc.put(
-    '/supervisor-events/:id/attendance',
+    '/gatherings/:id/attendance',
     {
       summary: 'Record attendance for an event (FR-SV-2.3)',
       tags: ['Supervisor Operations'],
@@ -319,7 +319,7 @@ export function createOperationsRouter(service: OperationsService) {
   );
 
   doc.get(
-    '/inventory-items',
+    '/items',
     {
       summary: 'List inventory items (consumables/instruments master data)',
       tags: ['Supervisor Operations'],
@@ -337,7 +337,7 @@ export function createOperationsRouter(service: OperationsService) {
   );
 
   doc.post(
-    '/inventory-items',
+    '/items',
     {
       summary: 'Create an inventory item (consumables/instruments master data)',
       tags: ['Supervisor Operations'],
@@ -381,7 +381,7 @@ export function createOperationsRouter(service: OperationsService) {
   );
 
   doc.get(
-    '/inventory-transactions/by-sakhi/:sakhiId',
+    '/inventory-transactions/sakhi/:sakhiId',
     {
       summary: "One Sakhi's inventory transaction history",
       tags: ['Supervisor Operations'],
@@ -591,7 +591,7 @@ export function createOperationsRouter(service: OperationsService) {
   );
 
   doc.get(
-    '/call-logs/by-sakhi/:sakhiId',
+    '/call-logs/sakhi/:sakhiId',
     {
       summary: 'Full call history for a Sakhi, newest first (FR-SV-3.3)',
       tags: ['Supervisor Operations'],
@@ -617,7 +617,7 @@ export function createOperationsRouter(service: OperationsService) {
   );
 
   doc.get(
-    '/call-logs/by-sakhi/:sakhiId/recent',
+    '/call-logs/sakhi/:sakhiId/recent',
     {
       summary: 'Whether a Sakhi has been called recently (FR-SV-3.4 orange-highlight state)',
       tags: ['Supervisor Operations'],
