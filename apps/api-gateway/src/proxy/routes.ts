@@ -86,10 +86,30 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
   { prefix: '/sync', target: appConfig.SYNC_SERVICE_URL, requiresAuth: true },
   { prefix: '/media', target: appConfig.MEDIA_SERVICE_URL, requiresAuth: true },
   { prefix: '/audit', target: appConfig.AUDIT_SERVICE_URL, requiresAuth: true },
-  // supervisor-operations-service owns four sibling prefixes (events, inventory
-  // items/transactions, call logs). Each enforces its own role guard downstream.
+  // supervisor-operations-service owns six sibling prefixes (events,
+  // Training sessions under /gatherings, training topics, inventory
+  // items/transactions, call logs). Each enforces its own role guard
+  // downstream.
   {
     prefix: '/supervisor-events',
+    target: appConfig.SUPERVISOR_OPERATIONS_SERVICE_URL,
+    requiresAuth: true,
+  },
+  // Real per-session ("gathering") resource, distinct from
+  // supervisor_events — a TRAINING event can have multiple gatherings,
+  // each with its own topics/attendance/marks.
+  {
+    prefix: '/gatherings',
+    target: appConfig.SUPERVISOR_OPERATIONS_SERVICE_URL,
+    requiresAuth: true,
+  },
+  {
+    prefix: '/training-topics',
+    target: appConfig.SUPERVISOR_OPERATIONS_SERVICE_URL,
+    requiresAuth: true,
+  },
+  {
+    prefix: '/topics',
     target: appConfig.SUPERVISOR_OPERATIONS_SERVICE_URL,
     requiresAuth: true,
   },

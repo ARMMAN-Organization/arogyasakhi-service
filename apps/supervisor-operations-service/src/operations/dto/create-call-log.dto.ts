@@ -19,18 +19,23 @@ export const createCallLogSchema = z
     sakhiId: z.string().uuid(),
     callDatetime: z.coerce.date(),
     callStatus: z.enum([
-      'CONNECTED',
-      'NOT_CONNECTED',
-      'FOLLOWUP_REQUIRED',
-      'BUSY',
-      'SWITCHED_OFF',
-      'WRONG_NUMBER',
+      'PICKED_UP_TALKED',
+      'PICKED_UP_NO_ONE_TALKING',
+      'PICKED_UP_CUT_MIDWAY',
+      'CALL_BACK',
+      'NOT_PICKED_UP',
+      'RINGING',
+      'PHONE_OFF',
+      'OUT_OF_NETWORK',
     ]),
     notes: z.string().trim().min(1).optional(),
     followupAction: z.string().trim().min(1).optional(),
     callStartAt: z.coerce.date(),
     callEndAt: z.coerce.date().optional(),
     callDurationSeconds: z.number().int().nonnegative().optional(),
+    responder: z
+      .enum(['RELATIVE', 'HUSBAND', 'SAKHI', 'PERSON_WHO_DOES_NOT_KNOW_WOMAN'])
+      .optional(),
   })
   .strict();
 

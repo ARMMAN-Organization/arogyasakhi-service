@@ -10,6 +10,13 @@ import { updateInventoryTransactionSchema } from './dto/update-inventory-transac
 import { createCallLogSchema } from './dto/create-call-log.dto';
 import { updateCallLogSchema } from './dto/update-call-log.dto';
 import { listRecentCallLogsQuerySchema } from './dto/list-recent-call-logs.dto';
+import { createTrainingTopicSchema } from './dto/create-training-topic.dto';
+import { rescheduleEventSchema } from './dto/reschedule-event.dto';
+import { createEventPhotoSchema } from './dto/create-event-photo.dto';
+import { createGatheringSchema } from './dto/create-gathering.dto';
+import { updateGatheringAttendanceSchema } from './dto/update-gathering-attendance.dto';
+import { completeTopicMarkSchema, createTopicMarkSchema } from './dto/create-topic-mark.dto';
+import { topicMarkQuerySchema } from './dto/topic-mark-query.dto';
 import {
   asyncHandler,
   createDocumentedRouter,
@@ -93,18 +100,21 @@ const callLogSchema = z.object({
   sakhiId: z.string().uuid(),
   callDatetime: z.string().datetime(),
   callStatus: z.enum([
-    'CONNECTED',
-    'NOT_CONNECTED',
-    'FOLLOWUP_REQUIRED',
-    'BUSY',
-    'SWITCHED_OFF',
-    'WRONG_NUMBER',
+    'PICKED_UP_TALKED',
+    'PICKED_UP_NO_ONE_TALKING',
+    'PICKED_UP_CUT_MIDWAY',
+    'CALL_BACK',
+    'NOT_PICKED_UP',
+    'RINGING',
+    'PHONE_OFF',
+    'OUT_OF_NETWORK',
   ]),
   notes: z.string().nullable(),
   followupAction: z.string().nullable(),
   callStartAt: z.string().datetime(),
   callEndAt: z.string().datetime().nullable(),
   callDurationSeconds: z.number().int().nullable(),
+  responder: z.enum(['RELATIVE', 'HUSBAND', 'SAKHI', 'PERSON_WHO_DOES_NOT_KNOW_WOMAN']).nullable(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });
@@ -132,6 +142,74 @@ const eventIdParamsSchema = z
     id: z.string().uuid(),
   })
   .strict();
+
+const gatheringIdParamsSchema = z
+  .object({
+    gatheringId: z.string().uuid(),
+  })
+  .strict();
+
+const topicIdParamsSchema = z
+  .object({
+    topicId: z.string().uuid(),
+  })
+  .strict();
+
+const trainingTopicSchema = z.object({
+  id: z.string().uuid(),
+  topicCode: z.string(),
+  topicName: z.string(),
+  status: z.enum(['ACTIVE', 'INACTIVE']),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+
+const eventPhotoSchema = z.object({
+  id: z.string().uuid(),
+  eventId: z.string().uuid(),
+  mediaId: z.string().uuid(),
+  createdAt: z.string().datetime(),
+});
+
+const gatheringSchema = z.object({
+  id: z.string().uuid(),
+  eventId: z.string().uuid(),
+  gatheringDate: z.string().datetime(),
+  remarks: z.string().nullable(),
+  status: z.enum(['SCHEDULED', 'COMPLETED', 'CANCELLED']),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+
+const gatheringTopicSchema = z.object({
+  id: z.string().uuid(),
+  gatheringId: z.string().uuid(),
+  topicId: z.string().uuid(),
+  topic: trainingTopicSchema,
+});
+
+const gatheringAttendanceSchema = z.object({
+  id: z.string().uuid(),
+  gatheringId: z.string().uuid(),
+  sakhiId: z.string().uuid(),
+  attendanceStatus: z.enum(['PRESENT', 'ABSENT', 'PARTIAL']),
+  remarks: z.string().nullable(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+
+const topicMarkSchema = z.object({
+  id: z.string().uuid(),
+  gatheringId: z.string().uuid(),
+  topicId: z.string().uuid(),
+  sakhiId: z.string().uuid(),
+  markType: z.enum(['PRE', 'POST']),
+  score: z.number(),
+  isLocked: z.boolean(),
+  lockedAt: z.string().datetime().nullable(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
 
 const createInventoryTransactionRequestSchema = createInventoryTransactionSchema;
 
@@ -653,6 +731,290 @@ export function createOperationsRouter(service: OperationsService) {
           ),
         ),
       );
+    }),
+  );
+
+  doc.get(
+    '/training-topics',
+    {
+      summary: 'List training topics (topic-picker master data)',
+      tags: ['Supervisor Operations'],
+      responses: {
+        200: { description: 'Training topics', schema: envelope(z.array(trainingTopicSchema)) },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    asyncHandler(async (_req, res) => {
+      res.json(ok(await service.listTrainingTopics()));
+    }),
+  );
+
+  doc.post(
+    '/training-topics',
+    {
+      summary: 'Create a training topic (topic-picker master data)',
+      tags: ['Supervisor Operations'],
+      responses: {
+        201: { description: 'Training topic created', schema: envelope(trainingTopicSchema) },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+        409: { description: 'topicCode already exists', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('ADMIN'),
+    validateBody(createTrainingTopicSchema),
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const created = await service.createTrainingTopic(req.body, req.user.id);
+      res.status(201).json(ok(created));
+    }),
+  );
+
+  doc.post(
+    '/supervisor-events/:id/reschedule',
+    {
+      summary: "Reschedule a SCHEDULED event's date",
+      tags: ['Supervisor Operations'],
+      params: eventIdParamsSchema,
+      responses: {
+        200: { description: 'Event rescheduled', schema: envelope(supervisorEventSchema) },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller does not own this event', schema: apiErrorSchema },
+        404: { description: 'Event not found', schema: apiErrorSchema },
+        409: { description: 'Event is not in SCHEDULED status', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'ADMIN'),
+    validate(eventIdParamsSchema, 'params'),
+    validateBody(rescheduleEventSchema),
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      res.json(ok(await service.rescheduleEvent(req.params.id, req.body, req.user)));
+    }),
+  );
+
+  doc.post(
+    '/supervisor-events/:id/photos',
+    {
+      summary: "Add a photo to an event's gallery",
+      tags: ['Supervisor Operations'],
+      params: eventIdParamsSchema,
+      responses: {
+        201: { description: 'Photo added', schema: envelope(eventPhotoSchema) },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller does not own this event', schema: apiErrorSchema },
+        404: { description: 'Event not found', schema: apiErrorSchema },
+        409: { description: 'Event is not in SCHEDULED status', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'ADMIN'),
+    validate(eventIdParamsSchema, 'params'),
+    validateBody(createEventPhotoSchema),
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const created = await service.addEventPhoto(req.params.id, req.body, req.user);
+      res.status(201).json(ok(created));
+    }),
+  );
+
+  doc.post(
+    '/supervisor-events/:id/gatherings',
+    {
+      summary: 'Create a Training session (gathering) under a TRAINING event',
+      tags: ['Supervisor Operations'],
+      params: eventIdParamsSchema,
+      responses: {
+        201: { description: 'Gathering created', schema: envelope(gatheringSchema) },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller does not own this event', schema: apiErrorSchema },
+        404: { description: 'Event not found', schema: apiErrorSchema },
+        422: {
+          description: 'Event is not TRAINING, or a topicId is missing/inactive',
+          schema: apiErrorSchema,
+        },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'ADMIN'),
+    validate(eventIdParamsSchema, 'params'),
+    validateBody(createGatheringSchema),
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const created = await service.createGathering(req.params.id, req.body, req.user);
+      res.status(201).json(ok(created));
+    }),
+  );
+
+  doc.get(
+    '/gatherings/:gatheringId/topics',
+    {
+      summary: 'List the topics belonging to one gathering',
+      tags: ['Supervisor Operations'],
+      params: gatheringIdParamsSchema,
+      responses: {
+        200: { description: 'Gathering topics', schema: envelope(z.array(gatheringTopicSchema)) },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller does not own this gathering', schema: apiErrorSchema },
+        404: { description: 'Gathering not found', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(gatheringIdParamsSchema, 'params'),
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      res.json(ok(await service.listGatheringTopics(req.params.gatheringId, req.user)));
+    }),
+  );
+
+  doc.get(
+    '/gatherings/:gatheringId/attendance',
+    {
+      summary: "A gathering's attendance records",
+      tags: ['Supervisor Operations'],
+      params: gatheringIdParamsSchema,
+      responses: {
+        200: {
+          description: 'Attendance for this gathering',
+          schema: envelope(z.array(gatheringAttendanceSchema)),
+        },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller does not own this gathering', schema: apiErrorSchema },
+        404: { description: 'Gathering not found', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(gatheringIdParamsSchema, 'params'),
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      res.json(ok(await service.getGatheringAttendance(req.params.gatheringId, req.user)));
+    }),
+  );
+
+  doc.put(
+    '/gatherings/:gatheringId/attendance',
+    {
+      summary: 'Record attendance for a gathering (Training session)',
+      tags: ['Supervisor Operations'],
+      params: gatheringIdParamsSchema,
+      responses: {
+        200: {
+          description: 'Attendance recorded',
+          schema: envelope(z.array(gatheringAttendanceSchema)),
+        },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller does not own this gathering', schema: apiErrorSchema },
+        404: { description: 'Gathering not found', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'ADMIN'),
+    validate(gatheringIdParamsSchema, 'params'),
+    validateBody(updateGatheringAttendanceSchema),
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      res.json(
+        ok(await service.updateGatheringAttendance(req.params.gatheringId, req.body, req.user)),
+      );
+    }),
+  );
+
+  doc.get(
+    '/topics/:topicId/marks',
+    {
+      summary: 'Load a Pre/Post mark for one topic + gathering + Sakhi',
+      tags: ['Supervisor Operations'],
+      params: topicIdParamsSchema,
+      query: topicMarkQuerySchema,
+      responses: {
+        200: { description: 'Topic mark', schema: envelope(topicMarkSchema) },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller does not own this gathering', schema: apiErrorSchema },
+        404: { description: 'Gathering or mark not found', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(topicIdParamsSchema, 'params'),
+    validate(topicMarkQuerySchema, 'query'),
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      res.json(
+        ok(
+          await service.getTopicMark(
+            req.params.topicId,
+            req.query as unknown as z.infer<typeof topicMarkQuerySchema>,
+            req.user,
+          ),
+        ),
+      );
+    }),
+  );
+
+  doc.put(
+    '/topics/:topicId/marks',
+    {
+      summary: 'Save a Pre/Post mark for one topic + gathering + Sakhi',
+      tags: ['Supervisor Operations'],
+      params: topicIdParamsSchema,
+      responses: {
+        200: { description: 'Topic mark saved', schema: envelope(topicMarkSchema) },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller does not own this gathering', schema: apiErrorSchema },
+        404: { description: 'Gathering not found', schema: apiErrorSchema },
+        409: { description: 'Mark is already locked', schema: apiErrorSchema },
+        422: {
+          description: 'Topic is not part of the referenced gathering',
+          schema: apiErrorSchema,
+        },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'ADMIN'),
+    validate(topicIdParamsSchema, 'params'),
+    validateBody(createTopicMarkSchema),
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      res.json(ok(await service.upsertTopicMark(req.params.topicId, req.body, req.user)));
+    }),
+  );
+
+  doc.post(
+    '/topics/:topicId/marks/complete',
+    {
+      summary: "Lock one topic's Pre or Post mark so it can no longer be edited",
+      tags: ['Supervisor Operations'],
+      params: topicIdParamsSchema,
+      responses: {
+        200: { description: 'Mark locked', schema: envelope(topicMarkSchema) },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller does not own this gathering', schema: apiErrorSchema },
+        404: { description: 'Gathering or mark not found', schema: apiErrorSchema },
+        409: { description: 'Mark is already locked', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'ADMIN'),
+    validate(topicIdParamsSchema, 'params'),
+    validateBody(completeTopicMarkSchema),
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      res.json(ok(await service.completeTopicMark(req.params.topicId, req.body, req.user)));
     }),
   );
 

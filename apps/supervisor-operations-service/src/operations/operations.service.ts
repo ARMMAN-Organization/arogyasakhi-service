@@ -8,6 +8,13 @@ import type { CreateInventoryTransactionInput } from './dto/create-inventory-tra
 import type { UpdateInventoryTransactionInput } from './dto/update-inventory-transaction.dto';
 import type { CreateCallLogInput } from './dto/create-call-log.dto';
 import type { UpdateCallLogInput } from './dto/update-call-log.dto';
+import type { CreateTrainingTopicInput } from './dto/create-training-topic.dto';
+import type { RescheduleEventInput } from './dto/reschedule-event.dto';
+import type { CreateEventPhotoInput } from './dto/create-event-photo.dto';
+import type { CreateGatheringInput } from './dto/create-gathering.dto';
+import type { UpdateGatheringAttendanceInput } from './dto/update-gathering-attendance.dto';
+import type { CompleteTopicMarkInput, CreateTopicMarkInput } from './dto/create-topic-mark.dto';
+import type { TopicMarkQuery } from './dto/topic-mark-query.dto';
 import type { SakhiClient } from './sakhi.client';
 
 /** Default recency window for the FR-SV-3.4 "recently called" card highlight. */
@@ -344,5 +351,237 @@ export class OperationsService {
     }
     const sinceDate = new Date(Date.now() - withinHours * 60 * 60 * 1000);
     return this.repository.findRecentCallLogsBySakhi(sakhiId, sinceDate);
+  }
+
+  listTrainingTopics() {
+    return this.repository.findTrainingTopics();
+  }
+
+  async createTrainingTopic(dto: CreateTrainingTopicInput, createdByUserId: string) {
+    try {
+      return await this.repository.createTrainingTopic(dto, createdByUserId);
+    } catch (err) {
+      if (isUniqueConstraintViolation(err)) {
+        throw conflict('A training topic with this topicCode already exists.');
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * A SUPERVISOR may only reschedule their own events. MANAGER and ADMIN are
+   * unrestricted. Only a SCHEDULED event can be rescheduled — matches
+   * cancelEvent/completeEvent's existing rule that a COMPLETED/CANCELLED
+   * event's history is immutable.
+   */
+  async rescheduleEvent(id: string, dto: RescheduleEventInput, caller: CallerIdentity) {
+    const existing = await this.repository.findEventById(id);
+    if (!existing) throw notFound('Event not found.');
+    if (existing.supervisorId !== caller.id && !isPrivileged(caller)) {
+      throw forbidden('You do not have access to this event.');
+    }
+    if (existing.status !== 'SCHEDULED') {
+      throw conflict(`Cannot reschedule an event with status ${existing.status}.`);
+    }
+
+    const updated = await this.repository.rescheduleEvent(id, dto, caller.id);
+    if (!updated) throw notFound('Event not found.');
+    return updated;
+  }
+
+  /**
+   * A SUPERVISOR may only add photos to their own events. MANAGER and ADMIN
+   * are unrestricted. Per FR (Meeting & Training Flow #3), a photo may be
+   * added any time before completion — COMPLETED/CANCELLED events are
+   * closed to further edits, matching every other post-terminal-status rule
+   * in this service.
+   */
+  async addEventPhoto(id: string, dto: CreateEventPhotoInput, caller: CallerIdentity) {
+    const event = await this.repository.findEventById(id);
+    if (!event) throw notFound('Event not found.');
+    if (event.supervisorId !== caller.id && !isPrivileged(caller)) {
+      throw forbidden('You do not have access to this event.');
+    }
+    if (event.status !== 'SCHEDULED') {
+      throw conflict(`Cannot add a photo to an event with status ${event.status}.`);
+    }
+    return this.repository.createEventPhoto(id, dto.mediaId, caller.id);
+  }
+
+  /**
+   * A SUPERVISOR may only add a gathering (Training session) to their own
+   * events. MANAGER and ADMIN are unrestricted. Gatherings are a
+   * TRAINING-only concept — creating one on a MEETING event is rejected.
+   * Every referenced topicId must resolve to an ACTIVE training_topics row;
+   * any that don't are reported back together rather than one at a time.
+   */
+  async createGathering(eventId: string, dto: CreateGatheringInput, caller: CallerIdentity) {
+    const event = await this.repository.findEventById(eventId);
+    if (!event) throw notFound('Event not found.');
+    if (event.supervisorId !== caller.id && !isPrivileged(caller)) {
+      throw forbidden('You do not have access to this event.');
+    }
+    if (event.eventType !== 'TRAINING') {
+      throw unprocessable('Gatherings can only be created for TRAINING events.');
+    }
+
+    const activeIds = await this.repository.findActiveTrainingTopicIds(dto.topicIds);
+    const missingOrInactive = dto.topicIds.filter((id) => !activeIds.includes(id));
+    if (missingOrInactive.length > 0) {
+      throw unprocessable(
+        `topicIds: the following topics do not exist or are not active: ${missingOrInactive.join(', ')}.`,
+      );
+    }
+
+    return this.repository.createGathering(eventId, dto, caller.id);
+  }
+
+  /**
+   * A SUPERVISOR may only view topics for a gathering under their own
+   * event. MANAGER and ADMIN are unrestricted. Ownership is derived via the
+   * gathering's parent event, since gatherings carry no supervisorId of
+   * their own.
+   */
+  async listGatheringTopics(gatheringId: string, caller: CallerIdentity) {
+    const gathering = await this.repository.findGatheringById(gatheringId);
+    if (!gathering) throw notFound('Gathering not found.');
+    const event = await this.repository.findEventById(gathering.eventId);
+    if (!event) throw notFound('Event not found.');
+    if (event.supervisorId !== caller.id && !isPrivileged(caller)) {
+      throw forbidden('You do not have access to this gathering.');
+    }
+    return this.repository.findGatheringTopics(gatheringId);
+  }
+
+  /** A SUPERVISOR may only view attendance for a gathering under their own event. MANAGER and ADMIN are unrestricted. */
+  async getGatheringAttendance(gatheringId: string, caller: CallerIdentity) {
+    const gathering = await this.repository.findGatheringById(gatheringId);
+    if (!gathering) throw notFound('Gathering not found.');
+    const event = await this.repository.findEventById(gathering.eventId);
+    if (!event) throw notFound('Event not found.');
+    if (event.supervisorId !== caller.id && !isPrivileged(caller)) {
+      throw forbidden('You do not have access to this gathering.');
+    }
+    return this.repository.findGatheringAttendance(gatheringId);
+  }
+
+  /**
+   * A SUPERVISOR may only record attendance for a gathering under their own
+   * event. MANAGER and ADMIN are unrestricted. Upserts by
+   * (gatheringId, sakhiId) so repeated submissions never create duplicate
+   * rows for the same Sakhi.
+   */
+  async updateGatheringAttendance(
+    gatheringId: string,
+    dto: UpdateGatheringAttendanceInput,
+    caller: CallerIdentity,
+  ) {
+    const gathering = await this.repository.findGatheringById(gatheringId);
+    if (!gathering) throw notFound('Gathering not found.');
+    const event = await this.repository.findEventById(gathering.eventId);
+    if (!event) throw notFound('Event not found.');
+    if (event.supervisorId !== caller.id && !isPrivileged(caller)) {
+      throw forbidden('You do not have access to this gathering.');
+    }
+    return this.repository.upsertGatheringAttendance(gatheringId, dto.attendance, caller.id);
+  }
+
+  /**
+   * A SUPERVISOR may only view marks for a gathering under their own event.
+   * MANAGER and ADMIN are unrestricted. Returns 404 if no mark has been
+   * recorded yet for this (gathering, topic, sakhi, type) combination —
+   * matching this service's "not found" convention for a genuinely absent
+   * record, rather than a 200 with an empty/null body.
+   */
+  async getTopicMark(topicId: string, query: TopicMarkQuery, caller: CallerIdentity) {
+    const gathering = await this.repository.findGatheringById(query.gatheringId);
+    if (!gathering) throw notFound('Gathering not found.');
+    const event = await this.repository.findEventById(gathering.eventId);
+    if (!event) throw notFound('Event not found.');
+    if (event.supervisorId !== caller.id && !isPrivileged(caller)) {
+      throw forbidden('You do not have access to this gathering.');
+    }
+
+    const mark = await this.repository.findTopicMark(
+      query.gatheringId,
+      topicId,
+      query.sakhiId,
+      query.type,
+    );
+    if (!mark) throw notFound('Mark not found.');
+    return mark;
+  }
+
+  /**
+   * A SUPERVISOR may only save marks for a gathering under their own event.
+   * MANAGER and ADMIN are unrestricted. The referenced topic must actually
+   * belong to the gathering (via gathering_topics) — otherwise a Supervisor
+   * could score a topic never selected for this session. Rejects with 409
+   * if the mark is already locked via completeTopicMark — there is no
+   * unlock endpoint, so a locked mark is immutable from here on.
+   */
+  async upsertTopicMark(topicId: string, dto: CreateTopicMarkInput, caller: CallerIdentity) {
+    const gathering = await this.repository.findGatheringById(dto.gatheringId);
+    if (!gathering) throw notFound('Gathering not found.');
+    const event = await this.repository.findEventById(gathering.eventId);
+    if (!event) throw notFound('Event not found.');
+    if (event.supervisorId !== caller.id && !isPrivileged(caller)) {
+      throw forbidden('You do not have access to this gathering.');
+    }
+
+    const gatheringTopics = await this.repository.findGatheringTopics(dto.gatheringId);
+    const belongsToGathering = gatheringTopics.some((gt) => gt.topicId === topicId);
+    if (!belongsToGathering) {
+      throw unprocessable('topicId: this topic is not part of the referenced gathering.');
+    }
+
+    const existing = await this.repository.findTopicMark(
+      dto.gatheringId,
+      topicId,
+      dto.sakhiId,
+      dto.markType,
+    );
+    if (existing?.isLocked) {
+      throw conflict('This mark is locked and can no longer be edited.');
+    }
+
+    return this.repository.upsertTopicMark(
+      dto.gatheringId,
+      topicId,
+      dto.sakhiId,
+      dto.markType,
+      dto.score,
+      caller.id,
+    );
+  }
+
+  /**
+   * A SUPERVISOR may only lock marks for a gathering under their own event.
+   * MANAGER and ADMIN are unrestricted. 404 if no mark exists yet to lock —
+   * a Supervisor must submit a score via PUT before it can be completed.
+   * 409 if already locked — idempotency protection, matching
+   * cancelEvent/completeEvent's one-way status-transition pattern.
+   */
+  async completeTopicMark(topicId: string, dto: CompleteTopicMarkInput, caller: CallerIdentity) {
+    const gathering = await this.repository.findGatheringById(dto.gatheringId);
+    if (!gathering) throw notFound('Gathering not found.');
+    const event = await this.repository.findEventById(gathering.eventId);
+    if (!event) throw notFound('Event not found.');
+    if (event.supervisorId !== caller.id && !isPrivileged(caller)) {
+      throw forbidden('You do not have access to this gathering.');
+    }
+
+    const mark = await this.repository.findTopicMark(
+      dto.gatheringId,
+      topicId,
+      dto.sakhiId,
+      dto.markType,
+    );
+    if (!mark) throw notFound('Mark not found.');
+    if (mark.isLocked) {
+      throw conflict('This mark is already locked.');
+    }
+
+    return this.repository.lockTopicMark(mark.id, caller.id);
   }
 }
