@@ -1,3 +1,5 @@
+import { badGateway } from '@armman/service-commons';
+
 // Read directly (not via appConfig) so importing this client doesn't pull in
 // app-config's full schema — mirrors geography.client.ts. Despite the name,
 // this is the gateway's own base URL (see that file's comment).
@@ -23,11 +25,16 @@ export async function findRuleVersion(
   authorizationHeader: string,
 ): Promise<RuleVersionSummary | null> {
   const url = `${GATEWAY_BASE_URL}/api/v1/rules/versions/${ruleVersionId}`;
-  const res = await fetch(url, { headers: { Authorization: authorizationHeader } });
+  let res: Response;
+  try {
+    res = await fetch(url, { headers: { Authorization: authorizationHeader } });
+  } catch {
+    throw badGateway('Unable to verify the rule version — rules-service is unreachable.');
+  }
 
   if (res.status === 404) return null;
   if (!res.ok) {
-    throw new Error('Unable to verify the rule version — rules-service lookup failed.');
+    throw badGateway('Unable to verify the rule version — rules-service returned an error.');
   }
 
   const body = (await res.json()) as { data: RuleVersionSummary };

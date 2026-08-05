@@ -96,7 +96,7 @@ export function createVisitScheduleRouter(service: VisitScheduleService) {
     asyncHandler(async (req, res, next) => {
       if (!req.user) return next(unauthorized());
       const authorizationHeader = req.header('authorization') ?? '';
-      const result = await service.createBulk(req.body, req.user.id, authorizationHeader);
+      const result = await service.createBulk(req.body, req.user, authorizationHeader);
       res.status(201).json(ok(result));
     }),
   );

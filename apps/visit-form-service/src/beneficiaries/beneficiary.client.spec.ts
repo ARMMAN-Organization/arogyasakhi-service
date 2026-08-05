@@ -1,6 +1,6 @@
-import { beneficiaryExists } from './beneficiary.client';
+import { findBeneficiaryById } from './beneficiary.client';
 
-describe('beneficiaryExists', () => {
+describe('findBeneficiaryById', () => {
   const originalFetch = global.fetch;
   const fetchMock = jest.fn();
 
@@ -13,29 +13,41 @@ describe('beneficiaryExists', () => {
     global.fetch = originalFetch;
   });
 
-  it('returns true when beneficiary-service returns 200', async () => {
-    fetchMock.mockResolvedValue({ ok: true, status: 200 });
+  it('returns the beneficiary case (id/sakhiId) when beneficiary-service returns 200', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ success: true, data: { id: 'ben-1', sakhiId: 'sakhi-1' } }),
+    });
 
-    const result = await beneficiaryExists('ben-1', 'Bearer test-token');
+    const result = await findBeneficiaryById('ben-1', 'Bearer test-token');
 
-    expect(result).toBe(true);
+    expect(result).toEqual({ id: 'ben-1', sakhiId: 'sakhi-1' });
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining('/beneficiaries/ben-1'),
       expect.objectContaining({ headers: { Authorization: 'Bearer test-token' } }),
     );
   });
 
-  it('returns false on 404', async () => {
+  it('returns null on 404', async () => {
     fetchMock.mockResolvedValue({ ok: false, status: 404 });
 
-    await expect(beneficiaryExists('missing', 'Bearer test-token')).resolves.toBe(false);
+    await expect(findBeneficiaryById('missing', 'Bearer test-token')).resolves.toBeNull();
   });
 
-  it('throws when beneficiary-service fails for a reason other than not-found', async () => {
+  it('throws a 502 (not 404) when beneficiary-service fails for a reason other than not-found', async () => {
     fetchMock.mockResolvedValue({ ok: false, status: 500 });
 
-    await expect(beneficiaryExists('ben-1', 'Bearer test-token')).rejects.toMatchObject({
-      status: 404,
+    await expect(findBeneficiaryById('ben-1', 'Bearer test-token')).rejects.toMatchObject({
+      status: 502,
+    });
+  });
+
+  it('throws a 502 when beneficiary-service is unreachable (fetch itself rejects)', async () => {
+    fetchMock.mockRejectedValue(new Error('network down'));
+
+    await expect(findBeneficiaryById('ben-1', 'Bearer test-token')).rejects.toMatchObject({
+      status: 502,
     });
   });
 });
