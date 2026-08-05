@@ -1,4 +1,4 @@
-import { badGateway } from '@armman/service-commons';
+import { badGateway, HttpError } from '@armman/service-commons';
 import { appConfig } from '../config/app-config';
 
 interface Sakhi {
@@ -28,6 +28,15 @@ export class SakhiClient {
 
     if (res.status === 404) return null;
     if (!res.ok) {
+      // 4xx here reflects auth-service's own decision about this request
+      // (e.g. its own project-scope check on GET /sakhis/:id) — a real
+      // rejection, not this service's infra failing, so it must reach the
+      // caller as-is rather than masquerade as a 502. Only a genuine
+      // 5xx from auth-service is actually "the upstream is broken".
+      if (res.status >= 400 && res.status < 500) {
+        const body = (await res.json().catch(() => null)) as { message?: string } | null;
+        throw new HttpError(res.status, body?.message ?? 'Unable to resolve the Sakhi.');
+      }
       throw badGateway('Unable to resolve the Sakhi — the auth service returned an error.');
     }
 
