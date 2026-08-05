@@ -107,6 +107,9 @@ export function createVisitInstanceRouter(service: VisitInstanceService) {
         400: errorResponse(400, { message: 'beneficiaryId: Required' }),
         401: errorResponse(401),
         403: errorResponse(403),
+        422: errorResponse(422, {
+          message: 'scheduleId does not reference an existing visit schedule.',
+        }),
         500: errorResponse(500),
       },
     },
