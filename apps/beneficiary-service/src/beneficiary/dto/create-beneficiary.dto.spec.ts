@@ -270,6 +270,22 @@ describe('createBeneficiarySchema', () => {
     expect(result.success).toBe(true);
   });
 
+  it('rejects Gravida = 0 — a currently pregnant woman is Gravida >= 1 by definition (M15)', () => {
+    const result = createBeneficiarySchema.safeParse({
+      pii: { ...basePii },
+      case: { ...baseCase, caseType: 'MOTHER' },
+      motherDetails: {
+        lmpDate: '2025-10-01',
+        gravida: 0,
+        liveBirths: 0,
+        stillbirths: 0,
+        abortions: 0,
+      },
+      consent,
+    });
+    expect(result.success).toBe(false);
+  });
+
   it('accepts a valid mother enrollment (M1)', () => {
     const result = createBeneficiarySchema.safeParse({
       pii: { ...basePii },

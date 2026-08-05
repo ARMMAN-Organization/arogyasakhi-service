@@ -79,7 +79,15 @@ export function deriveFullName(
 const motherDetailsSchema = z
   .object({
     lmpDate: z.coerce.date(),
-    gravida: z.number().int().min(0).max(14).optional(),
+    // min(1), not min(0) — this is a MOTHER_REGISTRATION case (a currently
+    // pregnant woman), and Gravida counts the current pregnancy by
+    // definition, so 0 is never a legitimate value here. Also closes a real
+    // bug the min(0) allowed: with the sum == gravida - 1 rule above,
+    // gravida: 0 makes gravida - 1 evaluate to -1, which
+    // liveBirths+stillbirths+abortions (each itself min(0)) can never reach —
+    // every submission with gravida: 0 would fail the cross-check
+    // unconditionally, with no way to satisfy it.
+    gravida: z.number().int().min(1).max(14).optional(),
     parity: z.number().int().min(0).max(14).optional(),
     liveBirths: z.number().int().min(0).max(14).optional(),
     stillbirths: z.number().int().min(0).max(14).optional(),
