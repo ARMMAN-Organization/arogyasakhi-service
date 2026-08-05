@@ -1,3 +1,4 @@
+import { badGateway } from '@armman/service-commons';
 import { OperationsService } from './operations.service';
 import type { OperationsRepository } from './operations.repository';
 import type { SakhiClient } from './sakhi.client';
@@ -33,6 +34,7 @@ describe('OperationsService', () => {
     findCallLogsBySakhi: jest.fn(),
     findRecentCallLogsBySakhi: jest.fn(),
     updateCallLog: jest.fn(),
+    countPendingFollowups: jest.fn(),
   } as unknown as jest.Mocked<OperationsRepository>;
   const sakhiClient = {
     findById: jest.fn(),
@@ -1317,6 +1319,104 @@ describe('OperationsService', () => {
         ),
       ).resolves.toEqual([callLogRow]);
       expect(sakhiClient.findById).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getCallSheetStats', () => {
+    const sakhiId = '44444444-4444-4444-4444-444444444444';
+    const allKinds = [
+      'VISIT_DUE',
+      'VISIT_3_DAYS_TO_EXPIRE',
+      'FOLLOWUP_PENDING',
+      'CLOSURE_FORM_PENDING',
+      'MISSED_VISIT',
+      'HIGH_RISK_ANC',
+      'HIGH_RISK_PNC',
+    ];
+
+    it('returns a real FOLLOWUP_PENDING count and a fixed 0 for every other kind', async () => {
+      sakhiClient.findById.mockResolvedValue(sakhi);
+      // Repository now only ever returns 0 or 1 (see its own doc comment on
+      // why this isn't a plain count() of every CALL_BACK row) — 1 here
+      // means this Sakhi's most recent call is still CALL_BACK.
+      repository.countPendingFollowups.mockResolvedValue(1);
+
+      const result = await service.getCallSheetStats(sakhiId, supervisorCaller, 'Bearer token');
+
+      expect(result.sakhiId).toBe(sakhiId);
+      expect(typeof result.lastDataSyncDate).toBe('string');
+      expect(result.rows.map((r) => r.kind)).toEqual(allKinds);
+      const followupRow = result.rows.find((r) => r.kind === 'FOLLOWUP_PENDING');
+      expect(followupRow).toMatchObject({ count: 1, updated: 0 });
+      for (const row of result.rows.filter((r) => r.kind !== 'FOLLOWUP_PENDING')) {
+        expect(row).toMatchObject({ count: 0, updated: 0 });
+      }
+    });
+
+    it('rejects a Supervisor who is not this Sakhi’s assigned Supervisor', async () => {
+      sakhiClient.findById.mockResolvedValue(sakhi);
+      await expect(
+        service.getCallSheetStats(sakhiId, otherSupervisorCaller, 'Bearer token'),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(repository.countPendingFollowups).not.toHaveBeenCalled();
+    });
+
+    it('throws 404 when the Sakhi does not exist', async () => {
+      sakhiClient.findById.mockResolvedValue(null);
+      await expect(
+        service.getCallSheetStats('missing', supervisorCaller, 'Bearer token'),
+      ).rejects.toMatchObject({ status: 404 });
+    });
+
+    it('allows a MANAGER regardless of Sakhi assignment', async () => {
+      sakhiClient.findById.mockResolvedValue(sakhi);
+      repository.countPendingFollowups.mockResolvedValue(0);
+      await expect(
+        service.getCallSheetStats(sakhiId, managerCaller, 'Bearer token'),
+      ).resolves.toMatchObject({ sakhiId });
+    });
+  });
+
+  describe('getCallSheetStatsBatch', () => {
+    const ownedId = '44444444-4444-4444-4444-444444444444';
+    const notOwnedId = '55555555-5555-5555-5555-555555555555';
+
+    it('returns stats only for sakhiIds the caller may access, omitting the rest', async () => {
+      sakhiClient.findById.mockImplementation(async (id) => {
+        if (id === ownedId) return sakhi;
+        if (id === notOwnedId)
+          return { ...sakhi, sakhiId: notOwnedId, supervisorId: 'someone-else' };
+        return null;
+      });
+      repository.countPendingFollowups.mockResolvedValue(1);
+
+      const result = await service.getCallSheetStatsBatch(
+        [ownedId, notOwnedId, 'missing-id'],
+        supervisorCaller,
+        'Bearer token',
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0].sakhiId).toBe(ownedId);
+    });
+
+    it('returns an empty array when none of the requested ids are accessible', async () => {
+      sakhiClient.findById.mockResolvedValue(null);
+      const result = await service.getCallSheetStatsBatch(
+        ['missing-1', 'missing-2'],
+        supervisorCaller,
+        'Bearer token',
+      );
+      expect(result).toEqual([]);
+    });
+
+    it('propagates a genuine infra failure (e.g. badGateway from sakhiClient) instead of swallowing it as an empty result', async () => {
+      const infraError = badGateway('auth-service is unreachable.');
+      sakhiClient.findById.mockRejectedValue(infraError);
+
+      await expect(
+        service.getCallSheetStatsBatch([ownedId], supervisorCaller, 'Bearer token'),
+      ).rejects.toBe(infraError);
     });
   });
 });

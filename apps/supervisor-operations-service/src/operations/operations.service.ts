@@ -1,4 +1,4 @@
-import { conflict, forbidden, notFound, unprocessable } from '@armman/service-commons';
+import { HttpError, conflict, forbidden, notFound, unprocessable } from '@armman/service-commons';
 import type { OperationsRepository } from './operations.repository';
 import type { CreateSupervisorEventInput } from './dto/create-supervisorEvent.dto';
 import type { ListSupervisorEventsQuery } from './dto/list-supervisor-events.dto';
@@ -15,6 +15,8 @@ import type { CreateGatheringInput } from './dto/create-gathering.dto';
 import type { UpdateGatheringAttendanceInput } from './dto/update-gathering-attendance.dto';
 import type { CompleteTopicMarkInput, CreateTopicMarkInput } from './dto/create-topic-mark.dto';
 import type { TopicMarkQuery } from './dto/topic-mark-query.dto';
+import type { CallSheetStatKind } from './dto/call-sheet-stats.dto';
+import { CALL_SHEET_STAT_KINDS } from './dto/call-sheet-stats.dto';
 import type { SakhiClient } from './sakhi.client';
 
 /** Default recency window for the FR-SV-3.4 "recently called" card highlight. */
@@ -42,6 +44,26 @@ export interface CallerIdentity {
 /** MANAGER and ADMIN are unrestricted across all inventory ownership checks. */
 function isPrivileged(caller: CallerIdentity): boolean {
   return caller.roles.includes('MANAGER') || caller.roles.includes('ADMIN');
+}
+
+/** Today's date as YYYY-MM-DD, for call-sheet-stats' lastDataSyncDate. */
+function todayDateOnly(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+/**
+ * Builds all 7 call-sheet-stats rows in the fixed kind order. Only
+ * FOLLOWUP_PENDING carries a real count; every other kind is a
+ * { count: 0, updated: 0 } placeholder — see call-sheet-stats.dto.ts.
+ */
+function buildCallSheetStatRows(
+  pendingFollowups: number,
+): Array<{ kind: CallSheetStatKind; updated: number; count: number }> {
+  return CALL_SHEET_STAT_KINDS.map((kind) => ({
+    kind,
+    updated: 0,
+    count: kind === 'FOLLOWUP_PENDING' ? pendingFollowups : 0,
+  }));
 }
 
 /** Supervisor operations domain logic. Data access is delegated to the repository. */
@@ -351,6 +373,61 @@ export class OperationsService {
     }
     const sinceDate = new Date(Date.now() - withinHours * 60 * 60 * 1000);
     return this.repository.findRecentCallLogsBySakhi(sakhiId, sinceDate);
+  }
+
+  /**
+   * A Sakhi's call-sheet stats card: 7 fixed "kind" rows. Only
+   * FOLLOWUP_PENDING is real today — the other 6 need data models that
+   * either don't exist yet or live in other services (visit schedules,
+   * closure forms, ANC/PNC risk state); they're returned as a fixed
+   * { count: 0, updated: 0 } placeholder until that's scoped, rather than
+   * omitted, so the card's row layout doesn't have to special-case a
+   * missing kind. Same ownership rule as listCallLogsBySakhi.
+   */
+  async getCallSheetStats(sakhiId: string, caller: CallerIdentity, authorizationHeader: string) {
+    const sakhi = await this.sakhiClient.findById(sakhiId, authorizationHeader);
+    if (!sakhi) throw notFound('Sakhi not found.');
+    if (!isPrivileged(caller) && sakhi.supervisorId !== caller.id) {
+      throw forbidden('You do not have access to this Sakhi.');
+    }
+
+    const pendingFollowups = await this.repository.countPendingFollowups(sakhiId);
+    return {
+      sakhiId,
+      lastDataSyncDate: todayDateOnly(),
+      rows: buildCallSheetStatRows(pendingFollowups),
+    };
+  }
+
+  /**
+   * Batch variant of getCallSheetStats for a list-view's card grid, so the
+   * caller isn't forced into one request per Sakhi card. A sakhiId that is
+   * unknown (404) or not assigned to the caller (403) is silently omitted
+   * from the result — the caller's other, legitimate cards should still
+   * render. Anything else (e.g. a badGateway 502 from sakhiClient if
+   * auth-service is unreachable) propagates and fails the whole batch,
+   * rather than being swallowed and rendered as an indistinguishable "no
+   * card" — a real infra failure on one id should surface, not masquerade
+   * as an empty result.
+   */
+  async getCallSheetStatsBatch(
+    sakhiIds: string[],
+    caller: CallerIdentity,
+    authorizationHeader: string,
+  ) {
+    const results = await Promise.all(
+      sakhiIds.map(async (sakhiId) => {
+        try {
+          return await this.getCallSheetStats(sakhiId, caller, authorizationHeader);
+        } catch (err) {
+          if (err instanceof HttpError && (err.status === 403 || err.status === 404)) {
+            return null;
+          }
+          throw err;
+        }
+      }),
+    );
+    return results.filter((r): r is NonNullable<typeof r> => r !== null);
   }
 
   listTrainingTopics() {

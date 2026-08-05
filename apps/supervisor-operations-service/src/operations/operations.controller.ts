@@ -18,6 +18,10 @@ import { updateGatheringAttendanceSchema } from './dto/update-gathering-attendan
 import { completeTopicMarkSchema, createTopicMarkSchema } from './dto/create-topic-mark.dto';
 import { topicMarkQuerySchema } from './dto/topic-mark-query.dto';
 import {
+  CALL_SHEET_STAT_KINDS,
+  listCallSheetStatsBatchQuerySchema,
+} from './dto/call-sheet-stats.dto';
+import {
   asyncHandler,
   createDocumentedRouter,
   ok,
@@ -117,6 +121,18 @@ const callLogSchema = z.object({
   responder: z.enum(['RELATIVE', 'HUSBAND', 'SAKHI', 'PERSON_WHO_DOES_NOT_KNOW_WOMAN']).nullable(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
+});
+
+const callSheetStatsSchema = z.object({
+  sakhiId: z.string().uuid(),
+  lastDataSyncDate: z.string().openapi({ example: '2026-08-04' }),
+  rows: z.array(
+    z.object({
+      kind: z.enum(CALL_SHEET_STAT_KINDS),
+      updated: z.number().int(),
+      count: z.number().int(),
+    }),
+  ),
 });
 
 const sakhiIdParamsSchema = z
@@ -731,6 +747,65 @@ export function createOperationsRouter(service: OperationsService) {
           ),
         ),
       );
+    }),
+  );
+
+  doc.get(
+    '/call-sheet-stats/by-sakhi/:sakhiId',
+    {
+      summary: "A Sakhi's call-sheet stats card (7 fixed kind rows)",
+      tags: ['Supervisor Operations'],
+      params: sakhiIdParamsSchema,
+      responses: {
+        200: {
+          description: 'Call-sheet stats for this Sakhi',
+          schema: envelope(callSheetStatsSchema),
+        },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Sakhi not assigned to caller', schema: apiErrorSchema },
+        404: { description: 'Sakhi not found', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(sakhiIdParamsSchema, 'params'),
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      res.json(
+        ok(await service.getCallSheetStats(req.params.sakhiId, req.user, authorizationHeader)),
+      );
+    }),
+  );
+
+  doc.get(
+    '/call-sheet-stats',
+    {
+      summary: 'Call-sheet stats for multiple Sakhis in one call (list-view card grid)',
+      tags: ['Supervisor Operations'],
+      query: listCallSheetStatsBatchQuerySchema,
+      responses: {
+        200: {
+          description:
+            'Call-sheet stats for every requested sakhiId the caller may access — an unauthorized or unknown id is silently omitted, not an error',
+          schema: envelope(z.array(callSheetStatsSchema)),
+        },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(listCallSheetStatsBatchQuerySchema, 'query'),
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const sakhiIds = String(req.query.sakhiIds)
+        .split(',')
+        .map((id) => id.trim());
+      res.json(ok(await service.getCallSheetStatsBatch(sakhiIds, req.user, authorizationHeader)));
     }),
   );
 

@@ -128,4 +128,9 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
     target: appConfig.SUPERVISOR_OPERATIONS_SERVICE_URL,
     requiresAuth: true,
   },
+  {
+    prefix: '/call-sheet-stats',
+    target: appConfig.SUPERVISOR_OPERATIONS_SERVICE_URL,
+    requiresAuth: true,
+  },
 ];
