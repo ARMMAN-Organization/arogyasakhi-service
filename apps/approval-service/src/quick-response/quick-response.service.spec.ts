@@ -107,6 +107,17 @@ describe('QuickResponseService', () => {
       expect(escalationClient.list).toHaveBeenCalledWith('OPEN', undefined, 50, authHeader);
     });
 
+    it('skips the escalation-events call entirely for a non-PENDING status', async () => {
+      lookupClient.resolveApprovalStatusId.mockResolvedValue(
+        'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      );
+      repository.findMany.mockResolvedValue([]);
+
+      const result = await service.list({ status: 'APPROVED', limit: 50 }, authHeader);
+      expect(escalationClient.list).not.toHaveBeenCalled();
+      expect(result.cards).toHaveLength(0);
+    });
+
     it('returns an empty list when the APPROVAL_STATUS lookup value is unknown', async () => {
       lookupClient.resolveApprovalStatusId.mockResolvedValue(null);
       escalationClient.list.mockResolvedValue({ cards: [], nextCursor: null });

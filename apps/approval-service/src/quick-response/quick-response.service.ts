@@ -47,9 +47,17 @@ function encodeCursor(row: { createdAt: Date; id: string }): string {
   return Buffer.from(`${row.createdAt.toISOString()}|${row.id}`, 'utf8').toString('base64url');
 }
 
-/** escalation_events has no PENDING status — OPEN is its "not yet acted on" equivalent. */
-function mapStatusForEscalations(status: string): string {
-  return status === 'PENDING' ? 'OPEN' : status;
+/**
+ * Maps an APPROVAL_STATUS value code onto escalation_events.status, or
+ * returns null when there's no meaningful equivalent. Only PENDING
+ * (escalation_events' "not yet acted on" state is OPEN) has one —
+ * APPROVED/REJECTED/AUTO_LAPSED/CANCELLED are approval-specific decision
+ * outcomes that don't exist in EscalationStatus's vocabulary, so those
+ * statuses skip the escalation-events call entirely rather than forwarding
+ * a value that call would reject.
+ */
+function mapStatusForEscalations(status: string): string | null {
+  return status === 'PENDING' ? 'OPEN' : null;
 }
 
 /** Quick Response's domain logic: merges approval_requests + escalation_events
@@ -91,12 +99,15 @@ export class QuickResponseService {
         raisedAt: row.createdAt.toISOString(),
       }));
 
-    const escalationResult = await this.escalationClient.list(
-      mapStatusForEscalations(query.status),
-      query.cursor,
-      query.limit,
-      authorizationHeader,
-    );
+    const escalationStatus = mapStatusForEscalations(query.status);
+    const escalationResult = escalationStatus
+      ? await this.escalationClient.list(
+          escalationStatus,
+          query.cursor,
+          query.limit,
+          authorizationHeader,
+        )
+      : { cards: [], nextCursor: null };
 
     const merged: QuickResponseCard[] = [...approvalCards, ...escalationResult.cards].sort(
       (a, b) => new Date(b.raisedAt).getTime() - new Date(a.raisedAt).getTime(),
