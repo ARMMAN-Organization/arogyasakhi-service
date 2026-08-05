@@ -2,10 +2,12 @@ import { VisitScheduleService } from './visitSchedule.service';
 import type { VisitScheduleRepository } from './visitSchedule.repository';
 import * as beneficiaryClient from '../beneficiaries/beneficiary.client';
 import * as ruleVersionClient from '../rules/ruleVersion.client';
+import * as sakhiClient from '../sakhis/sakhi.client';
 import type { CreateVisitScheduleBulkInput } from './dto/create-visit-schedule-bulk.dto';
 
 jest.mock('../beneficiaries/beneficiary.client');
 jest.mock('../rules/ruleVersion.client');
+jest.mock('../sakhis/sakhi.client');
 
 describe('VisitScheduleService', () => {
   const repository = {
@@ -18,13 +20,27 @@ describe('VisitScheduleService', () => {
 
   const beneficiaryId = '11111111-1111-1111-1111-111111111111';
   const ruleVersionId = '22222222-2222-2222-2222-222222222222';
+  const sakhiId = '33333333-3333-3333-3333-333333333333';
   const authHeader = 'Bearer token';
-  const createdByUserId = 'user-1';
+
+  const sakhiCaller = { id: sakhiId, roles: ['SAKHI'] };
+  const supervisorCaller = { id: 'supervisor-1', roles: ['SUPERVISOR'] };
+  const otherSupervisorCaller = { id: 'other-supervisor', roles: ['SUPERVISOR'] };
+  const managerCaller = { id: 'manager-1', roles: ['MANAGER'] };
+  const adminCaller = { id: 'admin-1', roles: ['ADMIN'] };
 
   beforeEach(() => {
     jest.resetAllMocks();
     service = new VisitScheduleService(repository);
-    (beneficiaryClient.beneficiaryExists as jest.Mock).mockResolvedValue(true);
+    (beneficiaryClient.findBeneficiaryById as jest.Mock).mockResolvedValue({
+      id: beneficiaryId,
+      sakhiId,
+    });
+    (sakhiClient.findSakhiById as jest.Mock).mockResolvedValue({
+      sakhiId,
+      supervisorId: supervisorCaller.id,
+      primaryProjectId: 'proj-1',
+    });
     (ruleVersionClient.findRuleVersion as jest.Mock).mockResolvedValue({
       id: ruleVersionId,
       ruleSetId: 'set-1',
@@ -63,7 +79,7 @@ describe('VisitScheduleService', () => {
       { id: 'sched-1', localScheduleUuid: 'local-1', status: 'GENERATED' },
     ] as never);
 
-    const result = await service.createBulk(baseDto(), createdByUserId, authHeader);
+    const result = await service.createBulk(baseDto(), sakhiCaller, authHeader);
 
     expect(result).toEqual({
       beneficiaryId,
@@ -85,7 +101,7 @@ describe('VisitScheduleService', () => {
       },
     ] as never);
 
-    const result = await service.createBulk(baseDto(), createdByUserId, authHeader);
+    const result = await service.createBulk(baseDto(), sakhiCaller, authHeader);
 
     expect(result.created).toBe(0);
     expect(result.alreadyExisted).toBe(1);
@@ -136,7 +152,7 @@ describe('VisitScheduleService', () => {
       { id: 'sched-2', localScheduleUuid: 'local-2', status: 'GENERATED' },
     ] as never);
 
-    const result = await service.createBulk(dto, createdByUserId, authHeader);
+    const result = await service.createBulk(dto, sakhiCaller, authHeader);
 
     expect(result.created).toBe(1);
     expect(result.alreadyExisted).toBe(1);
@@ -144,14 +160,14 @@ describe('VisitScheduleService', () => {
       [expect.objectContaining({ localScheduleUuid: 'local-2' })],
       beneficiaryId,
       ruleVersionId,
-      createdByUserId,
+      sakhiCaller.id,
     );
   });
 
   it('rejects when beneficiaryId is unknown (case 5)', async () => {
-    (beneficiaryClient.beneficiaryExists as jest.Mock).mockResolvedValue(false);
+    (beneficiaryClient.findBeneficiaryById as jest.Mock).mockResolvedValue(null);
 
-    await expect(service.createBulk(baseDto(), createdByUserId, authHeader)).rejects.toMatchObject({
+    await expect(service.createBulk(baseDto(), sakhiCaller, authHeader)).rejects.toMatchObject({
       status: 404,
     });
     expect(repository.createAllOrNothing).not.toHaveBeenCalled();
@@ -160,7 +176,7 @@ describe('VisitScheduleService', () => {
   it('rejects when generatedByRuleVersionId is unknown (case 6)', async () => {
     (ruleVersionClient.findRuleVersion as jest.Mock).mockResolvedValue(null);
 
-    await expect(service.createBulk(baseDto(), createdByUserId, authHeader)).rejects.toMatchObject({
+    await expect(service.createBulk(baseDto(), sakhiCaller, authHeader)).rejects.toMatchObject({
       status: 400,
     });
     expect(repository.createAllOrNothing).not.toHaveBeenCalled();
@@ -173,7 +189,7 @@ describe('VisitScheduleService', () => {
       status: 'DRAFT',
     });
 
-    await expect(service.createBulk(baseDto(), createdByUserId, authHeader)).rejects.toMatchObject({
+    await expect(service.createBulk(baseDto(), sakhiCaller, authHeader)).rejects.toMatchObject({
       status: 400,
     });
   });
@@ -210,7 +226,7 @@ describe('VisitScheduleService', () => {
       { id: 'sched-2', localScheduleUuid: 'local-2', status: 'GENERATED' },
     ] as never);
 
-    await service.createBulk(dto, createdByUserId, authHeader);
+    await service.createBulk(dto, sakhiCaller, authHeader);
 
     expect(repository.createAllOrNothing).toHaveBeenCalledWith(
       [
@@ -219,7 +235,7 @@ describe('VisitScheduleService', () => {
       ],
       beneficiaryId,
       ruleVersionId,
-      createdByUserId,
+      sakhiCaller.id,
     );
   });
 
@@ -240,7 +256,7 @@ describe('VisitScheduleService', () => {
       ],
     });
 
-    await expect(service.createBulk(dto, createdByUserId, authHeader)).rejects.toMatchObject({
+    await expect(service.createBulk(dto, sakhiCaller, authHeader)).rejects.toMatchObject({
       status: 422,
     });
     expect(repository.createAllOrNothing).not.toHaveBeenCalled();
@@ -258,7 +274,7 @@ describe('VisitScheduleService', () => {
       },
     ] as never);
 
-    await expect(service.createBulk(baseDto(), createdByUserId, authHeader)).rejects.toMatchObject({
+    await expect(service.createBulk(baseDto(), sakhiCaller, authHeader)).rejects.toMatchObject({
       status: 409,
     });
     expect(repository.createAllOrNothing).not.toHaveBeenCalled();
@@ -281,9 +297,72 @@ describe('VisitScheduleService', () => {
       ],
     });
 
-    await expect(service.createBulk(dto, createdByUserId, authHeader)).rejects.toMatchObject({
+    await expect(service.createBulk(dto, sakhiCaller, authHeader)).rejects.toMatchObject({
       status: 400,
     });
     expect(repository.createAllOrNothing).not.toHaveBeenCalled();
+  });
+
+  describe('ownership', () => {
+    it('rejects a SAKHI uploading a schedule for a beneficiary that is not hers', async () => {
+      (beneficiaryClient.findBeneficiaryById as jest.Mock).mockResolvedValue({
+        id: beneficiaryId,
+        sakhiId: 'some-other-sakhi',
+      });
+
+      await expect(service.createBulk(baseDto(), sakhiCaller, authHeader)).rejects.toMatchObject({
+        status: 403,
+      });
+      expect(repository.createAllOrNothing).not.toHaveBeenCalled();
+      expect(sakhiClient.findSakhiById).not.toHaveBeenCalled();
+    });
+
+    it('allows a SUPERVISOR whose Sakhi is assigned to them', async () => {
+      repository.createAllOrNothing.mockResolvedValue([
+        { id: 'sched-1', localScheduleUuid: 'local-1', status: 'GENERATED' },
+      ] as never);
+
+      await expect(
+        service.createBulk(baseDto(), supervisorCaller, authHeader),
+      ).resolves.toMatchObject({ beneficiaryId });
+      expect(sakhiClient.findSakhiById).toHaveBeenCalledWith(sakhiId, authHeader);
+    });
+
+    it('rejects a SUPERVISOR whose Sakhi is assigned to someone else', async () => {
+      await expect(
+        service.createBulk(baseDto(), otherSupervisorCaller, authHeader),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(repository.createAllOrNothing).not.toHaveBeenCalled();
+    });
+
+    it('rejects a SUPERVISOR when the beneficiary’s Sakhi cannot be resolved', async () => {
+      (sakhiClient.findSakhiById as jest.Mock).mockResolvedValue(null);
+
+      await expect(
+        service.createBulk(baseDto(), supervisorCaller, authHeader),
+      ).rejects.toMatchObject({ status: 403 });
+    });
+
+    it('allows a MANAGER regardless of assignment, without calling the Sakhi client', async () => {
+      repository.createAllOrNothing.mockResolvedValue([
+        { id: 'sched-1', localScheduleUuid: 'local-1', status: 'GENERATED' },
+      ] as never);
+
+      await expect(service.createBulk(baseDto(), managerCaller, authHeader)).resolves.toMatchObject(
+        { beneficiaryId },
+      );
+      expect(sakhiClient.findSakhiById).not.toHaveBeenCalled();
+    });
+
+    it('allows an ADMIN regardless of assignment, without calling the Sakhi client', async () => {
+      repository.createAllOrNothing.mockResolvedValue([
+        { id: 'sched-1', localScheduleUuid: 'local-1', status: 'GENERATED' },
+      ] as never);
+
+      await expect(service.createBulk(baseDto(), adminCaller, authHeader)).resolves.toMatchObject({
+        beneficiaryId,
+      });
+      expect(sakhiClient.findSakhiById).not.toHaveBeenCalled();
+    });
   });
 });

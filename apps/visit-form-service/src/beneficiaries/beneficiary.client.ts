@@ -1,4 +1,4 @@
-import { notFound } from '@armman/service-commons';
+import { badGateway } from '@armman/service-commons';
 
 // Read directly (not via appConfig) so importing this client doesn't pull in
 // app-config's full schema — mirrors geography.client.ts. Despite the name,
@@ -8,26 +8,36 @@ import { notFound } from '@armman/service-commons';
 // service's port.
 const GATEWAY_BASE_URL = process.env.AUTH_SERVICE_BASE_URL ?? 'http://localhost:3000';
 
+export interface BeneficiaryCase {
+  id: string;
+  sakhiId: string;
+}
+
 /**
- * Confirms a beneficiaryId exists via beneficiary-service's
+ * Fetches a beneficiary case's id/sakhiId via beneficiary-service's
  * `GET /beneficiaries/:id`, called through the gateway with the original
- * caller's own bearer token forwarded unchanged.
- *
- * Existence-only — GET /beneficiaries/:id has no ownership scoping today (any
- * SAKHI/SUPERVISOR/MANAGER can fetch any beneficiary by id), so this cannot
- * confirm the caller may write to it, only that the id is real. Tracked as a
- * follow-up; see the beneficiary-service ownership-scoping issue.
+ * caller's own bearer token forwarded unchanged. `sakhiId` is what lets the
+ * caller (visitSchedule.service.ts) enforce real ownership — a SAKHI may
+ * only upload a schedule for her own beneficiaries, a SUPERVISOR only for
+ * beneficiaries whose Sakhi is assigned to them.
  */
-export async function beneficiaryExists(
+export async function findBeneficiaryById(
   beneficiaryId: string,
   authorizationHeader: string,
-): Promise<boolean> {
+): Promise<BeneficiaryCase | null> {
   const url = `${GATEWAY_BASE_URL}/api/v1/beneficiaries/${beneficiaryId}`;
-  const res = await fetch(url, { headers: { Authorization: authorizationHeader } });
-
-  if (res.status === 404) return false;
-  if (!res.ok) {
-    throw notFound('Unable to verify the beneficiary — beneficiary lookup failed.');
+  let res: Response;
+  try {
+    res = await fetch(url, { headers: { Authorization: authorizationHeader } });
+  } catch {
+    throw badGateway('Unable to verify the beneficiary — beneficiary-service is unreachable.');
   }
-  return true;
+
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    throw badGateway('Unable to verify the beneficiary — beneficiary-service returned an error.');
+  }
+
+  const body = (await res.json()) as { data: BeneficiaryCase };
+  return body.data;
 }

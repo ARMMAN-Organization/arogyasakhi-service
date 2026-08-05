@@ -1,12 +1,24 @@
-import { badRequest, conflict, notFound, unprocessable } from '@armman/service-commons';
+import { badRequest, conflict, forbidden, notFound, unprocessable } from '@armman/service-commons';
 import type { NewScheduleRow, VisitScheduleRepository } from './visitSchedule.repository';
 import { toDateOnly } from './dto/create-visit-schedule-bulk.dto';
 import type {
   BulkScheduleRow,
   CreateVisitScheduleBulkInput,
 } from './dto/create-visit-schedule-bulk.dto';
-import { beneficiaryExists } from '../beneficiaries/beneficiary.client';
+import { findBeneficiaryById } from '../beneficiaries/beneficiary.client';
 import { findRuleVersion } from '../rules/ruleVersion.client';
+import { findSakhiById } from '../sakhis/sakhi.client';
+
+/** The calling principal's own identity, as carried on their trusted-identity headers. */
+export interface CallerIdentity {
+  readonly id: string;
+  readonly roles: readonly string[];
+}
+
+/** MANAGER and ADMIN are unrestricted — same convention as every other service. */
+function isPrivileged(caller: CallerIdentity): boolean {
+  return caller.roles.includes('MANAGER') || caller.roles.includes('ADMIN');
+}
 
 /** The digits at the end of a visitCode (e.g. "3" in "ANC3", "11" in "INC11"). */
 function trailingSequenceNo(visitCode: string): number | null {
@@ -37,11 +49,28 @@ export class VisitScheduleService {
 
   async createBulk(
     dto: CreateVisitScheduleBulkInput,
-    createdByUserId: string,
+    caller: CallerIdentity,
     authorizationHeader: string,
   ): Promise<CreateBulkResult> {
-    const exists = await beneficiaryExists(dto.beneficiaryId, authorizationHeader);
-    if (!exists) throw notFound('Beneficiary case not found.');
+    const beneficiary = await findBeneficiaryById(dto.beneficiaryId, authorizationHeader);
+    if (!beneficiary) throw notFound('Beneficiary case not found.');
+
+    if (!isPrivileged(caller)) {
+      if (caller.roles.includes('SAKHI')) {
+        if (beneficiary.sakhiId !== caller.id) {
+          throw forbidden('You do not have access to this beneficiary.');
+        }
+      } else {
+        // SUPERVISOR: authorized only if the beneficiary's own Sakhi is
+        // assigned to this caller — mirrors listCallLogsBySakhi's ownership
+        // check in supervisor-operations-service, since visit-form-service
+        // doesn't own sakhi_profiles either (forklift rule).
+        const sakhi = await findSakhiById(beneficiary.sakhiId, authorizationHeader);
+        if (!sakhi || sakhi.supervisorId !== caller.id) {
+          throw forbidden('You do not have access to this beneficiary.');
+        }
+      }
+    }
 
     const ruleVersion = await findRuleVersion(dto.generatedByRuleVersionId, authorizationHeader);
     if (!ruleVersion || ruleVersion.status !== 'PUBLISHED') {
@@ -114,7 +143,7 @@ export class VisitScheduleService {
             resolvedNewRows,
             dto.beneficiaryId,
             dto.generatedByRuleVersionId,
-            createdByUserId,
+            caller.id,
           )
         : [];
 
