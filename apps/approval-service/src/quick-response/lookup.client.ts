@@ -24,7 +24,7 @@ export class LookupClient {
   ): Promise<string | null> {
     let res: Response;
     try {
-      res = await fetch(`${appConfig.AUTH_SERVICE_BASE_URL}/api/v1/lookups/APPROVAL_STATUS`, {
+      res = await fetch(`${appConfig.API_GATEWAY_BASE_URL}/api/v1/lookups/APPROVAL_STATUS`, {
         headers: { Authorization: authorizationHeader },
       });
     } catch {

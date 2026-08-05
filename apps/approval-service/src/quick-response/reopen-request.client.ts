@@ -23,14 +23,11 @@ export class ReopenRequestClient {
   ): Promise<ReopenRequestRecord> {
     let res: Response;
     try {
-      res = await fetch(
-        `${appConfig.CLOSURE_REOPEN_SERVICE_BASE_URL}/api/v1/reopen-requests/${id}/decision`,
-        {
-          method: 'PATCH',
-          headers: { Authorization: authorizationHeader, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ decision, decisionReasonCodeLookupId, decisionNotes }),
-        },
-      );
+      res = await fetch(`${appConfig.API_GATEWAY_BASE_URL}/api/v1/reopen-requests/${id}/decision`, {
+        method: 'PATCH',
+        headers: { Authorization: authorizationHeader, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decision, decisionReasonCodeLookupId, decisionNotes }),
+      });
     } catch {
       throw badGateway(
         'Unable to decide the reopen request — closure-reopen-service is unreachable.',

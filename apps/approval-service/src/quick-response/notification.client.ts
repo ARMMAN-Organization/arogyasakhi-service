@@ -17,20 +17,17 @@ export class NotificationClient {
   ): Promise<void> {
     let res: Response;
     try {
-      res = await fetch(
-        `${appConfig.NOTIFICATION_ESCALATION_SERVICE_BASE_URL}/api/v1/notifications`,
-        {
-          method: 'POST',
-          headers: { Authorization: authorizationHeader, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            recipientUserId,
-            notificationType,
-            title,
-            body,
-            status: 'UNREAD',
-          }),
-        },
-      );
+      res = await fetch(`${appConfig.API_GATEWAY_BASE_URL}/api/v1/notifications`, {
+        method: 'POST',
+        headers: { Authorization: authorizationHeader, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          recipientUserId,
+          notificationType,
+          title,
+          body,
+          status: 'UNREAD',
+        }),
+      });
     } catch {
       throw badGateway(
         'Unable to notify the Sakhi — notification-escalation-service is unreachable.',

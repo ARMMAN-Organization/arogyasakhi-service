@@ -18,7 +18,7 @@ export class AuditClient {
   ): Promise<void> {
     let res: Response;
     try {
-      res = await fetch(`${appConfig.AUDIT_SERVICE_BASE_URL}/api/v1/audit`, {
+      res = await fetch(`${appConfig.API_GATEWAY_BASE_URL}/api/v1/audit`, {
         method: 'POST',
         headers: { Authorization: authorizationHeader, 'Content-Type': 'application/json' },
         body: JSON.stringify({ actorUserId, action, entityType, entityId, afterJson }),

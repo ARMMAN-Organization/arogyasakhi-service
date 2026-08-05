@@ -37,7 +37,7 @@ export class EscalationClient {
     let res: Response;
     try {
       res = await fetch(
-        `${appConfig.NOTIFICATION_ESCALATION_SERVICE_BASE_URL}/api/v1/escalation-events?${params.toString()}`,
+        `${appConfig.API_GATEWAY_BASE_URL}/api/v1/escalation-events?${params.toString()}`,
         { headers: { Authorization: authorizationHeader } },
       );
     } catch {
