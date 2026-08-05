@@ -1,4 +1,4 @@
-import { conflict, forbidden, notFound, unprocessable } from '@armman/service-commons';
+import { HttpError, conflict, forbidden, notFound, unprocessable } from '@armman/service-commons';
 import type { OperationsRepository } from './operations.repository';
 import type { CreateSupervisorEventInput } from './dto/create-supervisorEvent.dto';
 import type { ListSupervisorEventsQuery } from './dto/list-supervisor-events.dto';
@@ -401,10 +401,14 @@ export class OperationsService {
 
   /**
    * Batch variant of getCallSheetStats for a list-view's card grid, so the
-   * caller isn't forced into one request per Sakhi card. A sakhiId not
-   * assigned to the caller is silently omitted from the result rather than
-   * failing the whole batch — the caller's other, legitimate cards should
-   * still render.
+   * caller isn't forced into one request per Sakhi card. A sakhiId that is
+   * unknown (404) or not assigned to the caller (403) is silently omitted
+   * from the result — the caller's other, legitimate cards should still
+   * render. Anything else (e.g. a badGateway 502 from sakhiClient if
+   * auth-service is unreachable) propagates and fails the whole batch,
+   * rather than being swallowed and rendered as an indistinguishable "no
+   * card" — a real infra failure on one id should surface, not masquerade
+   * as an empty result.
    */
   async getCallSheetStatsBatch(
     sakhiIds: string[],
@@ -415,8 +419,11 @@ export class OperationsService {
       sakhiIds.map(async (sakhiId) => {
         try {
           return await this.getCallSheetStats(sakhiId, caller, authorizationHeader);
-        } catch {
-          return null;
+        } catch (err) {
+          if (err instanceof HttpError && (err.status === 403 || err.status === 404)) {
+            return null;
+          }
+          throw err;
         }
       }),
     );

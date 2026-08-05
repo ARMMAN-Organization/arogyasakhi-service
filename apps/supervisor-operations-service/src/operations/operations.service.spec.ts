@@ -1,3 +1,4 @@
+import { badGateway } from '@armman/service-commons';
 import { OperationsService } from './operations.service';
 import type { OperationsRepository } from './operations.repository';
 import type { SakhiClient } from './sakhi.client';
@@ -1335,7 +1336,10 @@ describe('OperationsService', () => {
 
     it('returns a real FOLLOWUP_PENDING count and a fixed 0 for every other kind', async () => {
       sakhiClient.findById.mockResolvedValue(sakhi);
-      repository.countPendingFollowups.mockResolvedValue(3);
+      // Repository now only ever returns 0 or 1 (see its own doc comment on
+      // why this isn't a plain count() of every CALL_BACK row) — 1 here
+      // means this Sakhi's most recent call is still CALL_BACK.
+      repository.countPendingFollowups.mockResolvedValue(1);
 
       const result = await service.getCallSheetStats(sakhiId, supervisorCaller, 'Bearer token');
 
@@ -1343,7 +1347,7 @@ describe('OperationsService', () => {
       expect(typeof result.lastDataSyncDate).toBe('string');
       expect(result.rows.map((r) => r.kind)).toEqual(allKinds);
       const followupRow = result.rows.find((r) => r.kind === 'FOLLOWUP_PENDING');
-      expect(followupRow).toMatchObject({ count: 3, updated: 0 });
+      expect(followupRow).toMatchObject({ count: 1, updated: 0 });
       for (const row of result.rows.filter((r) => r.kind !== 'FOLLOWUP_PENDING')) {
         expect(row).toMatchObject({ count: 0, updated: 0 });
       }
@@ -1404,6 +1408,15 @@ describe('OperationsService', () => {
         'Bearer token',
       );
       expect(result).toEqual([]);
+    });
+
+    it('propagates a genuine infra failure (e.g. badGateway from sakhiClient) instead of swallowing it as an empty result', async () => {
+      const infraError = badGateway('auth-service is unreachable.');
+      sakhiClient.findById.mockRejectedValue(infraError);
+
+      await expect(
+        service.getCallSheetStatsBatch([ownedId], supervisorCaller, 'Bearer token'),
+      ).rejects.toBe(infraError);
     });
   });
 });

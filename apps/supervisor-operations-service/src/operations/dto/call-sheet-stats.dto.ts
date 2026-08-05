@@ -22,6 +22,16 @@ export const CALL_SHEET_STAT_KINDS = [
 export type CallSheetStatKind = (typeof CALL_SHEET_STAT_KINDS)[number];
 
 /**
+ * Batch is currently one sakhiClient.findById round-trip to auth-service per
+ * id (parallelized, but still N calls) — capped so a card-grid list view
+ * can't fan out an unbounded number of concurrent auth-service calls in one
+ * request. Matches the visit-schedules bulk-upload endpoint's own cap.
+ * Revisit if this ever needs a real roster (fetch-once-then-filter, like
+ * beneficiary-service's listSakhiIdsForSupervisor) instead of per-id calls.
+ */
+export const MAX_BATCH_SAKHI_IDS = 100;
+
+/**
  * Query schema for the batch variant, `GET /call-sheet-stats?sakhiIds=...`.
  * Kept as a plain string + `.refine()` (not `z.coerce.*`), matching
  * list-recent-call-logs.dto.ts's own note on why — zod-to-openapi cannot
@@ -34,9 +44,18 @@ export const listCallSheetStatsBatchQuerySchema = z
       .string()
       .trim()
       .min(1)
-      .refine((v) => v.split(',').every((id) => z.string().uuid().safeParse(id.trim()).success), {
-        message: 'sakhiIds: must be a comma-separated list of uuids',
-      }),
+      .refine(
+        (v) => {
+          const ids = v.split(',');
+          return (
+            ids.length <= MAX_BATCH_SAKHI_IDS &&
+            ids.every((id) => z.string().uuid().safeParse(id.trim()).success)
+          );
+        },
+        {
+          message: `sakhiIds: must be a comma-separated list of at most ${MAX_BATCH_SAKHI_IDS} uuids`,
+        },
+      ),
   })
   .strict();
 

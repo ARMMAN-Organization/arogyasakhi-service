@@ -241,14 +241,22 @@ export class OperationsRepository {
   }
 
   /**
-   * Call-sheet stats' FOLLOWUP_PENDING count — a call logged as CALL_BACK
-   * (the caller asked to be rung again) with no newer call logged since.
-   * The only one of the 7 call-sheet-stats kinds backed by real data today.
+   * Call-sheet stats' FOLLOWUP_PENDING count — 1 if this Sakhi's most recent
+   * call is still CALL_BACK (unresolved), 0 otherwise (including "never
+   * called"). NOT a count of every CALL_BACK ever logged: call_logs has no
+   * beneficiary/thread grouping (it's one Supervisor-to-Sakhi check-in call
+   * per row, per FR-SV-3.3), so a later call of any status supersedes an
+   * earlier CALL_BACK — it doesn't stay "pending" once the Supervisor has
+   * called again, whatever the outcome of that later call. The only one of
+   * the 7 call-sheet-stats kinds backed by real data today.
    */
-  countPendingFollowups(sakhiId: string) {
-    return this.prisma.callLog.count({
-      where: { sakhiId, isDeleted: false, callStatus: 'CALL_BACK' },
+  async countPendingFollowups(sakhiId: string): Promise<number> {
+    const latest = await this.prisma.callLog.findFirst({
+      where: { sakhiId, isDeleted: false },
+      orderBy: { callDatetime: 'desc' },
+      select: { callStatus: true },
     });
+    return latest?.callStatus === 'CALL_BACK' ? 1 : 0;
   }
 
   /**
