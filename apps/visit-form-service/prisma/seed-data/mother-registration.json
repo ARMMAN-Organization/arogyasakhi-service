@@ -144,6 +144,13 @@
       "question_code": "age_of_the_beneficiary"
     },
     {
+      "label": "Husband's name",
+      "section": "Personal Info",
+      "required": false,
+      "input_type": "text",
+      "question_code": "husbands_name"
+    },
+    {
       "label": "What is the highest level of education you have completed?",
       "options": [
         {

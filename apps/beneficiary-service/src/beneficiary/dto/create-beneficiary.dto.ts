@@ -72,12 +72,22 @@ export function deriveFullName(
 /**
  * Cross-field consistency rules per SRS Category 3 (line 401): Para ≤
  * Gravida; Abortions ≤ Gravida; Dead children ≤ Live births; Live births +
- * Stillbirths + Abortions = Gravida (including the current pregnancy).
+ * Stillbirths + Abortions = Gravida - 1 (the sum covers only pregnancies that
+ * have already ended — the current pregnancy, counted in Gravida, has no
+ * outcome yet, so subtracting 1 excludes it).
  */
 const motherDetailsSchema = z
   .object({
     lmpDate: z.coerce.date(),
-    gravida: z.number().int().min(0).max(14).optional(),
+    // min(1), not min(0) — this is a MOTHER_REGISTRATION case (a currently
+    // pregnant woman), and Gravida counts the current pregnancy by
+    // definition, so 0 is never a legitimate value here. Also closes a real
+    // bug the min(0) allowed: with the sum == gravida - 1 rule above,
+    // gravida: 0 makes gravida - 1 evaluate to -1, which
+    // liveBirths+stillbirths+abortions (each itself min(0)) can never reach —
+    // every submission with gravida: 0 would fail the cross-check
+    // unconditionally, with no way to satisfy it.
+    gravida: z.number().int().min(1).max(14).optional(),
     parity: z.number().int().min(0).max(14).optional(),
     liveBirths: z.number().int().min(0).max(14).optional(),
     stillbirths: z.number().int().min(0).max(14).optional(),
@@ -122,11 +132,11 @@ const motherDetailsSchema = z
     }
     if (liveBirths !== undefined && stillbirths !== undefined && abortions !== undefined) {
       const sum = liveBirths + stillbirths + abortions;
-      if (sum !== gravida) {
+      if (sum !== gravida - 1) {
         ctx.addIssue({
           code: 'custom',
           path: ['gravida'],
-          message: 'liveBirths + stillbirths + abortions must equal gravida',
+          message: 'liveBirths + stillbirths + abortions must equal gravida - 1',
         });
       }
     }
