@@ -19,6 +19,12 @@ const setIdParamsSchema = z
   .object({ setId: z.string().uuid().openapi({ example: '99999999-9999-9999-9999-999999999999' }) })
   .strict();
 
+const versionIdParamsSchema = z
+  .object({
+    versionId: z.string().uuid().openapi({ example: '99999999-9999-9999-9999-999999999999' }),
+  })
+  .strict();
+
 const publishRuleVersionRequestSchema = publishRuleVersionSchema.extend({
   // `rulesJson` is a recursive z.lazy() type (see publish-ruleVersion.dto.ts) —
   // zod-to-openapi cannot introspect z.lazy() on its own, so `type: 'object'`
@@ -41,6 +47,15 @@ const ruleVersionSchema = z.object({
   status: z.enum(['DRAFT', 'PUBLISHED', 'RETIRED']).openapi({ example: 'PUBLISHED' }),
 });
 
+// Deliberately narrower than ruleVersionSchema — omits rulesJson/effectiveFrom/
+// effectiveTo/publishedByUserId, which a non-admin caller (any other service
+// verifying a generatedByRuleVersionId) has no reason to see.
+const ruleVersionSummarySchema = z.object({
+  id: z.string().uuid(),
+  ruleSetId: z.string().uuid(),
+  status: z.enum(['DRAFT', 'PUBLISHED', 'RETIRED']).openapi({ example: 'PUBLISHED' }),
+});
+
 const apiErrorSchema = z.object({
   success: z.literal(false),
   message: z.string(),
@@ -60,6 +75,26 @@ function envelope<T extends z.ZodTypeAny>(data: T) {
  */
 export function createRuleVersionRouter(service: RuleVersionService) {
   const doc = createDocumentedRouter();
+
+  doc.get(
+    '/rules/versions/:versionId',
+    {
+      summary: 'Get a rule version by id (any authenticated role)',
+      tags: ['Rules'],
+      params: versionIdParamsSchema,
+      responses: {
+        200: { description: 'Rule version summary', schema: envelope(ruleVersionSummarySchema) },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        404: { description: 'Rule version not found', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(versionIdParamsSchema, 'params'),
+    asyncHandler(async (req, res) => {
+      res.json(ok(await service.getById(req.params.versionId)));
+    }),
+  );
 
   doc.get(
     '/admin/rules/:setId',

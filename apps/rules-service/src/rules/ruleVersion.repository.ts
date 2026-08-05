@@ -21,6 +21,11 @@ export class RuleVersionRepository {
     return this.prisma.ruleSet.findFirst({ where: { id: ruleSetId, isDeleted: false } });
   }
 
+  /** One rule version by its own id, or null — used by other services to verify a version is usable. */
+  findById(id: string) {
+    return this.prisma.ruleVersion.findFirst({ where: { id, isDeleted: false } });
+  }
+
   /**
    * The currently-PUBLISHED version for a rule set (the one still in effect,
    * i.e. effectiveTo is null), or null if the set has never been published.
