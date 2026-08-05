@@ -22,6 +22,7 @@ const STATUS_TO_ERROR_CODE: Record<number, ErrorCode> = {
   403: ErrorCode.FORBIDDEN,
   404: ErrorCode.NOT_FOUND,
   409: ErrorCode.CONFLICT,
+  413: ErrorCode.PAYLOAD_TOO_LARGE,
   422: ErrorCode.UNPROCESSABLE,
   500: ErrorCode.INTERNAL_ERROR,
 };
@@ -33,6 +34,7 @@ const DEFAULT_DESCRIPTION: Record<number, string> = {
   403: 'Forbidden — the caller role is not permitted to perform this action',
   404: 'Not found',
   409: 'Conflict — the request violates a uniqueness or state constraint',
+  413: 'Payload too large — the request exceeds a size/count limit',
   422: 'Unprocessable — a business rule rejected an otherwise well-formed request',
   500: 'Internal server error — an unexpected failure; internals are never leaked',
 };
@@ -44,6 +46,7 @@ const DEFAULT_MESSAGE: Record<number, string> = {
   403: 'You do not have access to this resource.',
   404: 'Not found.',
   409: 'A resource with this unique key already exists.',
+  413: 'Request exceeds the maximum allowed size.',
   422: 'The request could not be processed.',
   // The 5xx client message is a fixed string set by the error filter and is
   // never overridable — internals must not leak.

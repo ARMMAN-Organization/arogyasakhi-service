@@ -9,6 +9,7 @@ const STATUS_TO_CODE: Record<number, ErrorCode> = {
   403: ErrorCode.FORBIDDEN,
   404: ErrorCode.NOT_FOUND,
   409: ErrorCode.CONFLICT,
+  413: ErrorCode.PAYLOAD_TOO_LARGE,
   422: ErrorCode.UNPROCESSABLE,
 };
 
