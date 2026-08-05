@@ -12,6 +12,7 @@ import { appConfig } from './config/app-config';
 import { PrismaService } from './prisma/prisma.service';
 import { createHealthRouter } from './health/health.controller';
 import { createApprovalRequestModule } from './approvals/approvalRequest.module';
+import { createQuickResponseModule } from './quick-response/quick-response.module';
 import { buildApprovalServiceOpenApiDocument } from './docs/openapi';
 
 // Re-export shared HTTP helpers so feature routers can import from a single place.
@@ -19,9 +20,11 @@ export {
   asyncHandler,
   ok,
   fail,
+  validate,
   validateBody,
   requireRoles,
   trustGatewayIdentity,
+  unauthorized,
   createDocumentedRouter,
   HttpError,
   ErrorCode,
@@ -50,15 +53,24 @@ export function createApp(prisma: PrismaService): Application {
   app.use(requestId);
 
   const approvalRequestModule = createApprovalRequestModule(prisma);
+  const quickResponseModule = createQuickResponseModule(prisma);
 
   // All routes live under the global `api/v1` prefix.
   const api = express.Router();
   api.use(createHealthRouter(prisma));
-  // Built from approvalRequestModule.registry — every route registered via
+  // Built from every feature module's registry — every route registered via
   // createDocumentedRouter() above is already in the spec, so this can never
   // drift from what's actually mounted.
-  api.use(createSwaggerRouter(buildApprovalServiceOpenApiDocument(approvalRequestModule.registry)));
+  api.use(
+    createSwaggerRouter(
+      buildApprovalServiceOpenApiDocument(
+        approvalRequestModule.registry,
+        quickResponseModule.registry,
+      ),
+    ),
+  );
   api.use(approvalRequestModule.router);
+  api.use(quickResponseModule.router);
   app.use('/api/v1', api);
 
   app.use(notFoundHandler);

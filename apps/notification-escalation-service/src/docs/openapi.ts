@@ -1,15 +1,18 @@
-import type { OpenAPIRegistry } from '@armman/service-commons';
-import { buildServiceOpenApiDocument } from '@armman/service-commons';
+import { OpenAPIRegistry, buildServiceOpenApiDocument } from '@armman/service-commons';
 import { appConfig } from '../config/app-config';
 
 /**
- * Builds the notification-escalation-service OpenAPI document from the
- * registry that `createNotificationRouter` (via `createDocumentedRouter()`)
- * already populated as each route was defined — there is no separate,
- * hand-maintained route list to keep in sync here.
+ * Builds the notification-escalation-service OpenAPI document from every
+ * feature router's registry — each `createDocumentedRouter()` call creates
+ * its own registry, merged here (via the registry's `parents` constructor
+ * param) so notifications/escalations routes never overwrite each other in
+ * the combined doc.
  */
-export function buildNotificationEscalationServiceOpenApiDocument(registry: OpenAPIRegistry) {
-  return buildServiceOpenApiDocument(registry, {
+export function buildNotificationEscalationServiceOpenApiDocument(
+  ...registries: OpenAPIRegistry[]
+) {
+  const merged = new OpenAPIRegistry(registries);
+  return buildServiceOpenApiDocument(merged, {
     title: 'Arogya Sakhi — Notification Escalation Service API',
     description: 'Event-driven notifications and escalations.',
     port: appConfig.PORT,

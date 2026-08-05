@@ -1,15 +1,16 @@
-import type { OpenAPIRegistry } from '@armman/service-commons';
-import { buildServiceOpenApiDocument } from '@armman/service-commons';
+import { OpenAPIRegistry, buildServiceOpenApiDocument } from '@armman/service-commons';
 import { appConfig } from '../config/app-config';
 
 /**
- * Builds the approval-service OpenAPI document from the registry that
- * `createApprovalRequestRouter` (via `createDocumentedRouter()`) already
- * populated as each route was defined — there is no separate,
- * hand-maintained route list to keep in sync here.
+ * Builds the approval-service OpenAPI document from every feature router's
+ * registry — each `createDocumentedRouter()` call creates its own registry,
+ * merged here (via the registry's `parents` constructor param) so
+ * approvals/quick-response routes never overwrite each other in the
+ * combined doc.
  */
-export function buildApprovalServiceOpenApiDocument(registry: OpenAPIRegistry) {
-  return buildServiceOpenApiDocument(registry, {
+export function buildApprovalServiceOpenApiDocument(...registries: OpenAPIRegistry[]) {
+  const merged = new OpenAPIRegistry(registries);
+  return buildServiceOpenApiDocument(merged, {
     title: 'Arogya Sakhi — Approval Service API',
     description: 'Generic supervisor approval requests and decisions.',
     port: appConfig.PORT,

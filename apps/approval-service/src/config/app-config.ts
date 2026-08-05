@@ -16,6 +16,16 @@ const schema = z.object({
         .filter(Boolean),
     ),
   PUBLIC_BASE_URLS: publicBaseUrlsSchema,
+  // Base URLs of the services Quick Response merges/delegates to (same
+  // naming/default pattern as supervisor-operations-service's SakhiClient) —
+  // resolving APPROVAL_STATUS lookup values (auth-service), fetching
+  // escalation-sourced cards (notification-escalation-service), deciding
+  // REOPEN cards (closure-reopen-service), and writing the audit entry
+  // (audit-service).
+  AUTH_SERVICE_BASE_URL: z.string().url().default('http://localhost:3000'),
+  NOTIFICATION_ESCALATION_SERVICE_BASE_URL: z.string().url().default('http://localhost:3009'),
+  CLOSURE_REOPEN_SERVICE_BASE_URL: z.string().url().default('http://localhost:3006'),
+  AUDIT_SERVICE_BASE_URL: z.string().url().default('http://localhost:3013'),
 });
 
 export type AppConfig = z.infer<typeof schema>;

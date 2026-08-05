@@ -1,15 +1,15 @@
-import type { OpenAPIRegistry } from '@armman/service-commons';
-import { buildServiceOpenApiDocument } from '@armman/service-commons';
+import { OpenAPIRegistry, buildServiceOpenApiDocument } from '@armman/service-commons';
 import { appConfig } from '../config/app-config';
 
 /**
- * Builds the closure-reopen-service OpenAPI document from the registry that
- * `createClosureRouter` (via `createDocumentedRouter()`) already populated as
- * each route was defined — there is no separate, hand-maintained route list
- * to keep in sync here.
+ * Builds the closure-reopen-service OpenAPI document from every feature
+ * router's registry — each `createDocumentedRouter()` call creates its own
+ * registry, merged here (via the registry's `parents` constructor param) so
+ * closures/reopen-requests routes never overwrite each other in the combined doc.
  */
-export function buildClosureReopenServiceOpenApiDocument(registry: OpenAPIRegistry) {
-  return buildServiceOpenApiDocument(registry, {
+export function buildClosureReopenServiceOpenApiDocument(...registries: OpenAPIRegistry[]) {
+  const merged = new OpenAPIRegistry(registries);
+  return buildServiceOpenApiDocument(merged, {
     title: 'Arogya Sakhi — Closure Reopen Service API',
     description: 'Closure forms, supervisor review, and reopen requests.',
     port: appConfig.PORT,

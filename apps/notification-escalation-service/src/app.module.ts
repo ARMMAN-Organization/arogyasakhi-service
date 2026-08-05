@@ -12,15 +12,18 @@ import { appConfig } from './config/app-config';
 import { PrismaService } from './prisma/prisma.service';
 import { createHealthRouter } from './health/health.controller';
 import { createNotificationModule } from './notifications/notification.module';
+import { createEscalationModule } from './escalations/escalation.module';
 import { buildNotificationEscalationServiceOpenApiDocument } from './docs/openapi';
 
 export {
   asyncHandler,
   ok,
   fail,
+  validate,
   validateBody,
   requireRoles,
   trustGatewayIdentity,
+  unauthorized,
   createDocumentedRouter,
   HttpError,
   ErrorCode,
@@ -46,18 +49,23 @@ export function createApp(prisma: PrismaService): Application {
   });
   app.use(requestId);
   const notificationModule = createNotificationModule(prisma);
+  const escalationModule = createEscalationModule(prisma);
 
   const api = express.Router();
   api.use(createHealthRouter(prisma));
-  // Built from notificationModule.registry — every route registered via
+  // Built from every feature module's registry — every route registered via
   // createDocumentedRouter() above is already in the spec, so this can never
   // drift from what's actually mounted.
   api.use(
     createSwaggerRouter(
-      buildNotificationEscalationServiceOpenApiDocument(notificationModule.registry),
+      buildNotificationEscalationServiceOpenApiDocument(
+        notificationModule.registry,
+        escalationModule.registry,
+      ),
     ),
   );
   api.use(notificationModule.router);
+  api.use(escalationModule.router);
   app.use('/api/v1', api);
   app.use(notFoundHandler);
   app.use(errorHandler);

@@ -32,7 +32,10 @@ datasource db {
 
 enum ApprovalRequestType {
   LMP_CHANGE
-  REFERRAL_SKIP
+  // Renamed from REFERRAL_SKIP to match the Quick Response spec's card type
+  // name — same concept (a Sakhi's referral follow-up wasn't completed),
+  // naming drift only, no semantic change.
+  REFERRAL_INCOMPLETE
   ACCOMPANIED_REFERRAL
   CLOSURE_REVIEW
   REOPEN

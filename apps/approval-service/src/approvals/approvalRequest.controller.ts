@@ -34,7 +34,7 @@ const approvalRequestSchema = z.object({
   id: z.string().uuid(),
   requestType: z.enum([
     'LMP_CHANGE',
-    'REFERRAL_SKIP',
+    'REFERRAL_INCOMPLETE',
     'ACCOMPANIED_REFERRAL',
     'CLOSURE_REVIEW',
     'REOPEN',

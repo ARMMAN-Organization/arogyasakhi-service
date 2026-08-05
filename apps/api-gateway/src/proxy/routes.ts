@@ -77,6 +77,14 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
   { prefix: '/referrals', target: appConfig.RISK_REFERRAL_SERVICE_URL, requiresAuth: true },
   { prefix: '/closures', target: appConfig.CLOSURE_REOPEN_SERVICE_URL, requiresAuth: true },
   { prefix: '/approvals', target: appConfig.APPROVAL_SERVICE_URL, requiresAuth: true },
+  // Quick Response's client-facing surface — merges approval_requests with
+  // escalation_events server-side. The two source-service prefixes
+  // (/escalation-events on notification-escalation-service,
+  // /reopen-requests on closure-reopen-service) are called directly by
+  // approval-service, not routed through the gateway — same
+  // service-to-service pattern as supervisor-operations-service's
+  // SakhiClient calling auth-service's /sakhis/:id.
+  { prefix: '/quick-response', target: appConfig.APPROVAL_SERVICE_URL, requiresAuth: true },
   { prefix: '/incentives', target: appConfig.INCENTIVE_WAGES_SERVICE_URL, requiresAuth: true },
   {
     prefix: '/notifications',

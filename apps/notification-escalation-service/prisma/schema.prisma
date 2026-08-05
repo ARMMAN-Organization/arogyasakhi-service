@@ -37,6 +37,9 @@ enum EscalationType {
   SYNC_DELAY
   CLOSURE_PENDING
   REOPEN_PENDING
+  // Quick Response's EDD_NEARING card type — distinct from POST_EDD_MISSED
+  // (the EDD has already passed); this fires while it's still approaching.
+  EDD_NEARING
 }
 
 enum EscalationStatus {

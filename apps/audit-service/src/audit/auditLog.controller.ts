@@ -8,6 +8,7 @@ import {
   ok,
   requireRoles,
   trustGatewayIdentity,
+  unauthorized,
   validateBody,
 } from '../app.module';
 
@@ -93,10 +94,21 @@ export function createAuditLogRouter(service: AuditLogService) {
       },
     },
     trustGatewayIdentity,
-    requireRoles('ADMIN'),
+    // ADMIN direct use, plus SUPERVISOR so approval-service can log a Quick
+    // Response decision's audit entry on the caller's behalf (it forwards
+    // the deciding Supervisor's own Authorization header, same pattern
+    // supervisor-operations-service's SakhiClient uses — no separate
+    // service-to-service credential scheme in this codebase yet).
+    // service.create() constrains a non-ADMIN caller to their own
+    // actorUserId and to the QUICK_RESPONSE_* action namespace, so this
+    // widened role can only ever log the caller's own decisions — never
+    // forge an entry attributed to someone else or write an arbitrary
+    // action/entityType.
+    requireRoles('ADMIN', 'SUPERVISOR'),
     validateBody(createAuditLogRequestSchema),
-    asyncHandler(async (req, res) => {
-      const created = await service.create(req.body);
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const created = await service.create(req.body, req.user);
       res.status(201).json(ok(created));
     }),
   );
