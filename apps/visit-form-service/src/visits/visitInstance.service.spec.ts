@@ -78,11 +78,11 @@ describe('VisitInstanceService', () => {
     expect(repository.create).not.toHaveBeenCalled();
   });
 
-  it('rejects with a typed 409 when scheduleId does not resolve, without calling create', async () => {
+  it('rejects with a typed 422 when scheduleId does not resolve, without calling create', async () => {
     repository.findByLocalVisitUuid.mockResolvedValue(null);
     repository.findScheduleById.mockResolvedValue(null);
 
-    await expect(service.create(dto)).rejects.toMatchObject({ status: 409 });
+    await expect(service.create(dto)).rejects.toMatchObject({ status: 422 });
     expect(repository.create).not.toHaveBeenCalled();
   });
 

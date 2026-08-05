@@ -1,4 +1,4 @@
-import { conflict } from '@armman/service-commons';
+import { unprocessable } from '@armman/service-commons';
 import type { VisitInstanceRepository } from './visitInstance.repository';
 import type { CreateVisitInstanceInput } from './dto/create-visitInstance.dto';
 
@@ -23,7 +23,13 @@ export class VisitInstanceService {
 
     const schedule = await this.repository.findScheduleById(dto.scheduleId);
     if (!schedule) {
-      throw conflict('scheduleId does not reference an existing visit schedule.');
+      // 422, not 409 — this is "the referenced scheduleId doesn't exist"
+      // (a bad reference), the same class of error supervisor-operations-
+      // service's createCallLog uses unprocessable() for on an unknown
+      // sakhiId — not a state conflict, which conflict()/409 is reserved for
+      // elsewhere in this codebase (form.service.ts's concurrent-DRAFT/
+      // wrong-status cases).
+      throw unprocessable('scheduleId does not reference an existing visit schedule.');
     }
 
     return this.repository.create(dto);
