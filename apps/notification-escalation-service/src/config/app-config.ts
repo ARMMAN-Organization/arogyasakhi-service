@@ -16,6 +16,12 @@ const schema = z.object({
         .filter(Boolean),
     ),
   PUBLIC_BASE_URLS: publicBaseUrlsSchema,
+  // Used to verify a SUPERVISOR caller of POST /notifications actually owns
+  // (is the assigned supervisor of) the Sakhi they're notifying — closes an
+  // impersonation/IDOR gap where a widened SUPERVISOR role could otherwise
+  // notify any recipientUserId (same naming/default as supervisor-
+  // operations-service's SakhiClient).
+  AUTH_SERVICE_BASE_URL: z.string().url().default('http://localhost:3000'),
 });
 export type AppConfig = z.infer<typeof schema>;
 

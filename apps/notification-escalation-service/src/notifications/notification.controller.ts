@@ -8,6 +8,7 @@ import {
   ok,
   requireRoles,
   trustGatewayIdentity,
+  unauthorized,
   validateBody,
 } from '../app.module';
 
@@ -83,10 +84,18 @@ export function createNotificationRouter(service: NotificationService) {
       },
     },
     trustGatewayIdentity,
-    requireRoles('ADMIN'),
+    // ADMIN direct use, plus SUPERVISOR so approval-service can notify a
+    // Sakhi on the caller's behalf after a Quick Response decision (it
+    // forwards the deciding Supervisor's own Authorization header, same
+    // pattern supervisor-operations-service's SakhiClient uses — no
+    // separate service-to-service credential scheme in this codebase yet).
+    requireRoles('ADMIN', 'SUPERVISOR'),
     validateBody(createNotificationSchema),
-    asyncHandler(async (req, res) => {
-      const created = await service.create(req.body);
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const created = await service.create(req.body, req.user, authorizationHeader);
       res.status(201).json(ok(created));
     }),
   );

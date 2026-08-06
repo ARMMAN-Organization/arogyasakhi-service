@@ -16,6 +16,11 @@ const schema = z.object({
         .filter(Boolean),
     ),
   PUBLIC_BASE_URLS: publicBaseUrlsSchema,
+  // Reopen request decisions write an audit_log entry and notify the Sakhi
+  // through audit-service and notification-escalation-service respectively —
+  // via the gateway, forwarding the deciding Supervisor's own JWT, same
+  // pattern as approval-service's Quick Response clients.
+  API_GATEWAY_BASE_URL: z.string().url().default('http://localhost:3000'),
 });
 
 export type AppConfig = z.infer<typeof schema>;

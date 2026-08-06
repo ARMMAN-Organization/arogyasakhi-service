@@ -76,10 +76,25 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
   { prefix: '/admin/rules', target: appConfig.RULES_SERVICE_URL, requiresAuth: true },
   { prefix: '/referrals', target: appConfig.RISK_REFERRAL_SERVICE_URL, requiresAuth: true },
   { prefix: '/closures', target: appConfig.CLOSURE_REOPEN_SERVICE_URL, requiresAuth: true },
+  // Internal-use decision endpoint, not part of the public Quick Response
+  // surface — approval-service calls it through the gateway (rather than
+  // closure-reopen-service's own port directly) because it uses
+  // trustGatewayIdentity, which only trusts the gateway's verified
+  // x-armman-* headers, not a raw forwarded JWT.
+  { prefix: '/reopen-requests', target: appConfig.CLOSURE_REOPEN_SERVICE_URL, requiresAuth: true },
   { prefix: '/approvals', target: appConfig.APPROVAL_SERVICE_URL, requiresAuth: true },
+  { prefix: '/quick-response', target: appConfig.APPROVAL_SERVICE_URL, requiresAuth: true },
   { prefix: '/incentives', target: appConfig.INCENTIVE_WAGES_SERVICE_URL, requiresAuth: true },
   {
     prefix: '/notifications',
+    target: appConfig.NOTIFICATION_ESCALATION_SERVICE_URL,
+    requiresAuth: true,
+  },
+  // Internal-use Quick Response read surface, not documented as a public
+  // API — approval-service calls it through the gateway for the same
+  // trustGatewayIdentity reason as /reopen-requests above.
+  {
+    prefix: '/escalation-events',
     target: appConfig.NOTIFICATION_ESCALATION_SERVICE_URL,
     requiresAuth: true,
   },

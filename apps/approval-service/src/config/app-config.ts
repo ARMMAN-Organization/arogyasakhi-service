@@ -16,6 +16,15 @@ const schema = z.object({
         .filter(Boolean),
     ),
   PUBLIC_BASE_URLS: publicBaseUrlsSchema,
+  // Quick Response's cross-service calls (resolving APPROVAL_STATUS lookup
+  // values, fetching escalation-sourced cards, deciding REOPEN cards,
+  // notifying the Sakhi, writing the audit entry) all go through the
+  // gateway rather than hitting each service's own port directly — every
+  // one of those routes uses trustGatewayIdentity (trusts the x-armman-*
+  // headers the gateway sets after verifying the JWT), not authenticate()
+  // (which verifies a raw JWT itself), so a direct call bypassing the
+  // gateway would never carry the identity those routes require.
+  API_GATEWAY_BASE_URL: z.string().url().default('http://localhost:3000'),
 });
 
 export type AppConfig = z.infer<typeof schema>;
