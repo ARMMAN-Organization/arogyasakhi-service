@@ -174,7 +174,7 @@
       "label": "Enter the beneficiary address",
       "section": "Personal Info",
       "required": true,
-      "input_type": "text,geo",
+      "input_type": "text_geo",
       "question_code": "enter_the_beneficiary_address"
     },
     {
