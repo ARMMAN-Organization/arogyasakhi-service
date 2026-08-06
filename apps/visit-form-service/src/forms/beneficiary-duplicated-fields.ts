@@ -19,10 +19,8 @@
  * field accepted there. Keep the two lists in sync if either form changes.
  */
 export const BENEFICIARY_DUPLICATED_FIELD_CODES: ReadonlySet<string> = new Set([
-  // pii.firstName / middleName / lastName
-  'first_name',
-  'middle_name',
-  'last_name',
+  // pii.fullName
+  'beneficiary_name',
   // pii.dateOfBirth
   'date_of_birth',
   // pii.phone

@@ -16,7 +16,7 @@ import type { BeneficiaryStatus, CaseType } from './beneficiary.constants';
 import { buildSearchTokens, evaluateDuplicateMatch } from './beneficiary.duplicate-detection';
 import { computeBmi, withDecryptedName } from './beneficiary.mapper';
 import type { BeneficiaryListFilters, BeneficiaryRepository } from './beneficiary.repository';
-import { deriveFullName, type CreateBeneficiaryInput } from './dto/create-beneficiary.dto';
+import type { CreateBeneficiaryInput } from './dto/create-beneficiary.dto';
 import { resolveHealthBlockIdFromPhc } from '../geography/geography.client';
 import { listSakhiIdsForSupervisor } from '../sakhi/sakhi.client';
 
@@ -115,7 +115,7 @@ export class BeneficiaryService {
       throw unprocessable('Consent not received. Registration cannot proceed.');
     }
 
-    const fullName = deriveFullName(dto.pii.firstName, dto.pii.middleName, dto.pii.lastName);
+    const fullName = dto.pii.fullName;
     const searchTokens = buildSearchTokens(dto, fullName);
 
     if (!dto.acknowledgeDuplicate) {

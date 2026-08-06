@@ -8,14 +8,11 @@ import { API_CONSENT_STATUSES, CASE_TYPES, SEXES } from '../beneficiary.constant
  */
 const piiSchema = z
   .object({
-    // Matches the MOTHER_REGISTRATION form's first_name/middle_name/last_name
-    // question_codes — the mobile form never collects a single combined name
-    // field, so the client sends these 3 parts and the server derives
-    // `fullName` below (joined, skipping an absent middleName) for the
-    // existing encrypted-storage/duplicate-detection path.
-    firstName: z.string().trim().min(1).max(100),
-    middleName: z.string().trim().min(1).max(100).optional(),
-    lastName: z.string().trim().min(1).max(100),
+    // Matches the MOTHER_REGISTRATION form's single beneficiary_name
+    // question_code — the mobile form collects one combined name field, so
+    // the client sends it as-is for the encrypted-storage/duplicate-detection
+    // path (see fullNameEnc/fullNameSearchHash in beneficiary.service.ts).
+    fullName: z.string().trim().min(1).max(200),
     // Required per SRS FR-S-2.1: "age, demographics, geographic details
     // (state, district, block, PHC, sub-centre, village, pada), mobile
     // numbers, RCH number." phone (mobile), dateOfBirth (age), and the 7
@@ -49,25 +46,6 @@ const piiSchema = z
     rchNumber: z.string().trim().min(1).max(50).optional(),
   })
   .strict();
-
-/**
- * Derives the single display/storage name from the mobile form's separate
- * firstName/middleName/lastName fields, for the encrypted-storage/
- * duplicate-detection path (beneficiary.service.ts,
- * beneficiary.duplicate-detection.ts) that's keyed on one full name.
- *
- * Kept out of `piiSchema` itself (not a `.transform()`) because
- * `@asteasolutions/zod-to-openapi`'s generator can't introspect a
- * `ZodEffects`-wrapped schema of type `transform` — registering one as a
- * route's request body throws `UnknownZodTypeError` at doc-build time.
- */
-export function deriveFullName(
-  firstName: string,
-  middleName: string | undefined,
-  lastName: string,
-): string {
-  return [firstName, middleName, lastName].filter(Boolean).join(' ');
-}
 
 /**
  * Cross-field consistency rules per SRS Category 3 (line 401): Para ≤
