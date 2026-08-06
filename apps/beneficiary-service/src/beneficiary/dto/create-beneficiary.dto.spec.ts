@@ -286,6 +286,40 @@ describe('createBeneficiarySchema', () => {
     expect(result.success).toBe(false);
   });
 
+  it('rejects parity != liveBirths + stillbirths (M16)', () => {
+    const result = createBeneficiarySchema.safeParse({
+      pii: { ...basePii },
+      case: { ...baseCase, caseType: 'MOTHER' },
+      motherDetails: {
+        lmpDate: '2025-10-01',
+        gravida: 3,
+        parity: 2,
+        liveBirths: 1,
+        stillbirths: 0,
+        abortions: 1,
+      },
+      consent,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('accepts parity == liveBirths + stillbirths (M17)', () => {
+    const result = createBeneficiarySchema.safeParse({
+      pii: { ...basePii },
+      case: { ...baseCase, caseType: 'MOTHER' },
+      motherDetails: {
+        lmpDate: '2025-10-01',
+        gravida: 2,
+        parity: 1,
+        liveBirths: 0,
+        stillbirths: 1,
+        abortions: 0,
+      },
+      consent,
+    });
+    expect(result.success).toBe(true);
+  });
+
   it('accepts a valid mother enrollment (M1)', () => {
     const result = createBeneficiarySchema.safeParse({
       pii: { ...basePii },

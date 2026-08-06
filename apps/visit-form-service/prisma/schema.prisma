@@ -84,6 +84,11 @@ enum FormValidationStatus {
 
 model VisitSchedule {
   id                       String              @id @default(uuid()) @map("schedule_id")
+  // Device-generated idempotency key (mirrors VisitInstance.localVisitUuid
+  // below) — without it, a retried offline upload of the same schedule
+  // creates duplicate rows, since the server has no other way to recognize
+  // a schedule it already stored.
+  localScheduleUuid        String              @unique @map("local_schedule_uuid") @db.VarChar(80)
   // beneficiary_cases.beneficiary_id — owned by another service, no cross-service relation.
   beneficiaryId            String              @map("beneficiary_id")
   visitCode                String              @map("visit_code") @db.VarChar(40)
@@ -109,6 +114,12 @@ model VisitSchedule {
 
   visitInstances VisitInstance[]
 
+  // Partial (WHERE is_deleted = false) in the migration SQL — Prisma's
+  // @@index can't express a WHERE clause, so these declarations exist for
+  // documentation/drift-detection only; the real, partial index is
+  // hand-written in the migration.
+  @@index([beneficiaryId, status])
+  @@index([scheduledDate])
   @@map("visit_schedules")
 }
 

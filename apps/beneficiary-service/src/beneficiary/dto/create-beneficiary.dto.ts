@@ -71,10 +71,11 @@ export function deriveFullName(
 
 /**
  * Cross-field consistency rules per SRS Category 3 (line 401): Para ≤
- * Gravida; Abortions ≤ Gravida; Dead children ≤ Live births; Live births +
- * Stillbirths + Abortions = Gravida - 1 (the sum covers only pregnancies that
- * have already ended — the current pregnancy, counted in Gravida, has no
- * outcome yet, so subtracting 1 excludes it).
+ * Gravida; Para = Live births + Stillbirths; Abortions ≤ Gravida; Dead
+ * children ≤ Live births; Live births + Stillbirths + Abortions = Gravida - 1
+ * (the sum covers only pregnancies that have already ended — the current
+ * pregnancy, counted in Gravida, has no outcome yet, so subtracting 1
+ * excludes it).
  */
 const motherDetailsSchema = z
   .object({
@@ -114,6 +115,18 @@ const motherDetailsSchema = z
         code: 'custom',
         path: ['parity'],
         message: 'parity must be less than or equal to gravida',
+      });
+    }
+    if (
+      parity !== undefined &&
+      liveBirths !== undefined &&
+      stillbirths !== undefined &&
+      parity !== liveBirths + stillbirths
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['parity'],
+        message: 'parity must equal liveBirths + stillbirths',
       });
     }
     if (abortions !== undefined && abortions > gravida) {
