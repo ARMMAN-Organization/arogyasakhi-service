@@ -16,7 +16,6 @@ describe('createVisitScheduleBulkSchema', () => {
   const base = {
     beneficiaryId: '11111111-1111-1111-1111-111111111111',
     generatedByRuleVersionId: '22222222-2222-2222-2222-222222222222',
-    generatedAt: '2026-08-04T09:12:33.000Z',
     schedules: [validRow],
   };
 

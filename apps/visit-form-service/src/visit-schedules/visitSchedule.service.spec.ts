@@ -56,7 +56,6 @@ describe('VisitScheduleService', () => {
     return {
       beneficiaryId,
       generatedByRuleVersionId: ruleVersionId,
-      generatedAt: new Date('2026-08-04T09:12:33.000Z'),
       schedules: [
         {
           localScheduleUuid: 'local-1',
@@ -97,6 +96,13 @@ describe('VisitScheduleService', () => {
         status: 'GENERATED',
         beneficiaryId,
         visitCode: 'ANC1',
+        visitType: 'ANC',
+        sequenceNo: 1,
+        scheduledDate: new Date('2026-08-04'),
+        windowStartDate: new Date('2026-08-04'),
+        windowEndDate: new Date('2026-08-09'),
+        anchorType: 'REGISTRATION',
+        anchorVisitId: null,
         generatedByRuleVersionId: ruleVersionId,
       },
     ] as never);
@@ -109,6 +115,61 @@ describe('VisitScheduleService', () => {
       { localScheduleUuid: 'local-1', scheduleId: 'sched-1', status: 'GENERATED' },
     ]);
     expect(repository.createAllOrNothing).not.toHaveBeenCalled();
+  });
+
+  it('rejects with 409 when a replayed localScheduleUuid carries different content than what is stored', async () => {
+    repository.findByLocalScheduleUuids.mockResolvedValue([
+      {
+        id: 'sched-1',
+        localScheduleUuid: 'local-1',
+        status: 'GENERATED',
+        beneficiaryId,
+        visitCode: 'ANC1',
+        visitType: 'ANC',
+        sequenceNo: 1,
+        scheduledDate: new Date('2026-08-04'),
+        windowStartDate: new Date('2026-08-04'),
+        windowEndDate: new Date('2026-08-09'),
+        anchorType: 'REGISTRATION',
+        anchorVisitId: null,
+        generatedByRuleVersionId: ruleVersionId,
+      },
+    ] as never);
+
+    // Same localScheduleUuid as the stored row, but a different scheduledDate.
+    const dto = baseDto({
+      schedules: [
+        {
+          localScheduleUuid: 'local-1',
+          visitCode: 'ANC1',
+          visitType: 'ANC',
+          sequenceNo: 1,
+          scheduledDate: '2026-08-05',
+          windowStartDate: '2026-08-05',
+          windowEndDate: '2026-08-10',
+          anchorType: 'REGISTRATION',
+          anchorVisitLocalUuid: null,
+        },
+      ],
+    });
+
+    await expect(service.createBulk(dto, sakhiCaller, authHeader)).rejects.toMatchObject({
+      status: 409,
+    });
+    expect(repository.createAllOrNothing).not.toHaveBeenCalled();
+  });
+
+  it('rejects with 409 when a localScheduleUuid collides with another beneficiary’s row', async () => {
+    // The idempotency lookup is scoped to this beneficiaryId, so a uuid
+    // already used by a DIFFERENT beneficiary is invisible to it — the row
+    // is treated as new, and the DB's own @unique constraint on
+    // localScheduleUuid rejects the insert.
+    repository.findByLocalScheduleUuids.mockResolvedValue([]);
+    repository.createAllOrNothing.mockRejectedValue({ code: 'P2002' });
+
+    await expect(service.createBulk(baseDto(), sakhiCaller, authHeader)).rejects.toMatchObject({
+      status: 409,
+    });
   });
 
   it('handles a partial replay — 1 old + 1 new (case 3)', async () => {
@@ -145,6 +206,13 @@ describe('VisitScheduleService', () => {
         status: 'GENERATED',
         beneficiaryId,
         visitCode: 'ANC1',
+        visitType: 'ANC',
+        sequenceNo: 1,
+        scheduledDate: new Date('2026-08-04'),
+        windowStartDate: new Date('2026-08-04'),
+        windowEndDate: new Date('2026-08-09'),
+        anchorType: 'REGISTRATION',
+        anchorVisitId: null,
         generatedByRuleVersionId: ruleVersionId,
       },
     ] as never);

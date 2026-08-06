@@ -82,7 +82,6 @@ export const createVisitScheduleBulkSchema = z
   .object({
     beneficiaryId: z.string().uuid(),
     generatedByRuleVersionId: z.string().uuid(),
-    generatedAt: z.coerce.date(),
     schedules: z.array(bulkScheduleRowSchema).min(1),
   })
   .strict();

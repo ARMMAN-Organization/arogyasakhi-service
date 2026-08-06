@@ -27,10 +27,17 @@ export interface NewScheduleRow {
 export class VisitScheduleRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** Every existing row among the given localScheduleUuids, for the idempotency/conflict checks. */
-  findByLocalScheduleUuids(localScheduleUuids: string[]) {
+  /**
+   * Every existing row among the given localScheduleUuids, for the
+   * idempotency/conflict checks — scoped to `beneficiaryId` so a
+   * localScheduleUuid collision with a row belonging to a *different*
+   * beneficiary is never mistaken for "already existed": it's treated as
+   * new instead, and the insert then hits the column's own @unique
+   * constraint (surfaced as a 409, not silently accepted).
+   */
+  findByLocalScheduleUuids(beneficiaryId: string, localScheduleUuids: string[]) {
     return this.prisma.visitSchedule.findMany({
-      where: { localScheduleUuid: { in: localScheduleUuids }, isDeleted: false },
+      where: { beneficiaryId, localScheduleUuid: { in: localScheduleUuids }, isDeleted: false },
     });
   }
 

@@ -26,6 +26,48 @@ function trailingSequenceNo(visitCode: string): number | null {
   return match ? Number(match[1]) : null;
 }
 
+/** Narrows a caught Prisma error to a unique-constraint violation (P2002). */
+function isUniqueConstraintViolation(err: unknown): boolean {
+  return (
+    typeof err === 'object' && err !== null && 'code' in err && (err as { code: unknown }).code === 'P2002'
+  );
+}
+
+/**
+ * True if `row` (the incoming payload) matches every field of `existing`
+ * (the previously stored row) that a genuine retry would resend unchanged.
+ * A same-localScheduleUuid row with different content is not a retry — it's
+ * either a client bug or a stale/reused uuid — so idempotency must not
+ * silently accept it.
+ */
+function matchesStoredRow(
+  row: BulkScheduleRow,
+  existing: {
+    visitCode: string;
+    visitType: string;
+    sequenceNo: number | null;
+    scheduledDate: Date;
+    windowStartDate: Date;
+    windowEndDate: Date;
+    anchorType: string;
+    anchorVisitId: string | null;
+  },
+): boolean {
+  return (
+    row.visitCode === existing.visitCode &&
+    row.visitType === existing.visitType &&
+    row.sequenceNo === existing.sequenceNo &&
+    toDateOnly(row.scheduledDate).getTime() === existing.scheduledDate.getTime() &&
+    toDateOnly(row.windowStartDate).getTime() === existing.windowStartDate.getTime() &&
+    toDateOnly(row.windowEndDate).getTime() === existing.windowEndDate.getTime() &&
+    row.anchorType === existing.anchorType &&
+    // The stored row only has the resolved anchorVisitId, not the original
+    // anchorVisitLocalUuid — can't compare the uuids themselves, but "has an
+    // anchor" vs "has none" must still agree.
+    (row.anchorVisitLocalUuid === null) === (existing.anchorVisitId === null)
+  );
+}
+
 export interface CreatedScheduleResult {
   localScheduleUuid: string;
   scheduleId: string;
@@ -88,10 +130,9 @@ export class VisitScheduleService {
 
     const localScheduleUuids = dto.schedules.map((row) => row.localScheduleUuid);
     const existingByLocalUuid = new Map(
-      (await this.repository.findByLocalScheduleUuids(localScheduleUuids)).map((row) => [
-        row.localScheduleUuid,
-        row,
-      ]),
+      (
+        await this.repository.findByLocalScheduleUuids(dto.beneficiaryId, localScheduleUuids)
+      ).map((row) => [row.localScheduleUuid, row]),
     );
 
     // Conflict check: same (beneficiaryId, visitCode, generatedByRuleVersionId)
@@ -125,6 +166,11 @@ export class VisitScheduleService {
     for (const row of dto.schedules) {
       const existing = existingByLocalUuid.get(row.localScheduleUuid);
       if (existing) {
+        if (!matchesStoredRow(row, existing)) {
+          throw conflict(
+            `localScheduleUuid "${row.localScheduleUuid}" is already stored with different content — a retried upload must resend the same payload.`,
+          );
+        }
         alreadyExisted.push({
           localScheduleUuid: row.localScheduleUuid,
           scheduleId: existing.id,
@@ -137,15 +183,27 @@ export class VisitScheduleService {
 
     const resolvedNewRows = this.resolveAnchors(newRows, existingByLocalUuid);
 
-    const created =
-      resolvedNewRows.length > 0
-        ? await this.repository.createAllOrNothing(
-            resolvedNewRows,
-            dto.beneficiaryId,
-            dto.generatedByRuleVersionId,
-            caller.id,
-          )
-        : [];
+    let created: Awaited<ReturnType<VisitScheduleRepository['createAllOrNothing']>> = [];
+    if (resolvedNewRows.length > 0) {
+      try {
+        created = await this.repository.createAllOrNothing(
+          resolvedNewRows,
+          dto.beneficiaryId,
+          dto.generatedByRuleVersionId,
+          caller.id,
+        );
+      } catch (err) {
+        // localScheduleUuid is globally @unique, but the idempotency lookup
+        // above is scoped to this beneficiaryId — a uuid already used by a
+        // DIFFERENT beneficiary's schedule is invisible to that lookup, so
+        // it reaches here as a "new" row and collides with the DB
+        // constraint instead. Surface that as a 409, not an unhandled 500.
+        if (isUniqueConstraintViolation(err)) {
+          throw conflict('One or more localScheduleUuid values are already in use.');
+        }
+        throw err;
+      }
+    }
 
     const createdResults: CreatedScheduleResult[] = created.map((row) => ({
       localScheduleUuid: row.localScheduleUuid,
