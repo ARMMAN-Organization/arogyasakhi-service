@@ -2,10 +2,10 @@ import { badGateway } from '@armman/service-commons';
 import { appConfig } from '../config/app-config';
 
 /**
- * Notifies a Sakhi after a Quick Response decision, calling
- * notification-escalation-service's POST /notifications directly (not
- * through the gateway), forwarding the caller's own Authorization header —
- * same pattern supervisor-operations-service's SakhiClient uses.
+ * Notifies a Sakhi after a reopen request decision, calling
+ * notification-escalation-service's POST /notifications through the
+ * gateway, forwarding the caller's own Authorization header — same pattern
+ * approval-service's Quick Response clients use.
  */
 export class NotificationClient {
   async notify(

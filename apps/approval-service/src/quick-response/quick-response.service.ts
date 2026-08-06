@@ -3,8 +3,6 @@ import type { QuickResponseRepository } from './quick-response.repository';
 import type { LookupClient } from './lookup.client';
 import type { EscalationClient, EscalationCard } from './escalation.client';
 import type { ReopenRequestClient } from './reopen-request.client';
-import type { NotificationClient } from './notification.client';
-import type { AuditClient } from './audit.client';
 import type { ListQuickResponseInput } from './dto/list-quick-response.dto';
 import type { DecideQuickResponseInput } from './dto/decide-quick-response.dto';
 
@@ -68,8 +66,6 @@ export class QuickResponseService {
     private readonly lookupClient: LookupClient,
     private readonly escalationClient: EscalationClient,
     private readonly reopenRequestClient: ReopenRequestClient,
-    private readonly notificationClient: NotificationClient,
-    private readonly auditClient: AuditClient,
   ) {}
 
   /**
@@ -132,19 +128,21 @@ export class QuickResponseService {
    * write endpoint in a service that doesn't have one yet, so they respond
    * 501 rather than silently no-op or guess at undefined behavior.
    */
-  async decide(
+  async decide(cardId: string, dto: DecideQuickResponseInput, authorizationHeader: string) {
+    if (dto.cardSource === 'escalation_events') {
+      return this.decideEscalationCard(cardId, dto, authorizationHeader);
+    }
+    return this.decideApprovalRequestCard(cardId, dto, authorizationHeader);
+  }
+
+  private async decideEscalationCard(
     cardId: string,
-    caller: { id: string },
     dto: DecideQuickResponseInput,
     authorizationHeader: string,
   ) {
-    if (dto.cardSource === 'escalation_events') {
-      return this.decideEscalationCard(cardId, dto);
-    }
-    return this.decideApprovalRequestCard(cardId, caller, dto, authorizationHeader);
-  }
+    const existing = await this.escalationClient.findById(cardId, authorizationHeader);
+    if (!existing) throw notFound('Quick Response card not found.');
 
-  private async decideEscalationCard(cardId: string, dto: DecideQuickResponseInput) {
     // Only EDD_NEARING is wired this phase; MISSED_VISIT's TRANSFER/CLOSE
     // actions need write paths in services that don't have them yet.
     if (dto.decision !== 'OKAY') {
@@ -165,7 +163,6 @@ export class QuickResponseService {
 
   private async decideApprovalRequestCard(
     cardId: string,
-    caller: { id: string },
     dto: DecideQuickResponseInput,
     authorizationHeader: string,
   ) {
@@ -187,6 +184,11 @@ export class QuickResponseService {
       throw new HttpError(500, 'This REOPEN card has no linked reopen request.');
     }
 
+    // The audit_log entry and Sakhi notification are written by
+    // closure-reopen-service's own decide flow, not here — that's the only
+    // place a reopen decision is actually persisted, so the audit trail
+    // can't be bypassed by calling that endpoint directly instead of through
+    // Quick Response.
     const decided = await this.reopenRequestClient.decide(
       existing.reopenRequestId,
       dto.decision === 'APPROVE' ? 'APPROVED' : 'REJECTED',
@@ -194,27 +196,6 @@ export class QuickResponseService {
       dto.decisionNotes,
       authorizationHeader,
     );
-
-    await this.auditClient.log(
-      caller.id,
-      `QUICK_RESPONSE_${dto.decision}`,
-      'ReopenRequest',
-      decided.id,
-      { decision: dto.decision, decisionNotes: dto.decisionNotes ?? null },
-      authorizationHeader,
-    );
-
-    if (existing.requestedByUserId) {
-      await this.notificationClient.notify(
-        existing.requestedByUserId,
-        'REOPEN_UPDATE',
-        'Reopen request decided',
-        dto.decision === 'APPROVE'
-          ? 'Your reopen request was approved.'
-          : 'Your reopen request was rejected.',
-        authorizationHeader,
-      );
-    }
 
     return {
       cardId,

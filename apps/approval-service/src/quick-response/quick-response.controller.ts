@@ -120,12 +120,7 @@ export function createQuickResponseRouter(service: QuickResponseService) {
       if (!req.user) return next(unauthorized());
       const authorizationHeader = req.header('authorization');
       if (!authorizationHeader) return next(unauthorized());
-      const result = await service.decide(
-        req.params.cardId,
-        req.user,
-        req.body,
-        authorizationHeader,
-      );
+      const result = await service.decide(req.params.cardId, req.body, authorizationHeader);
       res.json(ok(result));
     }),
   );

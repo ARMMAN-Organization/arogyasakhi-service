@@ -29,4 +29,8 @@ export class EscalationRepository {
     });
     return rows;
   }
+
+  findById(id: string) {
+    return this.prisma.escalationEvent.findFirst({ where: { id, isDeleted: false } });
+  }
 }

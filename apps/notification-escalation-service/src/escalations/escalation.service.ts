@@ -76,4 +76,26 @@ export class EscalationService {
 
     return { cards, nextCursor };
   }
+
+  /** Fetches a single escalation event shaped as a Quick Response card, or
+   * null if it doesn't exist (or isn't one of the 8 supported card types). */
+  async findById(id: string) {
+    const row = await this.repository.findById(id);
+    if (!row) return null;
+
+    const cardType = toCardType(row.escalationType);
+    if (!cardType) return null;
+
+    return {
+      cardId: row.id,
+      cardType,
+      cardSource: 'escalation_events' as const,
+      beneficiaryId: row.beneficiaryId,
+      visitId: row.visitId,
+      referralId: row.referralId,
+      escalationType: row.escalationType,
+      status: row.status,
+      raisedAt: row.createdAt.toISOString(),
+    };
+  }
 }

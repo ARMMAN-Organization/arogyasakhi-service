@@ -9,9 +9,9 @@ export interface ReopenRequestRecord {
 
 /**
  * Decides a REOPEN card by calling closure-reopen-service's
- * PATCH /reopen-requests/:id/decision directly (not through the gateway),
- * forwarding the caller's own Authorization header — same pattern
- * supervisor-operations-service's SakhiClient uses.
+ * PATCH /reopen-requests/:id/decision through the gateway, forwarding the
+ * caller's own Authorization header — same pattern supervisor-operations-
+ * service's SakhiClient uses.
  */
 export class ReopenRequestClient {
   async decide(

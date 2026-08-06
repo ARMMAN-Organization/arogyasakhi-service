@@ -1,5 +1,6 @@
 import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
 import { z } from 'zod';
+import { notFound } from '@armman/service-commons';
 import type { EscalationService } from './escalation.service';
 import {
   listEscalationEventsSchema,
@@ -15,6 +16,10 @@ import {
 } from '../app.module';
 
 extendZodWithOpenApi(z);
+
+const escalationEventIdParamsSchema = z
+  .object({ id: z.string().uuid().openapi({ example: '123e4567-e89b-12d3-a456-426614174000' }) })
+  .strict();
 
 const escalationCardSchema = z.object({
   cardId: z.string().uuid(),
@@ -48,9 +53,10 @@ function envelope<T extends z.ZodTypeAny>(data: T) {
  * Escalation event HTTP routes. Mounted under the global `api/v1` prefix.
  *
  * This is an internal, service-to-service read surface — approval-service
- * calls it directly (not through the gateway, matching supervisor-operations-
- * service's SakhiClient precedent) to merge escalation-sourced Quick Response
- * cards (MISSED_VISIT, EDD_NEARING) alongside its own approval_requests.
+ * calls it through the gateway (forwarding the caller's own Authorization
+ * header, matching supervisor-operations-service's SakhiClient precedent)
+ * to merge escalation-sourced Quick Response cards (MISSED_VISIT,
+ * EDD_NEARING) alongside its own approval_requests.
  */
 export function createEscalationRouter(service: EscalationService) {
   const doc = createDocumentedRouter();
@@ -76,6 +82,32 @@ export function createEscalationRouter(service: EscalationService) {
     asyncHandler(async (req, res) => {
       const query = req.query as unknown as ListEscalationEventsInput;
       res.json(ok(await service.list(query)));
+    }),
+  );
+
+  doc.get(
+    '/escalation-events/:id',
+    {
+      summary: 'Fetch a single escalation event shaped as a Quick Response card',
+      tags: ['Escalations'],
+      params: escalationEventIdParamsSchema,
+      responses: {
+        200: {
+          description: 'Escalation-sourced Quick Response card',
+          schema: envelope(escalationCardSchema),
+        },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+        404: { description: 'Escalation event not found', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER'),
+    validate(escalationEventIdParamsSchema, 'params'),
+    asyncHandler(async (req, res) => {
+      const card = await service.findById(req.params.id);
+      if (!card) throw notFound('Escalation event not found.');
+      res.json(ok(card));
     }),
   );
 

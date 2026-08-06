@@ -1,5 +1,7 @@
 import { ReopenRequestService } from './reopen-request.service';
 import type { ReopenRequestRepository } from './reopen-request.repository';
+import type { AuditClient } from './audit.client';
+import type { NotificationClient } from './notification.client';
 import type { DecideReopenRequestInput } from './dto/decide-reopen-request.dto';
 
 function reopenRequest(overrides: Partial<Record<string, unknown>> = {}) {
@@ -29,23 +31,47 @@ describe('ReopenRequestService', () => {
     findById: jest.fn(),
     decide: jest.fn(),
   } as unknown as jest.Mocked<ReopenRequestRepository>;
+  const auditClient = { log: jest.fn() } as unknown as jest.Mocked<AuditClient>;
+  const notificationClient = { notify: jest.fn() } as unknown as jest.Mocked<NotificationClient>;
   let service: ReopenRequestService;
   const supervisorId = '44444444-4444-4444-4444-444444444444';
+  const authHeader = 'Bearer token';
+  let consoleErrorSpy: jest.SpyInstance;
 
   beforeEach(() => {
     jest.resetAllMocks();
-    service = new ReopenRequestService(repository);
+    consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    service = new ReopenRequestService(repository, auditClient, notificationClient);
   });
 
-  it('approves a PENDING reopen request', async () => {
+  afterEach(() => {
+    consoleErrorSpy.mockRestore();
+  });
+
+  it('approves a PENDING reopen request, audits, and notifies the Sakhi', async () => {
     const pending = reopenRequest();
     const decided = reopenRequest({ supervisorStatus: 'APPROVED', decidedByUserId: supervisorId });
     repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(decided);
     repository.decide.mockResolvedValue(true);
 
     const dto: DecideReopenRequestInput = { decision: 'APPROVED' };
-    await expect(service.decide(pending.id, supervisorId, dto)).resolves.toBe(decided);
+    await expect(service.decide(pending.id, supervisorId, dto, authHeader)).resolves.toBe(decided);
     expect(repository.decide).toHaveBeenCalledWith(pending.id, supervisorId, dto);
+    expect(auditClient.log).toHaveBeenCalledWith(
+      supervisorId,
+      'QUICK_RESPONSE_APPROVE',
+      'ReopenRequest',
+      pending.id,
+      { decision: 'APPROVED', decisionNotes: null },
+      authHeader,
+    );
+    expect(notificationClient.notify).toHaveBeenCalledWith(
+      pending.requestedByUserId,
+      'REOPEN_UPDATE',
+      expect.any(String),
+      expect.any(String),
+      authHeader,
+    );
   });
 
   it('rejects a PENDING reopen request — persisted as the "Cannot re-open" state', async () => {
@@ -55,14 +81,22 @@ describe('ReopenRequestService', () => {
     repository.decide.mockResolvedValue(true);
 
     const dto: DecideReopenRequestInput = { decision: 'REJECTED' };
-    const result = await service.decide(pending.id, supervisorId, dto);
+    const result = await service.decide(pending.id, supervisorId, dto, authHeader);
     expect(result?.supervisorStatus).toBe('REJECTED');
+    expect(auditClient.log).toHaveBeenCalledWith(
+      supervisorId,
+      'QUICK_RESPONSE_REJECT',
+      'ReopenRequest',
+      pending.id,
+      { decision: 'REJECTED', decisionNotes: null },
+      authHeader,
+    );
   });
 
   it('404s on an unknown id', async () => {
     repository.findById.mockResolvedValue(null);
     await expect(
-      service.decide('unknown-id', supervisorId, { decision: 'APPROVED' }),
+      service.decide('unknown-id', supervisorId, { decision: 'APPROVED' }, authHeader),
     ).rejects.toMatchObject({ status: 404 });
     expect(repository.decide).not.toHaveBeenCalled();
   });
@@ -72,7 +106,7 @@ describe('ReopenRequestService', () => {
     await expect(
       service.decide('11111111-1111-1111-1111-111111111111', supervisorId, {
         decision: 'REJECTED',
-      }),
+      }, authHeader),
     ).rejects.toMatchObject({ status: 409 });
     expect(repository.decide).not.toHaveBeenCalled();
   });
@@ -82,7 +116,7 @@ describe('ReopenRequestService', () => {
     await expect(
       service.decide('11111111-1111-1111-1111-111111111111', supervisorId, {
         decision: 'APPROVED',
-      }),
+      }, authHeader),
     ).rejects.toMatchObject({ status: 409 });
   });
 
@@ -92,7 +126,7 @@ describe('ReopenRequestService', () => {
     await expect(
       service.decide('11111111-1111-1111-1111-111111111111', supervisorId, {
         decision: 'APPROVED',
-      }),
+      }, authHeader),
     ).rejects.toMatchObject({ status: 409 });
   });
 
@@ -102,8 +136,35 @@ describe('ReopenRequestService', () => {
     repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(decided);
     repository.decide.mockResolvedValue(true);
 
-    await expect(service.decide(pending.id, supervisorId, { decision: 'APPROVED' })).resolves.toBe(
-      decided,
-    );
+    await expect(
+      service.decide(pending.id, supervisorId, { decision: 'APPROVED' }, authHeader),
+    ).resolves.toBe(decided);
+  });
+
+  it('does not fail the request when notifying the Sakhi throws after the decision is committed', async () => {
+    const pending = reopenRequest();
+    const decided = reopenRequest({ supervisorStatus: 'APPROVED', decidedByUserId: supervisorId });
+    repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(decided);
+    repository.decide.mockResolvedValue(true);
+    notificationClient.notify.mockRejectedValue(Object.assign(new Error('Forbidden'), { status: 403 }));
+
+    await expect(
+      service.decide(pending.id, supervisorId, { decision: 'APPROVED' }, authHeader),
+    ).resolves.toBe(decided);
+    expect(consoleErrorSpy).toHaveBeenCalled();
+  });
+
+  it('does not fail the request when writing the audit entry throws after the decision is committed', async () => {
+    const pending = reopenRequest();
+    const decided = reopenRequest({ supervisorStatus: 'APPROVED', decidedByUserId: supervisorId });
+    repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(decided);
+    repository.decide.mockResolvedValue(true);
+    auditClient.log.mockRejectedValue(Object.assign(new Error('Bad gateway'), { status: 502 }));
+
+    await expect(
+      service.decide(pending.id, supervisorId, { decision: 'APPROVED' }, authHeader),
+    ).resolves.toBe(decided);
+    expect(notificationClient.notify).not.toHaveBeenCalled();
+    expect(consoleErrorSpy).toHaveBeenCalled();
   });
 });

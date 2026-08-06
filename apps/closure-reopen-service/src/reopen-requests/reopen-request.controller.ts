@@ -59,6 +59,11 @@ function envelope<T extends z.ZodTypeAny>(data: T) {
  * (see closure.controller.ts's GET /closures). approval-service's
  * POST /quick-response/:cardId/decision stays SUPERVISOR-only at its own
  * layer; this endpoint isn't artificially narrower than its siblings.
+ *
+ * The audit_log entry and Sakhi notification are written here, in
+ * `ReopenRequestService.decide`, not by callers — so they happen
+ * regardless of whether this endpoint is reached via Quick Response or
+ * called directly.
  */
 export function createReopenRequestRouter(service: ReopenRequestService) {
   const doc = createDocumentedRouter();
@@ -84,7 +89,12 @@ export function createReopenRequestRouter(service: ReopenRequestService) {
     validateBody(decideReopenRequestRequestSchema),
     asyncHandler(async (req, res, next) => {
       if (!req.user) return next(unauthorized());
-      const updated = await service.decide(req.params.id, req.user.id, req.body);
+      const updated = await service.decide(
+        req.params.id,
+        req.user.id,
+        req.body,
+        req.headers.authorization ?? '',
+      );
       res.json(ok(updated));
     }),
   );

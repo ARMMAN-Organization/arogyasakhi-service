@@ -3,8 +3,6 @@ import type { QuickResponseRepository } from './quick-response.repository';
 import type { LookupClient } from './lookup.client';
 import type { EscalationClient } from './escalation.client';
 import type { ReopenRequestClient } from './reopen-request.client';
-import type { NotificationClient } from './notification.client';
-import type { AuditClient } from './audit.client';
 
 function approvalRequest(overrides: Partial<Record<string, unknown>> = {}) {
   return {
@@ -37,6 +35,21 @@ function approvalRequest(overrides: Partial<Record<string, unknown>> = {}) {
   };
 }
 
+function escalationCard(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    cardId: '66666666-6666-6666-6666-666666666666',
+    cardType: 'EDD_NEARING' as const,
+    cardSource: 'escalation_events' as const,
+    beneficiaryId: '77777777-7777-7777-7777-777777777777',
+    visitId: null,
+    referralId: null,
+    escalationType: 'EDD_NEARING',
+    status: 'OPEN',
+    raisedAt: '2026-08-05T11:00:00.000Z',
+    ...overrides,
+  };
+}
+
 describe('QuickResponseService', () => {
   const repository = {
     findMany: jest.fn(),
@@ -45,24 +58,17 @@ describe('QuickResponseService', () => {
   const lookupClient = {
     resolveApprovalStatusId: jest.fn(),
   } as unknown as jest.Mocked<LookupClient>;
-  const escalationClient = { list: jest.fn() } as unknown as jest.Mocked<EscalationClient>;
+  const escalationClient = {
+    list: jest.fn(),
+    findById: jest.fn(),
+  } as unknown as jest.Mocked<EscalationClient>;
   const reopenRequestClient = { decide: jest.fn() } as unknown as jest.Mocked<ReopenRequestClient>;
-  const notificationClient = { notify: jest.fn() } as unknown as jest.Mocked<NotificationClient>;
-  const auditClient = { log: jest.fn() } as unknown as jest.Mocked<AuditClient>;
   let service: QuickResponseService;
   const authHeader = 'Bearer token';
-  const supervisor = { id: '55555555-5555-5555-5555-555555555555' };
 
   beforeEach(() => {
     jest.resetAllMocks();
-    service = new QuickResponseService(
-      repository,
-      lookupClient,
-      escalationClient,
-      reopenRequestClient,
-      notificationClient,
-      auditClient,
-    );
+    service = new QuickResponseService(repository, lookupClient, escalationClient, reopenRequestClient);
   });
 
   describe('list', () => {
@@ -74,19 +80,7 @@ describe('QuickResponseService', () => {
         approvalRequest({ createdAt: new Date('2026-08-05T09:00:00.000Z') }),
       ]);
       escalationClient.list.mockResolvedValue({
-        cards: [
-          {
-            cardId: '66666666-6666-6666-6666-666666666666',
-            cardType: 'EDD_NEARING',
-            cardSource: 'escalation_events',
-            beneficiaryId: '77777777-7777-7777-7777-777777777777',
-            visitId: null,
-            referralId: null,
-            escalationType: 'EDD_NEARING',
-            status: 'OPEN',
-            raisedAt: '2026-08-05T11:00:00.000Z',
-          },
-        ],
+        cards: [escalationCard()],
         nextCursor: null,
       });
 
@@ -136,22 +130,34 @@ describe('QuickResponseService', () => {
 
   describe('decide — EDD_NEARING (escalation_events)', () => {
     it('acknowledges OKAY with no audit/notify side effects', async () => {
+      escalationClient.findById.mockResolvedValue(escalationCard());
+
       const result = await service.decide(
         '66666666-6666-6666-6666-666666666666',
-        supervisor,
         { cardSource: 'escalation_events', decision: 'OKAY' },
         authHeader,
       );
       expect(result).toMatchObject({ decision: 'OKAY', acknowledged: true });
-      expect(auditClient.log).not.toHaveBeenCalled();
-      expect(notificationClient.notify).not.toHaveBeenCalled();
     });
 
-    it('501s a non-OKAY decision on an escalation card', async () => {
+    it('404s when the escalation card does not exist', async () => {
+      escalationClient.findById.mockResolvedValue(null);
+
       await expect(
         service.decide(
           '66666666-6666-6666-6666-666666666666',
-          supervisor,
+          { cardSource: 'escalation_events', decision: 'OKAY' },
+          authHeader,
+        ),
+      ).rejects.toMatchObject({ status: 404 });
+    });
+
+    it('501s a non-OKAY decision on an escalation card', async () => {
+      escalationClient.findById.mockResolvedValue(escalationCard());
+
+      await expect(
+        service.decide(
+          '66666666-6666-6666-6666-666666666666',
           { cardSource: 'escalation_events', decision: 'APPROVE' },
           authHeader,
         ),
@@ -160,7 +166,7 @@ describe('QuickResponseService', () => {
   });
 
   describe('decide — REOPEN (approval_requests)', () => {
-    it('approves: decides via ReopenRequestClient, audits, and notifies the Sakhi', async () => {
+    it('approves: decides via ReopenRequestClient', async () => {
       repository.findById.mockResolvedValue(approvalRequest());
       reopenRequestClient.decide.mockResolvedValue({
         id: '33333333-3333-3333-3333-333333333333',
@@ -170,7 +176,6 @@ describe('QuickResponseService', () => {
 
       const result = await service.decide(
         '11111111-1111-1111-1111-111111111111',
-        supervisor,
         { cardSource: 'approval_requests', decision: 'APPROVE' },
         authHeader,
       );
@@ -182,18 +187,10 @@ describe('QuickResponseService', () => {
         undefined,
         authHeader,
       );
-      expect(auditClient.log).toHaveBeenCalledTimes(1);
-      expect(notificationClient.notify).toHaveBeenCalledWith(
-        '44444444-4444-4444-4444-444444444444',
-        'REOPEN_UPDATE',
-        expect.any(String),
-        expect.any(String),
-        authHeader,
-      );
       expect(result.decision).toBe('APPROVE');
     });
 
-    it('rejects: persisted as REJECTED — "Cannot re-open" per product decision, audit/notify still fire', async () => {
+    it('rejects: persisted as REJECTED — "Cannot re-open" per product decision', async () => {
       repository.findById.mockResolvedValue(approvalRequest());
       reopenRequestClient.decide.mockResolvedValue({
         id: '33333333-3333-3333-3333-333333333333',
@@ -201,14 +198,12 @@ describe('QuickResponseService', () => {
         supervisorStatus: 'REJECTED',
       });
 
-      await service.decide(
+      const result = await service.decide(
         '11111111-1111-1111-1111-111111111111',
-        supervisor,
         { cardSource: 'approval_requests', decision: 'REJECT' },
         authHeader,
       );
-      expect(auditClient.log).toHaveBeenCalledTimes(1);
-      expect(notificationClient.notify).toHaveBeenCalledTimes(1);
+      expect(result.decision).toBe('REJECT');
     });
 
     it('404s on an unknown cardId', async () => {
@@ -216,7 +211,6 @@ describe('QuickResponseService', () => {
       await expect(
         service.decide(
           'unknown-id',
-          supervisor,
           { cardSource: 'approval_requests', decision: 'APPROVE' },
           authHeader,
         ),
@@ -231,13 +225,10 @@ describe('QuickResponseService', () => {
       await expect(
         service.decide(
           '11111111-1111-1111-1111-111111111111',
-          supervisor,
           { cardSource: 'approval_requests', decision: 'APPROVE' },
           authHeader,
         ),
       ).rejects.toMatchObject({ status: 409 });
-      expect(auditClient.log).not.toHaveBeenCalled();
-      expect(notificationClient.notify).not.toHaveBeenCalled();
     });
 
     it('rejects an invalid decision value for a REOPEN card', async () => {
@@ -245,7 +236,6 @@ describe('QuickResponseService', () => {
       await expect(
         service.decide(
           '11111111-1111-1111-1111-111111111111',
-          supervisor,
           { cardSource: 'approval_requests', decision: 'OKAY' },
           authHeader,
         ),
@@ -265,7 +255,6 @@ describe('QuickResponseService', () => {
       await expect(
         service.decide(
           '11111111-1111-1111-1111-111111111111',
-          supervisor,
           { cardSource: 'approval_requests', decision: 'APPROVE' },
           authHeader,
         ),

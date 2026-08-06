@@ -25,7 +25,10 @@ function row(overrides: { id?: string; escalationType?: EscalationType; createdA
 }
 
 describe('EscalationService', () => {
-  const repository = { findMany: jest.fn() } as unknown as jest.Mocked<EscalationRepository>;
+  const repository = {
+    findMany: jest.fn(),
+    findById: jest.fn(),
+  } as unknown as jest.Mocked<EscalationRepository>;
   let service: EscalationService;
   const baseQuery: ListEscalationEventsInput = { status: 'OPEN', limit: 50 };
 
@@ -94,5 +97,25 @@ describe('EscalationService', () => {
       status: 400,
     });
     expect(repository.findMany).not.toHaveBeenCalled();
+  });
+
+  describe('findById', () => {
+    it('returns the card shape for a supported card type', async () => {
+      repository.findById.mockResolvedValue(row({ escalationType: 'EDD_NEARING' }));
+      const result = await service.findById('11111111-1111-1111-1111-111111111111');
+      expect(result).toMatchObject({ cardType: 'EDD_NEARING', cardSource: 'escalation_events' });
+    });
+
+    it('returns null when the row does not exist', async () => {
+      repository.findById.mockResolvedValue(null);
+      const result = await service.findById('unknown-id');
+      expect(result).toBeNull();
+    });
+
+    it('returns null for an escalation type outside the 8 supported card types', async () => {
+      repository.findById.mockResolvedValue(row({ escalationType: 'SYNC_DELAY' }));
+      const result = await service.findById('11111111-1111-1111-1111-111111111111');
+      expect(result).toBeNull();
+    });
   });
 });

@@ -2,10 +2,10 @@ import { badGateway } from '@armman/service-commons';
 import { appConfig } from '../config/app-config';
 
 /**
- * Writes an audit_log entry after a Quick Response decision, calling
- * audit-service's POST /audit directly (not through the gateway),
- * forwarding the caller's own Authorization header — same pattern
- * supervisor-operations-service's SakhiClient uses.
+ * Writes an audit_log entry after a reopen request decision, calling
+ * audit-service's POST /audit through the gateway, forwarding the caller's
+ * own Authorization header — same pattern approval-service's Quick Response
+ * clients use.
  */
 export class AuditClient {
   async log(
