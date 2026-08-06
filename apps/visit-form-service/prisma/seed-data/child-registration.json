@@ -162,11 +162,19 @@
       "question_code": "caregiver_name_first_name_middle_name_last_name"
     },
     {
+      "label": "Date of birth of the mother",
+      "section": "Personal Info",
+      "required": false,
+      "input_type": "date",
+      "question_code": "date_of_birth_of_mother"
+    },
+    {
       "label": "Age or DOB of the mother",
       "section": "Personal Info",
-      "required": true,
-      "input_type": "date,integer",
+      "required": false,
+      "input_type": "number",
       "question_code": "age_or_dob_of_the_mother",
+      "computedFrom": "AGE_FROM_DOB",
       "numericRange": {
         "min": 10,
         "max": 50
@@ -943,5 +951,10 @@
       "question_code": "remarks"
     }
   ],
-  "validationJson": []
+  "validationJson": [
+    {
+      "rule": "ANY_OF_REQUIRED",
+      "fields": ["date_of_birth_of_mother", "age_or_dob_of_the_mother"]
+    }
+  ]
 }
