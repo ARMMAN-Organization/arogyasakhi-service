@@ -94,6 +94,7 @@ export class BeneficiaryRepository {
         consentRecords: true,
         riskConditionSummaries: true,
         statusHistory: { orderBy: { changedAt: 'desc' } },
+        socioDemographics: true,
       },
     });
   }
@@ -160,6 +161,12 @@ export class BeneficiaryRepository {
         });
       }
 
+      if (input.socioDemographics) {
+        await tx.beneficiarySocioDemographics.create({
+          data: { beneficiaryId: beneficiaryCase.id, ...input.socioDemographics },
+        });
+      }
+
       await tx.beneficiarySearchToken.create({
         data: {
           beneficiaryId: beneficiaryCase.id,
@@ -192,8 +199,23 @@ export class BeneficiaryRepository {
           motherCaseDetails: true,
           childCaseDetails: true,
           consentRecords: true,
+          socioDemographics: true,
         },
       });
+    });
+  }
+
+  /**
+   * Creates or updates the 1:1 socio-demographics row for a beneficiary.
+   * Only the supplied keys are written — an update never nulls a column the
+   * caller didn't mention, so a partial form submission can't erase an answer
+   * captured earlier at enrollment.
+   */
+  upsertSocioDemographics(beneficiaryId: string, data: Record<string, unknown>) {
+    return this.prisma.beneficiarySocioDemographics.upsert({
+      where: { beneficiaryId },
+      create: { beneficiaryId, ...data },
+      update: data,
     });
   }
 }

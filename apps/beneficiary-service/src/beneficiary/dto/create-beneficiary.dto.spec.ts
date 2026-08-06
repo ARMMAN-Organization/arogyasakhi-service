@@ -144,6 +144,64 @@ describe('createBeneficiarySchema', () => {
     });
   });
 
+  describe('socioDemographics (optional, Registration_PW_D rows 23-34)', () => {
+    it('accepts a payload with socioDemographics omitted entirely', () => {
+      const result = createBeneficiarySchema.safeParse({
+        pii: { ...basePii },
+        case: { ...baseCase, caseType: 'MOTHER' },
+        motherDetails: { lmpDate: '2025-10-01' },
+        consent,
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('accepts a payload with all socioDemographics fields present', () => {
+      const result = createBeneficiarySchema.safeParse({
+        pii: { ...basePii },
+        case: { ...baseCase, caseType: 'MOTHER' },
+        motherDetails: { lmpDate: '2025-10-01' },
+        socioDemographics: {
+          phoneOwnerLookupId: '11111111-aaaa-aaaa-aaaa-111111111111',
+          mobileNetworkAvailabilityLookupId: '11111111-aaaa-aaaa-aaaa-222222222222',
+          educationLevelLookupId: '11111111-aaaa-aaaa-aaaa-333333333333',
+          partnerEducationLevelLookupId: '11111111-aaaa-aaaa-aaaa-444444444444',
+          partnerOccupationLookupId: '11111111-aaaa-aaaa-aaaa-555555555555',
+          yearsInVillage: 12,
+          migrationPatternLookupId: '11111111-aaaa-aaaa-aaaa-666666666666',
+          monthlyIncomeLookupId: '11111111-aaaa-aaaa-aaaa-777777777777',
+          religionLookupId: '11111111-aaaa-aaaa-aaaa-888888888888',
+          socialCategoryLookupId: '11111111-aaaa-aaaa-aaaa-999999999999',
+          familyMembersCount: 5,
+          childrenUnder5Count: 2,
+        },
+        consent,
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('rejects familyMembersCount outside the doc-specified range 2-15', () => {
+      const result = createBeneficiarySchema.safeParse({
+        pii: { ...basePii },
+        case: { ...baseCase, caseType: 'MOTHER' },
+        motherDetails: { lmpDate: '2025-10-01' },
+        socioDemographics: { familyMembersCount: 20 },
+        consent,
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it('rejects an unknown key inside socioDemographics (.strict())', () => {
+      const result = createBeneficiarySchema.safeParse({
+        pii: { ...basePii },
+        case: { ...baseCase, caseType: 'MOTHER' },
+        motherDetails: { lmpDate: '2025-10-01' },
+        socioDemographics: { unexpectedField: 'nope' },
+        consent,
+      });
+      expect(result.success).toBe(false);
+    });
+  });
+
   describe('pii.fullName', () => {
     it('rejects a payload missing pii.fullName', () => {
       const missingFullName: Record<string, unknown> = { ...basePii };

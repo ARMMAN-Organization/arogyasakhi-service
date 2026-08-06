@@ -1,8 +1,10 @@
 import { FormService } from './form.service';
 import type { FormRepository } from './form.repository';
 import * as geographyClient from '../geography/geography.client';
+import { syncSocioDemographics } from '../beneficiaries/socio-demographics.client';
 
 jest.mock('../geography/geography.client');
+jest.mock('../beneficiaries/socio-demographics.client');
 
 describe('FormService', () => {
   const repository = {
@@ -306,6 +308,7 @@ describe('FormService', () => {
           formData: {},
         },
         'u1',
+        'Bearer test-token',
       );
 
       expect(result).toEqual(expect.objectContaining({ id: 'sub-1' }));
@@ -329,6 +332,7 @@ describe('FormService', () => {
             formData: { phone_owner: 'SELF' },
           },
           'u1',
+          'Bearer test-token',
         ),
       ).rejects.toThrow(/does not belong to this form code/);
     });
@@ -350,6 +354,7 @@ describe('FormService', () => {
             formData: { phone_owner: 'SELF' },
           },
           'u1',
+          'Bearer test-token',
         ),
       ).rejects.toThrow(/not published/);
     });
@@ -367,6 +372,7 @@ describe('FormService', () => {
           formData: {},
         },
         'u1',
+        'Bearer test-token',
       );
 
       await expect(call).rejects.toMatchObject({
@@ -387,6 +393,7 @@ describe('FormService', () => {
           formData: { phone_owner: 'SELF', bp_systolic: 400 },
         },
         'u1',
+        'Bearer test-token',
       );
 
       await expect(call).rejects.toMatchObject({
@@ -414,6 +421,7 @@ describe('FormService', () => {
           formData: { para: 5, gravida: 2 },
         },
         'u1',
+        'Bearer test-token',
       );
 
       await expect(call).rejects.toMatchObject({
@@ -444,6 +452,7 @@ describe('FormService', () => {
           formData: {},
         },
         'u1',
+        'Bearer test-token',
       );
 
       expect(repository.createSubmission).toHaveBeenCalled();
@@ -474,6 +483,7 @@ describe('FormService', () => {
           formData: { gestational_age_weeks: 10 },
         },
         'u1',
+        'Bearer test-token',
       );
 
       expect(repository.createSubmission).toHaveBeenCalled();
@@ -504,6 +514,7 @@ describe('FormService', () => {
           formData: {},
         },
         'u1',
+        'Bearer test-token',
       );
 
       expect(repository.createSubmission).toHaveBeenCalled();
@@ -523,12 +534,61 @@ describe('FormService', () => {
           formData: { phone_owner: 'SELF' },
         },
         'u1',
+        'Bearer test-token',
       );
 
       expect(repository.createSubmission).toHaveBeenCalledWith(
         expect.objectContaining({ validationStatus: 'VALID' }),
       );
       expect(result).toEqual({ id: 'sub-1' });
+    });
+
+    it('syncs socio-demographic answers to beneficiary-service for MOTHER_REGISTRATION', async () => {
+      repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+      repository.findVersionById.mockResolvedValue(publishedVersion as never);
+      repository.createSubmission.mockResolvedValue({ id: 'sub-1' } as never);
+      const formData = { phone_owner: 'SELF', what_is_your_religion: 'hindu' };
+
+      await service.createSubmission(
+        'MOTHER_REGISTRATION',
+        {
+          formVersionId: 'version-1',
+          beneficiaryId: 'b1',
+          localSubmissionUuid: 'uuid-1',
+          formData,
+        },
+        'u1',
+        'Bearer test-token',
+      );
+
+      expect(jest.mocked(syncSocioDemographics)).toHaveBeenCalledWith(
+        'b1',
+        formData,
+        'Bearer test-token',
+      );
+    });
+
+    it('does not sync socio-demographics for a non-MOTHER_REGISTRATION form', async () => {
+      repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+      repository.findVersionById.mockResolvedValue({
+        ...publishedVersion,
+        formDefinition: { formCode: 'CHILD_REGISTRATION' },
+      } as never);
+      repository.createSubmission.mockResolvedValue({ id: 'sub-1' } as never);
+
+      await service.createSubmission(
+        'CHILD_REGISTRATION',
+        {
+          formVersionId: 'version-1',
+          beneficiaryId: 'b1',
+          localSubmissionUuid: 'uuid-1',
+          formData: { phone_owner: 'SELF' },
+        },
+        'u1',
+        'Bearer test-token',
+      );
+
+      expect(jest.mocked(syncSocioDemographics)).not.toHaveBeenCalled();
     });
 
     it('decomposes formData into typed form_answers and passes them to the repository', () => {
@@ -546,6 +606,7 @@ describe('FormService', () => {
             formData: { phone_owner: 'SELF', bp_systolic: '120' },
           },
           'u1',
+          'Bearer test-token',
         )
         .then(() => {
           const arg = repository.createSubmission.mock.calls[0][0];

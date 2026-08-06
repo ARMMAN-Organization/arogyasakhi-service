@@ -11,6 +11,7 @@ import {
 } from './beneficiary.constants';
 import { createBeneficiarySchema } from './dto/create-beneficiary.dto';
 import { listBeneficiariesQuerySchema } from './dto/list-beneficiaries.dto';
+import { upsertSocioDemographicsSchema } from './dto/upsert-socio-demographics.dto';
 import {
   asyncHandler,
   createDocumentedRouter,
@@ -87,21 +88,42 @@ const childCaseDetailsSchema = z.object({
   linkedAncCase: z.boolean(),
 });
 
+// A *LookupId field resolved against auth-service's lookup_values, for
+// display without a second client round-trip to GET /lookups/:categoryCode.
+const resolvedLookupValueSchema = z
+  .object({
+    categoryCode: z.string().openapi({ example: 'RELIGION' }),
+    valueCode: z.string().openapi({ example: 'HINDU' }),
+    label: z.string().openapi({ example: 'Hindu' }),
+  })
+  .nullable();
+
 // Registration-time socio-demographic answers per SRS v3.0 / "Revised App
 // Form Final (20 March 2026)" Registration_PW_D sheet, rows 23-34.
-// *LookupId fields reference lookup_values owned by another service (plain
-// scalar ids per the forklift rule) — not resolved to labels here.
+// *LookupId fields carry the plain scalar id (per the forklift rule, the
+// underlying lookup_values row is owned by auth-service); each has a sibling
+// resolved field (same name minus the "LookupId" suffix) carrying the
+// category/value/label looked up server-side for display.
 const socioDemographicsSchema = z.object({
   phoneOwnerLookupId: z.string().uuid().nullable(),
+  phoneOwner: resolvedLookupValueSchema,
   mobileNetworkAvailabilityLookupId: z.string().uuid().nullable(),
+  mobileNetworkAvailability: resolvedLookupValueSchema,
   educationLevelLookupId: z.string().uuid().nullable(),
+  educationLevel: resolvedLookupValueSchema,
   partnerEducationLevelLookupId: z.string().uuid().nullable(),
+  partnerEducationLevel: resolvedLookupValueSchema,
   partnerOccupationLookupId: z.string().uuid().nullable(),
+  partnerOccupation: resolvedLookupValueSchema,
   yearsInVillage: z.number().int().nullable(),
   migrationPatternLookupId: z.string().uuid().nullable(),
+  migrationPattern: resolvedLookupValueSchema,
   monthlyIncomeLookupId: z.string().uuid().nullable(),
+  monthlyIncome: resolvedLookupValueSchema,
   religionLookupId: z.string().uuid().nullable(),
+  religion: resolvedLookupValueSchema,
   socialCategoryLookupId: z.string().uuid().nullable(),
+  socialCategory: resolvedLookupValueSchema,
   familyMembersCount: z.number().int().nullable(),
   childrenUnder5Count: z.number().int().nullable(),
 });
@@ -221,8 +243,10 @@ export function createBeneficiaryRouter(service: BeneficiaryService) {
     trustGatewayIdentity,
     requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER'),
     validate(idParamsSchema, 'params'),
-    asyncHandler(async (req, res) => {
-      res.json(ok(await service.getById(req.params.id)));
+    asyncHandler(async (req, res, next) => {
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      res.json(ok(await service.getById(req.params.id, authorizationHeader)));
     }),
   );
 
@@ -261,6 +285,40 @@ export function createBeneficiaryRouter(service: BeneficiaryService) {
       if (!authorizationHeader) return next(unauthorized());
       const created = await service.create(req.body, req.user.id, authorizationHeader);
       res.status(201).json(ok(created));
+    }),
+  );
+
+  doc.patch(
+    '/beneficiaries/:id/socio-demographics',
+    {
+      summary: "Upsert a beneficiary's registration socio-demographic answers",
+      tags: ['Beneficiaries'],
+      params: idParamsSchema,
+      responses: {
+        200: {
+          description: 'Socio-demographics saved; the updated case is returned',
+          schema: envelope(beneficiaryCaseDetailSchema),
+        },
+        400: errorResponse(400, { message: 'familyMembersCount: Number must be less than 15' }),
+        401: errorResponse(401),
+        403: errorResponse(403),
+        404: errorResponse(404, { message: 'Beneficiary case not found.' }),
+        500: errorResponse(500),
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER'),
+    validate(idParamsSchema, 'params'),
+    validateBody(upsertSocioDemographicsSchema),
+    asyncHandler(async (req, res, next) => {
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const updated = await service.upsertSocioDemographics(
+        req.params.id,
+        req.body,
+        authorizationHeader,
+      );
+      res.json(ok(updated));
     }),
   );
 

@@ -4,9 +4,11 @@ import { BeneficiaryService } from './beneficiary.service';
 import type { BeneficiaryRepository } from './beneficiary.repository';
 import type { CreateBeneficiaryInput } from './dto/create-beneficiary.dto';
 import { resolveHealthBlockIdFromPhc } from '../geography/geography.client';
+import { resolveLookupValues } from '../lookups/lookup.client';
 import { listSakhiIdsForSupervisor } from '../sakhi/sakhi.client';
 
 jest.mock('../geography/geography.client');
+jest.mock('../lookups/lookup.client');
 jest.mock('../sakhi/sakhi.client');
 
 describe('BeneficiaryService', () => {
@@ -23,6 +25,7 @@ describe('BeneficiaryService', () => {
   const CALLER_ID = '99999999-9999-9999-9999-999999999999';
   const AUTH_HEADER = 'Bearer test-token';
   const resolveHealthBlockIdFromPhcMock = jest.mocked(resolveHealthBlockIdFromPhc);
+  const resolveLookupValuesMock = jest.mocked(resolveLookupValues);
   const listSakhiIdsForSupervisorMock = jest.mocked(listSakhiIdsForSupervisor);
 
   function caller(overrides: Partial<AuthenticatedUser> = {}): AuthenticatedUser {
@@ -94,6 +97,7 @@ describe('BeneficiaryService', () => {
     process.env.PII_ENCRYPTION_KEY = randomBytes(32).toString('base64');
     process.env.PII_SEARCH_HASH_KEY = randomBytes(32).toString('base64');
     resolveHealthBlockIdFromPhcMock.mockResolvedValue('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+    resolveLookupValuesMock.mockResolvedValue({});
     service = new BeneficiaryService(repository);
   });
 
@@ -241,7 +245,7 @@ describe('BeneficiaryService', () => {
       };
       repository.findById.mockResolvedValue(found as never);
 
-      const result = await service.getById('x');
+      const result = await service.getById('x', AUTH_HEADER);
 
       expect(result.riskConditionSummaries).toEqual(found.riskConditionSummaries);
       expect(result.statusHistory).toEqual(found.statusHistory);
@@ -251,7 +255,7 @@ describe('BeneficiaryService', () => {
       const found = { id: 'x', pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') } };
       repository.findById.mockResolvedValue(found as never);
 
-      const result = await service.getById('x');
+      const result = await service.getById('x', AUTH_HEADER);
 
       expect(result).toEqual(
         expect.objectContaining({
@@ -263,7 +267,7 @@ describe('BeneficiaryService', () => {
 
     it('throws 404 when the case is not found', async () => {
       repository.findById.mockResolvedValue(null);
-      await expect(service.getById('missing')).rejects.toMatchObject({ status: 404 });
+      await expect(service.getById('missing', AUTH_HEADER)).rejects.toMatchObject({ status: 404 });
     });
 
     it('passes through socioDemographics from the repository', async () => {
@@ -274,12 +278,65 @@ describe('BeneficiaryService', () => {
       };
       repository.findById.mockResolvedValue(found as never);
 
-      const result = await service.getById('x');
+      const result = await service.getById('x', AUTH_HEADER);
 
       expect(result.socioDemographics).toMatchObject({
         familyMembersCount: 4,
         childrenUnder5Count: 1,
       });
+    });
+
+    it('resolves each *LookupId field to a sibling {categoryCode, valueCode, label}', async () => {
+      const found = {
+        id: 'x',
+        pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
+        socioDemographics: {
+          religionLookupId: 'religion-uuid-1',
+          educationLevelLookupId: null,
+        },
+      };
+      repository.findById.mockResolvedValue(found as never);
+      resolveLookupValuesMock.mockResolvedValue({
+        religionLookupId: { categoryCode: 'RELIGION', valueCode: 'HINDU', label: 'Hindu' },
+        educationLevelLookupId: null,
+        phoneOwnerLookupId: null,
+        mobileNetworkAvailabilityLookupId: null,
+        partnerEducationLevelLookupId: null,
+        partnerOccupationLookupId: null,
+        migrationPatternLookupId: null,
+        monthlyIncomeLookupId: null,
+        socialCategoryLookupId: null,
+      });
+
+      const result = await service.getById('x', AUTH_HEADER);
+
+      expect(resolveLookupValuesMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          religionLookupId: { categoryCode: 'RELIGION', lookupValueId: 'religion-uuid-1' },
+          educationLevelLookupId: { categoryCode: 'EDUCATION_LEVEL', lookupValueId: null },
+        }),
+        AUTH_HEADER,
+      );
+      expect((result.socioDemographics as Record<string, unknown>).religion).toEqual({
+        categoryCode: 'RELIGION',
+        valueCode: 'HINDU',
+        label: 'Hindu',
+      });
+      expect((result.socioDemographics as Record<string, unknown>).educationLevel).toBeNull();
+    });
+
+    it('does not call the lookup resolver when socioDemographics is null', async () => {
+      const found = {
+        id: 'x',
+        pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
+        socioDemographics: null,
+      };
+      repository.findById.mockResolvedValue(found as never);
+
+      const result = await service.getById('x', AUTH_HEADER);
+
+      expect(resolveLookupValuesMock).not.toHaveBeenCalled();
+      expect(result.socioDemographics).toBeNull();
     });
 
     it('returns null socioDemographics for a case with no row yet', async () => {
@@ -290,7 +347,7 @@ describe('BeneficiaryService', () => {
       };
       repository.findById.mockResolvedValue(found as never);
 
-      const result = await service.getById('x');
+      const result = await service.getById('x', AUTH_HEADER);
 
       expect(result.socioDemographics).toBeNull();
     });

@@ -11,6 +11,7 @@ import {
   toApiFormVersion,
 } from './form.mapper';
 import { validateSubmission } from './form-validation';
+import { syncSocioDemographics } from '../beneficiaries/socio-demographics.client';
 import { getAncestorChain } from '../geography/geography.client';
 
 /**
@@ -142,7 +143,12 @@ export class FormService {
     return toApiFormVersion(published);
   }
 
-  async createSubmission(formCode: string, dto: CreateSubmissionInput, submittedByUserId: string) {
+  async createSubmission(
+    formCode: string,
+    dto: CreateSubmissionInput,
+    submittedByUserId: string,
+    authorizationHeader: string,
+  ) {
     const existing = await this.repository.findSubmissionByLocalUuid(dto.localSubmissionUuid);
     // idempotent replay — matches sync's local_submission_uuid dedup key
     if (existing) return toApiFormSubmission(existing);
@@ -179,6 +185,15 @@ export class FormService {
       validationStatus: 'VALID',
       formAnswers,
     });
+
+    // Promote the socio-demographic answers into beneficiary-service, which
+    // owns them as structured columns (the registration form re-asks them so
+    // the Sakhi sees one continuous questionnaire). Best-effort and awaited
+    // after the submission is durably saved — see syncSocioDemographics.
+    if (formCode === 'MOTHER_REGISTRATION') {
+      await syncSocioDemographics(dto.beneficiaryId, dto.formData, authorizationHeader);
+    }
+
     return toApiFormSubmission(created);
   }
 }

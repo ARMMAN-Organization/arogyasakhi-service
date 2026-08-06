@@ -17,6 +17,17 @@
  * Source of the mapping: see the beneficiary-service create-beneficiary DTO
  * (piiSchema / motherDetailsSchema) — each code below corresponds 1:1 to a
  * field accepted there. Keep the two lists in sync if either form changes.
+ *
+ * NOT listed here (deliberately): the socio-demographic codes that
+ * beneficiary-service's `socioDemographics` (BeneficiarySocioDemographics)
+ * can hold — religion, category, education (self/partner), partner
+ * occupation, phone owner, mobile network, migration pattern, monthly
+ * income, years in village, family/children counts. beneficiary-service
+ * only ever receives those if the client sends them on POST /beneficiaries;
+ * nothing syncs them across from a form submission today, so excluding them
+ * here would drop them from form_answers without anything else storing
+ * them — they would exist only inside form_data_json. Add them once that
+ * sync exists (see the socio-demographics sync work), not before.
  */
 export const BENEFICIARY_DUPLICATED_FIELD_CODES: ReadonlySet<string> = new Set([
   // pii.fullName

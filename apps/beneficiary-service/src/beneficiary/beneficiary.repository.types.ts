@@ -85,11 +85,27 @@ export interface ChildDetailsCreateData {
   linkedAncCase: boolean;
 }
 
+export interface SocioDemographicsCreateData {
+  phoneOwnerLookupId: string | null;
+  mobileNetworkAvailabilityLookupId: string | null;
+  educationLevelLookupId: string | null;
+  partnerEducationLevelLookupId: string | null;
+  partnerOccupationLookupId: string | null;
+  yearsInVillage: number | null;
+  migrationPatternLookupId: string | null;
+  monthlyIncomeLookupId: string | null;
+  religionLookupId: string | null;
+  socialCategoryLookupId: string | null;
+  familyMembersCount: number | null;
+  childrenUnder5Count: number | null;
+}
+
 export interface CreateEnrollmentInput {
   pii: PiiCreateData;
   case: CaseCreateData;
   motherDetails: MotherDetailsCreateData | null;
   childDetails: ChildDetailsCreateData | null;
+  socioDemographics: SocioDemographicsCreateData | null;
   searchTokens: DuplicateSearchTokens;
   consentDate: Date;
   consentCapturedByUserId: string;

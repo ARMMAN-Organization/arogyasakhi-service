@@ -235,8 +235,15 @@ export function createFormRouter(service: FormService) {
     validateBody(createSubmissionRequestSchema),
     asyncHandler(async (req, res, next) => {
       if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
       const { formCode } = req.params as unknown as { formCode: string };
-      const created = await service.createSubmission(formCode, req.body, req.user.id);
+      const created = await service.createSubmission(
+        formCode,
+        req.body,
+        req.user.id,
+        authorizationHeader,
+      );
       res.status(201).json(ok(created));
     }),
   );
