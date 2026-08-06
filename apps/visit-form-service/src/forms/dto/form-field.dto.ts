@@ -59,7 +59,10 @@ export const formFieldSchema = z
     visibleWhen: z
       .object({
         field: z.string().trim().min(1),
-        operator: z.enum(['eq', 'gte', 'lt', 'isSet']),
+        // 'contains' checks a multiselect answer (an array of value_codes)
+        // for membership — e.g. show a dose date field only when its
+        // checkbox is one of the checked options on has_the_women_received_td_dose.
+        operator: z.enum(['eq', 'gte', 'lt', 'isSet', 'contains']),
         // Bare z.any() has no inferable OpenAPI type — annotated so the
         // OpenAPI generator doesn't throw when this schema is used as a
         // documented request/response body (see createDocumentedRouter()).

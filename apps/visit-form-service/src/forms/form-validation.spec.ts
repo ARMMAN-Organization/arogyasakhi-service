@@ -1,4 +1,4 @@
-import { validateSubmission } from './form-validation';
+import { isVisible, validateSubmission } from './form-validation';
 import type { FormField, CrossFieldRule } from './dto/form-field.dto';
 
 const gravidaField: FormField = {
@@ -205,5 +205,49 @@ describe('validateSubmission — ANY_OF_REQUIRED', () => {
     const violations = validateSubmission([requiredAgeField], [], {});
 
     expect(violations).toEqual([]);
+  });
+});
+
+describe('isVisible — contains operator', () => {
+  const td1DateField: FormField = {
+    question_code: 'td_1_date',
+    label: 'Td-1 date',
+    input_type: 'date',
+    required: false,
+    visibleWhen: {
+      field: 'has_the_women_received_td_dose',
+      operator: 'contains',
+      value: 'td_1_date',
+    },
+  };
+
+  it('is visible when the value is one of the checked options', () => {
+    const visible = isVisible(td1DateField, {
+      has_the_women_received_td_dose: ['td_1_date', 'td_2_date'],
+    });
+
+    expect(visible).toBe(true);
+  });
+
+  it('is hidden when the value is not among the checked options', () => {
+    const visible = isVisible(td1DateField, {
+      has_the_women_received_td_dose: ['none_received_yet'],
+    });
+
+    expect(visible).toBe(false);
+  });
+
+  it('is hidden when the gating field is empty', () => {
+    const visible = isVisible(td1DateField, {});
+
+    expect(visible).toBe(false);
+  });
+
+  it('is hidden when the gating field is not an array', () => {
+    const visible = isVisible(td1DateField, {
+      has_the_women_received_td_dose: 'td_1_date',
+    });
+
+    expect(visible).toBe(false);
   });
 });

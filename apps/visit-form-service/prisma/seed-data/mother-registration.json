@@ -846,8 +846,44 @@
       ],
       "section": "Health History",
       "required": true,
-      "input_type": "multiselect,calendar",
+      "input_type": "multiselect_date",
       "question_code": "has_the_women_received_td_dose"
+    },
+    {
+      "question_code": "td_1_date",
+      "label": "Td-1 date",
+      "input_type": "date",
+      "required": false,
+      "section": "Health History",
+      "visibleWhen": {
+        "field": "has_the_women_received_td_dose",
+        "operator": "contains",
+        "value": "td_1_date"
+      }
+    },
+    {
+      "question_code": "td_2_date",
+      "label": "Td-2 date",
+      "input_type": "date",
+      "required": false,
+      "section": "Health History",
+      "visibleWhen": {
+        "field": "has_the_women_received_td_dose",
+        "operator": "contains",
+        "value": "td_2_date"
+      }
+    },
+    {
+      "question_code": "td_booster_date",
+      "label": "Td-Booster date",
+      "input_type": "date",
+      "required": false,
+      "section": "Health History",
+      "visibleWhen": {
+        "field": "has_the_women_received_td_dose",
+        "operator": "contains",
+        "value": "td_booster_date"
+      }
     },
     {
       "label": "Gravida (Total number of pregnancies): How many times have you been pregnant including the current pregnancy?",

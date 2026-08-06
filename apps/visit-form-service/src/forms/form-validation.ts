@@ -17,6 +17,8 @@ export function isVisible(field: FormField, formData: Record<string, unknown>): 
       return Number(actual) < Number(field.visibleWhen.value);
     case 'isSet':
       return !isEmpty(actual);
+    case 'contains':
+      return Array.isArray(actual) && actual.includes(field.visibleWhen.value);
     default:
       return true;
   }
