@@ -60,6 +60,10 @@ export function validateSubmission(
         );
       }
     }
+
+    if (field.exactLength && !isEmpty(value) && String(value).length !== field.exactLength) {
+      violations.push(`${field.question_code} must be exactly ${field.exactLength} digits`);
+    }
   }
 
   for (const rule of crossFieldRules) {
@@ -84,8 +88,9 @@ export function validateSubmission(
       const target = Number(formData[rule.equals]);
       if (values.some((v) => Number.isNaN(v)) || Number.isNaN(target)) {
         violations.push(`${rule.fields.join(', ')} and ${rule.equals} must all be numeric`);
-      } else if (values.reduce((total, v) => total + v, 0) !== target) {
-        violations.push(`${rule.fields.join(' + ')} must equal ${rule.equals}`);
+      } else if (values.reduce((total, v) => total + v, 0) + (rule.offset ?? 0) !== target) {
+        const offsetSuffix = rule.offset ? ` + ${rule.offset}` : '';
+        violations.push(`${rule.fields.join(' + ')}${offsetSuffix} must equal ${rule.equals}`);
       }
     }
   }
