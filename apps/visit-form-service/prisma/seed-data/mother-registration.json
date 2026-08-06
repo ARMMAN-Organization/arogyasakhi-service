@@ -152,15 +152,23 @@
       "question_code": "beneficiary_name"
     },
     {
-      "label": "Age of the beneficiary",
-      "section": "Personal Info",
+      "question_code": "date_of_birth",
+      "label": "Date of birth",
+      "input_type": "date",
       "required": false,
-      "input_type": "date,integer",
+      "section": "Personal Info"
+    },
+    {
       "question_code": "age_of_the_beneficiary",
+      "label": "Age of the beneficiary",
+      "input_type": "number",
+      "required": false,
+      "computedFrom": "AGE_FROM_DOB",
       "numericRange": {
         "min": 10,
         "max": 50
-      }
+      },
+      "section": "Personal Info"
     },
     {
       "label": "Enter the beneficiary address",
@@ -1547,6 +1555,10 @@
       "fields": ["living_children", "still_births", "abortions_pregnancy_losses_before_24_weeks"],
       "equals": "gravida_total_number_of_pregnancies",
       "offset": 1
+    },
+    {
+      "rule": "ANY_OF_REQUIRED",
+      "fields": ["date_of_birth", "age_of_the_beneficiary"]
     }
   ]
 }

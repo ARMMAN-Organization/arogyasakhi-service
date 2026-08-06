@@ -144,3 +144,66 @@ describe('validateSubmission — exactLength', () => {
     expect(violations).toEqual([]);
   });
 });
+
+describe('validateSubmission — ANY_OF_REQUIRED', () => {
+  const dateOfBirthField: FormField = {
+    question_code: 'date_of_birth',
+    label: 'Date of birth',
+    input_type: 'date',
+    required: false,
+  };
+
+  const ageField: FormField = {
+    question_code: 'age_of_the_beneficiary',
+    label: 'Age of the beneficiary',
+    input_type: 'number',
+    required: false,
+    computedFrom: 'AGE_FROM_DOB',
+    numericRange: { min: 10, max: 50 },
+  };
+
+  const eitherAgeFieldRule: CrossFieldRule = {
+    rule: 'ANY_OF_REQUIRED',
+    fields: ['date_of_birth', 'age_of_the_beneficiary'],
+  };
+
+  it('rejects when every field in the rule is empty', () => {
+    const violations = validateSubmission([dateOfBirthField, ageField], [eitherAgeFieldRule], {});
+
+    expect(violations).toEqual([
+      'At least one of date_of_birth, age_of_the_beneficiary must be answered',
+    ]);
+  });
+
+  it('accepts when only date_of_birth is answered', () => {
+    const violations = validateSubmission([dateOfBirthField, ageField], [eitherAgeFieldRule], {
+      date_of_birth: '1995-05-20',
+    });
+
+    expect(violations).toEqual([]);
+  });
+
+  it('accepts when only age_of_the_beneficiary is answered', () => {
+    const violations = validateSubmission([dateOfBirthField, ageField], [eitherAgeFieldRule], {
+      age_of_the_beneficiary: 25,
+    });
+
+    expect(violations).toEqual([]);
+  });
+
+  it('still enforces numericRange on a computedFrom field when a value is submitted', () => {
+    const violations = validateSubmission([dateOfBirthField, ageField], [eitherAgeFieldRule], {
+      age_of_the_beneficiary: 5,
+    });
+
+    expect(violations).toEqual(['age_of_the_beneficiary must be between 10 and 50']);
+  });
+
+  it('does not flag a computedFrom field as missing when required is true and it is empty', () => {
+    const requiredAgeField: FormField = { ...ageField, required: true };
+
+    const violations = validateSubmission([requiredAgeField], [], {});
+
+    expect(violations).toEqual([]);
+  });
+});

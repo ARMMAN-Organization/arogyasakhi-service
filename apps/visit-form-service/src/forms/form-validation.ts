@@ -26,8 +26,10 @@ export function isVisible(field: FormField, formData: Record<string, unknown>): 
  * Checks required fields (SRS line 1150), numeric ranges (SRS Category 2),
  * and cross-field consistency (SRS Category 3) against submitted formData.
  * Date rules (Category 1) are deliberately not checked here — see the
- * forms API design doc §7. Fields hidden by skip logic (Category 5) or
- * computed by the system (Category 4) are excluded from the required check.
+ * forms API design doc §7. Fields hidden by skip logic (Category 5) are
+ * skipped entirely; fields computed by the system (Category 4) are exempt
+ * from the required check only — if a value is submitted for one anyway,
+ * its numericRange/exactLength is still enforced.
  *
  * Returns the list of human-readable violations (empty = valid).
  */
@@ -39,11 +41,12 @@ export function validateSubmission(
   const violations: string[] = [];
 
   for (const field of fields) {
-    if (field.computedFrom) continue;
     if (!isVisible(field, formData)) continue;
 
     const value = formData[field.question_code];
-    if (field.required && isEmpty(value)) {
+    // Computed fields are never required (the system derives them), but if a
+    // client submits one anyway, its numericRange/exactLength must still hold.
+    if (!field.computedFrom && field.required && isEmpty(value)) {
       violations.push(`Missing required field: ${field.question_code}`);
       continue;
     }
@@ -91,6 +94,11 @@ export function validateSubmission(
       } else if (values.reduce((total, v) => total + v, 0) + (rule.offset ?? 0) !== target) {
         const offsetSuffix = rule.offset ? ` + ${rule.offset}` : '';
         violations.push(`${rule.fields.join(' + ')}${offsetSuffix} must equal ${rule.equals}`);
+      }
+    } else if (rule.rule === 'ANY_OF_REQUIRED') {
+      const allEmpty = rule.fields.every((f) => isEmpty(formData[f]));
+      if (allEmpty) {
+        violations.push(`At least one of ${rule.fields.join(', ')} must be answered`);
       }
     }
   }
