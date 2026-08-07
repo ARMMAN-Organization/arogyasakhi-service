@@ -130,6 +130,14 @@ describe('child-registration.json', () => {
     expect(byCode.get('mobile_number')?.exactLength).toBe(10);
   });
 
+  it('only requires mother_beneficiary_id when registering a child of a registered pregnant woman', () => {
+    expect(byCode.get('mother_beneficiary_id')?.visibleWhen).toEqual({
+      field: 'who_are_you_registering_in_the_program',
+      operator: 'eq',
+      value: 'child_of_a_registered_pregnant_woman',
+    });
+  });
+
   it('adds a visibleWhen-gated date field per vaccine (Q49)', () => {
     const vaccineCodes = ['bcg_date', 'opv_date', 'hepatitis_b_date', 'vitamin_k_date'];
     for (const code of vaccineCodes) {

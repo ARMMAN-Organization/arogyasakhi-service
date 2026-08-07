@@ -629,6 +629,51 @@ describe('validateSubmission — EXCLUSIVE_OPTION', () => {
   });
 });
 
+describe('validateSubmission — mother_beneficiary_id visibility (CHILD_REGISTRATION)', () => {
+  const whoField: FormField = {
+    question_code: 'who_are_you_registering_in_the_program',
+    label: 'Who are you registering in the program?',
+    input_type: 'radio',
+    required: true,
+  };
+  const motherBeneficiaryIdField: FormField = {
+    question_code: 'mother_beneficiary_id',
+    label: 'Mother beneficiary ID',
+    input_type: 'number',
+    required: true,
+    visibleWhen: {
+      field: 'who_are_you_registering_in_the_program',
+      operator: 'eq',
+      value: 'child_of_a_registered_pregnant_woman',
+    },
+  };
+
+  it('does not require mother_beneficiary_id when registering a child directly', () => {
+    const violations = validateSubmission([whoField, motherBeneficiaryIdField], [], {
+      who_are_you_registering_in_the_program: 'child_directly_mother_not_registered_in_the_program',
+    });
+
+    expect(violations).toEqual([]);
+  });
+
+  it('requires mother_beneficiary_id when registering a child of a registered pregnant woman', () => {
+    const violations = validateSubmission([whoField, motherBeneficiaryIdField], [], {
+      who_are_you_registering_in_the_program: 'child_of_a_registered_pregnant_woman',
+    });
+
+    expect(violations).toEqual(['Missing required field: mother_beneficiary_id']);
+  });
+
+  it('is satisfied when mother_beneficiary_id is present on the child-of-registered-woman path', () => {
+    const violations = validateSubmission([whoField, motherBeneficiaryIdField], [], {
+      who_are_you_registering_in_the_program: 'child_of_a_registered_pregnant_woman',
+      mother_beneficiary_id: 12345,
+    });
+
+    expect(violations).toEqual([]);
+  });
+});
+
 describe('validateSubmission — REQUIRED_IF_SELECTED', () => {
   const vaccineField: FormField = {
     question_code: 'vaccination_taken_at_birth',

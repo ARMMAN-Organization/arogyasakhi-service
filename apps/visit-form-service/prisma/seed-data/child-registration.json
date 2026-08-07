@@ -93,7 +93,12 @@
       "section": "Personal Info",
       "required": true,
       "input_type": "number",
-      "question_code": "mother_beneficiary_id"
+      "question_code": "mother_beneficiary_id",
+      "visibleWhen": {
+        "field": "who_are_you_registering_in_the_program",
+        "operator": "eq",
+        "value": "child_of_a_registered_pregnant_woman"
+      }
     },
     {
       "label": "Registrtion date",
