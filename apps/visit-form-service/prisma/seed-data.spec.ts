@@ -220,7 +220,7 @@ describe('anc-visit.json', () => {
 
   it('gates fetal movement/heart rate/fundal height behind gestational age >= 20 weeks', () => {
     for (const code of ['fetal_movements', 'fetal_heart_rate', 'fundal_height_in_cm']) {
-      expect(byCode.get(code)?.visibleWhen).toEqual({
+      expect(conditionsOf(byCode.get(code)?.visibleWhen)).toContainEqual({
         field: 'current_gestational_age_in_weeks',
         operator: 'gte',
         value: 20,
@@ -228,7 +228,19 @@ describe('anc-visit.json', () => {
     }
   });
 
+  const MET_BENEFICIARY_YES = {
+    field: 'have_you_been_able_to_meet_the_beneficiary_for_the_visit',
+    operator: 'eq',
+    value: 'yes',
+  };
+
+  /** Normalizes visibleWhen (single condition or array) to an array for assertions. */
+  function conditionsOf(visibleWhen: unknown): unknown[] {
+    return Array.isArray(visibleWhen) ? visibleWhen : [visibleWhen];
+  }
+
   it('shows the not-met reason only when the beneficiary was not met', () => {
+    // The only Q5+ field NOT gated behind met=yes — it's the met=no branch itself.
     expect(byCode.get('if_no_mention_reasons')?.visibleWhen).toEqual({
       field: 'have_you_been_able_to_meet_the_beneficiary_for_the_visit',
       operator: 'eq',
@@ -236,9 +248,25 @@ describe('anc-visit.json', () => {
     });
   });
 
+  it('gates every Q5+ field behind met-beneficiary=yes, in addition to any of its own conditions', () => {
+    for (const field of fields) {
+      if (
+        [
+          'date_of_visit',
+          'visit_type',
+          'have_you_been_able_to_meet_the_beneficiary_for_the_visit',
+          'if_no_mention_reasons',
+        ].includes(field.question_code)
+      ) {
+        continue;
+      }
+      expect(conditionsOf(field.visibleWhen)).toContainEqual(MET_BENEFICIARY_YES);
+    }
+  });
+
   it('shows the LMP edit + sonography image only when a sonography report exists', () => {
     for (const code of ['lmp_date_edit', 'upload_sonography_report_image']) {
-      expect(byCode.get(code)?.visibleWhen).toEqual({
+      expect(conditionsOf(byCode.get(code)?.visibleWhen)).toContainEqual({
         field: 'do_you_have_a_sonography_report_to_confirm_the_lmp_date',
         operator: 'eq',
         value: 'yes',
@@ -248,20 +276,24 @@ describe('anc-visit.json', () => {
 
   it('branches IFA tablet follow-ups on whether the woman is taking IFA tablets', () => {
     expect(
-      byCode.get('how_many_ifa_tablets_did_you_consume_since_last_visit')?.visibleWhen,
-    ).toEqual({
+      conditionsOf(
+        byCode.get('how_many_ifa_tablets_did_you_consume_since_last_visit')?.visibleWhen,
+      ),
+    ).toContainEqual({
       field: 'are_you_taking_ifa_tablets',
       operator: 'eq',
       value: 'yes',
     });
     expect(
-      byCode.get('if_no_what_is_the_reasons_for_non_consumption_of_ifa_tablets')?.visibleWhen,
-    ).toEqual({ field: 'are_you_taking_ifa_tablets', operator: 'eq', value: 'no' });
+      conditionsOf(
+        byCode.get('if_no_what_is_the_reasons_for_non_consumption_of_ifa_tablets')?.visibleWhen,
+      ),
+    ).toContainEqual({ field: 'are_you_taking_ifa_tablets', operator: 'eq', value: 'no' });
   });
 
   it('shows USG date/type/finding only when USG was done', () => {
     for (const code of ['if_yes_date_of_usg', 'type_of_usg', 'usg_finding']) {
-      expect(byCode.get(code)?.visibleWhen).toEqual({
+      expect(conditionsOf(byCode.get(code)?.visibleWhen)).toContainEqual({
         field: 'have_you_done_usg_since_last_visit',
         operator: 'eq',
         value: 'yes',
@@ -344,13 +376,24 @@ describe('infant-visit.json', () => {
     }
   });
 
+  const MET_BENEFICIARY_YES_INFANT = {
+    field: 'have_you_been_able_to_meet_the_beneficiary_for_the_visit',
+    operator: 'eq',
+    value: 'yes',
+  };
+
+  /** Normalizes visibleWhen (single condition or array) to an array for assertions. */
+  function conditionsOfInfant(visibleWhen: unknown): unknown[] {
+    return Array.isArray(visibleWhen) ? visibleWhen : [visibleWhen];
+  }
+
   it('gates thermal care practices to under 2 months and MUAC to 6 months and up', () => {
-    expect(byCode.get('thermal_care_practices')?.visibleWhen).toEqual({
+    expect(conditionsOfInfant(byCode.get('thermal_care_practices')?.visibleWhen)).toContainEqual({
       field: 'age_in_months',
       operator: 'lt',
       value: 2,
     });
-    expect(byCode.get('muac_in_cms')?.visibleWhen).toEqual({
+    expect(conditionsOfInfant(byCode.get('muac_in_cms')?.visibleWhen)).toContainEqual({
       field: 'age_in_months',
       operator: 'gte',
       value: 6,
@@ -358,11 +401,28 @@ describe('infant-visit.json', () => {
   });
 
   it('shows the not-met reason only when the beneficiary was not met', () => {
+    // The only Q5+ field NOT gated behind met=yes — it's the met=no branch itself.
     expect(byCode.get('if_no_mention_reasons')?.visibleWhen).toEqual({
       field: 'have_you_been_able_to_meet_the_beneficiary_for_the_visit',
       operator: 'eq',
       value: 'no',
     });
+  });
+
+  it('gates every Q5+ field behind met-beneficiary=yes, in addition to any of its own conditions', () => {
+    for (const field of fields) {
+      if (
+        [
+          'date_of_visit',
+          'visit_type',
+          'have_you_been_able_to_meet_the_beneficiary_for_the_visit',
+          'if_no_mention_reasons',
+        ].includes(field.question_code)
+      ) {
+        continue;
+      }
+      expect(conditionsOfInfant(field.visibleWhen)).toContainEqual(MET_BENEFICIARY_YES_INFANT);
+    }
   });
 
   it('shows complementary-feeding follow-ups only once complementary feeding has started', () => {
@@ -371,7 +431,7 @@ describe('infant-visit.json', () => {
       'which_of_these_food_stuff_have_child_consumed_in_the_last_24_hours',
       'which_of_the_following_foods_does_the_child_avoid_eating_or_you_avoid_giving_to_the_child',
     ]) {
-      expect(byCode.get(code)?.visibleWhen).toEqual({
+      expect(conditionsOfInfant(byCode.get(code)?.visibleWhen)).toContainEqual({
         field: 'have_you_started_complementary_feeding_for_your_child',
         operator: 'eq',
         value: 'yes',
@@ -408,7 +468,7 @@ describe('infant-visit.json', () => {
 
     for (const [vaccineCode, dateCode] of vaccinePairs) {
       expect(byCode.get(vaccineCode)).toBeDefined();
-      expect(byCode.get(dateCode)?.visibleWhen).toEqual({
+      expect(conditionsOfInfant(byCode.get(dateCode)?.visibleWhen)).toContainEqual({
         field: vaccineCode,
         operator: 'eq',
         value: 'yes',

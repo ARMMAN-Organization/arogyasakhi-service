@@ -77,14 +77,24 @@
       "section": "Tests",
       "required": true,
       "input_type": "text",
-      "question_code": "rch_number"
+      "question_code": "rch_number",
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      }
     },
     {
       "label": "LMP",
       "section": "Tests",
       "required": true,
       "input_type": "date",
-      "question_code": "lmp"
+      "question_code": "lmp",
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      }
     },
     {
       "label": "Do you have a sonography report to confirm the LMP date?",
@@ -103,7 +113,12 @@
       "section": "Tests",
       "required": true,
       "input_type": "radio",
-      "question_code": "do_you_have_a_sonography_report_to_confirm_the_lmp_date"
+      "question_code": "do_you_have_a_sonography_report_to_confirm_the_lmp_date",
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      }
     },
     {
       "label": "LMP Date",
@@ -113,11 +128,18 @@
       "dateRule": {
         "notFuture": true
       },
-      "visibleWhen": {
-        "field": "do_you_have_a_sonography_report_to_confirm_the_lmp_date",
-        "operator": "eq",
-        "value": "yes"
-      },
+      "visibleWhen": [
+        {
+          "field": "do_you_have_a_sonography_report_to_confirm_the_lmp_date",
+          "operator": "eq",
+          "value": "yes"
+        },
+        {
+          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+          "operator": "eq",
+          "value": "yes"
+        }
+      ],
       "question_code": "lmp_date_edit"
     },
     {
@@ -126,11 +148,18 @@
       "required": true,
       "input_type": "image",
       "captureMode": "LIVE_CAMERA_ONLY",
-      "visibleWhen": {
-        "field": "do_you_have_a_sonography_report_to_confirm_the_lmp_date",
-        "operator": "eq",
-        "value": "yes"
-      },
+      "visibleWhen": [
+        {
+          "field": "do_you_have_a_sonography_report_to_confirm_the_lmp_date",
+          "operator": "eq",
+          "value": "yes"
+        },
+        {
+          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+          "operator": "eq",
+          "value": "yes"
+        }
+      ],
       "question_code": "upload_sonography_report_image"
     },
     {
@@ -139,7 +168,12 @@
       "required": true,
       "input_type": "number",
       "computedFrom": "GESTATIONAL_AGE_AT_VISIT",
-      "question_code": "current_gestational_age_in_weeks"
+      "question_code": "current_gestational_age_in_weeks",
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      }
     },
     {
       "label": "EDD",
@@ -147,7 +181,12 @@
       "required": true,
       "input_type": "date",
       "computedFrom": "EDD_FROM_LMP",
-      "question_code": "edd"
+      "question_code": "edd",
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      }
     },
     {
       "label": "Height of the woman in cm",
@@ -158,7 +197,12 @@
         "min": 120,
         "max": 190
       },
-      "question_code": "height_of_the_woman_in_cm"
+      "question_code": "height_of_the_woman_in_cm",
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      }
     },
     {
       "label": "Current weight of the woman in kg",
@@ -169,7 +213,12 @@
         "min": 25,
         "max": 100
       },
-      "question_code": "current_weight_of_the_woman_in_kg"
+      "question_code": "current_weight_of_the_woman_in_kg",
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      }
     },
     {
       "label": "BMI",
@@ -177,7 +226,12 @@
       "required": true,
       "input_type": "number",
       "computedFrom": "BMI",
-      "question_code": "bmi"
+      "question_code": "bmi",
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      }
     },
     {
       "label": "Gestational weight gain",
@@ -197,7 +251,12 @@
       "required": true,
       "input_type": "radio",
       "computedFrom": "GESTATIONAL_WEIGHT_GAIN",
-      "question_code": "gestational_weight_gain"
+      "question_code": "gestational_weight_gain",
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      }
     },
     {
       "label": "Capture the mid-upper arm circumference in cm",
@@ -208,7 +267,12 @@
         "min": 10,
         "max": 40
       },
-      "question_code": "mid_upper_arm_circumference_in_cm"
+      "question_code": "mid_upper_arm_circumference_in_cm",
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      }
     },
     {
       "label": "Have you been experiencing any of these since the last visit?",
@@ -282,7 +346,12 @@
       "section": "Symptoms",
       "required": true,
       "input_type": "multiselect",
-      "question_code": "have_you_been_experiencing_any_of_these_since_the_last_visit"
+      "question_code": "have_you_been_experiencing_any_of_these_since_the_last_visit",
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      }
     },
     {
       "label": "Check Palm and Nails",
@@ -306,7 +375,12 @@
       "section": "Symptoms",
       "required": true,
       "input_type": "select",
-      "question_code": "check_palm_and_nails"
+      "question_code": "check_palm_and_nails",
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      }
     },
     {
       "label": "Check Sclera (Eyes)",
@@ -330,7 +404,12 @@
       "section": "Symptoms",
       "required": true,
       "input_type": "select",
-      "question_code": "check_sclera_eyes"
+      "question_code": "check_sclera_eyes",
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      }
     },
     {
       "label": "Check Skin",
@@ -354,7 +433,12 @@
       "section": "Symptoms",
       "required": true,
       "input_type": "select",
-      "question_code": "check_skin"
+      "question_code": "check_skin",
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      }
     },
     {
       "label": "Swelling",
@@ -383,7 +467,12 @@
       "section": "Symptoms",
       "required": true,
       "input_type": "multiselect",
-      "question_code": "swelling"
+      "question_code": "swelling",
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      }
     },
     {
       "label": "Dehydration",
@@ -407,7 +496,12 @@
       "section": "Symptoms",
       "required": true,
       "input_type": "multiselect",
-      "question_code": "dehydration"
+      "question_code": "dehydration",
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      }
     },
     {
       "label": "Blood Pressure (BP) Systolic",
@@ -418,7 +512,12 @@
         "min": 70,
         "max": 300
       },
-      "question_code": "blood_pressure_bp_systolic"
+      "question_code": "blood_pressure_bp_systolic",
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      }
     },
     {
       "label": "Blood Pressure (BP) Diastolic",
@@ -429,10 +528,15 @@
         "min": 40,
         "max": 130
       },
-      "question_code": "blood_pressure_bp_diastolic"
+      "question_code": "blood_pressure_bp_diastolic",
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      }
     },
     {
-      "label": "Body Temperature in °F",
+      "label": "Body Temperature in \u00b0F",
       "section": "Symptoms",
       "required": true,
       "input_type": "number",
@@ -440,7 +544,12 @@
         "min": 94,
         "max": 105
       },
-      "question_code": "body_temperature_in_f"
+      "question_code": "body_temperature_in_f",
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      }
     },
     {
       "label": "Haemoglobin (Hb) g/dl",
@@ -451,14 +560,24 @@
         "min": 1,
         "max": 18
       },
-      "question_code": "haemoglobin_hb_g_dl"
+      "question_code": "haemoglobin_hb_g_dl",
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      }
     },
     {
       "label": "How many hours ago did you take last meal?",
       "section": "Symptoms",
       "required": true,
       "input_type": "number",
-      "question_code": "how_many_hours_ago_did_you_take_last_meal"
+      "question_code": "how_many_hours_ago_did_you_take_last_meal",
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      }
     },
     {
       "label": "Blood Glucose in mg/dl",
@@ -469,7 +588,12 @@
         "min": 40,
         "max": 400
       },
-      "question_code": "blood_glucose_in_mg_dl"
+      "question_code": "blood_glucose_in_mg_dl",
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      }
     },
     {
       "label": "Urine Test",
@@ -498,7 +622,12 @@
       "section": "Symptoms",
       "required": true,
       "input_type": "multiselect",
-      "question_code": "urine_test"
+      "question_code": "urine_test",
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      }
     },
     {
       "label": "Fetal Movements",
@@ -517,11 +646,18 @@
       "section": "Symptoms",
       "required": true,
       "input_type": "radio",
-      "visibleWhen": {
-        "field": "current_gestational_age_in_weeks",
-        "operator": "gte",
-        "value": 20
-      },
+      "visibleWhen": [
+        {
+          "field": "current_gestational_age_in_weeks",
+          "operator": "gte",
+          "value": 20
+        },
+        {
+          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+          "operator": "eq",
+          "value": "yes"
+        }
+      ],
       "question_code": "fetal_movements"
     },
     {
@@ -529,11 +665,18 @@
       "section": "Symptoms",
       "required": true,
       "input_type": "number",
-      "visibleWhen": {
-        "field": "current_gestational_age_in_weeks",
-        "operator": "gte",
-        "value": 20
-      },
+      "visibleWhen": [
+        {
+          "field": "current_gestational_age_in_weeks",
+          "operator": "gte",
+          "value": 20
+        },
+        {
+          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+          "operator": "eq",
+          "value": "yes"
+        }
+      ],
       "question_code": "fetal_heart_rate"
     },
     {
@@ -545,11 +688,18 @@
         "min": 10,
         "max": 50
       },
-      "visibleWhen": {
-        "field": "current_gestational_age_in_weeks",
-        "operator": "gte",
-        "value": 20
-      },
+      "visibleWhen": [
+        {
+          "field": "current_gestational_age_in_weeks",
+          "operator": "gte",
+          "value": 20
+        },
+        {
+          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+          "operator": "eq",
+          "value": "yes"
+        }
+      ],
       "question_code": "fundal_height_in_cm"
     },
     {
@@ -579,7 +729,12 @@
       "section": "Symptoms",
       "required": true,
       "input_type": "multiselect_date",
-      "question_code": "vaccination_status"
+      "question_code": "vaccination_status",
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      }
     },
     {
       "label": "Which of these food stuff have you consumed in the last 24 hours?",
@@ -620,7 +775,7 @@
           "value_code": "green_vegetables"
         },
         {
-          "label": "Other vitamin A–rich fruits and vegetables (Mango, papaya, pumpkin, carrot)",
+          "label": "Other vitamin A\u2013rich fruits and vegetables (Mango, papaya, pumpkin, carrot)",
           "sort_order": 7,
           "value_code": "other_vitamin_a_rich_fruits_and_vegetables_mango_papaya_pumpkin_carrot"
         },
@@ -638,7 +793,12 @@
       "section": "Symptoms",
       "required": true,
       "input_type": "multiselect",
-      "question_code": "which_of_these_food_stuff_have_you_consumed_in_the_last_24_hours"
+      "question_code": "which_of_these_food_stuff_have_you_consumed_in_the_last_24_hours",
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      }
     },
     {
       "label": "Which of these food stuff do you avoid eating?",
@@ -679,7 +839,7 @@
           "value_code": "green_vegetables"
         },
         {
-          "label": "Other vitamin A–rich fruits and vegetables (Mango, papaya, pumpkin, carrot)",
+          "label": "Other vitamin A\u2013rich fruits and vegetables (Mango, papaya, pumpkin, carrot)",
           "sort_order": 7,
           "value_code": "other_vitamin_a_rich_fruits_and_vegetables_mango_papaya_pumpkin_carrot"
         },
@@ -697,7 +857,12 @@
       "section": "Symptoms",
       "required": true,
       "input_type": "multiselect",
-      "question_code": "which_of_these_food_stuff_do_you_avoid_eating"
+      "question_code": "which_of_these_food_stuff_do_you_avoid_eating",
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      }
     },
     {
       "label": "Are you taking IFA tablets?",
@@ -716,7 +881,12 @@
       "section": "Symptoms",
       "required": true,
       "input_type": "radio",
-      "question_code": "are_you_taking_ifa_tablets"
+      "question_code": "are_you_taking_ifa_tablets",
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      }
     },
     {
       "label": "How many IFA tablets did you consume since last visit?",
@@ -727,11 +897,18 @@
         "min": 0,
         "max": 35
       },
-      "visibleWhen": {
-        "field": "are_you_taking_ifa_tablets",
-        "operator": "eq",
-        "value": "yes"
-      },
+      "visibleWhen": [
+        {
+          "field": "are_you_taking_ifa_tablets",
+          "operator": "eq",
+          "value": "yes"
+        },
+        {
+          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+          "operator": "eq",
+          "value": "yes"
+        }
+      ],
       "question_code": "how_many_ifa_tablets_did_you_consume_since_last_visit"
     },
     {
@@ -766,11 +943,18 @@
       "section": "Symptoms",
       "required": true,
       "input_type": "multiselect",
-      "visibleWhen": {
-        "field": "are_you_taking_ifa_tablets",
-        "operator": "eq",
-        "value": "no"
-      },
+      "visibleWhen": [
+        {
+          "field": "are_you_taking_ifa_tablets",
+          "operator": "eq",
+          "value": "no"
+        },
+        {
+          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+          "operator": "eq",
+          "value": "yes"
+        }
+      ],
       "question_code": "if_no_what_is_the_reasons_for_non_consumption_of_ifa_tablets"
     },
     {
@@ -790,7 +974,12 @@
       "section": "Symptoms",
       "required": true,
       "input_type": "radio",
-      "question_code": "calcium_tablets_received_and_consumed"
+      "question_code": "calcium_tablets_received_and_consumed",
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      }
     },
     {
       "label": "Have you visited health facility since my last visit",
@@ -809,7 +998,12 @@
       "section": "History",
       "required": true,
       "input_type": "radio",
-      "question_code": "have_you_visited_health_facility_since_my_last_visit"
+      "question_code": "have_you_visited_health_facility_since_my_last_visit",
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      }
     },
     {
       "label": "If yes, enter date of latest ANC visit at the health facility",
@@ -819,11 +1013,18 @@
       "dateRule": {
         "notFuture": true
       },
-      "visibleWhen": {
-        "field": "have_you_visited_health_facility_since_my_last_visit",
-        "operator": "eq",
-        "value": "yes"
-      },
+      "visibleWhen": [
+        {
+          "field": "have_you_visited_health_facility_since_my_last_visit",
+          "operator": "eq",
+          "value": "yes"
+        },
+        {
+          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+          "operator": "eq",
+          "value": "yes"
+        }
+      ],
       "question_code": "if_yes_enter_date_of_latest_anc_visit_at_the_health_facility"
     },
     {
@@ -868,7 +1069,12 @@
       "section": "History",
       "required": true,
       "input_type": "select",
-      "question_code": "advised_place_of_delivery"
+      "question_code": "advised_place_of_delivery",
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      }
     },
     {
       "label": "Sickle Cell",
@@ -899,7 +1105,7 @@
           "value_code": "not_tested_yet"
         },
         {
-          "label": "Don’t know/ Not aware",
+          "label": "Don\u2019t know/ Not aware",
           "sort_order": 5,
           "value_code": "dont_know_not_aware"
         }
@@ -907,7 +1113,12 @@
       "section": "History",
       "required": true,
       "input_type": "select",
-      "question_code": "sickle_cell"
+      "question_code": "sickle_cell",
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      }
     },
     {
       "label": "Which of the following contraceptive/family planning method does the woman plan to use after delivery?",
@@ -971,7 +1182,12 @@
       "section": "History",
       "required": true,
       "input_type": "multiselect",
-      "question_code": "contraceptive_family_planning_method_planned_after_delivery"
+      "question_code": "contraceptive_family_planning_method_planned_after_delivery",
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      }
     },
     {
       "label": "Feeling sad, anxious, or stressed most days?",
@@ -990,7 +1206,12 @@
       "section": "History",
       "required": true,
       "input_type": "radio",
-      "question_code": "feeling_sad_anxious_or_stressed_most_days"
+      "question_code": "feeling_sad_anxious_or_stressed_most_days",
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      }
     },
     {
       "label": "Adequate family support during pregnancy?",
@@ -1009,7 +1230,12 @@
       "section": "History",
       "required": true,
       "input_type": "radio",
-      "question_code": "adequate_family_support_during_pregnancy"
+      "question_code": "adequate_family_support_during_pregnancy",
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      }
     },
     {
       "label": "Are you going to migrate to other place any time during pregnancy?",
@@ -1028,7 +1254,12 @@
       "section": "History",
       "required": true,
       "input_type": "radio",
-      "question_code": "are_you_going_to_migrate_to_other_place_any_time_during_pregnancy"
+      "question_code": "are_you_going_to_migrate_to_other_place_any_time_during_pregnancy",
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      }
     },
     {
       "label": "Have you done USG since last visit",
@@ -1047,7 +1278,12 @@
       "section": "History",
       "required": true,
       "input_type": "radio",
-      "question_code": "have_you_done_usg_since_last_visit"
+      "question_code": "have_you_done_usg_since_last_visit",
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      }
     },
     {
       "label": "If yes, date of USG",
@@ -1060,11 +1296,18 @@
           "field": "lmp"
         }
       },
-      "visibleWhen": {
-        "field": "have_you_done_usg_since_last_visit",
-        "operator": "eq",
-        "value": "yes"
-      },
+      "visibleWhen": [
+        {
+          "field": "have_you_done_usg_since_last_visit",
+          "operator": "eq",
+          "value": "yes"
+        },
+        {
+          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+          "operator": "eq",
+          "value": "yes"
+        }
+      ],
       "question_code": "if_yes_date_of_usg"
     },
     {
@@ -1094,11 +1337,18 @@
       "section": "History",
       "required": true,
       "input_type": "select",
-      "visibleWhen": {
-        "field": "have_you_done_usg_since_last_visit",
-        "operator": "eq",
-        "value": "yes"
-      },
+      "visibleWhen": [
+        {
+          "field": "have_you_done_usg_since_last_visit",
+          "operator": "eq",
+          "value": "yes"
+        },
+        {
+          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+          "operator": "eq",
+          "value": "yes"
+        }
+      ],
       "question_code": "type_of_usg"
     },
     {
@@ -1118,11 +1368,18 @@
       "section": "History",
       "required": true,
       "input_type": "select",
-      "visibleWhen": {
-        "field": "have_you_done_usg_since_last_visit",
-        "operator": "eq",
-        "value": "yes"
-      },
+      "visibleWhen": [
+        {
+          "field": "have_you_done_usg_since_last_visit",
+          "operator": "eq",
+          "value": "yes"
+        },
+        {
+          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+          "operator": "eq",
+          "value": "yes"
+        }
+      ],
       "question_code": "usg_finding"
     },
     {
@@ -1142,7 +1399,12 @@
       "section": "History",
       "required": true,
       "input_type": "radio",
-      "question_code": "has_the_transport_contact_been_shared_with_and_saved_by_the_beneficiary_family"
+      "question_code": "has_the_transport_contact_been_shared_with_and_saved_by_the_beneficiary_family",
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      }
     },
     {
       "label": "Has the family set aside or arranged funds for delivery/emergency expenses?",
@@ -1161,7 +1423,12 @@
       "section": "History",
       "required": true,
       "input_type": "radio",
-      "question_code": "has_the_family_set_aside_or_arranged_funds_for_delivery_emergency_expenses"
+      "question_code": "has_the_family_set_aside_or_arranged_funds_for_delivery_emergency_expenses",
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      }
     },
     {
       "label": "Has a birth companion been identified to accompany the woman during delivery/emergency?",
@@ -1180,14 +1447,24 @@
       "section": "History",
       "required": true,
       "input_type": "radio",
-      "question_code": "has_a_birth_companion_been_identified_to_accompany_the_woman_during_delivery_emergency"
+      "question_code": "has_a_birth_companion_been_identified_to_accompany_the_woman_during_delivery_emergency",
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      }
     },
     {
       "label": "Remarks",
       "section": "History",
       "required": false,
       "input_type": "text",
-      "question_code": "remarks"
+      "question_code": "remarks",
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      }
     },
     {
       "label": "As a Sakhi, have you guided the beneficiary on the following?",
@@ -1241,7 +1518,12 @@
       "section": "History",
       "required": false,
       "input_type": "multiselect",
-      "question_code": "as_a_sakhi_have_you_guided_the_beneficiary_on_the_following"
+      "question_code": "as_a_sakhi_have_you_guided_the_beneficiary_on_the_following",
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      }
     }
   ],
   "validationJson": [

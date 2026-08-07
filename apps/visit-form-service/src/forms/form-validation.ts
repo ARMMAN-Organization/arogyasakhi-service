@@ -1,4 +1,4 @@
-import type { CrossFieldRule, FormField } from './dto/form-field.dto';
+import type { CrossFieldRule, FormField, VisibleWhenCondition } from './dto/form-field.dto';
 
 export function isEmpty(value: unknown): boolean {
   return value === undefined || value === null || value === '';
@@ -87,24 +87,38 @@ function checkDateRule(field: FormField, formData: Record<string, unknown>): str
   return violations;
 }
 
-/** Evaluates SRS Category 5 skip logic for one field against the submitted formData. */
-export function isVisible(field: FormField, formData: Record<string, unknown>): boolean {
-  if (!field.visibleWhen) return true;
-  const actual = formData[field.visibleWhen.field];
-  switch (field.visibleWhen.operator) {
+function evaluateVisibilityCondition(
+  condition: VisibleWhenCondition,
+  formData: Record<string, unknown>,
+): boolean {
+  const actual = formData[condition.field];
+  switch (condition.operator) {
     case 'eq':
-      return actual === field.visibleWhen.value;
+      return actual === condition.value;
     case 'gte':
-      return Number(actual) >= Number(field.visibleWhen.value);
+      return Number(actual) >= Number(condition.value);
     case 'lt':
-      return Number(actual) < Number(field.visibleWhen.value);
+      return Number(actual) < Number(condition.value);
     case 'isSet':
       return !isEmpty(actual);
     case 'contains':
-      return Array.isArray(actual) && actual.includes(field.visibleWhen.value);
+      return Array.isArray(actual) && actual.includes(condition.value);
     default:
       return true;
   }
+}
+
+/**
+ * Evaluates SRS Category 5 skip logic for one field against the submitted
+ * formData. `visibleWhen` is either a single condition or an array of
+ * conditions ANDed together — a field with multiple conditions (e.g. gated
+ * behind both "met the beneficiary = yes" and its own gestational-age
+ * threshold) is visible only when every condition passes.
+ */
+export function isVisible(field: FormField, formData: Record<string, unknown>): boolean {
+  if (!field.visibleWhen) return true;
+  const conditions = Array.isArray(field.visibleWhen) ? field.visibleWhen : [field.visibleWhen];
+  return conditions.every((condition) => evaluateVisibilityCondition(condition, formData));
 }
 
 /**

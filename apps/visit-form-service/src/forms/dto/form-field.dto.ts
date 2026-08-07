@@ -3,6 +3,19 @@ import { z } from 'zod';
 
 extendZodWithOpenApi(z);
 
+/** One SRS Category 5 skip-logic condition — see visibleWhen below. */
+export const visibleWhenConditionSchema = z.object({
+  field: z.string().trim().min(1),
+  // 'contains' checks a multiselect answer (an array of value_codes)
+  // for membership — e.g. show a dose date field only when its
+  // checkbox is one of the checked options on has_the_women_received_td_dose.
+  operator: z.enum(['eq', 'gte', 'lt', 'isSet', 'contains']),
+  // Bare z.any() has no inferable OpenAPI type — annotated so the
+  // OpenAPI generator doesn't throw when this schema is used as a
+  // documented request/response body (see createDocumentedRouter()).
+  value: z.any().openapi({ type: 'object' }).optional(),
+});
+
 /**
  * Shape of one entry in `form_versions.schema_json`. Only the parts confirmed
  * by docs/Arogya_Sakhi_Database_Design_ERD_Table_Definitions.docx.md §4.0 (the
@@ -61,18 +74,13 @@ export const formFieldSchema = z
     // Fixed digit-count fields (e.g. a 10-digit mobile number) — distinct from
     // numericRange, which bounds a value rather than its digit length.
     exactLength: z.number().int().positive().optional(),
+    // A single condition, or an array of conditions ANDed together (all must
+    // pass for the field to be visible) — e.g. a visit-form field that is
+    // both gated behind "met the beneficiary = yes" AND its own condition
+    // (gestational age, USG done, etc). Most fields only ever need one
+    // condition, so the plain single-object shape is still accepted as-is.
     visibleWhen: z
-      .object({
-        field: z.string().trim().min(1),
-        // 'contains' checks a multiselect answer (an array of value_codes)
-        // for membership — e.g. show a dose date field only when its
-        // checkbox is one of the checked options on has_the_women_received_td_dose.
-        operator: z.enum(['eq', 'gte', 'lt', 'isSet', 'contains']),
-        // Bare z.any() has no inferable OpenAPI type — annotated so the
-        // OpenAPI generator doesn't throw when this schema is used as a
-        // documented request/response body (see createDocumentedRouter()).
-        value: z.any().openapi({ type: 'object' }).optional(),
-      })
+      .union([visibleWhenConditionSchema, z.array(visibleWhenConditionSchema).min(1)])
       .optional(),
     computedFrom: z
       .enum([
@@ -118,6 +126,7 @@ export const formFieldSchema = z
   .strict();
 
 export type FormField = z.infer<typeof formFieldSchema>;
+export type VisibleWhenCondition = z.infer<typeof visibleWhenConditionSchema>;
 
 export const schemaJsonSchema = z.array(formFieldSchema).min(1);
 
