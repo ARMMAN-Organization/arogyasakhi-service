@@ -218,26 +218,27 @@ describe('anc-visit.json', () => {
     }
   });
 
-  it('gates fetal movement/heart rate/fundal height behind gestational age >= 20 weeks', () => {
-    for (const code of ['fetal_movements', 'fetal_heart_rate', 'fundal_height_in_cm']) {
-      expect(conditionsOf(byCode.get(code)?.visibleWhen)).toContainEqual({
-        field: 'current_gestational_age_in_weeks',
-        operator: 'gte',
-        value: 20,
-      });
-    }
-  });
-
+  // visibleWhen is a single {field,operator,value} object only — never an
+  // array of ANDed conditions. The mobile client's FormVisibilityEvaluator
+  // does not parse an array shape and crashes the whole form load if it sees
+  // one (2026-08-07 incident: ANC_VISIT became unopenable for every Sakhi).
+  // A field that would otherwise need two conditions (its own condition AND
+  // "met beneficiary = yes") keeps only the met-beneficiary gate — the more
+  // recently confirmed, higher-impact fix — until mobile ships array support
+  // and the two-condition form can be restored.
   const MET_BENEFICIARY_YES = {
     field: 'have_you_been_able_to_meet_the_beneficiary_for_the_visit',
     operator: 'eq',
     value: 'yes',
   };
 
-  /** Normalizes visibleWhen (single condition or array) to an array for assertions. */
-  function conditionsOf(visibleWhen: unknown): unknown[] {
-    return Array.isArray(visibleWhen) ? visibleWhen : [visibleWhen];
-  }
+  it('never stores visibleWhen as an array — mobile only parses a single condition object', () => {
+    for (const field of fields) {
+      if (field.visibleWhen !== undefined) {
+        expect(Array.isArray(field.visibleWhen)).toBe(false);
+      }
+    }
+  });
 
   it('shows the not-met reason only when the beneficiary was not met', () => {
     // The only Q5+ field NOT gated behind met=yes — it's the met=no branch itself.
@@ -248,7 +249,7 @@ describe('anc-visit.json', () => {
     });
   });
 
-  it('gates every Q5+ field behind met-beneficiary=yes, in addition to any of its own conditions', () => {
+  it('gates every Q5+ field behind met-beneficiary=yes', () => {
     for (const field of fields) {
       if (
         [
@@ -260,44 +261,7 @@ describe('anc-visit.json', () => {
       ) {
         continue;
       }
-      expect(conditionsOf(field.visibleWhen)).toContainEqual(MET_BENEFICIARY_YES);
-    }
-  });
-
-  it('shows the LMP edit + sonography image only when a sonography report exists', () => {
-    for (const code of ['lmp_date_edit', 'upload_sonography_report_image']) {
-      expect(conditionsOf(byCode.get(code)?.visibleWhen)).toContainEqual({
-        field: 'do_you_have_a_sonography_report_to_confirm_the_lmp_date',
-        operator: 'eq',
-        value: 'yes',
-      });
-    }
-  });
-
-  it('branches IFA tablet follow-ups on whether the woman is taking IFA tablets', () => {
-    expect(
-      conditionsOf(
-        byCode.get('how_many_ifa_tablets_did_you_consume_since_last_visit')?.visibleWhen,
-      ),
-    ).toContainEqual({
-      field: 'are_you_taking_ifa_tablets',
-      operator: 'eq',
-      value: 'yes',
-    });
-    expect(
-      conditionsOf(
-        byCode.get('if_no_what_is_the_reasons_for_non_consumption_of_ifa_tablets')?.visibleWhen,
-      ),
-    ).toContainEqual({ field: 'are_you_taking_ifa_tablets', operator: 'eq', value: 'no' });
-  });
-
-  it('shows USG date/type/finding only when USG was done', () => {
-    for (const code of ['if_yes_date_of_usg', 'type_of_usg', 'usg_finding']) {
-      expect(conditionsOf(byCode.get(code)?.visibleWhen)).toContainEqual({
-        field: 'have_you_done_usg_since_last_visit',
-        operator: 'eq',
-        value: 'yes',
-      });
+      expect(field.visibleWhen).toEqual(MET_BENEFICIARY_YES);
     }
   });
 
@@ -376,28 +340,27 @@ describe('infant-visit.json', () => {
     }
   });
 
+  // visibleWhen is a single {field,operator,value} object only — never an
+  // array of ANDed conditions. The mobile client's FormVisibilityEvaluator
+  // does not parse an array shape and crashes the whole form load if it sees
+  // one (2026-08-07 incident: ANC_VISIT became unopenable for every Sakhi).
+  // Fields that would otherwise need two conditions (their own condition AND
+  // "met beneficiary = yes") keep only the met-beneficiary gate — the more
+  // recently confirmed, higher-impact fix — until mobile ships array support
+  // and these two-condition fields (age gating, complementary-feeding
+  // gating, per-vaccine date gating) can be restored.
   const MET_BENEFICIARY_YES_INFANT = {
     field: 'have_you_been_able_to_meet_the_beneficiary_for_the_visit',
     operator: 'eq',
     value: 'yes',
   };
 
-  /** Normalizes visibleWhen (single condition or array) to an array for assertions. */
-  function conditionsOfInfant(visibleWhen: unknown): unknown[] {
-    return Array.isArray(visibleWhen) ? visibleWhen : [visibleWhen];
-  }
-
-  it('gates thermal care practices to under 2 months and MUAC to 6 months and up', () => {
-    expect(conditionsOfInfant(byCode.get('thermal_care_practices')?.visibleWhen)).toContainEqual({
-      field: 'age_in_months',
-      operator: 'lt',
-      value: 2,
-    });
-    expect(conditionsOfInfant(byCode.get('muac_in_cms')?.visibleWhen)).toContainEqual({
-      field: 'age_in_months',
-      operator: 'gte',
-      value: 6,
-    });
+  it('never stores visibleWhen as an array — mobile only parses a single condition object', () => {
+    for (const field of fields) {
+      if (field.visibleWhen !== undefined) {
+        expect(Array.isArray(field.visibleWhen)).toBe(false);
+      }
+    }
   });
 
   it('shows the not-met reason only when the beneficiary was not met', () => {
@@ -409,7 +372,7 @@ describe('infant-visit.json', () => {
     });
   });
 
-  it('gates every Q5+ field behind met-beneficiary=yes, in addition to any of its own conditions', () => {
+  it('gates every Q5+ field behind met-beneficiary=yes', () => {
     for (const field of fields) {
       if (
         [
@@ -421,25 +384,11 @@ describe('infant-visit.json', () => {
       ) {
         continue;
       }
-      expect(conditionsOfInfant(field.visibleWhen)).toContainEqual(MET_BENEFICIARY_YES_INFANT);
+      expect(field.visibleWhen).toEqual(MET_BENEFICIARY_YES_INFANT);
     }
   });
 
-  it('shows complementary-feeding follow-ups only once complementary feeding has started', () => {
-    for (const code of [
-      'how_many_times_do_child_take_meal_in_a_day',
-      'which_of_these_food_stuff_have_child_consumed_in_the_last_24_hours',
-      'which_of_the_following_foods_does_the_child_avoid_eating_or_you_avoid_giving_to_the_child',
-    ]) {
-      expect(conditionsOfInfant(byCode.get(code)?.visibleWhen)).toContainEqual({
-        field: 'have_you_started_complementary_feeding_for_your_child',
-        operator: 'eq',
-        value: 'yes',
-      });
-    }
-  });
-
-  it('shows each vaccine date field only when that vaccine is marked given', () => {
+  it('has every vaccine date field present, gated behind met-beneficiary=yes', () => {
     const vaccinePairs: [string, string][] = [
       ['bcg', 'bcg_date'],
       ['opv_0', 'opv_0_date'],
@@ -468,11 +417,7 @@ describe('infant-visit.json', () => {
 
     for (const [vaccineCode, dateCode] of vaccinePairs) {
       expect(byCode.get(vaccineCode)).toBeDefined();
-      expect(conditionsOfInfant(byCode.get(dateCode)?.visibleWhen)).toContainEqual({
-        field: vaccineCode,
-        operator: 'eq',
-        value: 'yes',
-      });
+      expect(byCode.get(dateCode)?.visibleWhen).toEqual(MET_BENEFICIARY_YES_INFANT);
     }
   });
 

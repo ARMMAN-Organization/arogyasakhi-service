@@ -379,18 +379,11 @@
       "section": "Symptoms",
       "required": true,
       "input_type": "select",
-      "visibleWhen": [
-        {
-          "field": "have_you_started_complementary_feeding_for_your_child",
-          "operator": "eq",
-          "value": "yes"
-        },
-        {
-          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
-          "operator": "eq",
-          "value": "yes"
-        }
-      ],
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      },
       "question_code": "how_many_times_do_child_take_meal_in_a_day"
     },
     {
@@ -435,18 +428,11 @@
       "section": "Symptoms",
       "required": true,
       "input_type": "multiselect",
-      "visibleWhen": [
-        {
-          "field": "have_you_started_complementary_feeding_for_your_child",
-          "operator": "eq",
-          "value": "yes"
-        },
-        {
-          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
-          "operator": "eq",
-          "value": "yes"
-        }
-      ],
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      },
       "question_code": "which_of_these_food_stuff_have_child_consumed_in_the_last_24_hours"
     },
     {
@@ -491,18 +477,11 @@
       "section": "Symptoms",
       "required": true,
       "input_type": "multiselect",
-      "visibleWhen": [
-        {
-          "field": "have_you_started_complementary_feeding_for_your_child",
-          "operator": "eq",
-          "value": "yes"
-        },
-        {
-          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
-          "operator": "eq",
-          "value": "yes"
-        }
-      ],
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      },
       "question_code": "which_of_the_following_foods_does_the_child_avoid_eating_or_you_avoid_giving_to_the_child"
     },
     {
@@ -580,18 +559,11 @@
       "section": "Symptoms",
       "required": true,
       "input_type": "multiselect",
-      "visibleWhen": [
-        {
-          "field": "age_in_months",
-          "operator": "lt",
-          "value": 2
-        },
-        {
-          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
-          "operator": "eq",
-          "value": "yes"
-        }
-      ],
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      },
       "question_code": "thermal_care_practices"
     },
     {
@@ -870,18 +842,11 @@
         "min": 5,
         "max": 25
       },
-      "visibleWhen": [
-        {
-          "field": "age_in_months",
-          "operator": "gte",
-          "value": 6
-        },
-        {
-          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
-          "operator": "eq",
-          "value": "yes"
-        }
-      ],
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      },
       "question_code": "muac_in_cms"
     },
     {
@@ -942,18 +907,11 @@
       "section": "History",
       "required": true,
       "input_type": "date",
-      "visibleWhen": [
-        {
-          "field": "bcg",
-          "operator": "eq",
-          "value": "yes"
-        },
-        {
-          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
-          "operator": "eq",
-          "value": "yes"
-        }
-      ],
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      },
       "question_code": "bcg_date"
     },
     {
@@ -985,18 +943,11 @@
       "section": "History",
       "required": true,
       "input_type": "date",
-      "visibleWhen": [
-        {
-          "field": "opv_0",
-          "operator": "eq",
-          "value": "yes"
-        },
-        {
-          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
-          "operator": "eq",
-          "value": "yes"
-        }
-      ],
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      },
       "question_code": "opv_0_date"
     },
     {
@@ -1028,18 +979,11 @@
       "section": "History",
       "required": true,
       "input_type": "date",
-      "visibleWhen": [
-        {
-          "field": "hepatitis_b_birth_dose",
-          "operator": "eq",
-          "value": "yes"
-        },
-        {
-          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
-          "operator": "eq",
-          "value": "yes"
-        }
-      ],
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      },
       "question_code": "hepatitis_b_date_birth_dose"
     },
     {
@@ -1071,18 +1015,11 @@
       "section": "History",
       "required": true,
       "input_type": "date",
-      "visibleWhen": [
-        {
-          "field": "vitamin_k",
-          "operator": "eq",
-          "value": "yes"
-        },
-        {
-          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
-          "operator": "eq",
-          "value": "yes"
-        }
-      ],
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      },
       "question_code": "vitamin_k_date"
     },
     {
@@ -1114,18 +1051,11 @@
       "section": "History",
       "required": true,
       "input_type": "date",
-      "visibleWhen": [
-        {
-          "field": "opv_1",
-          "operator": "eq",
-          "value": "yes"
-        },
-        {
-          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
-          "operator": "eq",
-          "value": "yes"
-        }
-      ],
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      },
       "question_code": "opv_1_date"
     },
     {
@@ -1157,18 +1087,11 @@
       "section": "History",
       "required": true,
       "input_type": "date",
-      "visibleWhen": [
-        {
-          "field": "pentavalent_1_dpt1",
-          "operator": "eq",
-          "value": "yes"
-        },
-        {
-          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
-          "operator": "eq",
-          "value": "yes"
-        }
-      ],
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      },
       "question_code": "pentavalent_1_dpt1_date"
     },
     {
@@ -1200,18 +1123,11 @@
       "section": "History",
       "required": true,
       "input_type": "date",
-      "visibleWhen": [
-        {
-          "field": "ipv_1",
-          "operator": "eq",
-          "value": "yes"
-        },
-        {
-          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
-          "operator": "eq",
-          "value": "yes"
-        }
-      ],
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      },
       "question_code": "ipv_1_date"
     },
     {
@@ -1243,18 +1159,11 @@
       "section": "History",
       "required": true,
       "input_type": "date",
-      "visibleWhen": [
-        {
-          "field": "rotavirus1",
-          "operator": "eq",
-          "value": "yes"
-        },
-        {
-          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
-          "operator": "eq",
-          "value": "yes"
-        }
-      ],
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      },
       "question_code": "rotavirus1_date"
     },
     {
@@ -1286,18 +1195,11 @@
       "section": "History",
       "required": true,
       "input_type": "date",
-      "visibleWhen": [
-        {
-          "field": "pcv1",
-          "operator": "eq",
-          "value": "yes"
-        },
-        {
-          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
-          "operator": "eq",
-          "value": "yes"
-        }
-      ],
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      },
       "question_code": "pcv1_date"
     },
     {
@@ -1329,18 +1231,11 @@
       "section": "History",
       "required": true,
       "input_type": "date",
-      "visibleWhen": [
-        {
-          "field": "opv_2",
-          "operator": "eq",
-          "value": "yes"
-        },
-        {
-          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
-          "operator": "eq",
-          "value": "yes"
-        }
-      ],
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      },
       "question_code": "opv_2_date"
     },
     {
@@ -1372,18 +1267,11 @@
       "section": "History",
       "required": true,
       "input_type": "date",
-      "visibleWhen": [
-        {
-          "field": "pentavalent_2_dpt2",
-          "operator": "eq",
-          "value": "yes"
-        },
-        {
-          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
-          "operator": "eq",
-          "value": "yes"
-        }
-      ],
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      },
       "question_code": "pentavalent_2_dpt2_date"
     },
     {
@@ -1415,18 +1303,11 @@
       "section": "History",
       "required": true,
       "input_type": "date",
-      "visibleWhen": [
-        {
-          "field": "rotavirus2",
-          "operator": "eq",
-          "value": "yes"
-        },
-        {
-          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
-          "operator": "eq",
-          "value": "yes"
-        }
-      ],
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      },
       "question_code": "rotavirus2_date"
     },
     {
@@ -1458,18 +1339,11 @@
       "section": "History",
       "required": true,
       "input_type": "date",
-      "visibleWhen": [
-        {
-          "field": "opv_3",
-          "operator": "eq",
-          "value": "yes"
-        },
-        {
-          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
-          "operator": "eq",
-          "value": "yes"
-        }
-      ],
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      },
       "question_code": "opv_3_date"
     },
     {
@@ -1501,18 +1375,11 @@
       "section": "History",
       "required": true,
       "input_type": "date",
-      "visibleWhen": [
-        {
-          "field": "pentavalent_3_dpt3",
-          "operator": "eq",
-          "value": "yes"
-        },
-        {
-          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
-          "operator": "eq",
-          "value": "yes"
-        }
-      ],
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      },
       "question_code": "pentavalent_3_dpt3_date"
     },
     {
@@ -1544,18 +1411,11 @@
       "section": "History",
       "required": true,
       "input_type": "date",
-      "visibleWhen": [
-        {
-          "field": "ipv2",
-          "operator": "eq",
-          "value": "yes"
-        },
-        {
-          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
-          "operator": "eq",
-          "value": "yes"
-        }
-      ],
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      },
       "question_code": "ipv2_date"
     },
     {
@@ -1587,18 +1447,11 @@
       "section": "History",
       "required": true,
       "input_type": "date",
-      "visibleWhen": [
-        {
-          "field": "rotavirus3",
-          "operator": "eq",
-          "value": "yes"
-        },
-        {
-          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
-          "operator": "eq",
-          "value": "yes"
-        }
-      ],
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      },
       "question_code": "rotavirus3_date"
     },
     {
@@ -1630,18 +1483,11 @@
       "section": "History",
       "required": true,
       "input_type": "date",
-      "visibleWhen": [
-        {
-          "field": "pcv2",
-          "operator": "eq",
-          "value": "yes"
-        },
-        {
-          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
-          "operator": "eq",
-          "value": "yes"
-        }
-      ],
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      },
       "question_code": "pcv2_date"
     },
     {
@@ -1673,18 +1519,11 @@
       "section": "History",
       "required": true,
       "input_type": "date",
-      "visibleWhen": [
-        {
-          "field": "mmr_1_mr1",
-          "operator": "eq",
-          "value": "yes"
-        },
-        {
-          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
-          "operator": "eq",
-          "value": "yes"
-        }
-      ],
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      },
       "question_code": "mmr_1_mr1_date"
     },
     {
@@ -1716,18 +1555,11 @@
       "section": "History",
       "required": true,
       "input_type": "date",
-      "visibleWhen": [
-        {
-          "field": "pcv_booster",
-          "operator": "eq",
-          "value": "yes"
-        },
-        {
-          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
-          "operator": "eq",
-          "value": "yes"
-        }
-      ],
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      },
       "question_code": "pcv_booster_date"
     },
     {
@@ -1759,18 +1591,11 @@
       "section": "History",
       "required": true,
       "input_type": "date",
-      "visibleWhen": [
-        {
-          "field": "vitamin_a",
-          "operator": "eq",
-          "value": "yes"
-        },
-        {
-          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
-          "operator": "eq",
-          "value": "yes"
-        }
-      ],
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      },
       "question_code": "vitamin_a_date"
     },
     {
@@ -1802,18 +1627,11 @@
       "section": "History",
       "required": true,
       "input_type": "date",
-      "visibleWhen": [
-        {
-          "field": "opv_booster",
-          "operator": "eq",
-          "value": "yes"
-        },
-        {
-          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
-          "operator": "eq",
-          "value": "yes"
-        }
-      ],
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      },
       "question_code": "opv_booster_date"
     },
     {
@@ -1845,18 +1663,11 @@
       "section": "History",
       "required": true,
       "input_type": "date",
-      "visibleWhen": [
-        {
-          "field": "mmr2_mr2",
-          "operator": "eq",
-          "value": "yes"
-        },
-        {
-          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
-          "operator": "eq",
-          "value": "yes"
-        }
-      ],
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      },
       "question_code": "mmr2_mr2_date"
     },
     {
@@ -1888,18 +1699,11 @@
       "section": "History",
       "required": true,
       "input_type": "date",
-      "visibleWhen": [
-        {
-          "field": "dpt_booster1",
-          "operator": "eq",
-          "value": "yes"
-        },
-        {
-          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
-          "operator": "eq",
-          "value": "yes"
-        }
-      ],
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      },
       "question_code": "dpt_booster1_date"
     },
     {

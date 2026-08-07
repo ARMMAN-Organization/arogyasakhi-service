@@ -128,18 +128,11 @@
       "dateRule": {
         "notFuture": true
       },
-      "visibleWhen": [
-        {
-          "field": "do_you_have_a_sonography_report_to_confirm_the_lmp_date",
-          "operator": "eq",
-          "value": "yes"
-        },
-        {
-          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
-          "operator": "eq",
-          "value": "yes"
-        }
-      ],
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      },
       "question_code": "lmp_date_edit"
     },
     {
@@ -148,18 +141,11 @@
       "required": true,
       "input_type": "image",
       "captureMode": "LIVE_CAMERA_ONLY",
-      "visibleWhen": [
-        {
-          "field": "do_you_have_a_sonography_report_to_confirm_the_lmp_date",
-          "operator": "eq",
-          "value": "yes"
-        },
-        {
-          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
-          "operator": "eq",
-          "value": "yes"
-        }
-      ],
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      },
       "question_code": "upload_sonography_report_image"
     },
     {
@@ -646,18 +632,11 @@
       "section": "Symptoms",
       "required": true,
       "input_type": "radio",
-      "visibleWhen": [
-        {
-          "field": "current_gestational_age_in_weeks",
-          "operator": "gte",
-          "value": 20
-        },
-        {
-          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
-          "operator": "eq",
-          "value": "yes"
-        }
-      ],
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      },
       "question_code": "fetal_movements"
     },
     {
@@ -665,18 +644,11 @@
       "section": "Symptoms",
       "required": true,
       "input_type": "number",
-      "visibleWhen": [
-        {
-          "field": "current_gestational_age_in_weeks",
-          "operator": "gte",
-          "value": 20
-        },
-        {
-          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
-          "operator": "eq",
-          "value": "yes"
-        }
-      ],
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      },
       "question_code": "fetal_heart_rate"
     },
     {
@@ -688,18 +660,11 @@
         "min": 10,
         "max": 50
       },
-      "visibleWhen": [
-        {
-          "field": "current_gestational_age_in_weeks",
-          "operator": "gte",
-          "value": 20
-        },
-        {
-          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
-          "operator": "eq",
-          "value": "yes"
-        }
-      ],
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      },
       "question_code": "fundal_height_in_cm"
     },
     {
@@ -897,18 +862,11 @@
         "min": 0,
         "max": 35
       },
-      "visibleWhen": [
-        {
-          "field": "are_you_taking_ifa_tablets",
-          "operator": "eq",
-          "value": "yes"
-        },
-        {
-          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
-          "operator": "eq",
-          "value": "yes"
-        }
-      ],
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      },
       "question_code": "how_many_ifa_tablets_did_you_consume_since_last_visit"
     },
     {
@@ -943,18 +901,11 @@
       "section": "Symptoms",
       "required": true,
       "input_type": "multiselect",
-      "visibleWhen": [
-        {
-          "field": "are_you_taking_ifa_tablets",
-          "operator": "eq",
-          "value": "no"
-        },
-        {
-          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
-          "operator": "eq",
-          "value": "yes"
-        }
-      ],
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      },
       "question_code": "if_no_what_is_the_reasons_for_non_consumption_of_ifa_tablets"
     },
     {
@@ -1013,18 +964,11 @@
       "dateRule": {
         "notFuture": true
       },
-      "visibleWhen": [
-        {
-          "field": "have_you_visited_health_facility_since_my_last_visit",
-          "operator": "eq",
-          "value": "yes"
-        },
-        {
-          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
-          "operator": "eq",
-          "value": "yes"
-        }
-      ],
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      },
       "question_code": "if_yes_enter_date_of_latest_anc_visit_at_the_health_facility"
     },
     {
@@ -1296,18 +1240,11 @@
           "field": "lmp"
         }
       },
-      "visibleWhen": [
-        {
-          "field": "have_you_done_usg_since_last_visit",
-          "operator": "eq",
-          "value": "yes"
-        },
-        {
-          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
-          "operator": "eq",
-          "value": "yes"
-        }
-      ],
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      },
       "question_code": "if_yes_date_of_usg"
     },
     {
@@ -1337,18 +1274,11 @@
       "section": "History",
       "required": true,
       "input_type": "select",
-      "visibleWhen": [
-        {
-          "field": "have_you_done_usg_since_last_visit",
-          "operator": "eq",
-          "value": "yes"
-        },
-        {
-          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
-          "operator": "eq",
-          "value": "yes"
-        }
-      ],
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      },
       "question_code": "type_of_usg"
     },
     {
@@ -1368,18 +1298,11 @@
       "section": "History",
       "required": true,
       "input_type": "select",
-      "visibleWhen": [
-        {
-          "field": "have_you_done_usg_since_last_visit",
-          "operator": "eq",
-          "value": "yes"
-        },
-        {
-          "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
-          "operator": "eq",
-          "value": "yes"
-        }
-      ],
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "yes"
+      },
       "question_code": "usg_finding"
     },
     {
