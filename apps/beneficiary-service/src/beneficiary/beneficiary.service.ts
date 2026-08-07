@@ -322,7 +322,10 @@ export class BeneficiaryService {
       case: {
         localCaseUuid: dto.case.localCaseUuid,
         projectId: dto.case.projectId,
-        sakhiId: dto.case.sakhiId,
+        // Always the authenticated caller's own id — dto.case.sakhiId is
+        // ignored even if present, so a Sakhi can never enroll a beneficiary
+        // under another Sakhi's name (see caseSchema.sakhiId).
+        sakhiId: capturedByUserId,
         caseType: dto.case.caseType,
         registrationDate: dto.case.registrationDate,
         previousBeneficiaryId: dto.case.previousBeneficiaryId ?? null,

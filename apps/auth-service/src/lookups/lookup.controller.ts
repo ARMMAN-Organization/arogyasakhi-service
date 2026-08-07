@@ -4,6 +4,7 @@ import type { TokenSigner } from '@armman/service-commons';
 import type { LookupService } from './lookup.service';
 import { createLookupValueSchema } from './dto/create-lookup-value.dto';
 import { updateLookupValueSchema } from './dto/update-lookup-value.dto';
+import { bulkUpsertLookupValuesSchema } from './dto/bulk-upsert-lookup-values.dto';
 import {
   asyncHandler,
   authenticate,
@@ -48,6 +49,12 @@ const lookupCategorySchema = z.object({
 function envelope<T extends z.ZodTypeAny>(data: T) {
   return z.object({ success: z.literal(true), message: z.string(), data });
 }
+
+const bulkUpsertResultSchema = z.object({
+  created: z.array(z.string()).openapi({ example: ['TENTH_PASS'] }),
+  updated: z.array(z.string()).openapi({ example: ['PRIMARY'] }),
+  unchanged: z.array(z.string()).openapi({ example: ['GRADUATE'] }),
+});
 
 /**
  * Lookup category/value master-data HTTP routes. Mounted under the global
@@ -156,6 +163,37 @@ export function createLookupRouter(service: LookupService, signer: TokenSigner) 
     validateBody(updateLookupValueSchema),
     asyncHandler(async (req, res) => {
       res.json(ok(await service.updateValue(req.params.id, req.body)));
+    }),
+  );
+
+  doc.patch(
+    '/lookups/:categoryCode/values/bulk-upsert',
+    {
+      summary: "Reconcile a category's values against a target list",
+      tags: ['Lookups'],
+      params: categoryCodeParamsSchema,
+      responses: {
+        200: {
+          description: 'Values created/updated as needed; a summary of what changed',
+          schema: envelope(bulkUpsertResultSchema),
+        },
+        400: errorResponse(400, { message: 'values: Array must contain at least 1 element(s)' }),
+        401: errorResponse(401),
+        403: errorResponse(403),
+        404: errorResponse(404, { message: 'Lookup category not found.' }),
+        422: errorResponse(422, {
+          message: 'parentLookupValueId must belong to the same lookup category.',
+          description: 'Unprocessable — parentLookupValueId belongs to a different category',
+        }),
+        500: errorResponse(500),
+      },
+    },
+    authenticate(signer),
+    requireRoles('ADMIN'),
+    validate(categoryCodeParamsSchema, 'params'),
+    validateBody(bulkUpsertLookupValuesSchema),
+    asyncHandler(async (req, res) => {
+      res.json(ok(await service.bulkUpsertValues(req.params.categoryCode, req.body)));
     }),
   );
 

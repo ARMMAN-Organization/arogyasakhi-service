@@ -202,6 +202,40 @@ describe('createBeneficiarySchema', () => {
     });
   });
 
+  describe('case.sakhiId (accepted but ignored — see BeneficiaryService.create)', () => {
+    it('accepts a payload with case.sakhiId omitted entirely', () => {
+      const caseWithoutSakhiId: Record<string, unknown> = { ...baseCase };
+      delete caseWithoutSakhiId.sakhiId;
+      const result = createBeneficiarySchema.safeParse({
+        pii: { ...basePii },
+        case: { ...caseWithoutSakhiId, caseType: 'MOTHER' },
+        motherDetails: { lmpDate: '2025-10-01' },
+        consent,
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('accepts a payload with case.sakhiId present (legacy client)', () => {
+      const result = createBeneficiarySchema.safeParse({
+        pii: { ...basePii },
+        case: { ...baseCase, caseType: 'MOTHER' },
+        motherDetails: { lmpDate: '2025-10-01' },
+        consent,
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('rejects case.sakhiId that is not a valid uuid', () => {
+      const result = createBeneficiarySchema.safeParse({
+        pii: { ...basePii },
+        case: { ...baseCase, caseType: 'MOTHER', sakhiId: 'not-a-uuid' },
+        motherDetails: { lmpDate: '2025-10-01' },
+        consent,
+      });
+      expect(result.success).toBe(false);
+    });
+  });
+
   describe('pii.fullName', () => {
     it('rejects a payload missing pii.fullName', () => {
       const missingFullName: Record<string, unknown> = { ...basePii };
