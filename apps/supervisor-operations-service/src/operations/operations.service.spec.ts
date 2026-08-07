@@ -15,6 +15,7 @@ describe('OperationsService', () => {
   const repository = {
     findEvents: jest.fn(),
     createEvent: jest.fn(),
+    findConflictingEvent: jest.fn(),
     findEventById: jest.fn(),
     updateEventStatus: jest.fn(),
     findAttendanceByEvent: jest.fn(),
@@ -112,8 +113,8 @@ describe('OperationsService', () => {
     ).rejects.toThrow('db down');
   });
 
-  it('rejects a COMPLETED event with no photoMediaId without hitting the repository', () => {
-    expect(() =>
+  it('rejects a COMPLETED event with no photoMediaId without hitting the repository', async () => {
+    await expect(
       service.createEvent({
         projectId: '22222222-2222-2222-2222-222222222222',
         supervisorId: '33333333-3333-3333-3333-333333333333',
@@ -122,7 +123,7 @@ describe('OperationsService', () => {
         topicsJson: ['review'],
         status: 'COMPLETED',
       }),
-    ).toThrow('photoMediaId is required when status is COMPLETED.');
+    ).rejects.toThrow('photoMediaId is required when status is COMPLETED.');
     expect(repository.createEvent).not.toHaveBeenCalled();
   });
 
@@ -137,6 +138,42 @@ describe('OperationsService', () => {
       photoMediaId: '55555555-5555-5555-5555-555555555555',
     };
     repository.createEvent.mockResolvedValue(eventRow);
+    await expect(service.createEvent(dto)).resolves.toBe(eventRow);
+    expect(repository.createEvent).toHaveBeenCalledWith(dto);
+  });
+
+  it('rejects a duplicate event for the same supervisor/project/eventDate, without creating anything', async () => {
+    const dto: CreateSupervisorEventInput = {
+      projectId: '22222222-2222-2222-2222-222222222222',
+      supervisorId: '33333333-3333-3333-3333-333333333333',
+      eventType: 'MEETING',
+      eventDate: new Date('2026-07-01T10:00:00Z'),
+      topicsJson: ['review'],
+      status: 'SCHEDULED',
+    };
+    repository.findConflictingEvent.mockResolvedValue(eventRow);
+
+    await expect(service.createEvent(dto)).rejects.toMatchObject({ status: 409 });
+    expect(repository.findConflictingEvent).toHaveBeenCalledWith(
+      dto.supervisorId,
+      dto.projectId,
+      dto.eventDate,
+    );
+    expect(repository.createEvent).not.toHaveBeenCalled();
+  });
+
+  it('allows creating an event when no conflicting event exists', async () => {
+    const dto: CreateSupervisorEventInput = {
+      projectId: '22222222-2222-2222-2222-222222222222',
+      supervisorId: '33333333-3333-3333-3333-333333333333',
+      eventType: 'MEETING',
+      eventDate: new Date('2026-07-01T10:00:00Z'),
+      topicsJson: ['review'],
+      status: 'SCHEDULED',
+    };
+    repository.findConflictingEvent.mockResolvedValue(null);
+    repository.createEvent.mockResolvedValue(eventRow);
+
     await expect(service.createEvent(dto)).resolves.toBe(eventRow);
     expect(repository.createEvent).toHaveBeenCalledWith(dto);
   });
@@ -951,7 +988,15 @@ describe('OperationsService', () => {
       },
     ];
     repository.findCallLogs.mockResolvedValue(rows);
-    await expect(service.listCallLogs()).resolves.toBe(rows);
+    await expect(service.listCallLogs(supervisorCaller)).resolves.toBe(rows);
+    expect(repository.findCallLogs).toHaveBeenCalledWith(supervisorCaller.id);
+  });
+
+  it('lists all call logs unscoped for a MANAGER', async () => {
+    const rows: CallLog[] = [];
+    repository.findCallLogs.mockResolvedValue(rows);
+    await expect(service.listCallLogs(managerCaller)).resolves.toBe(rows);
+    expect(repository.findCallLogs).toHaveBeenCalledWith(undefined);
   });
 
   const callLogRow: CallLog = {
@@ -1121,6 +1166,36 @@ describe('OperationsService', () => {
         ),
       ).rejects.toMatchObject({ status: 403 });
       expect(repository.updateCallLog).not.toHaveBeenCalled();
+    });
+
+    it('rejects a callEndAt earlier than the record’s own callStartAt, without updating anything', async () => {
+      repository.findCallLogById.mockResolvedValue(callLogRow);
+      await expect(
+        service.updateCallLog(
+          'cccccccc-cccc-cccc-cccc-cccccccccccc',
+          { callEndAt: new Date(callLogRow.callStartAt.getTime() - 60 * 60 * 1000) },
+          supervisorCaller,
+        ),
+      ).rejects.toMatchObject({ status: 422 });
+      expect(repository.updateCallLog).not.toHaveBeenCalled();
+    });
+
+    it('accepts a callEndAt at or after the record’s own callStartAt', async () => {
+      repository.findCallLogById.mockResolvedValue(callLogRow);
+      repository.updateCallLog.mockResolvedValue(callLogRow);
+
+      const callEndAt = new Date(callLogRow.callStartAt.getTime() + 60 * 1000);
+      await service.updateCallLog(
+        'cccccccc-cccc-cccc-cccc-cccccccccccc',
+        { callEndAt },
+        supervisorCaller,
+      );
+
+      expect(repository.updateCallLog).toHaveBeenCalledWith(
+        'cccccccc-cccc-cccc-cccc-cccccccccccc',
+        { callEndAt },
+        supervisorCaller.id,
+      );
     });
 
     it('allows an ADMIN to update a call log they do not own', async () => {

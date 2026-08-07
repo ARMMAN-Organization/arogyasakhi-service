@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { diffInDays, startOfUTCDay } from '@armman/core';
 
 /**
  * Recursive JSON value type usable inside the `topicsJson` payload (nulls allowed
@@ -41,9 +42,15 @@ export const createSupervisorEventSchema = z
     projectId: z.string().uuid(),
     supervisorId: z.string().uuid(),
     eventType: z.enum(['MEETING', 'TRAINING']),
-    eventDate: z.coerce.date(),
+    // eventDate is @db.Date (calendar date, no time-of-day) — comparing its
+    // coerced midnight value against the exact current instant would reject
+    // today itself for all but the first millisecond after UTC midnight, so
+    // "now" is normalized to midnight UTC before comparing whole calendar days.
+    eventDate: z.coerce.date().refine((date) => diffInDays(startOfUTCDay(new Date()), date) >= 0, {
+      message: 'eventDate must not be in the past.',
+    }),
     topicsJson: jsonValueSchema,
-    remarks: z.string().trim().min(1).optional(),
+    remarks: z.string().trim().min(3).optional(),
     status: z.enum(['SCHEDULED', 'COMPLETED', 'CANCELLED']),
     photoMediaId: z.string().uuid().optional(),
   })

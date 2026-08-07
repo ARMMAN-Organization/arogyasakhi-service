@@ -35,6 +35,19 @@ export class OperationsRepository {
     return this.prisma.supervisorEvent.create({ data });
   }
 
+  /** An existing, non-cancelled event for this supervisor+project at the exact same eventDate, if any. */
+  findConflictingEvent(supervisorId: string, projectId: string, eventDate: Date) {
+    return this.prisma.supervisorEvent.findFirst({
+      where: {
+        supervisorId,
+        projectId,
+        eventDate,
+        isDeleted: false,
+        status: { not: 'CANCELLED' },
+      },
+    });
+  }
+
   findEventById(id: string) {
     return this.prisma.supervisorEvent.findFirst({ where: { id, isDeleted: false } });
   }
@@ -206,9 +219,10 @@ export class OperationsRepository {
     });
   }
 
-  findCallLogs() {
+  /** Recent call logs, scoped to one supervisor unless `supervisorId` is omitted (MANAGER/ADMIN). */
+  findCallLogs(supervisorId?: string) {
     return this.prisma.callLog.findMany({
-      where: { isDeleted: false },
+      where: { isDeleted: false, ...(supervisorId ? { supervisorId } : {}) },
       orderBy: { callDatetime: 'desc' },
       take: 50,
     });

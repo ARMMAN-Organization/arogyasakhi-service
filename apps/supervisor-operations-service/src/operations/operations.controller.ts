@@ -604,8 +604,9 @@ export function createOperationsRouter(service: OperationsService) {
     },
     trustGatewayIdentity,
     requireRoles('SUPERVISOR', 'MANAGER'),
-    asyncHandler(async (_req, res) => {
-      res.json(ok(await service.listCallLogs()));
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      res.json(ok(await service.listCallLogs(req.user)));
     }),
   );
 
