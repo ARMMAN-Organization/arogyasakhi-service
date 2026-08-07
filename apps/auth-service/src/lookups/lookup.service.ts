@@ -2,6 +2,7 @@ import { conflict, notFound, unprocessable } from '@armman/service-commons';
 import type { LookupRepository } from './lookup.repository';
 import type { CreateLookupValueInput } from './dto/create-lookup-value.dto';
 import type { UpdateLookupValueInput } from './dto/update-lookup-value.dto';
+import type { BulkUpsertLookupValuesInput } from './dto/bulk-upsert-lookup-values.dto';
 
 /** Prisma unique-constraint violation code (valueCode within a category). */
 const PRISMA_UNIQUE_CONSTRAINT_CODE = 'P2002';
@@ -86,6 +87,78 @@ export class LookupService {
     const updated = await this.repository.updateValue(id, input);
     if (!updated) throw notFound('Lookup value not found.');
     return toApiLookupValue(updated as unknown as Record<string, unknown>);
+  }
+
+  /**
+   * Reconciles a category's values against a target list in one call —
+   * e.g. an environment whose lookup master data has drifted from the
+   * current form schema. Additive/updating only: a valueCode absent from
+   * the category is created, one present with a different valueLabel/
+   * sortOrder/parentLookupValueId is updated, and a valueCode already
+   * matching exactly is left as a no-op write. Existing values not
+   * mentioned in the payload are never touched or removed.
+   */
+  async bulkUpsertValues(categoryCode: string, input: BulkUpsertLookupValuesInput) {
+    const category = await this.repository.findCategoryByCode(categoryCode);
+    if (!category) throw notFound('Lookup category not found.');
+
+    const existingValues = await this.repository.findValuesByCategoryId(category.id);
+    const existingByCode = new Map(
+      existingValues.map((v) => [(v as { valueCode: string }).valueCode, v]),
+    );
+
+    for (const item of input.values) {
+      if (item.parentLookupValueId) {
+        const parent = await this.repository.findValueById(item.parentLookupValueId);
+        if (!parent || parent.lookupCategoryId !== category.id) {
+          throw unprocessable('parentLookupValueId must belong to the same lookup category.');
+        }
+      }
+    }
+
+    const toCreate: BulkUpsertLookupValuesInput['values'] = [];
+    const toUpdate: { id: string; data: BulkUpsertLookupValuesInput['values'][number] }[] = [];
+    const unchanged: string[] = [];
+
+    for (const item of input.values) {
+      const existing = existingByCode.get(item.valueCode) as
+        | { id: string; valueLabel: string; sortOrder: number; parentLookupValueId: string | null }
+        | undefined;
+
+      if (!existing) {
+        toCreate.push(item);
+        continue;
+      }
+
+      const isUnchanged =
+        existing.valueLabel === item.valueLabel &&
+        (item.sortOrder === undefined || existing.sortOrder === item.sortOrder) &&
+        (item.parentLookupValueId === undefined ||
+          existing.parentLookupValueId === item.parentLookupValueId);
+
+      if (isUnchanged) {
+        unchanged.push(item.valueCode);
+      } else {
+        toUpdate.push({ id: existing.id, data: item });
+      }
+    }
+
+    if (toCreate.length > 0 || toUpdate.length > 0) {
+      try {
+        await this.repository.bulkUpsertValues(category.id, toCreate, toUpdate);
+      } catch (err) {
+        if (isUniqueConstraintViolation(err)) {
+          throw conflict('A value with this code already exists in this category.');
+        }
+        throw err;
+      }
+    }
+
+    return {
+      created: toCreate.map((v) => v.valueCode),
+      updated: toUpdate.map((v) => v.data.valueCode),
+      unchanged,
+    };
   }
 }
 
