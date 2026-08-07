@@ -285,8 +285,9 @@ export function createOperationsRouter(service: OperationsService) {
     trustGatewayIdentity,
     requireRoles('SUPERVISOR'),
     validateBody(createSupervisorEventRequestSchema),
-    asyncHandler(async (req, res) => {
-      const created = await service.createEvent(req.body);
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const created = await service.createEvent(req.body, req.user);
       res.status(201).json(ok(created));
     }),
   );

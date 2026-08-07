@@ -77,7 +77,15 @@ export class OperationsService {
     return this.repository.findEvents(filters);
   }
 
-  async createEvent(dto: CreateSupervisorEventInput) {
+  /**
+   * `supervisorId` is never taken from the client-supplied body — it's
+   * always the authenticated caller's own id, so a Supervisor can never
+   * create an event under another Supervisor's name (matching
+   * createInventoryTransactions/createCallLog). This also guarantees
+   * getEvent/cancelEvent/completeEvent's `supervisorId !== caller.id`
+   * ownership check is meaningful for the event's actual creator.
+   */
+  async createEvent(dto: CreateSupervisorEventInput, caller: CallerIdentity) {
     // The DTO's photoMediaId is application-mandatory when status = COMPLETED
     // (ERD §4.7) — the schema keeps it optional so SCHEDULED/CANCELLED events
     // can be created without a photo, so this rule is enforced here instead.
@@ -88,14 +96,14 @@ export class OperationsService {
     // same project — almost certainly a duplicate submission, not two real
     // meetings. Cancelled events don't block a re-create at that slot.
     const existingConflict = await this.repository.findConflictingEvent(
-      dto.supervisorId,
+      caller.id,
       dto.projectId,
       dto.eventDate,
     );
     if (existingConflict) {
       throw conflict('An event for this supervisor and project already exists at this date/time.');
     }
-    return this.repository.createEvent(dto);
+    return this.repository.createEvent({ ...dto, supervisorId: caller.id });
   }
 
   /** A SUPERVISOR may only fetch their own events. MANAGER and ADMIN are unrestricted. */

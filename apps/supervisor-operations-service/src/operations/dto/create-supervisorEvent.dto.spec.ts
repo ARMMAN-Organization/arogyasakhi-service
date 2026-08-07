@@ -3,11 +3,19 @@ import { createSupervisorEventSchema } from './create-supervisorEvent.dto';
 describe('createSupervisorEventSchema', () => {
   const baseInput = {
     projectId: '22222222-2222-2222-2222-222222222222',
-    supervisorId: '33333333-3333-3333-3333-333333333333',
     eventType: 'MEETING' as const,
     topicsJson: { agenda: 'review' },
     status: 'SCHEDULED' as const,
   };
+
+  it('rejects a client-supplied supervisorId', () => {
+    const result = createSupervisorEventSchema.safeParse({
+      ...baseInput,
+      supervisorId: '33333333-3333-3333-3333-333333333333',
+      eventDate: new Date(Date.now() + 60 * 60 * 1000),
+    });
+    expect(result.success).toBe(false);
+  });
 
   it('rejects a past eventDate', () => {
     const result = createSupervisorEventSchema.safeParse({

@@ -36,11 +36,16 @@ const jsonValueSchema = z.union([
  * rejects unknown fields, matching the repo-wide `forbidNonWhitelisted` behavior.
  * `photoMediaId` is application-mandatory when `status = COMPLETED` (ERD §4.7) —
  * enforced in the service layer, not here, so the API contract stays declarative.
+ *
+ * `supervisorId` is deliberately NOT a field here — it is always the
+ * authenticated caller's own id (see operations.service.ts), never
+ * client-supplied, so a Supervisor can never create an event under another
+ * Supervisor's name (matching create-inventory-transaction.dto.ts and
+ * create-call-log.dto.ts).
  */
 export const createSupervisorEventSchema = z
   .object({
     projectId: z.string().uuid(),
-    supervisorId: z.string().uuid(),
     eventType: z.enum(['MEETING', 'TRAINING']),
     // eventDate is @db.Date (calendar date, no time-of-day) — comparing its
     // coerced midnight value against the exact current instant would reject
