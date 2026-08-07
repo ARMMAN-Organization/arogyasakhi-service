@@ -222,7 +222,12 @@ const caseSchema = z
     // localVisitUuid elsewhere in this codebase.
     localCaseUuid: z.string().trim().min(1).max(80),
     projectId: z.string().uuid(),
-    sakhiId: z.string().uuid(),
+    // Accepted for backward compatibility with existing clients but never
+    // trusted — the case is always attributed to the authenticated caller's
+    // own id (see BeneficiaryService.create's capturedByUserId), never a
+    // client-supplied value. A client can't create a beneficiary under
+    // another Sakhi's name.
+    sakhiId: z.string().uuid().optional(),
     caseType: z.enum(CASE_TYPES),
     registrationDate: z.coerce.date(),
     previousBeneficiaryId: z.string().uuid().optional(),

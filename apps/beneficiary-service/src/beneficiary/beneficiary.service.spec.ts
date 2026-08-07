@@ -561,6 +561,76 @@ describe('BeneficiaryService', () => {
       // 60 / (1.6*1.6) = 23.4375
       expect(call.motherDetails?.bmiAtRegistration).toBeCloseTo(23.44, 1);
     });
+
+    it('attributes the case to the authenticated caller when case.sakhiId is omitted', async () => {
+      const dto: CreateBeneficiaryInput = {
+        ...baseMotherInput,
+        case: { ...baseMotherInput.case, sakhiId: undefined },
+      };
+      repository.findDuplicateCandidate.mockResolvedValue(null);
+      repository.createEnrollment.mockImplementation((input) =>
+        Promise.resolve({ ...input } as never),
+      );
+
+      await service.create(dto, CALLER_ID, AUTH_HEADER);
+
+      const call = repository.createEnrollment.mock.calls[0][0];
+      expect(call.case.sakhiId).toBe(CALLER_ID);
+    });
+
+    it('ignores a client-supplied case.sakhiId and always uses the authenticated caller’s id', async () => {
+      // baseMotherInput.case.sakhiId ('33333333-...') deliberately differs
+      // from CALLER_ID ('99999999-...') to prove the client value is never trusted.
+      expect(baseMotherInput.case.sakhiId).not.toBe(CALLER_ID);
+      repository.findDuplicateCandidate.mockResolvedValue(null);
+      repository.createEnrollment.mockImplementation((input) =>
+        Promise.resolve({ ...input } as never),
+      );
+
+      await service.create(baseMotherInput, CALLER_ID, AUTH_HEADER);
+
+      const call = repository.createEnrollment.mock.calls[0][0];
+      expect(call.case.sakhiId).toBe(CALLER_ID);
+      expect(call.case.sakhiId).not.toBe(baseMotherInput.case.sakhiId);
+    });
+
+    it('attributes each case to its own caller when two different Sakhis enroll with the same body shape', async () => {
+      const CALLER_A = CALLER_ID;
+      const CALLER_B = '88888888-8888-8888-8888-888888888888';
+      repository.findDuplicateCandidate.mockResolvedValue(null);
+      repository.createEnrollment.mockImplementation((input) =>
+        Promise.resolve({ ...input } as never),
+      );
+
+      const dtoA: CreateBeneficiaryInput = {
+        ...baseMotherInput,
+        case: { ...baseMotherInput.case, localCaseUuid: 'local-case-uuid-caller-a' },
+      };
+      const dtoB: CreateBeneficiaryInput = {
+        ...baseMotherInput,
+        case: { ...baseMotherInput.case, localCaseUuid: 'local-case-uuid-caller-b' },
+      };
+
+      await service.create(dtoA, CALLER_A, AUTH_HEADER);
+      await service.create(dtoB, CALLER_B, AUTH_HEADER);
+
+      const [callA, callB] = repository.createEnrollment.mock.calls;
+      expect(callA[0].case.sakhiId).toBe(CALLER_A);
+      expect(callB[0].case.sakhiId).toBe(CALLER_B);
+    });
+
+    it('attributes a child enrollment to the authenticated caller, ignoring case.sakhiId', async () => {
+      expect(baseChildInput.case.sakhiId).not.toBe(CALLER_ID);
+      repository.findDuplicateCandidate.mockResolvedValue(null);
+      repository.createEnrollment.mockImplementation((input) =>
+        Promise.resolve({ ...input } as never),
+      );
+
+      await service.create(baseChildInput, CALLER_ID, AUTH_HEADER);
+
+      const call = repository.createEnrollment.mock.calls[0][0];
+      expect(call.case.sakhiId).toBe(CALLER_ID);
+    });
   });
 
   describe('create — mother enrollment (M1)', () => {
