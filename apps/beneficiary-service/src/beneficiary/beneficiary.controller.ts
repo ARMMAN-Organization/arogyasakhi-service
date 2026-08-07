@@ -37,6 +37,11 @@ const piiResponseSchema = z.object({
   // phoneEnc/addressLineEnc columns.
   mobileNumber: z.string().nullable().openapi({ example: '9876543210' }),
   address: z.string().nullable(),
+  // Decrypted server-side for display, same as fullName/mobileNumber/address
+  // — never the raw rchNumberEnc column. Null when the Sakhi left RCH
+  // enrollment unanswered or had no card available (see
+  // create-beneficiary.dto.ts's rchNumber note).
+  rchNumber: z.string().nullable().openapi({ example: 'KA201900042' }),
   villageId: z.string().uuid().nullable(),
   padaId: z.string().uuid().nullable(),
   healthSubCentreId: z.string().uuid().nullable(),

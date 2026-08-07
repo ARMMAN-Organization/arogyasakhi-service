@@ -1,5 +1,12 @@
+import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
 import { z } from 'zod';
 import { API_CONSENT_STATUSES, CASE_TYPES, SEXES } from '../beneficiary.constants';
+
+// Required for rchNumber's .openapi() call below — extendZodWithOpenApi
+// patches the shared zod module, but relying on some other file (e.g. the
+// controller) to call it first is fragile: this schema must be safe to
+// import standalone (as create-beneficiary.dto.spec.ts does).
+extendZodWithOpenApi(z);
 
 /**
  * Validation schema for enrolling a beneficiary (mother or child), per SRS
@@ -43,7 +50,22 @@ const piiSchema = z
     stateId: z.string().uuid(),
     districtId: z.string().uuid(),
     talukaId: z.string().uuid().optional(),
-    rchNumber: z.string().trim().min(1).max(50).optional(),
+    // Stored uppercase per GOI requirement (RCH numbers are case-insensitive
+    // in practice but must be canonical uppercase in the database/reports) —
+    // normalized here so every downstream consumer (encryption, search hash)
+    // sees the same casing regardless of how the Sakhi typed it.
+    // `.openapi({ type: 'string' })` is required on a `.transform()`'d
+    // schema — zod-to-openapi cannot infer a type for a bare ZodEffects
+    // node, and throws (crashing the whole service at boot, since OpenAPI
+    // doc generation runs at startup) without it.
+    rchNumber: z
+      .string()
+      .trim()
+      .min(1)
+      .max(50)
+      .transform((v) => v.toUpperCase())
+      .openapi({ type: 'string' })
+      .optional(),
   })
   .strict();
 
