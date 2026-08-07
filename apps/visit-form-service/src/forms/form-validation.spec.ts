@@ -623,3 +623,70 @@ describe('validateSubmission — pattern (NAME_NO_SPECIAL_CHARS)', () => {
     expect(violations).toEqual([]);
   });
 });
+
+describe('validateSubmission — dateRule (DOB of infant: notFuture, maxDaysFrom registration)', () => {
+  const registrationDateField: FormField = {
+    question_code: 'registrtion_date',
+    label: 'Registration date',
+    input_type: 'date',
+    required: true,
+  };
+
+  const dobField: FormField = {
+    question_code: 'date_of_birth_of_infant',
+    label: 'Date of birth of infant',
+    input_type: 'date',
+    required: true,
+    dateRule: {
+      notFuture: true,
+      maxDaysFrom: { field: 'registrtion_date', days: 183 },
+    },
+  };
+
+  const dateFields = [registrationDateField, dobField];
+
+  it('rejects a future date of birth', () => {
+    const future = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const violations = validateSubmission(dateFields, [], {
+      registrtion_date: future,
+      date_of_birth_of_infant: future,
+    });
+
+    expect(violations).toContain('date_of_birth_of_infant must not be in the future');
+  });
+
+  it('accepts a date of birth exactly 183 days before registration (boundary)', () => {
+    const violations = validateSubmission(dateFields, [], {
+      registrtion_date: '2026-07-03',
+      date_of_birth_of_infant: '2026-01-01',
+    });
+
+    expect(violations).toEqual([]);
+  });
+
+  it('rejects a date of birth 184 days before registration', () => {
+    const violations = validateSubmission(dateFields, [], {
+      registrtion_date: '2026-07-04',
+      date_of_birth_of_infant: '2026-01-01',
+    });
+
+    expect(violations.some((v) => v.includes('at most 183 days'))).toBe(true);
+  });
+
+  it('accepts a date of birth within the 0-183 day window', () => {
+    const violations = validateSubmission(dateFields, [], {
+      registrtion_date: '2026-03-01',
+      date_of_birth_of_infant: '2026-01-01',
+    });
+
+    expect(violations).toEqual([]);
+  });
+
+  it('skips the rule when registration date is absent', () => {
+    const violations = validateSubmission(dateFields, [], {
+      date_of_birth_of_infant: '2026-01-01',
+    });
+
+    expect(violations.filter((v) => v.includes('date_of_birth_of_infant'))).toEqual([]);
+  });
+});

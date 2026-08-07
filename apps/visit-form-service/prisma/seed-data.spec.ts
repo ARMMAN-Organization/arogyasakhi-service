@@ -94,6 +94,56 @@ describe('mother-registration.json', () => {
   });
 });
 
+describe('child-registration.json', () => {
+  const byCode = new Map(childRegistration.schemaJson.map((f) => [f.question_code, f]));
+
+  it('has exactly 55 fields (51 existing + 4 new per-vaccine date fields)', () => {
+    expect(childRegistration.schemaJson).toHaveLength(55);
+  });
+
+  it('applies the DOB-of-infant date rule (Infant Registration form Q6)', () => {
+    expect(byCode.get('date_of_birth_of_infant')?.dateRule).toEqual({
+      notFuture: true,
+      maxDaysFrom: { field: 'registrtion_date', days: 183 },
+    });
+  });
+
+  it('applies NAME_NO_SPECIAL_CHARS to the caregiver name (Q19)', () => {
+    expect(byCode.get('caregiver_name_first_name_middle_name_last_name')?.pattern).toBe(
+      'NAME_NO_SPECIAL_CHARS',
+    );
+  });
+
+  it('applies exactLength 10 to mobile_number (Q22)', () => {
+    expect(byCode.get('mobile_number')?.exactLength).toBe(10);
+  });
+
+  it('adds a visibleWhen-gated date field per vaccine (Q49)', () => {
+    const vaccineCodes = ['bcg_date', 'opv_date', 'hepatitis_b_date', 'vitamin_k_date'];
+    for (const code of vaccineCodes) {
+      expect(byCode.get(code)?.visibleWhen).toEqual({
+        field: 'vaccination_taken_at_birth',
+        operator: 'contains',
+        value: code,
+      });
+      expect(byCode.get(code)?.input_type).toBe('date');
+      expect(byCode.get(code)?.required).toBe(false);
+    }
+  });
+
+  it('has an EXCLUSIVE_OPTION rule so "None" cannot combine with a selected vaccine (Q49)', () => {
+    expect(childRegistration.validationJson).toContainEqual({
+      rule: 'EXCLUSIVE_OPTION',
+      field: 'vaccination_taken_at_birth',
+      exclusiveValues: ['none'],
+    });
+  });
+
+  it('has 2 total validationJson rules (1 existing ANY_OF_REQUIRED + 1 new EXCLUSIVE_OPTION)', () => {
+    expect(childRegistration.validationJson).toHaveLength(2);
+  });
+});
+
 describe('anc-visit.json', () => {
   const fields = ancVisit.schemaJson;
   const byCode = new Map(fields.map((f) => [f.question_code, f]));
