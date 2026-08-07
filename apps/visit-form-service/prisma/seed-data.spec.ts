@@ -173,8 +173,8 @@ describe('anc-visit.json', () => {
   const fields = ancVisit.schemaJson;
   const byCode = new Map(fields.map((f) => [f.question_code, f]));
 
-  it('has exactly 56 fields, per the Revised App Form Final ANC visit form', () => {
-    expect(fields).toHaveLength(56);
+  it('has exactly 59 fields (56 existing + 3 new per-dose Td date fields)', () => {
+    expect(fields).toHaveLength(59);
   });
 
   it('groups fields into Tests, Symptoms, History, in that order', () => {
@@ -186,7 +186,7 @@ describe('anc-visit.json', () => {
     expect(sections.slice(firstSymptoms, firstHistory).every((s) => s === 'Symptoms')).toBe(true);
     expect(sections.slice(firstHistory).every((s) => s === 'History')).toBe(true);
     expect(sections.filter((s) => s === 'Tests')).toHaveLength(11);
-    expect(sections.filter((s) => s === 'Symptoms')).toHaveLength(28);
+    expect(sections.filter((s) => s === 'Symptoms')).toHaveLength(31);
     expect(sections.filter((s) => s === 'History')).toHaveLength(17);
   });
 
@@ -269,8 +269,87 @@ describe('anc-visit.json', () => {
     }
   });
 
-  it('has no cross-field validation rules', () => {
-    expect(ancVisit.validationJson).toEqual([]);
+  it('applies notFuture to the LMP edit date (Q8)', () => {
+    expect(byCode.get('lmp_date_edit')?.dateRule).toEqual({ notFuture: true });
+  });
+
+  it('applies notFuture to the latest-ANC-visit date (Q41)', () => {
+    expect(
+      byCode.get('if_yes_enter_date_of_latest_anc_visit_at_the_health_facility')?.dateRule,
+    ).toEqual({ notFuture: true });
+  });
+
+  it('applies notFuture + notBefore LMP to the USG date (Q49)', () => {
+    expect(byCode.get('if_yes_date_of_usg')?.dateRule).toEqual({
+      notFuture: true,
+      notBefore: { field: 'lmp' },
+    });
+  });
+
+  it('adds a visibleWhen-gated, chained date field per Td dose (Q33)', () => {
+    expect(byCode.get('td1_date')?.visibleWhen).toEqual({
+      field: 'vaccination_status',
+      operator: 'contains',
+      value: 'td1_date',
+    });
+    expect(byCode.get('td1_date')?.dateRule).toEqual({ notFuture: true });
+
+    expect(byCode.get('td2_date')?.visibleWhen).toEqual({
+      field: 'vaccination_status',
+      operator: 'contains',
+      value: 'td2_date',
+    });
+    expect(byCode.get('td2_date')?.dateRule).toEqual({
+      notFuture: true,
+      notBefore: { field: 'td1_date' },
+    });
+
+    expect(byCode.get('booster_date')?.visibleWhen).toEqual({
+      field: 'vaccination_status',
+      operator: 'contains',
+      value: 'booster_date',
+    });
+    expect(byCode.get('booster_date')?.dateRule).toEqual({
+      notFuture: true,
+      notBefore: { field: 'td2_date' },
+    });
+
+    for (const code of ['td1_date', 'td2_date', 'booster_date']) {
+      expect(byCode.get(code)?.input_type).toBe('date');
+      expect(byCode.get(code)?.required).toBe(false);
+    }
+  });
+
+  it('has an EXCLUSIVE_OPTION rule so "Normal" urine test cannot combine with other findings (Q29)', () => {
+    expect(ancVisit.validationJson).toContainEqual({
+      rule: 'EXCLUSIVE_OPTION',
+      field: 'urine_test',
+      exclusiveValues: ['normal'],
+    });
+  });
+
+  it('has an EXCLUSIVE_OPTION rule so "None" cannot combine with a selected Td dose (Q33)', () => {
+    expect(ancVisit.validationJson).toContainEqual({
+      rule: 'EXCLUSIVE_OPTION',
+      field: 'vaccination_status',
+      exclusiveValues: ['none'],
+    });
+  });
+
+  it('has a REQUIRED_IF_SELECTED rule so each selected Td dose requires its date (Q33)', () => {
+    expect(ancVisit.validationJson).toContainEqual({
+      rule: 'REQUIRED_IF_SELECTED',
+      field: 'vaccination_status',
+      optionFieldMap: {
+        td1_date: 'td1_date',
+        td2_date: 'td2_date',
+        booster_date: 'booster_date',
+      },
+    });
+  });
+
+  it('has 3 total validationJson rules (2 EXCLUSIVE_OPTION + 1 REQUIRED_IF_SELECTED)', () => {
+    expect(ancVisit.validationJson).toHaveLength(3);
   });
 });
 

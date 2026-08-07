@@ -110,6 +110,9 @@
       "section": "Tests",
       "required": true,
       "input_type": "date",
+      "dateRule": {
+        "notFuture": true
+      },
       "visibleWhen": {
         "field": "do_you_have_a_sonography_report_to_confirm_the_lmp_date",
         "operator": "eq",
@@ -579,6 +582,57 @@
       "question_code": "vaccination_status"
     },
     {
+      "label": "Td1 date",
+      "section": "Symptoms",
+      "required": false,
+      "input_type": "date",
+      "dateRule": {
+        "notFuture": true
+      },
+      "visibleWhen": {
+        "field": "vaccination_status",
+        "operator": "contains",
+        "value": "td1_date"
+      },
+      "question_code": "td1_date"
+    },
+    {
+      "label": "Td2 date",
+      "section": "Symptoms",
+      "required": false,
+      "input_type": "date",
+      "dateRule": {
+        "notFuture": true,
+        "notBefore": {
+          "field": "td1_date"
+        }
+      },
+      "visibleWhen": {
+        "field": "vaccination_status",
+        "operator": "contains",
+        "value": "td2_date"
+      },
+      "question_code": "td2_date"
+    },
+    {
+      "label": "Booster date",
+      "section": "Symptoms",
+      "required": false,
+      "input_type": "date",
+      "dateRule": {
+        "notFuture": true,
+        "notBefore": {
+          "field": "td2_date"
+        }
+      },
+      "visibleWhen": {
+        "field": "vaccination_status",
+        "operator": "contains",
+        "value": "booster_date"
+      },
+      "question_code": "booster_date"
+    },
+    {
       "label": "Which of these food stuff have you consumed in the last 24 hours?",
       "options": [
         {
@@ -813,6 +867,9 @@
       "section": "History",
       "required": true,
       "input_type": "date",
+      "dateRule": {
+        "notFuture": true
+      },
       "visibleWhen": {
         "field": "have_you_visited_health_facility_since_my_last_visit",
         "operator": "eq",
@@ -1048,6 +1105,12 @@
       "section": "History",
       "required": true,
       "input_type": "date",
+      "dateRule": {
+        "notFuture": true,
+        "notBefore": {
+          "field": "lmp"
+        }
+      },
       "visibleWhen": {
         "field": "have_you_done_usg_since_last_visit",
         "operator": "eq",
@@ -1232,5 +1295,25 @@
       "question_code": "as_a_sakhi_have_you_guided_the_beneficiary_on_the_following"
     }
   ],
-  "validationJson": []
+  "validationJson": [
+    {
+      "rule": "EXCLUSIVE_OPTION",
+      "field": "urine_test",
+      "exclusiveValues": ["normal"]
+    },
+    {
+      "rule": "EXCLUSIVE_OPTION",
+      "field": "vaccination_status",
+      "exclusiveValues": ["none"]
+    },
+    {
+      "rule": "REQUIRED_IF_SELECTED",
+      "field": "vaccination_status",
+      "optionFieldMap": {
+        "td1_date": "td1_date",
+        "td2_date": "td2_date",
+        "booster_date": "booster_date"
+      }
+    }
+  ]
 }
