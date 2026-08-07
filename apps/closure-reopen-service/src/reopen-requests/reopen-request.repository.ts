@@ -1,4 +1,5 @@
 import type { PrismaService } from '../prisma/prisma.service';
+import type { CreateReopenRequestInput } from './dto/create-reopen-request.dto';
 import type { DecideReopenRequestInput } from './dto/decide-reopen-request.dto';
 
 /** Data access for reopen_requests. Owns only this service's `reopen_requests` table. */
@@ -7,6 +8,12 @@ export class ReopenRequestRepository {
 
   findById(id: string) {
     return this.prisma.reopenRequest.findFirst({ where: { id, isDeleted: false } });
+  }
+
+  create(data: CreateReopenRequestInput & { requestedByUserId: string }) {
+    return this.prisma.reopenRequest.create({
+      data: { ...data, requestedAt: new Date() },
+    });
   }
 
   /**

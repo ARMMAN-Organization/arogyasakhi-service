@@ -2,12 +2,15 @@ import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
 import { z } from 'zod';
 import type { ClosureService } from './closure.service';
 import { createClosureSchema } from './dto/create-closure.dto';
+import { decideClosureSchema } from './dto/decide-closure.dto';
 import {
   asyncHandler,
   createDocumentedRouter,
   ok,
   requireRoles,
   trustGatewayIdentity,
+  unauthorized,
+  validate,
   validateBody,
 } from '../app.module';
 
@@ -46,6 +49,14 @@ const closureSchema = z.object({
   supervisorNotes: z.string().nullable(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
+});
+
+const closureIdParamsSchema = z
+  .object({ id: z.string().uuid().openapi({ example: '123e4567-e89b-12d3-a456-426614174000' }) })
+  .strict();
+
+const decideClosureRequestSchema = decideClosureSchema.extend({
+  decision: decideClosureSchema.shape.decision.openapi({ example: 'APPROVED' }),
 });
 
 const apiErrorSchema = z.object({
@@ -104,8 +115,40 @@ export function createClosureRouter(service: ClosureService) {
     requireRoles('SAKHI'),
     validateBody(createClosureRequestSchema),
     asyncHandler(async (req, res) => {
-      const created = await service.create(req.body);
+      const created = await service.create(req.body, req.headers.authorization ?? '');
       res.status(201).json(ok(created));
+    }),
+  );
+
+  doc.patch(
+    '/closures/:id/decision',
+    {
+      summary: 'Decide a pending closure review (FR-SV-4.4)',
+      tags: ['Closures'],
+      params: closureIdParamsSchema,
+      responses: {
+        200: { description: 'Closure decided', schema: envelope(closureSchema) },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+        404: { description: 'Closure not found', schema: apiErrorSchema },
+        409: { description: 'Already decided', schema: apiErrorSchema },
+        422: { description: 'Closure does not require supervisor review', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(closureIdParamsSchema, 'params'),
+    validateBody(decideClosureRequestSchema),
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const updated = await service.decide(
+        req.params.id,
+        req.user.id,
+        req.body,
+        req.headers.authorization ?? '',
+      );
+      res.json(ok(updated));
     }),
   );
 

@@ -2,6 +2,9 @@ import { conflict, notFound } from '@armman/service-commons';
 import type { ReopenRequestRepository } from './reopen-request.repository';
 import type { AuditClient } from './audit.client';
 import type { NotificationClient } from './notification.client';
+import type { ApprovalClient } from './approval.client';
+import type { LookupClient } from './lookup.client';
+import type { CreateReopenRequestInput } from './dto/create-reopen-request.dto';
 import type { DecideReopenRequestInput } from './dto/decide-reopen-request.dto';
 
 /** Reopen request domain logic. Data access is delegated to the repository. */
@@ -10,7 +13,56 @@ export class ReopenRequestService {
     private readonly repository: ReopenRequestRepository,
     private readonly auditClient: AuditClient,
     private readonly notificationClient: NotificationClient,
+    private readonly approvalClient: ApprovalClient,
+    private readonly lookupClient: LookupClient,
   ) {}
+
+  /**
+   * Raises a Sakhi's reopen request (FR-S-10.3) and, on success, raises the
+   * matching REOPEN Quick Response card in approval-service. The reopen
+   * request is the source of truth — a failure raising the card is logged
+   * and tolerated rather than failing an already-successful submission
+   * (same tolerance the decide() audit/notification calls use).
+   */
+  async create(
+    dto: CreateReopenRequestInput,
+    requestedByUserId: string,
+    authorizationHeader: string,
+  ) {
+    const created = await this.repository.create({ ...dto, requestedByUserId });
+
+    try {
+      const decisionStatusLookupId = await this.lookupClient.resolveApprovalStatusId(
+        'PENDING',
+        authorizationHeader,
+      );
+      if (decisionStatusLookupId) {
+        await this.approvalClient.create(
+          {
+            requestType: 'REOPEN',
+            beneficiaryId: created.beneficiaryId,
+            sourceEntityType: 'ReopenRequest',
+            sourceEntityId: created.id,
+            reopenRequestId: created.id,
+            requestedByUserId,
+            decisionStatusLookupId,
+          },
+          authorizationHeader,
+        );
+      } else {
+        console.error(
+          `Reopen request ${created.id} was created but no PENDING APPROVAL_STATUS lookup value was found — Quick Response card not raised.`,
+        );
+      }
+    } catch (err) {
+      console.error(
+        `Reopen request ${created.id} was created but raising its Quick Response card failed:`,
+        err,
+      );
+    }
+
+    return created;
+  }
 
   /**
    * Decides a Supervisor's reopen request (Quick Response's REOPEN card).

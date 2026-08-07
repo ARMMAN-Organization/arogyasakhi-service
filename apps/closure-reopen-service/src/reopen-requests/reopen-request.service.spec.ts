@@ -2,6 +2,9 @@ import { ReopenRequestService } from './reopen-request.service';
 import type { ReopenRequestRepository } from './reopen-request.repository';
 import type { AuditClient } from './audit.client';
 import type { NotificationClient } from './notification.client';
+import type { ApprovalClient } from './approval.client';
+import type { LookupClient } from './lookup.client';
+import type { CreateReopenRequestInput } from './dto/create-reopen-request.dto';
 import type { DecideReopenRequestInput } from './dto/decide-reopen-request.dto';
 
 function reopenRequest(overrides: Partial<Record<string, unknown>> = {}) {
@@ -30,9 +33,14 @@ describe('ReopenRequestService', () => {
   const repository = {
     findById: jest.fn(),
     decide: jest.fn(),
+    create: jest.fn(),
   } as unknown as jest.Mocked<ReopenRequestRepository>;
   const auditClient = { log: jest.fn() } as unknown as jest.Mocked<AuditClient>;
   const notificationClient = { notify: jest.fn() } as unknown as jest.Mocked<NotificationClient>;
+  const approvalClient = { create: jest.fn() } as unknown as jest.Mocked<ApprovalClient>;
+  const lookupClient = {
+    resolveApprovalStatusId: jest.fn(),
+  } as unknown as jest.Mocked<LookupClient>;
   let service: ReopenRequestService;
   const supervisorId = '44444444-4444-4444-4444-444444444444';
   const authHeader = 'Bearer token';
@@ -41,11 +49,84 @@ describe('ReopenRequestService', () => {
   beforeEach(() => {
     jest.resetAllMocks();
     consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
-    service = new ReopenRequestService(repository, auditClient, notificationClient);
+    service = new ReopenRequestService(
+      repository,
+      auditClient,
+      notificationClient,
+      approvalClient,
+      lookupClient,
+    );
   });
 
   afterEach(() => {
     consoleErrorSpy.mockRestore();
+  });
+
+  describe('create', () => {
+    const sakhiId = '55555555-5555-5555-5555-555555555555';
+    const dto: CreateReopenRequestInput = {
+      beneficiaryId: '22222222-2222-2222-2222-222222222222',
+      requestReason: 'CLOSED_BY_MISTAKE',
+    };
+
+    it('creates via repository with requestedByUserId stamped from the caller', async () => {
+      const created = reopenRequest({ requestedByUserId: sakhiId });
+      repository.create.mockResolvedValue(created);
+      lookupClient.resolveApprovalStatusId.mockResolvedValue('pending-lookup-id');
+
+      await expect(service.create(dto, sakhiId, authHeader)).resolves.toBe(created);
+      expect(repository.create).toHaveBeenCalledWith({ ...dto, requestedByUserId: sakhiId });
+    });
+
+    it('raises a REOPEN Quick Response card via approvalClient after creating', async () => {
+      const created = reopenRequest({ requestedByUserId: sakhiId });
+      repository.create.mockResolvedValue(created);
+      lookupClient.resolveApprovalStatusId.mockResolvedValue('pending-lookup-id');
+
+      await service.create(dto, sakhiId, authHeader);
+
+      expect(lookupClient.resolveApprovalStatusId).toHaveBeenCalledWith('PENDING', authHeader);
+      expect(approvalClient.create).toHaveBeenCalledWith(
+        {
+          requestType: 'REOPEN',
+          beneficiaryId: created.beneficiaryId,
+          sourceEntityType: 'ReopenRequest',
+          sourceEntityId: created.id,
+          reopenRequestId: created.id,
+          requestedByUserId: sakhiId,
+          decisionStatusLookupId: 'pending-lookup-id',
+        },
+        authHeader,
+      );
+    });
+
+    it('still returns the created reopen request when raising the card fails', async () => {
+      const created = reopenRequest({ requestedByUserId: sakhiId });
+      repository.create.mockResolvedValue(created);
+      lookupClient.resolveApprovalStatusId.mockResolvedValue('pending-lookup-id');
+      approvalClient.create.mockRejectedValue(
+        Object.assign(new Error('Bad gateway'), { status: 502 }),
+      );
+
+      await expect(service.create(dto, sakhiId, authHeader)).resolves.toBe(created);
+      expect(consoleErrorSpy).toHaveBeenCalled();
+    });
+
+    it('still returns the created reopen request when no PENDING lookup value is found', async () => {
+      const created = reopenRequest({ requestedByUserId: sakhiId });
+      repository.create.mockResolvedValue(created);
+      lookupClient.resolveApprovalStatusId.mockResolvedValue(null);
+
+      await expect(service.create(dto, sakhiId, authHeader)).resolves.toBe(created);
+      expect(approvalClient.create).not.toHaveBeenCalled();
+      expect(consoleErrorSpy).toHaveBeenCalled();
+    });
+
+    it('propagates a genuine repository failure on create', async () => {
+      repository.create.mockRejectedValue(new Error('db down'));
+      await expect(service.create(dto, sakhiId, authHeader)).rejects.toThrow('db down');
+      expect(approvalClient.create).not.toHaveBeenCalled();
+    });
   });
 
   it('approves a PENDING reopen request, audits, and notifies the Sakhi', async () => {
@@ -104,9 +185,14 @@ describe('ReopenRequestService', () => {
   it('409s on an already-APPROVED reopen request', async () => {
     repository.findById.mockResolvedValue(reopenRequest({ supervisorStatus: 'APPROVED' }));
     await expect(
-      service.decide('11111111-1111-1111-1111-111111111111', supervisorId, {
-        decision: 'REJECTED',
-      }, authHeader),
+      service.decide(
+        '11111111-1111-1111-1111-111111111111',
+        supervisorId,
+        {
+          decision: 'REJECTED',
+        },
+        authHeader,
+      ),
     ).rejects.toMatchObject({ status: 409 });
     expect(repository.decide).not.toHaveBeenCalled();
   });
@@ -114,9 +200,14 @@ describe('ReopenRequestService', () => {
   it('409s on an already-REJECTED reopen request', async () => {
     repository.findById.mockResolvedValue(reopenRequest({ supervisorStatus: 'REJECTED' }));
     await expect(
-      service.decide('11111111-1111-1111-1111-111111111111', supervisorId, {
-        decision: 'APPROVED',
-      }, authHeader),
+      service.decide(
+        '11111111-1111-1111-1111-111111111111',
+        supervisorId,
+        {
+          decision: 'APPROVED',
+        },
+        authHeader,
+      ),
     ).rejects.toMatchObject({ status: 409 });
   });
 
@@ -124,9 +215,14 @@ describe('ReopenRequestService', () => {
     repository.findById.mockResolvedValueOnce(reopenRequest());
     repository.decide.mockResolvedValue(false);
     await expect(
-      service.decide('11111111-1111-1111-1111-111111111111', supervisorId, {
-        decision: 'APPROVED',
-      }, authHeader),
+      service.decide(
+        '11111111-1111-1111-1111-111111111111',
+        supervisorId,
+        {
+          decision: 'APPROVED',
+        },
+        authHeader,
+      ),
     ).rejects.toMatchObject({ status: 409 });
   });
 
@@ -146,7 +242,9 @@ describe('ReopenRequestService', () => {
     const decided = reopenRequest({ supervisorStatus: 'APPROVED', decidedByUserId: supervisorId });
     repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(decided);
     repository.decide.mockResolvedValue(true);
-    notificationClient.notify.mockRejectedValue(Object.assign(new Error('Forbidden'), { status: 403 }));
+    notificationClient.notify.mockRejectedValue(
+      Object.assign(new Error('Forbidden'), { status: 403 }),
+    );
 
     await expect(
       service.decide(pending.id, supervisorId, { decision: 'APPROVED' }, authHeader),
