@@ -144,7 +144,14 @@ export class LookupService {
     }
 
     if (toCreate.length > 0 || toUpdate.length > 0) {
-      await this.repository.bulkUpsertValues(category.id, toCreate, toUpdate);
+      try {
+        await this.repository.bulkUpsertValues(category.id, toCreate, toUpdate);
+      } catch (err) {
+        if (isUniqueConstraintViolation(err)) {
+          throw conflict('A value with this code already exists in this category.');
+        }
+        throw err;
+      }
     }
 
     return {

@@ -314,5 +314,52 @@ describe('LookupService', () => {
       });
       expect(repository.bulkUpsertValues).not.toHaveBeenCalled();
     });
+
+    it('clears an existing parentLookupValueId when the payload sends null', async () => {
+      repository.findCategoryByCode.mockResolvedValue(category as never);
+      repository.findValuesByCategoryId.mockResolvedValue([
+        { id: 'val-1', valueCode: 'SUB', valueLabel: 'Sub', sortOrder: 0, parentLookupValueId: 'parent-1' },
+      ] as never);
+
+      const input = {
+        values: [{ valueCode: 'SUB', valueLabel: 'Sub', parentLookupValueId: null }],
+      };
+      const result = await service.bulkUpsertValues('EDUCATION_LEVEL', input);
+
+      expect(result).toEqual({ created: [], updated: ['SUB'], unchanged: [] });
+      expect(repository.bulkUpsertValues).toHaveBeenCalledWith(
+        'cat-1',
+        [],
+        [{ id: 'val-1', data: input.values[0] }],
+      );
+      // No same-category check needed when clearing/omitting a parent.
+      expect(repository.findValueById).not.toHaveBeenCalled();
+    });
+
+    it('treats an already-parentless value with parentLookupValueId: null as unchanged', async () => {
+      repository.findCategoryByCode.mockResolvedValue(category as never);
+      repository.findValuesByCategoryId.mockResolvedValue([
+        { id: 'val-1', valueCode: 'GRADUATE', valueLabel: 'Graduate', sortOrder: 4, parentLookupValueId: null },
+      ] as never);
+
+      const input = {
+        values: [{ valueCode: 'GRADUATE', valueLabel: 'Graduate', parentLookupValueId: null }],
+      };
+      const result = await service.bulkUpsertValues('EDUCATION_LEVEL', input);
+
+      expect(result).toEqual({ created: [], updated: [], unchanged: ['GRADUATE'] });
+    });
+
+    it('throws 409 when a concurrent create wins the race on a duplicate valueCode', async () => {
+      repository.findCategoryByCode.mockResolvedValue(category as never);
+      repository.findValuesByCategoryId.mockResolvedValue([] as never);
+      repository.bulkUpsertValues.mockRejectedValue({ code: 'P2002' });
+
+      const input = { values: [{ valueCode: 'TENTH_PASS', valueLabel: '10th Pass' }] };
+
+      await expect(service.bulkUpsertValues('EDUCATION_LEVEL', input)).rejects.toMatchObject({
+        status: 409,
+      });
+    });
   });
 });

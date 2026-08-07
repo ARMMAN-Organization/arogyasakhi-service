@@ -5,7 +5,12 @@ const bulkUpsertLookupValueItemSchema = z
     valueCode: z.string().trim().min(1).max(80),
     valueLabel: z.string().trim().min(1).max(160),
     sortOrder: z.number().int().min(0).optional(),
-    parentLookupValueId: z.string().uuid().optional(),
+    // Omitted = leave the existing parent alone (create path: no parent);
+    // null = explicitly clear an existing value's parent — same
+    // omitted-vs-null distinction as update-lookup-value.dto.ts, needed here
+    // too since "this value should no longer be a child of anything" is a
+    // legitimate reconciliation case.
+    parentLookupValueId: z.string().uuid().nullable().optional(),
   })
   .strict();
 
