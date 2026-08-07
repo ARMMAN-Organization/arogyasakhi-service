@@ -1621,6 +1621,15 @@
       "exclusiveValues": ["none_received_yet"]
     },
     {
+      "rule": "REQUIRED_IF_SELECTED",
+      "field": "has_the_women_received_td_dose",
+      "optionFieldMap": {
+        "td_1_date": "td_1_date",
+        "td_2_date": "td_2_date",
+        "td_booster_date": "td_booster_date"
+      }
+    },
+    {
       "rule": "EXCLUSIVE_OPTION",
       "field": "have_you_ever_been_diagnosed_with_or_treated_for_any_of_the_following_medical_conditions",
       "exclusiveValues": ["no_known_medical_condition", "don_t_know"]

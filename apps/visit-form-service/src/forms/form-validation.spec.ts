@@ -576,6 +576,86 @@ describe('validateSubmission — EXCLUSIVE_OPTION', () => {
   });
 });
 
+describe('validateSubmission — REQUIRED_IF_SELECTED', () => {
+  const vaccineField: FormField = {
+    question_code: 'vaccination_taken_at_birth',
+    label: 'Vaccination taken at birth?',
+    input_type: 'multiselect_date',
+    required: true,
+  };
+  const bcgDateField: FormField = {
+    question_code: 'bcg_date',
+    label: 'BCG date',
+    input_type: 'date',
+    required: false,
+  };
+  const opvDateField: FormField = {
+    question_code: 'opv_date',
+    label: 'OPV date',
+    input_type: 'date',
+    required: false,
+  };
+  const requiredIfSelectedRule: CrossFieldRule = {
+    rule: 'REQUIRED_IF_SELECTED',
+    field: 'vaccination_taken_at_birth',
+    optionFieldMap: { bcg_date: 'bcg_date', opv_date: 'opv_date' },
+  };
+
+  it('rejects when an option is selected but its paired date field is empty', () => {
+    const violations = validateSubmission(
+      [vaccineField, bcgDateField, opvDateField],
+      [requiredIfSelectedRule],
+      { vaccination_taken_at_birth: ['bcg_date'] },
+    );
+
+    expect(violations).toEqual(['bcg_date is required when bcg_date is selected']);
+  });
+
+  it('accepts when the selected option has its date filled', () => {
+    const violations = validateSubmission(
+      [vaccineField, bcgDateField, opvDateField],
+      [requiredIfSelectedRule],
+      { vaccination_taken_at_birth: ['bcg_date'], bcg_date: '2026-01-05' },
+    );
+
+    expect(violations).toEqual([]);
+  });
+
+  it('does not require a date for an option that was not selected', () => {
+    const violations = validateSubmission(
+      [vaccineField, bcgDateField, opvDateField],
+      [requiredIfSelectedRule],
+      { vaccination_taken_at_birth: ['opv_date'], opv_date: '2026-01-05' },
+    );
+
+    expect(violations).toEqual([]);
+  });
+
+  it('reports one violation per unfilled selected option', () => {
+    const violations = validateSubmission(
+      [vaccineField, bcgDateField, opvDateField],
+      [requiredIfSelectedRule],
+      { vaccination_taken_at_birth: ['bcg_date', 'opv_date'] },
+    );
+
+    expect(violations).toEqual([
+      'bcg_date is required when bcg_date is selected',
+      'opv_date is required when opv_date is selected',
+    ]);
+  });
+
+  it('skips the rule when the field is empty or absent', () => {
+    const optionalVaccineField: FormField = { ...vaccineField, required: false };
+    const violations = validateSubmission(
+      [optionalVaccineField, bcgDateField, opvDateField],
+      [requiredIfSelectedRule],
+      {},
+    );
+
+    expect(violations).toEqual([]);
+  });
+});
+
 describe('validateSubmission — pattern (NAME_NO_SPECIAL_CHARS)', () => {
   const nameField: FormField = {
     question_code: 'beneficiary_name',

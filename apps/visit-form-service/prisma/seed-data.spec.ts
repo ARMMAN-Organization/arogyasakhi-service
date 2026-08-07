@@ -89,8 +89,20 @@ describe('mother-registration.json', () => {
     expect(exclusiveRules).toHaveLength(3);
   });
 
-  it('has 8 total validationJson rules (5 existing + 3 new EXCLUSIVE_OPTION)', () => {
-    expect(motherRegistration.validationJson).toHaveLength(8);
+  it('has a REQUIRED_IF_SELECTED rule so each selected Td dose requires its date', () => {
+    expect(motherRegistration.validationJson).toContainEqual({
+      rule: 'REQUIRED_IF_SELECTED',
+      field: 'has_the_women_received_td_dose',
+      optionFieldMap: {
+        td_1_date: 'td_1_date',
+        td_2_date: 'td_2_date',
+        td_booster_date: 'td_booster_date',
+      },
+    });
+  });
+
+  it('has 9 total validationJson rules (5 existing + 3 EXCLUSIVE_OPTION + 1 REQUIRED_IF_SELECTED)', () => {
+    expect(motherRegistration.validationJson).toHaveLength(9);
   });
 });
 
@@ -139,8 +151,21 @@ describe('child-registration.json', () => {
     });
   });
 
-  it('has 2 total validationJson rules (1 existing ANY_OF_REQUIRED + 1 new EXCLUSIVE_OPTION)', () => {
-    expect(childRegistration.validationJson).toHaveLength(2);
+  it('has a REQUIRED_IF_SELECTED rule so each selected vaccine requires its date', () => {
+    expect(childRegistration.validationJson).toContainEqual({
+      rule: 'REQUIRED_IF_SELECTED',
+      field: 'vaccination_taken_at_birth',
+      optionFieldMap: {
+        bcg_date: 'bcg_date',
+        opv_date: 'opv_date',
+        hepatitis_b_date: 'hepatitis_b_date',
+        vitamin_k_date: 'vitamin_k_date',
+      },
+    });
+  });
+
+  it('has 3 total validationJson rules (1 ANY_OF_REQUIRED + 1 EXCLUSIVE_OPTION + 1 REQUIRED_IF_SELECTED)', () => {
+    expect(childRegistration.validationJson).toHaveLength(3);
   });
 });
 

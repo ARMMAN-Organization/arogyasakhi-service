@@ -1013,6 +1013,16 @@
       "rule": "EXCLUSIVE_OPTION",
       "field": "vaccination_taken_at_birth",
       "exclusiveValues": ["none"]
+    },
+    {
+      "rule": "REQUIRED_IF_SELECTED",
+      "field": "vaccination_taken_at_birth",
+      "optionFieldMap": {
+        "bcg_date": "bcg_date",
+        "opv_date": "opv_date",
+        "hepatitis_b_date": "hepatitis_b_date",
+        "vitamin_k_date": "vitamin_k_date"
+      }
     }
   ]
 }

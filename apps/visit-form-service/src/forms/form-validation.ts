@@ -200,6 +200,14 @@ export function validateSubmission(
           `${rule.field} cannot combine ${rule.exclusiveValues.join('/')} with any other option`,
         );
       }
+    } else if (rule.rule === 'REQUIRED_IF_SELECTED') {
+      const answer = formData[rule.field];
+      if (!Array.isArray(answer)) continue;
+      for (const [optionCode, dateField] of Object.entries(rule.optionFieldMap)) {
+        if (answer.includes(optionCode) && isEmpty(formData[dateField])) {
+          violations.push(`${dateField} is required when ${optionCode} is selected`);
+        }
+      }
     }
   }
 

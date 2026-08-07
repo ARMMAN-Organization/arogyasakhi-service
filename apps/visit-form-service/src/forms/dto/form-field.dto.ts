@@ -135,6 +135,11 @@ export const schemaJsonSchema = z.array(formFieldSchema).min(1);
  * groups (Q43, Q44, Q58). The client-side disabling itself is a mobile-app
  * concern; this rule is the server-side check that the *submitted* answer
  * never combines an exclusive value with anything else.
+ * REQUIRED_IF_SELECTED is a seventh rule — the recurring "☐ <option>; Date:"
+ * multiselect_date pattern (Registration_PW_D's Td dose, Q49 vaccination at
+ * birth), where the doc requires each option's paired date field be filled
+ * whenever that option is checked (e.g. "If marked to any option other than
+ * 'None' then date is mandatory").
  */
 // A discriminated union has no inferable OpenAPI type on its own — annotated
 // so the OpenAPI generator doesn't throw when this schema is used as a
@@ -163,6 +168,14 @@ export const crossFieldRuleSchema = z
         rule: z.literal('EXCLUSIVE_OPTION'),
         field: z.string().trim().min(1),
         exclusiveValues: z.array(z.string().trim().min(1)).min(1),
+      })
+      .strict(),
+    z
+      .object({
+        rule: z.literal('REQUIRED_IF_SELECTED'),
+        field: z.string().trim().min(1),
+        // Selected value_code -> the question_code of its paired date field.
+        optionFieldMap: z.record(z.string(), z.string().trim().min(1)),
       })
       .strict(),
   ])
