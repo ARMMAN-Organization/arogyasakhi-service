@@ -251,3 +251,375 @@ describe('isVisible — contains operator', () => {
     expect(visible).toBe(false);
   });
 });
+
+describe('validateSubmission — dateRule (LMP: notFuture, notAfter, minDaysFrom, maxDaysFrom)', () => {
+  const registrationDateField: FormField = {
+    question_code: 'registration_date',
+    label: 'Registration date',
+    input_type: 'date',
+    required: true,
+  };
+
+  const lmpDateField: FormField = {
+    question_code: 'lmp_date',
+    label: 'LMP Date',
+    input_type: 'date',
+    required: false,
+    dateRule: {
+      notFuture: true,
+      notAfter: { field: 'registration_date' },
+      minDaysFrom: { field: 'registration_date', days: 30 },
+      maxDaysFrom: { field: 'registration_date', days: 240 },
+    },
+  };
+
+  const dateFields = [registrationDateField, lmpDateField];
+
+  it('rejects a future LMP date', () => {
+    const future = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const violations = validateSubmission(dateFields, [], {
+      registration_date: future,
+      lmp_date: future,
+    });
+
+    expect(violations).toContain('lmp_date must not be in the future');
+  });
+
+  it('rejects an LMP date after the registration date', () => {
+    const violations = validateSubmission(dateFields, [], {
+      registration_date: '2026-01-01',
+      lmp_date: '2026-01-02',
+    });
+
+    expect(violations).toContain('lmp_date must not be after registration_date');
+  });
+
+  it('rejects when registration_date - lmp_date is 29 days (below the 30-day minimum)', () => {
+    const violations = validateSubmission(dateFields, [], {
+      registration_date: '2026-01-30',
+      lmp_date: '2026-01-01',
+    });
+
+    expect(violations.some((v) => v.includes('at least 30 days'))).toBe(true);
+  });
+
+  it('accepts when registration_date - lmp_date is exactly 30 days (boundary)', () => {
+    const violations = validateSubmission(dateFields, [], {
+      registration_date: '2026-01-31',
+      lmp_date: '2026-01-01',
+    });
+
+    expect(violations).toEqual([]);
+  });
+
+  it('accepts when registration_date - lmp_date is exactly 240 days (boundary)', () => {
+    const violations = validateSubmission(dateFields, [], {
+      registration_date: '2026-08-29',
+      lmp_date: '2026-01-01',
+    });
+
+    expect(violations).toEqual([]);
+  });
+
+  it('rejects when registration_date - lmp_date is 241 days (above the max)', () => {
+    const violations = validateSubmission(dateFields, [], {
+      registration_date: '2026-08-30',
+      lmp_date: '2026-01-01',
+    });
+
+    expect(violations.some((v) => v.includes('at most 240 days'))).toBe(true);
+  });
+
+  it('accepts a well-formed LMP date within range', () => {
+    const violations = validateSubmission(dateFields, [], {
+      registration_date: '2026-04-11',
+      lmp_date: '2026-01-01',
+    });
+
+    expect(violations).toEqual([]);
+  });
+
+  it('skips the rule when either date is absent', () => {
+    const violations = validateSubmission(dateFields, [], {
+      registration_date: '2026-04-11',
+    });
+
+    expect(violations.filter((v) => v.includes('lmp_date'))).toEqual([]);
+  });
+});
+
+describe('validateSubmission — dateRule (ANC-1 date: notBefore LMP, notAfter registration+5)', () => {
+  const anc1DateField: FormField = {
+    question_code: 'if_anc1_completed_please_record_the_date',
+    label: 'ANC-1 date',
+    input_type: 'date',
+    required: true,
+    visibleWhen: {
+      field: 'has_the_woman_received_anc_check_ups_at_a_health_facility_during_this_pregnancy',
+      operator: 'eq',
+      value: 'anc_1_completed',
+    },
+    dateRule: {
+      notBefore: { field: 'lmp_date' },
+      notAfter: { field: 'registration_date', offsetDays: 5 },
+    },
+  };
+
+  it('rejects an ANC-1 date before LMP', () => {
+    const violations = validateSubmission([anc1DateField], [], {
+      has_the_woman_received_anc_check_ups_at_a_health_facility_during_this_pregnancy:
+        'anc_1_completed',
+      lmp_date: '2026-01-10',
+      registration_date: '2026-02-01',
+      if_anc1_completed_please_record_the_date: '2026-01-05',
+    });
+
+    expect(violations).toContain(
+      'if_anc1_completed_please_record_the_date must not be before lmp_date',
+    );
+  });
+
+  it('accepts an ANC-1 date equal to the LMP date (inclusive boundary)', () => {
+    const violations = validateSubmission([anc1DateField], [], {
+      has_the_woman_received_anc_check_ups_at_a_health_facility_during_this_pregnancy:
+        'anc_1_completed',
+      lmp_date: '2026-01-10',
+      registration_date: '2026-02-01',
+      if_anc1_completed_please_record_the_date: '2026-01-10',
+    });
+
+    expect(violations).toEqual([]);
+  });
+
+  it('accepts an ANC-1 date exactly registration_date + 5 days (boundary)', () => {
+    const violations = validateSubmission([anc1DateField], [], {
+      has_the_woman_received_anc_check_ups_at_a_health_facility_during_this_pregnancy:
+        'anc_1_completed',
+      lmp_date: '2026-01-10',
+      registration_date: '2026-02-01',
+      if_anc1_completed_please_record_the_date: '2026-02-06',
+    });
+
+    expect(violations).toEqual([]);
+  });
+
+  it('rejects an ANC-1 date at registration_date + 6 days', () => {
+    const violations = validateSubmission([anc1DateField], [], {
+      has_the_woman_received_anc_check_ups_at_a_health_facility_during_this_pregnancy:
+        'anc_1_completed',
+      lmp_date: '2026-01-10',
+      registration_date: '2026-02-01',
+      if_anc1_completed_please_record_the_date: '2026-02-07',
+    });
+
+    expect(
+      violations.some(
+        (v) => v === 'if_anc1_completed_please_record_the_date must not be after registration_date',
+      ),
+    ).toBe(true);
+  });
+
+  it('skips the rule entirely when the field is hidden by visibleWhen', () => {
+    const violations = validateSubmission([anc1DateField], [], {
+      has_the_woman_received_anc_check_ups_at_a_health_facility_during_this_pregnancy:
+        'not_started_anc_yet',
+      lmp_date: '2026-01-10',
+      registration_date: '2026-02-01',
+      if_anc1_completed_please_record_the_date: '2020-01-01',
+    });
+
+    expect(violations).toEqual([]);
+  });
+});
+
+describe('validateSubmission — dateRule (Td dose date ordering)', () => {
+  const td1: FormField = {
+    question_code: 'td_1_date',
+    label: 'Td-1 date',
+    input_type: 'date',
+    required: false,
+    dateRule: { notFuture: true },
+  };
+  const td2: FormField = {
+    question_code: 'td_2_date',
+    label: 'Td-2 date',
+    input_type: 'date',
+    required: false,
+    dateRule: { notFuture: true, notBefore: { field: 'td_1_date' } },
+  };
+  const tdBooster: FormField = {
+    question_code: 'td_booster_date',
+    label: 'Td-Booster date',
+    input_type: 'date',
+    required: false,
+    dateRule: { notFuture: true, notBefore: { field: 'td_2_date' } },
+  };
+  const tdFields = [td1, td2, tdBooster];
+
+  it('rejects td_2_date before td_1_date', () => {
+    const violations = validateSubmission(tdFields, [], {
+      td_1_date: '2026-03-01',
+      td_2_date: '2026-02-01',
+    });
+
+    expect(violations).toContain('td_2_date must not be before td_1_date');
+  });
+
+  it('accepts td_2_date after td_1_date', () => {
+    const violations = validateSubmission(tdFields, [], {
+      td_1_date: '2026-02-01',
+      td_2_date: '2026-03-01',
+    });
+
+    expect(violations).toEqual([]);
+  });
+
+  it('rejects td_booster_date before td_2_date', () => {
+    const violations = validateSubmission(tdFields, [], {
+      td_2_date: '2026-03-01',
+      td_booster_date: '2026-02-15',
+    });
+
+    expect(violations).toContain('td_booster_date must not be before td_2_date');
+  });
+
+  it('rejects a future Td date', () => {
+    const future = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const violations = validateSubmission(tdFields, [], { td_1_date: future });
+
+    expect(violations).toContain('td_1_date must not be in the future');
+  });
+
+  it('skips the rule when the field is not visible/present', () => {
+    const violations = validateSubmission(tdFields, [], {});
+
+    expect(violations).toEqual([]);
+  });
+});
+
+describe('validateSubmission — EXCLUSIVE_OPTION', () => {
+  const conditionField: FormField = {
+    question_code:
+      'have_you_ever_been_diagnosed_with_or_treated_for_any_of_the_following_medical_conditions',
+    label: 'Diagnosed conditions',
+    input_type: 'multiselect',
+    required: false,
+  };
+
+  const exclusiveRule: CrossFieldRule = {
+    rule: 'EXCLUSIVE_OPTION',
+    field:
+      'have_you_ever_been_diagnosed_with_or_treated_for_any_of_the_following_medical_conditions',
+    exclusiveValues: ['no_known_medical_condition', 'don_t_know'],
+  };
+
+  it('accepts when only the exclusive value is selected', () => {
+    const violations = validateSubmission([conditionField], [exclusiveRule], {
+      have_you_ever_been_diagnosed_with_or_treated_for_any_of_the_following_medical_conditions: [
+        'no_known_medical_condition',
+      ],
+    });
+
+    expect(violations).toEqual([]);
+  });
+
+  it('accepts when only non-exclusive values are selected', () => {
+    const violations = validateSubmission([conditionField], [exclusiveRule], {
+      have_you_ever_been_diagnosed_with_or_treated_for_any_of_the_following_medical_conditions: [
+        'hypertension_high_bp',
+        'thyroid_disorder',
+      ],
+    });
+
+    expect(violations).toEqual([]);
+  });
+
+  it('rejects when the exclusive value is combined with another option', () => {
+    const violations = validateSubmission([conditionField], [exclusiveRule], {
+      have_you_ever_been_diagnosed_with_or_treated_for_any_of_the_following_medical_conditions: [
+        'no_known_medical_condition',
+        'hypertension_high_bp',
+      ],
+    });
+
+    expect(violations).toEqual([
+      'have_you_ever_been_diagnosed_with_or_treated_for_any_of_the_following_medical_conditions cannot combine no_known_medical_condition/don_t_know with any other option',
+    ]);
+  });
+
+  it('skips the rule when the field is empty or absent', () => {
+    const violations = validateSubmission([conditionField], [exclusiveRule], {});
+
+    expect(violations).toEqual([]);
+  });
+
+  it('applies independently per field for Q43/Q44/Q58-style rules', () => {
+    const tdField: FormField = {
+      question_code: 'has_the_women_received_td_dose',
+      label: 'Td dose',
+      input_type: 'multiselect_date',
+      required: true,
+    };
+    const tdRule: CrossFieldRule = {
+      rule: 'EXCLUSIVE_OPTION',
+      field: 'has_the_women_received_td_dose',
+      exclusiveValues: ['none_received_yet'],
+    };
+
+    const violations = validateSubmission([tdField], [tdRule], {
+      has_the_women_received_td_dose: ['none_received_yet', 'td_1_date'],
+    });
+
+    expect(violations).toEqual([
+      'has_the_women_received_td_dose cannot combine none_received_yet with any other option',
+    ]);
+  });
+});
+
+describe('validateSubmission — pattern (NAME_NO_SPECIAL_CHARS)', () => {
+  const nameField: FormField = {
+    question_code: 'beneficiary_name',
+    label: 'Beneficiary name',
+    input_type: 'text',
+    required: true,
+    pattern: 'NAME_NO_SPECIAL_CHARS',
+  };
+
+  it('accepts a plain name', () => {
+    const violations = validateSubmission([nameField], [], { beneficiary_name: 'Jane Doe' });
+
+    expect(violations).toEqual([]);
+  });
+
+  it('accepts a name with an apostrophe', () => {
+    const violations = validateSubmission([nameField], [], { beneficiary_name: "O'Brien" });
+
+    expect(violations).toEqual([]);
+  });
+
+  it('rejects a name containing digits', () => {
+    const violations = validateSubmission([nameField], [], { beneficiary_name: 'Jane123' });
+
+    expect(violations).toEqual(['beneficiary_name contains characters that are not allowed']);
+  });
+
+  it('rejects a name containing a symbol', () => {
+    const violations = validateSubmission([nameField], [], { beneficiary_name: 'Jane@Doe' });
+
+    expect(violations).toEqual(['beneficiary_name contains characters that are not allowed']);
+  });
+
+  it('accepts a name in a non-Latin script', () => {
+    const violations = validateSubmission([nameField], [], { beneficiary_name: 'सुनीता देवी' });
+
+    expect(violations).toEqual([]);
+  });
+
+  it('skips the pattern check when the value is absent', () => {
+    const optionalNameField: FormField = { ...nameField, required: false };
+
+    const violations = validateSubmission([optionalNameField], [], {});
+
+    expect(violations).toEqual([]);
+  });
+});

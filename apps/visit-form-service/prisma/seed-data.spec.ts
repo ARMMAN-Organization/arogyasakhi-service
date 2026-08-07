@@ -47,6 +47,53 @@ describe.each([
   });
 });
 
+describe('mother-registration.json', () => {
+  const byCode = new Map(motherRegistration.schemaJson.map((f) => [f.question_code, f]));
+
+  it('applies the LMP date rule (Registration_PW_D Q5)', () => {
+    expect(byCode.get('lmp_date')?.dateRule).toEqual({
+      notFuture: true,
+      notAfter: { field: 'registration_date' },
+      minDaysFrom: { field: 'registration_date', days: 30 },
+      maxDaysFrom: { field: 'registration_date', days: 240 },
+    });
+  });
+
+  it('applies the ANC-1 date rule (Registration_PW_D Q42)', () => {
+    expect(byCode.get('if_anc1_completed_please_record_the_date')?.dateRule).toEqual({
+      notBefore: { field: 'lmp_date' },
+      notAfter: { field: 'registration_date', offsetDays: 5 },
+    });
+  });
+
+  it('applies Td dose date ordering rules (Registration_PW_D Q44)', () => {
+    expect(byCode.get('td_1_date')?.dateRule).toEqual({ notFuture: true });
+    expect(byCode.get('td_2_date')?.dateRule).toEqual({
+      notFuture: true,
+      notBefore: { field: 'td_1_date' },
+    });
+    expect(byCode.get('td_booster_date')?.dateRule).toEqual({
+      notFuture: true,
+      notBefore: { field: 'td_2_date' },
+    });
+  });
+
+  it('applies NAME_NO_SPECIAL_CHARS to beneficiary_name (Registration_PW_D Q19)', () => {
+    expect(byCode.get('beneficiary_name')?.pattern).toBe('NAME_NO_SPECIAL_CHARS');
+  });
+
+  it('has exactly 3 EXCLUSIVE_OPTION rules for the "none/no known condition" checkbox groups', () => {
+    const exclusiveRules = motherRegistration.validationJson.filter(
+      (r) => (r as { rule: string }).rule === 'EXCLUSIVE_OPTION',
+    );
+    expect(exclusiveRules).toHaveLength(3);
+  });
+
+  it('has 8 total validationJson rules (5 existing + 3 new EXCLUSIVE_OPTION)', () => {
+    expect(motherRegistration.validationJson).toHaveLength(8);
+  });
+});
+
 describe('anc-visit.json', () => {
   const fields = ancVisit.schemaJson;
   const byCode = new Map(fields.map((f) => [f.question_code, f]));

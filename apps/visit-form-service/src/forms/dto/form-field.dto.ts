@@ -29,9 +29,14 @@ extendZodWithOpenApi(z);
  *   with no section fall into a client-rendered catch-all tab — no special
  *   handling needed here beyond allowing the field to be absent.
  * Categories 1 (date rules) and 3 (cross-field, on validation_json — see
- * cross-field-rule.dto.ts) are the only other SRS-named categories; date
- * rules are deliberately NOT modeled here yet (see the forms API design doc
- * §7 — which comparison field a date rule reads from isn't specified).
+ * crossFieldRuleSchema below) are the only other SRS-named categories.
+ * - dateRule: SRS Category 1 — future-date rejection and date-vs-date
+ *   comparisons against another field on the same submission (e.g. LMP
+ *   must be on/after registration date minus 240 days). All bounds are
+ *   inclusive: a value exactly on the boundary is valid.
+ * - pattern: a closed set of named character-class checks (never a raw
+ *   regex in JSON) — e.g. rejecting digits/symbols in a name field per
+ *   Registration_PW_D Q19 ("should not accept any special characters").
  */
 export const formFieldSchema = z
   .object({
@@ -85,6 +90,30 @@ export const formFieldSchema = z
     captureMode: z.enum(['LIVE_CAMERA_ONLY']).optional(),
     requirePlaybackComplete: z.boolean().optional(),
     section: z.string().trim().min(1).optional(),
+    // SRS Category 1 — date-vs-date comparisons, evaluated only when this
+    // field and the referenced field both have a value (a missing value is
+    // the required-field check's concern, not this rule's). All comparisons
+    // are inclusive of the boundary day.
+    dateRule: z
+      .object({
+        notFuture: z.boolean().optional(),
+        notBefore: z
+          .object({ field: z.string().trim().min(1), offsetDays: z.number().int().optional() })
+          .optional(),
+        notAfter: z
+          .object({ field: z.string().trim().min(1), offsetDays: z.number().int().optional() })
+          .optional(),
+        minDaysFrom: z
+          .object({ field: z.string().trim().min(1), days: z.number().int() })
+          .optional(),
+        maxDaysFrom: z
+          .object({ field: z.string().trim().min(1), days: z.number().int() })
+          .optional(),
+      })
+      .optional(),
+    // Named character-class checks — never a raw regex in JSON, to keep
+    // seed data free of arbitrary executable-ish patterns.
+    pattern: z.enum(['NAME_NO_SPECIAL_CHARS']).optional(),
   })
   .strict();
 
@@ -101,6 +130,11 @@ export const schemaJsonSchema = z.array(formFieldSchema).min(1);
  * `offset` for that last rule's constant. ANY_OF_REQUIRED is a fifth rule,
  * added for MOTHER_REGISTRATION's date_of_birth/age_of_the_beneficiary pair
  * (either one satisfies the requirement) — see CR037beneficiaryagedobfieldgap.md.
+ * EXCLUSIVE_OPTION is a sixth rule — Registration_PW_D's repeated "if 'None'/
+ * 'No known condition' is selected, disable all other options" checkbox
+ * groups (Q43, Q44, Q58). The client-side disabling itself is a mobile-app
+ * concern; this rule is the server-side check that the *submitted* answer
+ * never combines an exclusive value with anything else.
  */
 // A discriminated union has no inferable OpenAPI type on its own — annotated
 // so the OpenAPI generator doesn't throw when this schema is used as a
@@ -122,6 +156,13 @@ export const crossFieldRuleSchema = z
       .object({
         rule: z.literal('ANY_OF_REQUIRED'),
         fields: z.array(z.string().trim().min(1)).min(2),
+      })
+      .strict(),
+    z
+      .object({
+        rule: z.literal('EXCLUSIVE_OPTION'),
+        field: z.string().trim().min(1),
+        exclusiveValues: z.array(z.string().trim().min(1)).min(1),
       })
       .strict(),
   ])
