@@ -8,14 +8,11 @@ import { API_CONSENT_STATUSES, CASE_TYPES, SEXES } from '../beneficiary.constant
  */
 const piiSchema = z
   .object({
-    // Matches the MOTHER_REGISTRATION form's first_name/middle_name/last_name
-    // question_codes — the mobile form never collects a single combined name
-    // field, so the client sends these 3 parts and the server derives
-    // `fullName` below (joined, skipping an absent middleName) for the
-    // existing encrypted-storage/duplicate-detection path.
-    firstName: z.string().trim().min(1).max(100),
-    middleName: z.string().trim().min(1).max(100).optional(),
-    lastName: z.string().trim().min(1).max(100),
+    // Matches the MOTHER_REGISTRATION form's single beneficiary_name
+    // question_code — the mobile form collects one combined name field, so
+    // the client sends it as-is for the encrypted-storage/duplicate-detection
+    // path (see fullNameEnc/fullNameSearchHash in beneficiary.service.ts).
+    fullName: z.string().trim().min(1).max(200),
     // Required per SRS FR-S-2.1: "age, demographics, geographic details
     // (state, district, block, PHC, sub-centre, village, pada), mobile
     // numbers, RCH number." phone (mobile), dateOfBirth (age), and the 7
@@ -49,25 +46,6 @@ const piiSchema = z
     rchNumber: z.string().trim().min(1).max(50).optional(),
   })
   .strict();
-
-/**
- * Derives the single display/storage name from the mobile form's separate
- * firstName/middleName/lastName fields, for the encrypted-storage/
- * duplicate-detection path (beneficiary.service.ts,
- * beneficiary.duplicate-detection.ts) that's keyed on one full name.
- *
- * Kept out of `piiSchema` itself (not a `.transform()`) because
- * `@asteasolutions/zod-to-openapi`'s generator can't introspect a
- * `ZodEffects`-wrapped schema of type `transform` — registering one as a
- * route's request body throws `UnknownZodTypeError` at doc-build time.
- */
-export function deriveFullName(
-  firstName: string,
-  middleName: string | undefined,
-  lastName: string,
-): string {
-  return [firstName, middleName, lastName].filter(Boolean).join(' ');
-}
 
 /**
  * Cross-field consistency rules per SRS Category 3 (line 401): Para ≤
@@ -198,6 +176,44 @@ const consentSchema = z
   })
   .strict();
 
+/**
+ * Registration-time socio-demographic answers — SRS v3.0 / "Revised App Form
+ * Final (20 March 2026)" Registration_PW_D sheet, rows 23-34. Persisted 1:1
+ * with the beneficiary case (see BeneficiarySocioDemographics in
+ * schema.prisma) — dropdown/count answers, not person-identifying data, so
+ * they live outside piiSchema and don't need encryption. All fields optional
+ * at this layer: none of them gate registration itself (the ERD/DB columns
+ * are nullable), matching how motherDetails'/childDetails' own optional
+ * fields are handled.
+ */
+const socioDemographicsSchema = z
+  .object({
+    // lookup_values.lookup_value_id (category PHONE_OWNER) — owned by auth-service.
+    phoneOwnerLookupId: z.string().uuid().optional(),
+    // lookup_values.lookup_value_id (category MOBILE_NETWORK_AVAILABILITY) — owned by auth-service.
+    mobileNetworkAvailabilityLookupId: z.string().uuid().optional(),
+    // lookup_values.lookup_value_id (category EDUCATION_LEVEL) — owned by auth-service.
+    educationLevelLookupId: z.string().uuid().optional(),
+    // lookup_values.lookup_value_id (category EDUCATION_LEVEL) — owned by auth-service.
+    partnerEducationLevelLookupId: z.string().uuid().optional(),
+    // lookup_values.lookup_value_id (category PARTNER_OCCUPATION) — owned by auth-service.
+    partnerOccupationLookupId: z.string().uuid().optional(),
+    yearsInVillage: z.number().int().min(0).max(120).optional(),
+    // lookup_values.lookup_value_id (category MIGRATION_PATTERN) — owned by auth-service.
+    migrationPatternLookupId: z.string().uuid().optional(),
+    // lookup_values.lookup_value_id (category MONTHLY_INCOME_BRACKET) — owned by auth-service.
+    monthlyIncomeLookupId: z.string().uuid().optional(),
+    // lookup_values.lookup_value_id (category RELIGION) — owned by auth-service.
+    religionLookupId: z.string().uuid().optional(),
+    // lookup_values.lookup_value_id (category SOCIAL_CATEGORY) — owned by auth-service.
+    socialCategoryLookupId: z.string().uuid().optional(),
+    // Doc row 33: "Range 2 to 15."
+    familyMembersCount: z.number().int().min(2).max(15).optional(),
+    // Doc row 34: "1 digit."
+    childrenUnder5Count: z.number().int().min(0).max(9).optional(),
+  })
+  .strict();
+
 const caseSchema = z
   .object({
     // Client-generated at enrollment-form submission time — lets a
@@ -222,6 +238,7 @@ export const createBeneficiarySchema = z
     case: caseSchema,
     motherDetails: motherDetailsSchema.optional(),
     childDetails: childDetailsSchema.optional(),
+    socioDemographics: socioDemographicsSchema.optional(),
     consent: consentSchema,
     /** Per FR-S-2.4: proceed despite a detected duplicate after the Sakhi acknowledges the warning. */
     acknowledgeDuplicate: z.boolean().optional(),

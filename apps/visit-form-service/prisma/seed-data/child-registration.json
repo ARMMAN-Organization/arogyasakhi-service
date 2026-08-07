@@ -38,8 +38,16 @@
     {
       "label": "Did we receive consent?",
       "options": [
-        { "label": "Yes", "sort_order": 0, "value_code": "yes" },
-        { "label": "No", "sort_order": 1, "value_code": "no" }
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
       ],
       "section": "Consent",
       "required": true,
@@ -154,11 +162,22 @@
       "question_code": "caregiver_name_first_name_middle_name_last_name"
     },
     {
-      "label": "Age or DOB of the mother",
+      "label": "Mother date of birth",
       "section": "Personal Info",
-      "required": true,
+      "required": false,
       "input_type": "date",
-      "question_code": "age_or_dob_of_the_mother"
+      "question_code": "mother_date_of_birth"
+    },
+    {
+      "label": "Age of the mother",
+      "section": "Personal Info",
+      "required": false,
+      "input_type": "number",
+      "question_code": "mother_age",
+      "numericRange": {
+        "min": 10,
+        "max": 50
+      }
     },
     {
       "label": "Enter the beneficiary address",
@@ -177,11 +196,31 @@
     {
       "label": "Who owns the phone?",
       "options": [
-        { "label": "Self", "sort_order": 0, "value_code": "self" },
-        { "label": "Husband", "sort_order": 1, "value_code": "husband" },
-        { "label": "Family member", "sort_order": 2, "value_code": "family_member" },
-        { "label": "ASHA", "sort_order": 3, "value_code": "asha" },
-        { "label": "Neighbour", "sort_order": 4, "value_code": "neighbour" }
+        {
+          "label": "Self",
+          "sort_order": 0,
+          "value_code": "self"
+        },
+        {
+          "label": "Husband",
+          "sort_order": 1,
+          "value_code": "husband"
+        },
+        {
+          "label": "Family member",
+          "sort_order": 2,
+          "value_code": "family_member"
+        },
+        {
+          "label": "ASHA",
+          "sort_order": 3,
+          "value_code": "asha"
+        },
+        {
+          "label": "Neighbour",
+          "sort_order": 4,
+          "value_code": "neighbour"
+        }
       ],
       "section": "Personal Info",
       "required": true,
@@ -191,7 +230,11 @@
     {
       "label": "Availability of Mobile Network",
       "options": [
-        { "label": "No Network", "sort_order": 0, "value_code": "no_network" },
+        {
+          "label": "No Network",
+          "sort_order": 0,
+          "value_code": "no_network"
+        },
         {
           "label": "Very Poor Network( Have to go height which is 10 minutes walk away)",
           "sort_order": 1,
@@ -236,9 +279,21 @@
           "sort_order": 2,
           "value_code": "upper_primary_middle_school_class_6_9"
         },
-        { "label": "10TH Pass", "sort_order": 3, "value_code": "10th_pass" },
-        { "label": "12th Pass", "sort_order": 4, "value_code": "12th_pass" },
-        { "label": "Diploma", "sort_order": 5, "value_code": "diploma" },
+        {
+          "label": "10TH Pass",
+          "sort_order": 3,
+          "value_code": "10th_pass"
+        },
+        {
+          "label": "12th Pass",
+          "sort_order": 4,
+          "value_code": "12th_pass"
+        },
+        {
+          "label": "Diploma",
+          "sort_order": 5,
+          "value_code": "diploma"
+        },
         {
           "label": "Graduate (College degree)",
           "sort_order": 6,
@@ -273,9 +328,21 @@
           "sort_order": 2,
           "value_code": "upper_primary_middle_school_class_6_9"
         },
-        { "label": "10TH Pass", "sort_order": 3, "value_code": "10th_pass" },
-        { "label": "12th Pass", "sort_order": 4, "value_code": "12th_pass" },
-        { "label": "Diploma", "sort_order": 5, "value_code": "diploma" },
+        {
+          "label": "10TH Pass",
+          "sort_order": 3,
+          "value_code": "10th_pass"
+        },
+        {
+          "label": "12th Pass",
+          "sort_order": 4,
+          "value_code": "12th_pass"
+        },
+        {
+          "label": "Diploma",
+          "sort_order": 5,
+          "value_code": "diploma"
+        },
         {
           "label": "Graduate (College degree)",
           "sort_order": 6,
@@ -295,12 +362,36 @@
     {
       "label": "What is the occupation of your partner?",
       "options": [
-        { "label": "Labour", "sort_order": 0, "value_code": "labour" },
-        { "label": "Private Job", "sort_order": 1, "value_code": "private_job" },
-        { "label": "Government Job", "sort_order": 2, "value_code": "government_job" },
-        { "label": "Business", "sort_order": 3, "value_code": "business" },
-        { "label": "Farmer", "sort_order": 4, "value_code": "farmer" },
-        { "label": "Other", "sort_order": 5, "value_code": "other" }
+        {
+          "label": "Labour",
+          "sort_order": 0,
+          "value_code": "labour"
+        },
+        {
+          "label": "Private Job",
+          "sort_order": 1,
+          "value_code": "private_job"
+        },
+        {
+          "label": "Government Job",
+          "sort_order": 2,
+          "value_code": "government_job"
+        },
+        {
+          "label": "Business",
+          "sort_order": 3,
+          "value_code": "business"
+        },
+        {
+          "label": "Farmer",
+          "sort_order": 4,
+          "value_code": "farmer"
+        },
+        {
+          "label": "Other",
+          "sort_order": 5,
+          "value_code": "other"
+        }
       ],
       "section": "Personal Info",
       "required": true,
@@ -317,7 +408,11 @@
     {
       "label": "Which of the following best describes your household’s migration pattern?",
       "options": [
-        { "label": "Permanent migration", "sort_order": 0, "value_code": "permanent_migration" },
+        {
+          "label": "Permanent migration",
+          "sort_order": 0,
+          "value_code": "permanent_migration"
+        },
         {
           "label": "Seasonal migration (leave for work during specific months)",
           "sort_order": 1,
@@ -347,11 +442,31 @@
     {
       "label": "What is the income of the family per month?",
       "options": [
-        { "label": "≤10000", "sort_order": 0, "value_code": "10000" },
-        { "label": "10001-15000", "sort_order": 1, "value_code": "10001_15000" },
-        { "label": "15001-20000", "sort_order": 2, "value_code": "15001_20000" },
-        { "label": "20001-25000", "sort_order": 3, "value_code": "20001_25000" },
-        { "label": ">25000", "sort_order": 4, "value_code": "25000" }
+        {
+          "label": "≤10000",
+          "sort_order": 0,
+          "value_code": "10000"
+        },
+        {
+          "label": "10001-15000",
+          "sort_order": 1,
+          "value_code": "10001_15000"
+        },
+        {
+          "label": "15001-20000",
+          "sort_order": 2,
+          "value_code": "15001_20000"
+        },
+        {
+          "label": "20001-25000",
+          "sort_order": 3,
+          "value_code": "20001_25000"
+        },
+        {
+          "label": ">25000",
+          "sort_order": 4,
+          "value_code": "25000"
+        }
       ],
       "section": "Personal Info",
       "required": true,
@@ -361,13 +476,41 @@
     {
       "label": "What is your religion?",
       "options": [
-        { "label": "Buddhist", "sort_order": 0, "value_code": "buddhist" },
-        { "label": "Christian", "sort_order": 1, "value_code": "christian" },
-        { "label": "Hindu", "sort_order": 2, "value_code": "hindu" },
-        { "label": "Jain", "sort_order": 3, "value_code": "jain" },
-        { "label": "Muslim", "sort_order": 4, "value_code": "muslim" },
-        { "label": "Sikh", "sort_order": 5, "value_code": "sikh" },
-        { "label": "Other", "sort_order": 6, "value_code": "other" }
+        {
+          "label": "Buddhist",
+          "sort_order": 0,
+          "value_code": "buddhist"
+        },
+        {
+          "label": "Christian",
+          "sort_order": 1,
+          "value_code": "christian"
+        },
+        {
+          "label": "Hindu",
+          "sort_order": 2,
+          "value_code": "hindu"
+        },
+        {
+          "label": "Jain",
+          "sort_order": 3,
+          "value_code": "jain"
+        },
+        {
+          "label": "Muslim",
+          "sort_order": 4,
+          "value_code": "muslim"
+        },
+        {
+          "label": "Sikh",
+          "sort_order": 5,
+          "value_code": "sikh"
+        },
+        {
+          "label": "Other",
+          "sort_order": 6,
+          "value_code": "other"
+        }
       ],
       "section": "Personal Info",
       "required": true,
@@ -377,11 +520,31 @@
     {
       "label": "What is your category?",
       "options": [
-        { "label": "General", "sort_order": 0, "value_code": "general" },
-        { "label": "OBC", "sort_order": 1, "value_code": "obc" },
-        { "label": "Other", "sort_order": 2, "value_code": "other" },
-        { "label": "SC", "sort_order": 3, "value_code": "sc" },
-        { "label": "ST", "sort_order": 4, "value_code": "st" }
+        {
+          "label": "General",
+          "sort_order": 0,
+          "value_code": "general"
+        },
+        {
+          "label": "OBC",
+          "sort_order": 1,
+          "value_code": "obc"
+        },
+        {
+          "label": "Other",
+          "sort_order": 2,
+          "value_code": "other"
+        },
+        {
+          "label": "SC",
+          "sort_order": 3,
+          "value_code": "sc"
+        },
+        {
+          "label": "ST",
+          "sort_order": 4,
+          "value_code": "st"
+        }
       ],
       "section": "Personal Info",
       "required": true,
@@ -393,7 +556,10 @@
       "section": "Personal Info",
       "required": true,
       "input_type": "number",
-      "numericRange": { "max": 15, "min": 2 },
+      "numericRange": {
+        "max": 15,
+        "min": 2
+      },
       "question_code": "how_many_family_members_in_your_household_including_children_under_5_years_of_age"
     },
     {
@@ -401,14 +567,30 @@
       "section": "Personal Info",
       "required": true,
       "input_type": "number",
-      "question_code": "how_many_children_under_5_years_of_age_are_in_your_household"
+      "question_code": "how_many_children_under_5_years_of_age_are_in_your_household",
+      "numericRange": {
+        "min": 0,
+        "max": 9
+      }
     },
     {
       "label": "Term of delivery",
       "options": [
-        { "label": "Pre Term", "sort_order": 0, "value_code": "pre_term" },
-        { "label": "Post Term", "sort_order": 1, "value_code": "post_term" },
-        { "label": "Full Term", "sort_order": 2, "value_code": "full_term" }
+        {
+          "label": "Pre Term",
+          "sort_order": 0,
+          "value_code": "pre_term"
+        },
+        {
+          "label": "Post Term",
+          "sort_order": 1,
+          "value_code": "post_term"
+        },
+        {
+          "label": "Full Term",
+          "sort_order": 2,
+          "value_code": "full_term"
+        }
       ],
       "section": "Personal Info",
       "required": true,
@@ -418,8 +600,16 @@
     {
       "label": "Type of delivery",
       "options": [
-        { "label": "Caesarian", "sort_order": 0, "value_code": "caesarian" },
-        { "label": "Normal", "sort_order": 1, "value_code": "normal" },
+        {
+          "label": "Caesarian",
+          "sort_order": 0,
+          "value_code": "caesarian"
+        },
+        {
+          "label": "Normal",
+          "sort_order": 1,
+          "value_code": "normal"
+        },
         {
           "label": "Assisted (Forcep/vacuum)",
           "sort_order": 2,
@@ -439,13 +629,41 @@
           "sort_order": 0,
           "value_code": "district_hospital_civil_hospital"
         },
-        { "label": "Sub- district hopital", "sort_order": 1, "value_code": "sub_district_hopital" },
-        { "label": "Rural Hospital", "sort_order": 2, "value_code": "rural_hospital" },
-        { "label": "PHC", "sort_order": 3, "value_code": "phc" },
-        { "label": "SC", "sort_order": 4, "value_code": "sc" },
-        { "label": "Pvt. Hospital", "sort_order": 5, "value_code": "pvt_hospital" },
-        { "label": "Home", "sort_order": 6, "value_code": "home" },
-        { "label": "Transit", "sort_order": 7, "value_code": "transit" }
+        {
+          "label": "Sub- district hopital",
+          "sort_order": 1,
+          "value_code": "sub_district_hopital"
+        },
+        {
+          "label": "Rural Hospital",
+          "sort_order": 2,
+          "value_code": "rural_hospital"
+        },
+        {
+          "label": "PHC",
+          "sort_order": 3,
+          "value_code": "phc"
+        },
+        {
+          "label": "SC",
+          "sort_order": 4,
+          "value_code": "sc"
+        },
+        {
+          "label": "Pvt. Hospital",
+          "sort_order": 5,
+          "value_code": "pvt_hospital"
+        },
+        {
+          "label": "Home",
+          "sort_order": 6,
+          "value_code": "home"
+        },
+        {
+          "label": "Transit",
+          "sort_order": 7,
+          "value_code": "transit"
+        }
       ],
       "section": "Personal Info",
       "required": true,
@@ -455,13 +673,41 @@
     {
       "label": "Who conducted the delivery?",
       "options": [
-        { "label": "Specialist", "sort_order": 0, "value_code": "specialist" },
-        { "label": "Medical officer", "sort_order": 1, "value_code": "medical_officer" },
-        { "label": "Staffnurse", "sort_order": 2, "value_code": "staffnurse" },
-        { "label": "ANM", "sort_order": 3, "value_code": "anm" },
-        { "label": "LHV", "sort_order": 4, "value_code": "lhv" },
-        { "label": "Dai", "sort_order": 5, "value_code": "dai" },
-        { "label": "Other-mention", "sort_order": 6, "value_code": "other_mention" }
+        {
+          "label": "Specialist",
+          "sort_order": 0,
+          "value_code": "specialist"
+        },
+        {
+          "label": "Medical officer",
+          "sort_order": 1,
+          "value_code": "medical_officer"
+        },
+        {
+          "label": "Staffnurse",
+          "sort_order": 2,
+          "value_code": "staffnurse"
+        },
+        {
+          "label": "ANM",
+          "sort_order": 3,
+          "value_code": "anm"
+        },
+        {
+          "label": "LHV",
+          "sort_order": 4,
+          "value_code": "lhv"
+        },
+        {
+          "label": "Dai",
+          "sort_order": 5,
+          "value_code": "dai"
+        },
+        {
+          "label": "Other-mention",
+          "sort_order": 6,
+          "value_code": "other_mention"
+        }
       ],
       "section": "Personal Info",
       "required": true,
@@ -471,16 +717,36 @@
     {
       "label": "Did the baby have any complications at the time of birth?",
       "options": [
-        { "label": "Birth asphyxia", "sort_order": 0, "value_code": "birth_asphyxia" },
-        { "label": "Fetal distress", "sort_order": 1, "value_code": "fetal_distress" },
-        { "label": "Birth trauma", "sort_order": 2, "value_code": "birth_trauma" },
-        { "label": "Neonatal infections", "sort_order": 3, "value_code": "neonatal_infections" },
+        {
+          "label": "Birth asphyxia",
+          "sort_order": 0,
+          "value_code": "birth_asphyxia"
+        },
+        {
+          "label": "Fetal distress",
+          "sort_order": 1,
+          "value_code": "fetal_distress"
+        },
+        {
+          "label": "Birth trauma",
+          "sort_order": 2,
+          "value_code": "birth_trauma"
+        },
+        {
+          "label": "Neonatal infections",
+          "sort_order": 3,
+          "value_code": "neonatal_infections"
+        },
         {
           "label": "Congenital anomalies detected",
           "sort_order": 4,
           "value_code": "congenital_anomalies_detected"
         },
-        { "label": "Other (please specify)", "sort_order": 5, "value_code": "other_please_specify" }
+        {
+          "label": "Other (please specify)",
+          "sort_order": 5,
+          "value_code": "other_please_specify"
+        }
       ],
       "section": "Personal Info",
       "required": true,
@@ -490,8 +756,16 @@
     {
       "label": "Is mother alive?",
       "options": [
-        { "label": "Yes", "sort_order": 0, "value_code": "yes" },
-        { "label": "No", "sort_order": 1, "value_code": "no" }
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
       ],
       "section": "Personal Info",
       "required": true,
@@ -523,9 +797,21 @@
     {
       "label": "Sex of child",
       "options": [
-        { "label": "Male", "sort_order": 0, "value_code": "male" },
-        { "label": "Female", "sort_order": 1, "value_code": "female" },
-        { "label": "Intersex / Other", "sort_order": 2, "value_code": "intersex_other" }
+        {
+          "label": "Male",
+          "sort_order": 0,
+          "value_code": "male"
+        },
+        {
+          "label": "Female",
+          "sort_order": 1,
+          "value_code": "female"
+        },
+        {
+          "label": "Intersex / Other",
+          "sort_order": 2,
+          "value_code": "intersex_other"
+        }
       ],
       "section": "Infant Details",
       "required": true,
@@ -537,7 +823,10 @@
       "section": "Infant Details",
       "required": true,
       "input_type": "number",
-      "numericRange": { "max": 60, "min": 35 },
+      "numericRange": {
+        "max": 60,
+        "min": 35
+      },
       "question_code": "child_length_at_birth_in_cm"
     },
     {
@@ -545,13 +834,20 @@
       "section": "Infant Details",
       "required": true,
       "input_type": "number",
-      "numericRange": { "max": 15, "min": 0.5 },
+      "numericRange": {
+        "max": 15,
+        "min": 0.5
+      },
       "question_code": "child_weight_at_birth_in_kg"
     },
     {
       "label": "What was the child fed immediately after birth?",
       "options": [
-        { "label": "Colostrum Given", "sort_order": 0, "value_code": "colostrum_given" },
+        {
+          "label": "Colostrum Given",
+          "sort_order": 0,
+          "value_code": "colostrum_given"
+        },
         {
           "label": "Breastfed within 1 hour of birth",
           "sort_order": 1,
@@ -567,13 +863,21 @@
           "sort_order": 3,
           "value_code": "after_24_hour_of_birth"
         },
-        { "label": "Honey", "sort_order": 4, "value_code": "honey" },
+        {
+          "label": "Honey",
+          "sort_order": 4,
+          "value_code": "honey"
+        },
         {
           "label": "Top feed given after birth",
           "sort_order": 5,
           "value_code": "top_feed_given_after_birth"
         },
-        { "label": "Other", "sort_order": 6, "value_code": "other" },
+        {
+          "label": "Other",
+          "sort_order": 6,
+          "value_code": "other"
+        },
         {
           "label": "Don't know/don't remeber",
           "sort_order": 7,
@@ -588,8 +892,16 @@
     {
       "label": "Any diformity observed in the newborn ?",
       "options": [
-        { "label": "Yes", "sort_order": 0, "value_code": "yes" },
-        { "label": "No", "sort_order": 1, "value_code": "no" }
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
       ],
       "section": "Infant Details",
       "required": true,
@@ -599,11 +911,31 @@
     {
       "label": "Vaccination taken at birth?",
       "options": [
-        { "label": "BCG; Date:", "sort_order": 0, "value_code": "bcg_date" },
-        { "label": "OPV; Date:", "sort_order": 1, "value_code": "opv_date" },
-        { "label": "Hepatitis B; Date:", "sort_order": 2, "value_code": "hepatitis_b_date" },
-        { "label": "Vitamin K; Date:", "sort_order": 3, "value_code": "vitamin_k_date" },
-        { "label": "None", "sort_order": 4, "value_code": "none" }
+        {
+          "label": "BCG; Date:",
+          "sort_order": 0,
+          "value_code": "bcg_date"
+        },
+        {
+          "label": "OPV; Date:",
+          "sort_order": 1,
+          "value_code": "opv_date"
+        },
+        {
+          "label": "Hepatitis B; Date:",
+          "sort_order": 2,
+          "value_code": "hepatitis_b_date"
+        },
+        {
+          "label": "Vitamin K; Date:",
+          "sort_order": 3,
+          "value_code": "vitamin_k_date"
+        },
+        {
+          "label": "None",
+          "sort_order": 4,
+          "value_code": "none"
+        }
       ],
       "section": "Infant Details",
       "required": true,
@@ -618,5 +950,10 @@
       "question_code": "remarks"
     }
   ],
-  "validationJson": []
+  "validationJson": [
+    {
+      "rule": "ANY_OF_REQUIRED",
+      "fields": ["mother_date_of_birth", "mother_age"]
+    }
+  ]
 }

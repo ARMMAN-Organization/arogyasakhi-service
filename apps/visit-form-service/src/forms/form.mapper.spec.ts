@@ -118,12 +118,12 @@ describe('buildFormAnswers', () => {
   describe('beneficiary-duplicated fields', () => {
     it('writes no row for a field already stored by beneficiary creation', () => {
       const fields = [
-        field('first_name', 'text'),
+        field('beneficiary_name', 'text'),
         field('lmp_date', 'date'),
         field('height_cm', 'number'),
       ];
       const rows = buildFormAnswers(fields, {
-        first_name: 'bajaja',
+        beneficiary_name: 'Jane Doe',
         lmp_date: '2026-06-10',
         height_cm: 123,
       });
@@ -132,11 +132,11 @@ describe('buildFormAnswers', () => {
 
     it('still writes rows for non-duplicate fields alongside skipped duplicates', () => {
       const fields = [
-        field('first_name', 'text'), // duplicate -> skipped
+        field('beneficiary_name', 'text'), // duplicate -> skipped
         field('who_owns_the_phone', 'select'), // not a duplicate -> kept
       ];
       const rows = buildFormAnswers(fields, {
-        first_name: 'bajaja',
+        beneficiary_name: 'Jane Doe',
         who_owns_the_phone: 'asha',
       });
       expect(rows).toHaveLength(1);

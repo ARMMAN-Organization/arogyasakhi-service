@@ -15,6 +15,9 @@ extendZodWithOpenApi(z);
  *   it's been placed.
  * - numericRange: SRS Category 2 (exact per-field ranges are admin-entered
  *   data, not hardcoded here — only the {min,max} shape is fixed).
+ * - exactLength: SRS Category 2, fixed digit-count fields (e.g. a 10-digit
+ *   mobile number) — distinct from numericRange, which bounds a value
+ *   rather than its digit length.
  * - visibleWhen: SRS Category 5 (conditional field visibility / skip logic).
  * - computedFrom: SRS Category 4 (auto-calculated fields that must not be
  *   manually entered) — closed set of the exact formulas SRS names.
@@ -50,10 +53,16 @@ export const formFieldSchema = z
       .object({ min: z.number(), max: z.number() })
       .refine((r) => r.min <= r.max, { message: 'numericRange.min must be <= max' })
       .optional(),
+    // Fixed digit-count fields (e.g. a 10-digit mobile number) — distinct from
+    // numericRange, which bounds a value rather than its digit length.
+    exactLength: z.number().int().positive().optional(),
     visibleWhen: z
       .object({
         field: z.string().trim().min(1),
-        operator: z.enum(['eq', 'gte', 'lt', 'isSet']),
+        // 'contains' checks a multiselect answer (an array of value_codes)
+        // for membership — e.g. show a dose date field only when its
+        // checkbox is one of the checked options on has_the_women_received_td_dose.
+        operator: z.enum(['eq', 'gte', 'lt', 'isSet', 'contains']),
         // Bare z.any() has no inferable OpenAPI type — annotated so the
         // OpenAPI generator doesn't throw when this schema is used as a
         // documented request/response body (see createDocumentedRouter()).
@@ -70,6 +79,7 @@ export const formFieldSchema = z
         'NUTRITIONAL_ZSCORE',
         'CHILD_AGE_MONTHS',
         'UNIQUE_ID',
+        'AGE_FROM_DOB',
       ])
       .optional(),
     captureMode: z.enum(['LIVE_CAMERA_ONLY']).optional(),
@@ -86,8 +96,11 @@ export const schemaJsonSchema = z.array(formFieldSchema).min(1);
  * Shape of one entry in `form_versions.validation_json` — SRS Category 3,
  * cross-field consistency. SRS names exactly four rules of these two
  * fixed shapes (Para <= Gravida, Abortions <= Gravida, Dead children <=
- * Live births, Live births + Stillbirths + Abortions = Gravida) — the shape
- * below is generic enough to express all four without inventing a fifth.
+ * Live births, Live births + Stillbirths + Abortions + 1 = Gravida — the +1
+ * accounts for the current pregnancy) — SUM_EQUALS carries an optional
+ * `offset` for that last rule's constant. ANY_OF_REQUIRED is a fifth rule,
+ * added for MOTHER_REGISTRATION's date_of_birth/age_of_the_beneficiary pair
+ * (either one satisfies the requirement) — see CR037beneficiaryagedobfieldgap.md.
  */
 // A discriminated union has no inferable OpenAPI type on its own — annotated
 // so the OpenAPI generator doesn't throw when this schema is used as a
@@ -100,6 +113,15 @@ export const crossFieldRuleSchema = z
         rule: z.literal('SUM_EQUALS'),
         fields: z.array(z.string().trim().min(1)).min(2),
         equals: z.string().trim().min(1),
+        // Constant added to the field sum before comparing — e.g. Gravida =
+        // live births + stillbirths + abortions + 1 (the current pregnancy).
+        offset: z.number().int().optional(),
+      })
+      .strict(),
+    z
+      .object({
+        rule: z.literal('ANY_OF_REQUIRED'),
+        fields: z.array(z.string().trim().min(1)).min(2),
       })
       .strict(),
   ])

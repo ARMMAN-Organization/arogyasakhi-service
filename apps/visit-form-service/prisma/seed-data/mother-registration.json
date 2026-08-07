@@ -9,56 +9,31 @@
       "requirePlaybackComplete": true
     },
     {
-      "label": "Willing to share personal info",
-      "options": [
-        { "label": "Yes", "sort_order": 0, "value_code": "yes" },
-        { "label": "No", "sort_order": 1, "value_code": "no" }
-      ],
-      "section": "Consent",
-      "required": true,
-      "input_type": "radio",
-      "question_code": "willing_to_share_personal_info"
-    },
-    {
-      "label": "Willing to share health history",
-      "options": [
-        { "label": "Yes", "sort_order": 0, "value_code": "yes" },
-        { "label": "No", "sort_order": 1, "value_code": "no" }
-      ],
-      "section": "Consent",
-      "required": true,
-      "input_type": "radio",
-      "question_code": "willing_to_share_health_history"
-    },
-    {
-      "label": "Willing to participate in diagnostic tests",
-      "options": [
-        { "label": "Yes", "sort_order": 0, "value_code": "yes" },
-        { "label": "No", "sort_order": 1, "value_code": "no" }
-      ],
-      "section": "Consent",
-      "required": true,
-      "input_type": "radio",
-      "question_code": "willing_to_participate_in_diagnostic_tests"
-    },
-    {
-      "label": "Understands the logic for referral",
-      "options": [
-        { "label": "Yes", "sort_order": 0, "value_code": "yes" },
-        { "label": "No", "sort_order": 1, "value_code": "no" }
-      ],
-      "section": "Consent",
-      "required": true,
-      "input_type": "radio",
-      "question_code": "understands_the_logic_for_referral"
-    },
-    {
       "label": "Consent audio",
       "section": "Consent",
       "required": true,
       "input_type": "media",
       "question_code": "consent_audio",
       "requirePlaybackComplete": true
+    },
+    {
+      "label": "Did we receive consent?",
+      "options": [
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
+      ],
+      "section": "Consent",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "did_we_receive_consent"
     },
     {
       "label": "Consent form photo",
@@ -69,15 +44,27 @@
       "question_code": "consent_form_photo"
     },
     {
-      "label": "Did we receive consent?",
-      "options": [
-        { "label": "Yes", "sort_order": 0, "value_code": "yes" },
-        { "label": "No", "sort_order": 1, "value_code": "no" }
-      ],
+      "label": "LMP Date",
       "section": "Consent",
       "required": true,
-      "input_type": "radio",
-      "question_code": "did_we_receive_consent"
+      "input_type": "date",
+      "question_code": "lmp_date"
+    },
+    {
+      "label": "EDD",
+      "section": "Consent",
+      "required": true,
+      "input_type": "date",
+      "computedFrom": "EDD_FROM_LMP",
+      "question_code": "edd"
+    },
+    {
+      "label": "Gestational age at the time of registration",
+      "section": "Consent",
+      "required": true,
+      "input_type": "number",
+      "computedFrom": "GESTATIONAL_AGE_AT_REGISTRATION",
+      "question_code": "gestational_age_at_the_time_of_registration"
     },
     {
       "label": "Beneficiary ID",
@@ -107,292 +94,6 @@
       "required": true,
       "input_type": "select",
       "question_code": "project_name"
-    },
-    {
-      "label": "First name",
-      "section": "Personal Info",
-      "required": true,
-      "input_type": "text",
-      "question_code": "first_name"
-    },
-    {
-      "label": "Middle name",
-      "section": "Personal Info",
-      "required": false,
-      "input_type": "text",
-      "question_code": "middle_name"
-    },
-    {
-      "label": "Last name",
-      "section": "Personal Info",
-      "required": true,
-      "input_type": "text",
-      "question_code": "last_name"
-    },
-    {
-      "label": "Date of birth",
-      "section": "Personal Info",
-      "required": false,
-      "input_type": "date",
-      "question_code": "date_of_birth"
-    },
-    {
-      "label": "Age of the beneficiary",
-      "section": "Personal Info",
-      "required": false,
-      "input_type": "number",
-      "question_code": "age_of_the_beneficiary"
-    },
-    {
-      "label": "Husband's name",
-      "section": "Personal Info",
-      "required": false,
-      "input_type": "text",
-      "question_code": "husbands_name"
-    },
-    {
-      "label": "What is the highest level of education you have completed?",
-      "options": [
-        {
-          "label": "No formal education (Never attended school / cannot read or write)",
-          "sort_order": 0,
-          "value_code": "no_formal_education_never_attended_school_cannot_read_or_write"
-        },
-        {
-          "label": "Primary education (Class 1–5)",
-          "sort_order": 1,
-          "value_code": "primary_education_class_1_5"
-        },
-        {
-          "label": "Upper primary / Middle school (Class 6–9)",
-          "sort_order": 2,
-          "value_code": "upper_primary_middle_school_class_6_9"
-        },
-        { "label": "10TH Pass", "sort_order": 3, "value_code": "10th_pass" },
-        { "label": "12th Pass", "sort_order": 4, "value_code": "12th_pass" },
-        { "label": "Diploma", "sort_order": 5, "value_code": "diploma" },
-        {
-          "label": "Graduate (College degree)",
-          "sort_order": 6,
-          "value_code": "graduate_college_degree"
-        },
-        {
-          "label": "Post Graduate and above",
-          "sort_order": 7,
-          "value_code": "post_graduate_and_above"
-        }
-      ],
-      "section": "Personal Info",
-      "required": true,
-      "input_type": "select",
-      "question_code": "what_is_the_highest_level_of_education_you_have_completed"
-    },
-    {
-      "label": "Enter the beneficiary address",
-      "section": "Personal Info",
-      "required": true,
-      "input_type": "text_geo",
-      "question_code": "enter_the_beneficiary_address"
-    },
-    {
-      "label": "Mobile number",
-      "section": "Personal Info",
-      "required": true,
-      "input_type": "number",
-      "question_code": "mobile_number"
-    },
-    {
-      "label": "Who owns the phone?",
-      "options": [
-        { "label": "Self", "sort_order": 0, "value_code": "self" },
-        { "label": "Husband", "sort_order": 1, "value_code": "husband" },
-        { "label": "Family member", "sort_order": 2, "value_code": "family_member" },
-        { "label": "ASHA", "sort_order": 3, "value_code": "asha" },
-        { "label": "Neighbour", "sort_order": 4, "value_code": "neighbour" }
-      ],
-      "section": "Personal Info",
-      "required": true,
-      "input_type": "select",
-      "question_code": "who_owns_the_phone"
-    },
-    {
-      "label": "Availability of Mobile Network",
-      "options": [
-        { "label": "No Network", "sort_order": 0, "value_code": "no_network" },
-        {
-          "label": "Very Poor Network( Have to go height which is 10 minutes walk away)",
-          "sort_order": 1,
-          "value_code": "very_poor_network_have_to_go_height_which_is_10_minutes_walk_away"
-        },
-        {
-          "label": "Network Available out side the home at some specific time",
-          "sort_order": 2,
-          "value_code": "network_available_out_side_the_home_at_some_specific_time"
-        },
-        {
-          "label": "Network available only outside home all time.",
-          "sort_order": 3,
-          "value_code": "network_available_only_outside_home_all_time"
-        },
-        {
-          "label": "Full Network Available",
-          "sort_order": 4,
-          "value_code": "full_network_available"
-        }
-      ],
-      "section": "Personal Info",
-      "required": true,
-      "input_type": "select",
-      "question_code": "availability_of_mobile_network"
-    },
-    {
-      "label": "What is the highest level of education your partner have completed?",
-      "options": [
-        {
-          "label": "No formal education (Never attended school / cannot read or write)",
-          "sort_order": 0,
-          "value_code": "no_formal_education_never_attended_school_cannot_read_or_write"
-        },
-        {
-          "label": "Primary education (Class 1–5)",
-          "sort_order": 1,
-          "value_code": "primary_education_class_1_5"
-        },
-        {
-          "label": "Upper primary / Middle school (Class 6–9)",
-          "sort_order": 2,
-          "value_code": "upper_primary_middle_school_class_6_9"
-        },
-        { "label": "10TH Pass", "sort_order": 3, "value_code": "10th_pass" },
-        { "label": "12th Pass", "sort_order": 4, "value_code": "12th_pass" },
-        { "label": "Diploma", "sort_order": 5, "value_code": "diploma" },
-        {
-          "label": "Graduate (College degree)",
-          "sort_order": 6,
-          "value_code": "graduate_college_degree"
-        },
-        {
-          "label": "Post Graduate and above",
-          "sort_order": 7,
-          "value_code": "post_graduate_and_above"
-        }
-      ],
-      "section": "Personal Info",
-      "required": true,
-      "input_type": "select",
-      "question_code": "what_is_the_highest_level_of_education_your_partner_have_completed"
-    },
-    {
-      "label": "What is the occupation of your partner?",
-      "options": [
-        { "label": "Labour", "sort_order": 0, "value_code": "labour" },
-        { "label": "Private Job", "sort_order": 1, "value_code": "private_job" },
-        { "label": "Government Job", "sort_order": 2, "value_code": "government_job" },
-        { "label": "Business", "sort_order": 3, "value_code": "business" },
-        { "label": "Farmer", "sort_order": 4, "value_code": "farmer" },
-        { "label": "Other", "sort_order": 5, "value_code": "other" }
-      ],
-      "section": "Personal Info",
-      "required": true,
-      "input_type": "select",
-      "question_code": "what_is_the_occupation_of_your_partner"
-    },
-    {
-      "label": "Since when have you been staying in this village?",
-      "section": "Personal Info",
-      "required": true,
-      "input_type": "number",
-      "question_code": "since_when_have_you_been_staying_in_this_village"
-    },
-    {
-      "label": "Which of the following best describes your household’s migration pattern?",
-      "options": [
-        { "label": "Permanent migration", "sort_order": 0, "value_code": "permanent_migration" },
-        {
-          "label": "Seasonal migration (leave for work during specific months)",
-          "sort_order": 1,
-          "value_code": "seasonal_migration_leave_for_work_during_specific_months"
-        },
-        {
-          "label": "Circular migration (move between two places repeatedly)",
-          "sort_order": 2,
-          "value_code": "circular_migration_move_between_two_places_repeatedly"
-        },
-        {
-          "label": "Temporary migration for employment",
-          "sort_order": 3,
-          "value_code": "temporary_migration_for_employment"
-        },
-        {
-          "label": "Displacement due to crisis (disaster, conflict, eviction)",
-          "sort_order": 4,
-          "value_code": "displacement_due_to_crisis_disaster_conflict_eviction"
-        }
-      ],
-      "section": "Personal Info",
-      "required": true,
-      "input_type": "select",
-      "question_code": "which_of_the_following_best_describes_your_household_s_migration_pattern"
-    },
-    {
-      "label": "What is the income of the family per month?",
-      "options": [
-        { "label": "≤10000", "sort_order": 0, "value_code": "10000" },
-        { "label": "10001-15000", "sort_order": 1, "value_code": "10001_15000" },
-        { "label": "15001-20000", "sort_order": 2, "value_code": "15001_20000" },
-        { "label": "20001-25000", "sort_order": 3, "value_code": "20001_25000" },
-        { "label": ">25000", "sort_order": 4, "value_code": "25000" }
-      ],
-      "section": "Personal Info",
-      "required": true,
-      "input_type": "select",
-      "question_code": "what_is_the_income_of_the_family_per_month"
-    },
-    {
-      "label": "What is your religion",
-      "options": [
-        { "label": "Buddhist", "sort_order": 0, "value_code": "buddhist" },
-        { "label": "Christian", "sort_order": 1, "value_code": "christian" },
-        { "label": "Hindu", "sort_order": 2, "value_code": "hindu" },
-        { "label": "Jain", "sort_order": 3, "value_code": "jain" },
-        { "label": "Muslim", "sort_order": 4, "value_code": "muslim" },
-        { "label": "Sikh", "sort_order": 5, "value_code": "sikh" },
-        { "label": "Other", "sort_order": 6, "value_code": "other" }
-      ],
-      "section": "Personal Info",
-      "required": true,
-      "input_type": "select",
-      "question_code": "what_is_your_religion"
-    },
-    {
-      "label": "What is your category",
-      "options": [
-        { "label": "General", "sort_order": 0, "value_code": "general" },
-        { "label": "OBC", "sort_order": 1, "value_code": "obc" },
-        { "label": "Other", "sort_order": 2, "value_code": "other" },
-        { "label": "SC", "sort_order": 3, "value_code": "sc" },
-        { "label": "ST", "sort_order": 4, "value_code": "st" }
-      ],
-      "section": "Personal Info",
-      "required": true,
-      "input_type": "select",
-      "question_code": "what_is_your_category"
-    },
-    {
-      "label": "How many family members in your household? (including children under 5 years of age)",
-      "section": "Personal Info",
-      "required": true,
-      "input_type": "number",
-      "numericRange": { "max": 15, "min": 2 },
-      "question_code": "how_many_family_members_in_your_household_including_children_under_5_years_of_age"
-    },
-    {
-      "label": "How many children under 5 years of age are in your household?",
-      "section": "Personal Info",
-      "required": true,
-      "input_type": "number",
-      "numericRange": { "max": 9, "min": 0 },
-      "question_code": "how_many_children_under_5_years_of_age_are_in_your_household"
     },
     {
       "label": "Name of the State",
@@ -444,38 +145,425 @@
       "question_code": "name_of_sub_center"
     },
     {
-      "label": "Does the woman know her LMP?",
-      "options": [
-        { "label": "Yes", "sort_order": 0, "value_code": "yes" },
-        { "label": "No", "sort_order": 1, "value_code": "no" }
-      ],
+      "label": "Beneficiary name (First name Middle Name Last Name)",
       "section": "Personal Info",
       "required": true,
-      "input_type": "radio",
-      "question_code": "does_the_woman_know_her_lmp"
+      "input_type": "text",
+      "question_code": "beneficiary_name"
     },
     {
-      "label": "LMP Date",
-      "section": "Personal Info",
-      "required": true,
+      "question_code": "date_of_birth",
+      "label": "Date of birth",
       "input_type": "date",
-      "question_code": "lmp_date"
+      "required": false,
+      "section": "Personal Info"
     },
     {
-      "label": "EDD",
+      "question_code": "age_of_the_beneficiary",
+      "label": "Age of the beneficiary",
+      "input_type": "number",
+      "required": false,
+      "computedFrom": "AGE_FROM_DOB",
+      "numericRange": {
+        "min": 10,
+        "max": 50
+      },
+      "section": "Personal Info"
+    },
+    {
+      "label": "Enter the beneficiary address",
       "section": "Personal Info",
       "required": true,
-      "input_type": "date",
-      "computedFrom": "EDD_FROM_LMP",
-      "question_code": "edd"
+      "input_type": "text_geo",
+      "question_code": "enter_the_beneficiary_address"
     },
     {
-      "label": "Gestational age at the time of registration",
+      "label": "Mobile number",
       "section": "Personal Info",
       "required": true,
       "input_type": "number",
-      "computedFrom": "GESTATIONAL_AGE_AT_REGISTRATION",
-      "question_code": "gestational_age_at_the_time_of_registration"
+      "question_code": "mobile_number",
+      "exactLength": 10
+    },
+    {
+      "label": "Who owns the phone?",
+      "options": [
+        {
+          "label": "Self",
+          "sort_order": 0,
+          "value_code": "self"
+        },
+        {
+          "label": "Husband",
+          "sort_order": 1,
+          "value_code": "husband"
+        },
+        {
+          "label": "Family member",
+          "sort_order": 2,
+          "value_code": "family_member"
+        },
+        {
+          "label": "ASHA",
+          "sort_order": 3,
+          "value_code": "asha"
+        },
+        {
+          "label": "Neighbour",
+          "sort_order": 4,
+          "value_code": "neighbour"
+        }
+      ],
+      "section": "Personal Info",
+      "required": true,
+      "input_type": "select",
+      "question_code": "who_owns_the_phone"
+    },
+    {
+      "label": "Availability of Mobile Network",
+      "options": [
+        {
+          "label": "No Network",
+          "sort_order": 0,
+          "value_code": "no_network"
+        },
+        {
+          "label": "Very Poor Network( Have to go height which is 10 minutes walk away)",
+          "sort_order": 1,
+          "value_code": "very_poor_network_have_to_go_height_which_is_10_minutes_walk_away"
+        },
+        {
+          "label": "Network Available out side the home at some specific time",
+          "sort_order": 2,
+          "value_code": "network_available_out_side_the_home_at_some_specific_time"
+        },
+        {
+          "label": "Network available only outside home all time.",
+          "sort_order": 3,
+          "value_code": "network_available_only_outside_home_all_time"
+        },
+        {
+          "label": "Full Network Available",
+          "sort_order": 4,
+          "value_code": "full_network_available"
+        }
+      ],
+      "section": "Personal Info",
+      "required": true,
+      "input_type": "select",
+      "question_code": "availability_of_mobile_network"
+    },
+    {
+      "label": "What is the highest level of education you have completed?",
+      "options": [
+        {
+          "label": "No formal education (Never attended school / cannot read or write)",
+          "sort_order": 0,
+          "value_code": "no_formal_education_never_attended_school_cannot_read_or_write"
+        },
+        {
+          "label": "Primary education (Class 1–5)",
+          "sort_order": 1,
+          "value_code": "primary_education_class_1_5"
+        },
+        {
+          "label": "Upper primary / Middle school (Class 6–9)",
+          "sort_order": 2,
+          "value_code": "upper_primary_middle_school_class_6_9"
+        },
+        {
+          "label": "10TH Pass",
+          "sort_order": 3,
+          "value_code": "10th_pass"
+        },
+        {
+          "label": "12th Pass",
+          "sort_order": 4,
+          "value_code": "12th_pass"
+        },
+        {
+          "label": "Diploma",
+          "sort_order": 5,
+          "value_code": "diploma"
+        },
+        {
+          "label": "Graduate (College degree)",
+          "sort_order": 6,
+          "value_code": "graduate_college_degree"
+        },
+        {
+          "label": "Post Graduate and above",
+          "sort_order": 7,
+          "value_code": "post_graduate_and_above"
+        }
+      ],
+      "section": "Personal Info",
+      "required": true,
+      "input_type": "select",
+      "question_code": "what_is_the_highest_level_of_education_you_have_completed"
+    },
+    {
+      "label": "What is the highest level of education your partner have completed?",
+      "options": [
+        {
+          "label": "No formal education (Never attended school / cannot read or write)",
+          "sort_order": 0,
+          "value_code": "no_formal_education_never_attended_school_cannot_read_or_write"
+        },
+        {
+          "label": "Primary education (Class 1–5)",
+          "sort_order": 1,
+          "value_code": "primary_education_class_1_5"
+        },
+        {
+          "label": "Upper primary / Middle school (Class 6–9)",
+          "sort_order": 2,
+          "value_code": "upper_primary_middle_school_class_6_9"
+        },
+        {
+          "label": "10TH Pass",
+          "sort_order": 3,
+          "value_code": "10th_pass"
+        },
+        {
+          "label": "12th Pass",
+          "sort_order": 4,
+          "value_code": "12th_pass"
+        },
+        {
+          "label": "Diploma",
+          "sort_order": 5,
+          "value_code": "diploma"
+        },
+        {
+          "label": "Graduate (College degree)",
+          "sort_order": 6,
+          "value_code": "graduate_college_degree"
+        },
+        {
+          "label": "Post Graduate and above",
+          "sort_order": 7,
+          "value_code": "post_graduate_and_above"
+        }
+      ],
+      "section": "Personal Info",
+      "required": true,
+      "input_type": "select",
+      "question_code": "what_is_the_highest_level_of_education_your_partner_have_completed"
+    },
+    {
+      "label": "What is the occupation of your partner?",
+      "options": [
+        {
+          "label": "Labour",
+          "sort_order": 0,
+          "value_code": "labour"
+        },
+        {
+          "label": "Private Job",
+          "sort_order": 1,
+          "value_code": "private_job"
+        },
+        {
+          "label": "Government Job",
+          "sort_order": 2,
+          "value_code": "government_job"
+        },
+        {
+          "label": "Business",
+          "sort_order": 3,
+          "value_code": "business"
+        },
+        {
+          "label": "Farmer",
+          "sort_order": 4,
+          "value_code": "farmer"
+        },
+        {
+          "label": "Other",
+          "sort_order": 5,
+          "value_code": "other"
+        }
+      ],
+      "section": "Personal Info",
+      "required": true,
+      "input_type": "select",
+      "question_code": "what_is_the_occupation_of_your_partner"
+    },
+    {
+      "label": "Since when have you been staying in this village?",
+      "section": "Personal Info",
+      "required": true,
+      "input_type": "number",
+      "question_code": "since_when_have_you_been_staying_in_this_village"
+    },
+    {
+      "label": "Which of the following best describes your household’s migration pattern?",
+      "options": [
+        {
+          "label": "Permanent migration",
+          "sort_order": 0,
+          "value_code": "permanent_migration"
+        },
+        {
+          "label": "Seasonal migration (leave for work during specific months)",
+          "sort_order": 1,
+          "value_code": "seasonal_migration_leave_for_work_during_specific_months"
+        },
+        {
+          "label": "Circular migration (move between two places repeatedly)",
+          "sort_order": 2,
+          "value_code": "circular_migration_move_between_two_places_repeatedly"
+        },
+        {
+          "label": "Temporary migration for employment",
+          "sort_order": 3,
+          "value_code": "temporary_migration_for_employment"
+        },
+        {
+          "label": "Displacement due to crisis (disaster, conflict, eviction)",
+          "sort_order": 4,
+          "value_code": "displacement_due_to_crisis_disaster_conflict_eviction"
+        }
+      ],
+      "section": "Personal Info",
+      "required": true,
+      "input_type": "select",
+      "question_code": "which_of_the_following_best_describes_your_household_s_migration_pattern"
+    },
+    {
+      "label": "What is the income of the family per month?",
+      "options": [
+        {
+          "label": "≤10000",
+          "sort_order": 0,
+          "value_code": "10000"
+        },
+        {
+          "label": "10001-15000",
+          "sort_order": 1,
+          "value_code": "10001_15000"
+        },
+        {
+          "label": "15001-20000",
+          "sort_order": 2,
+          "value_code": "15001_20000"
+        },
+        {
+          "label": "20001-25000",
+          "sort_order": 3,
+          "value_code": "20001_25000"
+        },
+        {
+          "label": ">25000",
+          "sort_order": 4,
+          "value_code": "25000"
+        }
+      ],
+      "section": "Personal Info",
+      "required": true,
+      "input_type": "select",
+      "question_code": "what_is_the_income_of_the_family_per_month"
+    },
+    {
+      "label": "What is your religion",
+      "options": [
+        {
+          "label": "Buddhist",
+          "sort_order": 0,
+          "value_code": "buddhist"
+        },
+        {
+          "label": "Christian",
+          "sort_order": 1,
+          "value_code": "christian"
+        },
+        {
+          "label": "Hindu",
+          "sort_order": 2,
+          "value_code": "hindu"
+        },
+        {
+          "label": "Jain",
+          "sort_order": 3,
+          "value_code": "jain"
+        },
+        {
+          "label": "Muslim",
+          "sort_order": 4,
+          "value_code": "muslim"
+        },
+        {
+          "label": "Sikh",
+          "sort_order": 5,
+          "value_code": "sikh"
+        },
+        {
+          "label": "Other",
+          "sort_order": 6,
+          "value_code": "other"
+        }
+      ],
+      "section": "Personal Info",
+      "required": true,
+      "input_type": "select",
+      "question_code": "what_is_your_religion"
+    },
+    {
+      "label": "What is your category",
+      "options": [
+        {
+          "label": "General",
+          "sort_order": 0,
+          "value_code": "general"
+        },
+        {
+          "label": "OBC",
+          "sort_order": 1,
+          "value_code": "obc"
+        },
+        {
+          "label": "Other",
+          "sort_order": 2,
+          "value_code": "other"
+        },
+        {
+          "label": "SC",
+          "sort_order": 3,
+          "value_code": "sc"
+        },
+        {
+          "label": "ST",
+          "sort_order": 4,
+          "value_code": "st"
+        }
+      ],
+      "section": "Personal Info",
+      "required": true,
+      "input_type": "select",
+      "question_code": "what_is_your_category"
+    },
+    {
+      "label": "How many family members in your household? (including children under 5 years of age)",
+      "section": "Personal Info",
+      "required": true,
+      "input_type": "number",
+      "numericRange": {
+        "max": 15,
+        "min": 2
+      },
+      "question_code": "how_many_family_members_in_your_household_including_children_under_5_years_of_age"
+    },
+    {
+      "label": "How many children under 5 years of age are in your household?",
+      "section": "Personal Info",
+      "required": true,
+      "input_type": "number",
+      "numericRange": {
+        "max": 9,
+        "min": 0
+      },
+      "question_code": "how_many_children_under_5_years_of_age_are_in_your_household"
     },
     {
       "label": "Trimester of preganancy",
@@ -487,9 +575,21 @@
     {
       "label": "Is this pregnancy planned?",
       "options": [
-        { "label": "Yes", "sort_order": 0, "value_code": "yes" },
-        { "label": "No", "sort_order": 1, "value_code": "no" },
-        { "label": "No answer", "sort_order": 2, "value_code": "no_answer" }
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        },
+        {
+          "label": "No answer",
+          "sort_order": 2,
+          "value_code": "no_answer"
+        }
       ],
       "section": "Health History",
       "required": true,
@@ -499,8 +599,16 @@
     {
       "label": "Did you take any medical treatment to become pregnant this time?",
       "options": [
-        { "label": "Yes", "sort_order": 0, "value_code": "yes" },
-        { "label": "No", "sort_order": 1, "value_code": "no" }
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
       ],
       "section": "Health History",
       "required": true,
@@ -510,11 +618,31 @@
     {
       "label": "If yes, treatment type",
       "options": [
-        { "label": "Fertility treatment", "sort_order": 0, "value_code": "fertility_treatment" },
-        { "label": "IVF", "sort_order": 1, "value_code": "ivf" },
-        { "label": "Ovulation induction", "sort_order": 2, "value_code": "ovulation_induction" },
-        { "label": "Hormonal treatment", "sort_order": 3, "value_code": "hormonal_treatment" },
-        { "label": "other", "sort_order": 4, "value_code": "other" }
+        {
+          "label": "Fertility treatment",
+          "sort_order": 0,
+          "value_code": "fertility_treatment"
+        },
+        {
+          "label": "IVF",
+          "sort_order": 1,
+          "value_code": "ivf"
+        },
+        {
+          "label": "Ovulation induction",
+          "sort_order": 2,
+          "value_code": "ovulation_induction"
+        },
+        {
+          "label": "Hormonal treatment",
+          "sort_order": 3,
+          "value_code": "hormonal_treatment"
+        },
+        {
+          "label": "other",
+          "sort_order": 4,
+          "value_code": "other"
+        }
       ],
       "section": "Health History",
       "required": false,
@@ -570,8 +698,16 @@
     {
       "label": "Has the woman received ANC check-ups at a health facility during this pregnancy?",
       "options": [
-        { "label": "Not started ANC yet", "sort_order": 0, "value_code": "not_started_anc_yet" },
-        { "label": "ANC-1 completed", "sort_order": 1, "value_code": "anc_1_completed" }
+        {
+          "label": "Not started ANC yet",
+          "sort_order": 0,
+          "value_code": "not_started_anc_yet"
+        },
+        {
+          "label": "ANC-1 completed",
+          "sort_order": 1,
+          "value_code": "anc_1_completed"
+        }
       ],
       "section": "Health History",
       "required": true,
@@ -613,8 +749,16 @@
           "sort_order": 3,
           "value_code": "gestational_diabetes_in_previous_pregnancy"
         },
-        { "label": "Thyroid disorder", "sort_order": 4, "value_code": "thyroid_disorder" },
-        { "label": "Heart disease", "sort_order": 5, "value_code": "heart_disease" },
+        {
+          "label": "Thyroid disorder",
+          "sort_order": 4,
+          "value_code": "thyroid_disorder"
+        },
+        {
+          "label": "Heart disease",
+          "sort_order": 5,
+          "value_code": "heart_disease"
+        },
         {
           "label": "Epilepsy / Seizure disorder",
           "sort_order": 6,
@@ -625,8 +769,16 @@
           "sort_order": 7,
           "value_code": "asthma_chronic_respiratory_disease"
         },
-        { "label": "Kidney disease", "sort_order": 8, "value_code": "kidney_disease" },
-        { "label": "Liver disease", "sort_order": 9, "value_code": "liver_disease" },
+        {
+          "label": "Kidney disease",
+          "sort_order": 8,
+          "value_code": "kidney_disease"
+        },
+        {
+          "label": "Liver disease",
+          "sort_order": 9,
+          "value_code": "liver_disease"
+        },
         {
           "label": "Anemia (severe / recurrent)",
           "sort_order": 10,
@@ -637,14 +789,26 @@
           "sort_order": 11,
           "value_code": "tuberculosis_current_or_past"
         },
-        { "label": "HIV / AIDS", "sort_order": 12, "value_code": "hiv_aids" },
-        { "label": "Hepatitis B", "sort_order": 13, "value_code": "hepatitis_b" },
+        {
+          "label": "HIV / AIDS",
+          "sort_order": 12,
+          "value_code": "hiv_aids"
+        },
+        {
+          "label": "Hepatitis B",
+          "sort_order": 13,
+          "value_code": "hepatitis_b"
+        },
         {
           "label": "Mental health condition (e.g., depression, anxiety)",
           "sort_order": 14,
           "value_code": "mental_health_condition_e_g_depression_anxiety"
         },
-        { "label": "Don’t know", "sort_order": 15, "value_code": "don_t_know" }
+        {
+          "label": "Don’t know",
+          "sort_order": 15,
+          "value_code": "don_t_know"
+        }
       ],
       "section": "Health History",
       "required": true,
@@ -659,9 +823,21 @@
     {
       "label": "Has the women received Td dose ?",
       "options": [
-        { "label": "None received yet", "sort_order": 0, "value_code": "none_received_yet" },
-        { "label": "Td-1  date:___________", "sort_order": 1, "value_code": "td_1_date" },
-        { "label": "Td-2     date:____________", "sort_order": 2, "value_code": "td_2_date" },
+        {
+          "label": "None received yet",
+          "sort_order": 0,
+          "value_code": "none_received_yet"
+        },
+        {
+          "label": "Td-1  date:___________",
+          "sort_order": 1,
+          "value_code": "td_1_date"
+        },
+        {
+          "label": "Td-2     date:____________",
+          "sort_order": 2,
+          "value_code": "td_2_date"
+        },
         {
           "label": "Td-Booster   date:____________",
           "sort_order": 3,
@@ -674,11 +850,50 @@
       "question_code": "has_the_women_received_td_dose"
     },
     {
+      "question_code": "td_1_date",
+      "label": "Td-1 date",
+      "input_type": "date",
+      "required": false,
+      "section": "Health History",
+      "visibleWhen": {
+        "field": "has_the_women_received_td_dose",
+        "operator": "contains",
+        "value": "td_1_date"
+      }
+    },
+    {
+      "question_code": "td_2_date",
+      "label": "Td-2 date",
+      "input_type": "date",
+      "required": false,
+      "section": "Health History",
+      "visibleWhen": {
+        "field": "has_the_women_received_td_dose",
+        "operator": "contains",
+        "value": "td_2_date"
+      }
+    },
+    {
+      "question_code": "td_booster_date",
+      "label": "Td-Booster date",
+      "input_type": "date",
+      "required": false,
+      "section": "Health History",
+      "visibleWhen": {
+        "field": "has_the_women_received_td_dose",
+        "operator": "contains",
+        "value": "td_booster_date"
+      }
+    },
+    {
       "label": "Gravida (Total number of pregnancies): How many times have you been pregnant including the current pregnancy?",
       "section": "Health History",
       "required": true,
       "input_type": "number",
-      "numericRange": { "max": 14, "min": 1 },
+      "numericRange": {
+        "max": 14,
+        "min": 1
+      },
       "question_code": "gravida_total_number_of_pregnancies"
     },
     {
@@ -686,40 +901,80 @@
       "section": "Health History",
       "required": true,
       "input_type": "number",
-      "numericRange": { "max": 14, "min": 0 },
-      "question_code": "para_number_of_births_after_24_weeks"
+      "numericRange": {
+        "max": 14,
+        "min": 0
+      },
+      "question_code": "para_number_of_births_after_24_weeks",
+      "visibleWhen": {
+        "field": "gravida_total_number_of_pregnancies",
+        "operator": "gte",
+        "value": 2
+      }
     },
     {
       "label": "Living children:How many of your children are currently alive?",
       "section": "Health History",
       "required": true,
       "input_type": "number",
-      "numericRange": { "max": 14, "min": 0 },
-      "question_code": "living_children"
+      "numericRange": {
+        "max": 14,
+        "min": 0
+      },
+      "question_code": "living_children",
+      "visibleWhen": {
+        "field": "gravida_total_number_of_pregnancies",
+        "operator": "gte",
+        "value": 2
+      }
     },
     {
       "label": "Abortions (Pregnancy losses before 24 weeks): Number of pregnancies that ended before 6 months (If any)",
       "section": "Health History",
       "required": true,
       "input_type": "number",
-      "numericRange": { "max": 14, "min": 0 },
-      "question_code": "abortions_pregnancy_losses_before_24_weeks"
+      "numericRange": {
+        "max": 14,
+        "min": 0
+      },
+      "question_code": "abortions_pregnancy_losses_before_24_weeks",
+      "visibleWhen": {
+        "field": "gravida_total_number_of_pregnancies",
+        "operator": "gte",
+        "value": 2
+      }
     },
     {
       "label": "Still Births",
       "section": "Health History",
       "required": true,
       "input_type": "number",
-      "numericRange": { "max": 14, "min": 0 },
-      "question_code": "still_births"
+      "numericRange": {
+        "max": 14,
+        "min": 0
+      },
+      "question_code": "still_births",
+      "visibleWhen": {
+        "field": "gravida_total_number_of_pregnancies",
+        "operator": "gte",
+        "value": 2
+      }
     },
     {
       "label": "Dead Children",
       "section": "Health History",
       "required": false,
       "input_type": "number",
-      "numericRange": { "max": 14, "min": 0 },
-      "question_code": "dead_children"
+      "numericRange": {
+        "max": 14,
+        "min": 0
+      },
+      "question_code": "dead_children",
+      "visibleWhen": {
+        "field": "gravida_total_number_of_pregnancies",
+        "operator": "gte",
+        "value": 2
+      }
     },
     {
       "label": "When was your last pregnancy?",
@@ -729,17 +984,30 @@
           "sort_order": 0,
           "value_code": "less_than_3_years_ago"
         },
-        { "label": "More than 3 years ago", "sort_order": 1, "value_code": "more_than_3_years_ago" }
+        {
+          "label": "More than 3 years ago",
+          "sort_order": 1,
+          "value_code": "more_than_3_years_ago"
+        }
       ],
       "section": "Health History",
       "required": false,
       "input_type": "radio",
-      "question_code": "when_was_your_last_pregnancy"
+      "question_code": "when_was_your_last_pregnancy",
+      "visibleWhen": {
+        "field": "gravida_total_number_of_pregnancies",
+        "operator": "gte",
+        "value": 2
+      }
     },
     {
       "label": "Did you experience any complications during birth/delivery in previous pregnancies?",
       "options": [
-        { "label": "Yes, Miscarriage", "sort_order": 0, "value_code": "yes_miscarriage" },
+        {
+          "label": "Yes, Miscarriage",
+          "sort_order": 0,
+          "value_code": "yes_miscarriage"
+        },
         {
           "label": "YES, During delivery complications",
           "sort_order": 1,
@@ -750,89 +1018,190 @@
           "sort_order": 2,
           "value_code": "yes_complications_with_baby_during_delivery"
         },
-        { "label": "No complications", "sort_order": 3, "value_code": "no_complications" }
+        {
+          "label": "No complications",
+          "sort_order": 3,
+          "value_code": "no_complications"
+        }
       ],
       "section": "Health History",
       "required": true,
       "input_type": "multiselect",
-      "question_code": "did_you_experience_any_complications_during_birth_delivery_in_previous_pregnancies"
+      "question_code": "did_you_experience_any_complications_during_birth_delivery_in_previous_pregnancies",
+      "visibleWhen": {
+        "field": "gravida_total_number_of_pregnancies",
+        "operator": "gte",
+        "value": 2
+      }
     },
     {
       "label": "Duration of last delivery?",
       "options": [
-        { "label": "Full Term", "sort_order": 0, "value_code": "full_term" },
-        { "label": "Post Term", "sort_order": 1, "value_code": "post_term" },
-        { "label": "Pre Term", "sort_order": 2, "value_code": "pre_term" }
+        {
+          "label": "Full Term",
+          "sort_order": 0,
+          "value_code": "full_term"
+        },
+        {
+          "label": "Post Term",
+          "sort_order": 1,
+          "value_code": "post_term"
+        },
+        {
+          "label": "Pre Term",
+          "sort_order": 2,
+          "value_code": "pre_term"
+        }
       ],
       "section": "Health History",
       "required": true,
       "input_type": "select",
-      "question_code": "duration_of_last_delivery"
+      "question_code": "duration_of_last_delivery",
+      "visibleWhen": {
+        "field": "gravida_total_number_of_pregnancies",
+        "operator": "gte",
+        "value": 2
+      }
     },
     {
       "label": "Type of last delivery ?",
       "options": [
-        { "label": "Caesarian", "sort_order": 0, "value_code": "caesarian" },
-        { "label": "Forcep", "sort_order": 1, "value_code": "forcep" },
-        { "label": "Normal", "sort_order": 2, "value_code": "normal" }
+        {
+          "label": "Caesarian",
+          "sort_order": 0,
+          "value_code": "caesarian"
+        },
+        {
+          "label": "Forcep",
+          "sort_order": 1,
+          "value_code": "forcep"
+        },
+        {
+          "label": "Normal",
+          "sort_order": 2,
+          "value_code": "normal"
+        }
       ],
       "section": "Health History",
       "required": true,
       "input_type": "select",
-      "question_code": "type_of_last_delivery"
+      "question_code": "type_of_last_delivery",
+      "visibleWhen": {
+        "field": "gravida_total_number_of_pregnancies",
+        "operator": "gte",
+        "value": 2
+      }
     },
     {
       "label": "Where was the woman's last delivery conducted?",
       "options": [
-        { "label": "CHC", "sort_order": 0, "value_code": "chc" },
-        { "label": "District Hospital", "sort_order": 1, "value_code": "district_hospital" },
-        { "label": "Home", "sort_order": 2, "value_code": "home" },
+        {
+          "label": "CHC",
+          "sort_order": 0,
+          "value_code": "chc"
+        },
+        {
+          "label": "District Hospital",
+          "sort_order": 1,
+          "value_code": "district_hospital"
+        },
+        {
+          "label": "Home",
+          "sort_order": 2,
+          "value_code": "home"
+        },
         {
           "label": "Other government Hospital",
           "sort_order": 3,
           "value_code": "other_government_hospital"
         },
-        { "label": "PHC", "sort_order": 4, "value_code": "phc" },
-        { "label": "Private Hospital", "sort_order": 5, "value_code": "private_hospital" },
+        {
+          "label": "PHC",
+          "sort_order": 4,
+          "value_code": "phc"
+        },
+        {
+          "label": "Private Hospital",
+          "sort_order": 5,
+          "value_code": "private_hospital"
+        },
         {
           "label": "Recognized Private Hospital",
           "sort_order": 6,
           "value_code": "recognized_private_hospital"
         },
-        { "label": "Rural Hospital", "sort_order": 7, "value_code": "rural_hospital" },
+        {
+          "label": "Rural Hospital",
+          "sort_order": 7,
+          "value_code": "rural_hospital"
+        },
         {
           "label": "Sub District Hospital",
           "sort_order": 8,
           "value_code": "sub_district_hospital"
         },
-        { "label": "Sub centre", "sort_order": 9, "value_code": "sub_centre" }
+        {
+          "label": "Sub centre",
+          "sort_order": 9,
+          "value_code": "sub_centre"
+        }
       ],
       "section": "Health History",
       "required": true,
       "input_type": "select",
-      "question_code": "where_was_the_woman_s_last_delivery_conducted"
+      "question_code": "where_was_the_woman_s_last_delivery_conducted",
+      "visibleWhen": {
+        "field": "gravida_total_number_of_pregnancies",
+        "operator": "gte",
+        "value": 2
+      }
     },
     {
       "label": "Last delivery outcome",
       "options": [
-        { "label": "Live birth", "sort_order": 0, "value_code": "live_birth" },
-        { "label": "Still birth", "sort_order": 1, "value_code": "still_birth" }
+        {
+          "label": "Live birth",
+          "sort_order": 0,
+          "value_code": "live_birth"
+        },
+        {
+          "label": "Still birth",
+          "sort_order": 1,
+          "value_code": "still_birth"
+        }
       ],
       "section": "Health History",
       "required": true,
       "input_type": "radio",
-      "question_code": "last_delivery_outcome"
+      "question_code": "last_delivery_outcome",
+      "visibleWhen": {
+        "field": "gravida_total_number_of_pregnancies",
+        "operator": "gte",
+        "value": 2
+      }
     },
     {
       "label": "Weight of the child at the time of birth?",
       "options": [
-        { "label": "Less than 2.5 kg", "sort_order": 0, "value_code": "less_than_2_5_kg" },
-        { "label": "Greather than 2.5 kg", "sort_order": 1, "value_code": "greather_than_2_5_kg" }
+        {
+          "label": "Less than 2.5 kg",
+          "sort_order": 0,
+          "value_code": "less_than_2_5_kg"
+        },
+        {
+          "label": "Greather than 2.5 kg",
+          "sort_order": 1,
+          "value_code": "greather_than_2_5_kg"
+        }
       ],
       "section": "Health History",
       "required": true,
       "input_type": "radio",
-      "visibleWhen": { "field": "last_delivery_outcome", "value": "live_birth", "operator": "eq" },
+      "visibleWhen": {
+        "field": "last_delivery_outcome",
+        "value": "live_birth",
+        "operator": "eq"
+      },
       "question_code": "weight_of_the_child_at_the_time_of_birth"
     },
     {
@@ -858,8 +1227,16 @@
           "sort_order": 3,
           "value_code": "gestational_diabetes_in_previous_pregnancy"
         },
-        { "label": "Thyroid disorder", "sort_order": 4, "value_code": "thyroid_disorder" },
-        { "label": "Heart disease", "sort_order": 5, "value_code": "heart_disease" },
+        {
+          "label": "Thyroid disorder",
+          "sort_order": 4,
+          "value_code": "thyroid_disorder"
+        },
+        {
+          "label": "Heart disease",
+          "sort_order": 5,
+          "value_code": "heart_disease"
+        },
         {
           "label": "Epilepsy / Seizure disorder",
           "sort_order": 6,
@@ -870,9 +1247,21 @@
           "sort_order": 7,
           "value_code": "asthma_chronic_respiratory_disease"
         },
-        { "label": "Kidney disease", "sort_order": 8, "value_code": "kidney_disease" },
-        { "label": "Thalassemia", "sort_order": 9, "value_code": "thalassemia" },
-        { "label": "Liver disease", "sort_order": 10, "value_code": "liver_disease" },
+        {
+          "label": "Kidney disease",
+          "sort_order": 8,
+          "value_code": "kidney_disease"
+        },
+        {
+          "label": "Thalassemia",
+          "sort_order": 9,
+          "value_code": "thalassemia"
+        },
+        {
+          "label": "Liver disease",
+          "sort_order": 10,
+          "value_code": "liver_disease"
+        },
         {
           "label": "Anemia (severe / recurrent)",
           "sort_order": 11,
@@ -883,14 +1272,26 @@
           "sort_order": 12,
           "value_code": "tuberculosis_current_or_past"
         },
-        { "label": "HIV / AIDS", "sort_order": 13, "value_code": "hiv_aids" },
-        { "label": "Hepatitis B", "sort_order": 14, "value_code": "hepatitis_b" },
+        {
+          "label": "HIV / AIDS",
+          "sort_order": 13,
+          "value_code": "hiv_aids"
+        },
+        {
+          "label": "Hepatitis B",
+          "sort_order": 14,
+          "value_code": "hepatitis_b"
+        },
         {
           "label": "Mental health condition (e.g., depression, anxiety)",
           "sort_order": 15,
           "value_code": "mental_health_condition_e_g_depression_anxiety"
         },
-        { "label": "Don’t know", "sort_order": 16, "value_code": "don_t_know" }
+        {
+          "label": "Don’t know",
+          "sort_order": 16,
+          "value_code": "don_t_know"
+        }
       ],
       "section": "Health History",
       "required": true,
@@ -925,9 +1326,21 @@
           "sort_order": 4,
           "value_code": "taking_anti_epileptic_drugs"
         },
-        { "label": "Taking anti-TB drugs", "sort_order": 5, "value_code": "taking_anti_tb_drugs" },
-        { "label": "Taking HIV drugs", "sort_order": 6, "value_code": "taking_hiv_drugs" },
-        { "label": "Other", "sort_order": 7, "value_code": "other" }
+        {
+          "label": "Taking anti-TB drugs",
+          "sort_order": 5,
+          "value_code": "taking_anti_tb_drugs"
+        },
+        {
+          "label": "Taking HIV drugs",
+          "sort_order": 6,
+          "value_code": "taking_hiv_drugs"
+        },
+        {
+          "label": "Other",
+          "sort_order": 7,
+          "value_code": "other"
+        }
       ],
       "section": "Health History",
       "required": true,
@@ -957,8 +1370,16 @@
           "sort_order": 3,
           "value_code": "tested_earlier_but_result_not_available"
         },
-        { "label": "Not tested yet", "sort_order": 4, "value_code": "not_tested_yet" },
-        { "label": "Don’t know / Not aware", "sort_order": 5, "value_code": "don_t_know_not_aware" }
+        {
+          "label": "Not tested yet",
+          "sort_order": 4,
+          "value_code": "not_tested_yet"
+        },
+        {
+          "label": "Don’t know / Not aware",
+          "sort_order": 5,
+          "value_code": "don_t_know_not_aware"
+        }
       ],
       "section": "Health History",
       "required": true,
@@ -968,7 +1389,11 @@
     {
       "label": "Have you used any of the following substances before or during this pregnancy?",
       "options": [
-        { "label": "No", "sort_order": 0, "value_code": "no" },
+        {
+          "label": "No",
+          "sort_order": 0,
+          "value_code": "no"
+        },
         {
           "label": "Chewing tobacco (gutkha, khaini, mishri, etc.)",
           "sort_order": 1,
@@ -979,8 +1404,16 @@
           "sort_order": 2,
           "value_code": "smoking_tobacco_bidi_cigaretde"
         },
-        { "label": "Alcohol use", "sort_order": 3, "value_code": "alcohol_use" },
-        { "label": "Other", "sort_order": 4, "value_code": "other" },
+        {
+          "label": "Alcohol use",
+          "sort_order": 3,
+          "value_code": "alcohol_use"
+        },
+        {
+          "label": "Other",
+          "sort_order": 4,
+          "value_code": "other"
+        },
         {
           "label": "Used earlier but stopped after knowing about pregnancy",
           "sort_order": 5,
@@ -1000,8 +1433,16 @@
     {
       "label": "Is there a family history of acute or chronic illnesses?",
       "options": [
-        { "label": "Yes", "sort_order": 0, "value_code": "yes" },
-        { "label": "No", "sort_order": 1, "value_code": "no" }
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
       ],
       "section": "Health History",
       "required": true,
@@ -1016,26 +1457,66 @@
           "sort_order": 0,
           "value_code": "hypertension_high_bp"
         },
-        { "label": "Diabetes", "sort_order": 1, "value_code": "diabetes" },
+        {
+          "label": "Diabetes",
+          "sort_order": 1,
+          "value_code": "diabetes"
+        },
         {
           "label": "Heart disease (e.g., heart aTdack, stroke)",
           "sort_order": 2,
           "value_code": "heart_disease_e_g_heart_atdack_stroke"
         },
-        { "label": "Thyroid disorders", "sort_order": 3, "value_code": "thyroid_disorders" },
+        {
+          "label": "Thyroid disorders",
+          "sort_order": 3,
+          "value_code": "thyroid_disorders"
+        },
         {
           "label": "Asthma / Chronic respiratory disease",
           "sort_order": 4,
           "value_code": "asthma_chronic_respiratory_disease"
         },
-        { "label": "Kidney disease", "sort_order": 5, "value_code": "kidney_disease" },
-        { "label": "Tuberculosis (TB)", "sort_order": 6, "value_code": "tuberculosis_tb" },
-        { "label": "HIV / AIDS", "sort_order": 7, "value_code": "hiv_aids" },
-        { "label": "Hepatitis B or C", "sort_order": 8, "value_code": "hepatitis_b_or_c" },
-        { "label": "Leprosy", "sort_order": 9, "value_code": "leprosy" },
-        { "label": "Thalassemia", "sort_order": 10, "value_code": "thalassemia" },
-        { "label": "Sickle cell disease", "sort_order": 11, "value_code": "sickle_cell_disease" },
-        { "label": "Hemophilia", "sort_order": 12, "value_code": "hemophilia" },
+        {
+          "label": "Kidney disease",
+          "sort_order": 5,
+          "value_code": "kidney_disease"
+        },
+        {
+          "label": "Tuberculosis (TB)",
+          "sort_order": 6,
+          "value_code": "tuberculosis_tb"
+        },
+        {
+          "label": "HIV / AIDS",
+          "sort_order": 7,
+          "value_code": "hiv_aids"
+        },
+        {
+          "label": "Hepatitis B or C",
+          "sort_order": 8,
+          "value_code": "hepatitis_b_or_c"
+        },
+        {
+          "label": "Leprosy",
+          "sort_order": 9,
+          "value_code": "leprosy"
+        },
+        {
+          "label": "Thalassemia",
+          "sort_order": 10,
+          "value_code": "thalassemia"
+        },
+        {
+          "label": "Sickle cell disease",
+          "sort_order": 11,
+          "value_code": "sickle_cell_disease"
+        },
+        {
+          "label": "Hemophilia",
+          "sort_order": 12,
+          "value_code": "hemophilia"
+        },
         {
           "label": "Congenital anomalies / Birth defects",
           "sort_order": 13,
@@ -1051,18 +1532,30 @@
       "required": true,
       "input_type": "multiselect",
       "visibleWhen": {
-        "field": "is_there_a_family_history_of_acute_or_chronic_illnesses",
-        "value": "yes",
-        "operator": "eq"
+        "field": "is_there_a_family_history_of_acute_or_chronic_illnesses_note",
+        "operator": "eq",
+        "value": "yes"
       },
       "question_code": "if_yes_select_applicable_conditions"
     },
     {
       "label": "Are any children in the household being treated for malnutrition?",
       "options": [
-        { "label": "Yes", "sort_order": 0, "value_code": "yes" },
-        { "label": "No", "sort_order": 1, "value_code": "no" },
-        { "label": "No children", "sort_order": 2, "value_code": "no_children" }
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        },
+        {
+          "label": "No children",
+          "sort_order": 2,
+          "value_code": "no_children"
+        }
       ],
       "section": "Health History",
       "required": false,
@@ -1089,6 +1582,19 @@
         "gravida_total_number_of_pregnancies"
       ]
     },
-    { "rule": "LTE", "fields": ["dead_children", "living_children"] }
+    {
+      "rule": "LTE",
+      "fields": ["dead_children", "living_children"]
+    },
+    {
+      "rule": "SUM_EQUALS",
+      "fields": ["living_children", "still_births", "abortions_pregnancy_losses_before_24_weeks"],
+      "equals": "gravida_total_number_of_pregnancies",
+      "offset": 1
+    },
+    {
+      "rule": "ANY_OF_REQUIRED",
+      "fields": ["date_of_birth", "age_of_the_beneficiary"]
+    }
   ]
 }
