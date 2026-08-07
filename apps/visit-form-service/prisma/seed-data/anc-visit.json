@@ -582,57 +582,6 @@
       "question_code": "vaccination_status"
     },
     {
-      "label": "Td1 date",
-      "section": "Symptoms",
-      "required": false,
-      "input_type": "date",
-      "dateRule": {
-        "notFuture": true
-      },
-      "visibleWhen": {
-        "field": "vaccination_status",
-        "operator": "contains",
-        "value": "td1_date"
-      },
-      "question_code": "td1_date"
-    },
-    {
-      "label": "Td2 date",
-      "section": "Symptoms",
-      "required": false,
-      "input_type": "date",
-      "dateRule": {
-        "notFuture": true,
-        "notBefore": {
-          "field": "td1_date"
-        }
-      },
-      "visibleWhen": {
-        "field": "vaccination_status",
-        "operator": "contains",
-        "value": "td2_date"
-      },
-      "question_code": "td2_date"
-    },
-    {
-      "label": "Booster date",
-      "section": "Symptoms",
-      "required": false,
-      "input_type": "date",
-      "dateRule": {
-        "notFuture": true,
-        "notBefore": {
-          "field": "td2_date"
-        }
-      },
-      "visibleWhen": {
-        "field": "vaccination_status",
-        "operator": "contains",
-        "value": "booster_date"
-      },
-      "question_code": "booster_date"
-    },
-    {
       "label": "Which of these food stuff have you consumed in the last 24 hours?",
       "options": [
         {
@@ -1305,15 +1254,6 @@
       "rule": "EXCLUSIVE_OPTION",
       "field": "vaccination_status",
       "exclusiveValues": ["none"]
-    },
-    {
-      "rule": "REQUIRED_IF_SELECTED",
-      "field": "vaccination_status",
-      "optionFieldMap": {
-        "td1_date": "td1_date",
-        "td2_date": "td2_date",
-        "booster_date": "booster_date"
-      }
     }
   ]
 }
