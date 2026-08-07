@@ -37,6 +37,18 @@ export const createCallLogSchema = z
       .enum(['RELATIVE', 'HUSBAND', 'SAKHI', 'PERSON_WHO_DOES_NOT_KNOW_WOMAN'])
       .optional(),
   })
-  .strict();
+  .strict()
+  .refine((data) => data.callStartAt.getTime() <= Date.now(), {
+    message: 'callStartAt must not be in the future.',
+    path: ['callStartAt'],
+  })
+  .refine((data) => !data.callEndAt || data.callEndAt.getTime() <= Date.now(), {
+    message: 'callEndAt must not be in the future.',
+    path: ['callEndAt'],
+  })
+  .refine((data) => !data.callEndAt || data.callEndAt.getTime() >= data.callStartAt.getTime(), {
+    message: 'callEndAt must not be before callStartAt.',
+    path: ['callEndAt'],
+  });
 
 export type CreateCallLogInput = z.infer<typeof createCallLogSchema>;

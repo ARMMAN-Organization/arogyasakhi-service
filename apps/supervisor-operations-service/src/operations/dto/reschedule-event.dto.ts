@@ -8,8 +8,10 @@ import { z } from 'zod';
  */
 export const rescheduleEventSchema = z
   .object({
-    eventDate: z.coerce.date(),
-    remarks: z.string().trim().min(1).optional(),
+    eventDate: z.coerce.date().refine((date) => date.getTime() >= Date.now(), {
+      message: 'eventDate must not be in the past.',
+    }),
+    remarks: z.string().trim().min(3).optional(),
   })
   .strict();
 

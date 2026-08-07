@@ -26,7 +26,9 @@ export const createInventoryTransactionSchema = z
     projectId: z.string().uuid(),
     sakhiId: z.string().uuid(),
     transactionType: z.enum(['HANDOVER', 'RETURNED', 'PERMANENT_DAMAGED', 'MISPLACED', 'CONSUMED']),
-    transactionDate: z.coerce.date(),
+    transactionDate: z.coerce.date().refine((date) => date.getTime() <= Date.now(), {
+      message: 'transactionDate must not be in the future.',
+    }),
     remarks: z.string().trim().min(1).optional(),
     items: z.array(transactionItemSchema).min(1),
   })

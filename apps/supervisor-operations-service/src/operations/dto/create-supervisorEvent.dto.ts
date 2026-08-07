@@ -41,9 +41,11 @@ export const createSupervisorEventSchema = z
     projectId: z.string().uuid(),
     supervisorId: z.string().uuid(),
     eventType: z.enum(['MEETING', 'TRAINING']),
-    eventDate: z.coerce.date(),
+    eventDate: z.coerce.date().refine((date) => date.getTime() >= Date.now(), {
+      message: 'eventDate must not be in the past.',
+    }),
     topicsJson: jsonValueSchema,
-    remarks: z.string().trim().min(1).optional(),
+    remarks: z.string().trim().min(3).optional(),
     status: z.enum(['SCHEDULED', 'COMPLETED', 'CANCELLED']),
     photoMediaId: z.string().uuid().optional(),
   })

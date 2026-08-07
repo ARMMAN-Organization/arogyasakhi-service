@@ -17,6 +17,10 @@ export const updateInventoryTransactionSchema = z
   .strict()
   .refine((data) => Object.keys(data).length > 0, {
     message: 'At least one field must be provided.',
+  })
+  .refine((data) => !data.transactionDate || data.transactionDate.getTime() <= Date.now(), {
+    message: 'transactionDate must not be in the future.',
+    path: ['transactionDate'],
   });
 
 export type UpdateInventoryTransactionInput = z.infer<typeof updateInventoryTransactionSchema>;

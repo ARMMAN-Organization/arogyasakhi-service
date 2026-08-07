@@ -77,12 +77,23 @@ export class OperationsService {
     return this.repository.findEvents(filters);
   }
 
-  createEvent(dto: CreateSupervisorEventInput) {
+  async createEvent(dto: CreateSupervisorEventInput) {
     // The DTO's photoMediaId is application-mandatory when status = COMPLETED
     // (ERD §4.7) — the schema keeps it optional so SCHEDULED/CANCELLED events
     // can be created without a photo, so this rule is enforced here instead.
     if (dto.status === 'COMPLETED' && !dto.photoMediaId) {
       throw unprocessable('photoMediaId is required when status is COMPLETED.');
+    }
+    // A supervisor can't have two events at the same exact instant for the
+    // same project — almost certainly a duplicate submission, not two real
+    // meetings. Cancelled events don't block a re-create at that slot.
+    const existingConflict = await this.repository.findConflictingEvent(
+      dto.supervisorId,
+      dto.projectId,
+      dto.eventDate,
+    );
+    if (existingConflict) {
+      throw conflict('An event for this supervisor and project already exists at this date/time.');
     }
     return this.repository.createEvent(dto);
   }
@@ -289,8 +300,9 @@ export class OperationsService {
     if (!deleted) throw notFound('Inventory transaction not found.');
   }
 
-  listCallLogs() {
-    return this.repository.findCallLogs();
+  /** A SUPERVISOR may only see their own call logs. MANAGER and ADMIN are unrestricted. */
+  listCallLogs(caller: CallerIdentity) {
+    return this.repository.findCallLogs(isPrivileged(caller) ? undefined : caller.id);
   }
 
   /**
@@ -330,6 +342,11 @@ export class OperationsService {
     if (!existing) throw notFound('Call log not found.');
     if (existing.supervisorId !== caller.id && !isPrivileged(caller)) {
       throw forbidden('You do not have access to this call log.');
+    }
+    // callStartAt is immutable (see updateCallLogSchema), so this is the only
+    // place the ordering can be checked against the record's actual start time.
+    if (dto.callEndAt && dto.callEndAt.getTime() < existing.callStartAt.getTime()) {
+      throw unprocessable('callEndAt must not be before callStartAt.');
     }
 
     const updated = await this.repository.updateCallLog(id, dto, caller.id);

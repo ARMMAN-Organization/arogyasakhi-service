@@ -32,6 +32,10 @@ export const updateCallLogSchema = z
   .strict()
   .refine((data) => Object.keys(data).length > 0, {
     message: 'At least one field must be provided.',
+  })
+  .refine((data) => !data.callEndAt || data.callEndAt.getTime() <= Date.now(), {
+    message: 'callEndAt must not be in the future.',
+    path: ['callEndAt'],
   });
 
 export type UpdateCallLogInput = z.infer<typeof updateCallLogSchema>;
