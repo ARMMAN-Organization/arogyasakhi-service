@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import { PrismaClient } from '../../../node_modules/.prisma/client-visit-form-service';
 import motherRegistrationPayload from './seed-data/mother-registration.json';
 import childRegistrationPayload from './seed-data/child-registration.json';
+import ancVisitPayload from './seed-data/anc-visit.json';
+import infantVisitPayload from './seed-data/infant-visit.json';
 
 const prisma = new PrismaClient();
 
@@ -53,6 +55,20 @@ const FORMS: FormDraft[] = [
     entityType: 'CHILD',
     versionNo: 'v1',
     payload: childRegistrationPayload,
+  },
+  {
+    formCode: 'ANC_VISIT',
+    formName: 'ANC Visit',
+    entityType: 'MOTHER',
+    versionNo: 'v1',
+    payload: ancVisitPayload,
+  },
+  {
+    formCode: 'INFANT_VISIT',
+    formName: 'Infant Visit',
+    entityType: 'CHILD',
+    versionNo: 'v1',
+    payload: infantVisitPayload,
   },
 ];
 

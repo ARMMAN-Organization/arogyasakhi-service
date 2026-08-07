@@ -1,0 +1,1236 @@
+{
+  "schemaJson": [
+    {
+      "label": "Date of visit",
+      "section": "Tests",
+      "required": true,
+      "input_type": "date",
+      "question_code": "date_of_visit"
+    },
+    {
+      "label": "Visit type",
+      "section": "Tests",
+      "required": true,
+      "input_type": "text",
+      "question_code": "visit_type"
+    },
+    {
+      "label": "Have you been able to meet the beneficiary for the visit?",
+      "options": [
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
+      ],
+      "section": "Tests",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "have_you_been_able_to_meet_the_beneficiary_for_the_visit"
+    },
+    {
+      "label": "If no, mention reasons",
+      "options": [
+        {
+          "label": "Woman migrated, status known",
+          "sort_order": 0,
+          "value_code": "woman_migrated_status_known"
+        },
+        {
+          "label": "Woman migrated, status unknown",
+          "sort_order": 1,
+          "value_code": "woman_migrated_status_unknown"
+        },
+        {
+          "label": "Woman not available (gone out, hospitalization)",
+          "sort_order": 2,
+          "value_code": "woman_not_available_gone_out_hospitalization"
+        },
+        {
+          "label": "Woman busy for the check up",
+          "sort_order": 3,
+          "value_code": "woman_busy_for_the_check_up"
+        },
+        {
+          "label": "Other",
+          "sort_order": 4,
+          "value_code": "other"
+        }
+      ],
+      "section": "Tests",
+      "required": true,
+      "input_type": "select",
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "no"
+      },
+      "question_code": "if_no_mention_reasons"
+    },
+    {
+      "label": "RCH Number",
+      "section": "Tests",
+      "required": true,
+      "input_type": "text",
+      "question_code": "rch_number"
+    },
+    {
+      "label": "LMP",
+      "section": "Tests",
+      "required": true,
+      "input_type": "date",
+      "question_code": "lmp"
+    },
+    {
+      "label": "Do you have a sonography report to confirm the LMP date?",
+      "options": [
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
+      ],
+      "section": "Tests",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "do_you_have_a_sonography_report_to_confirm_the_lmp_date"
+    },
+    {
+      "label": "LMP Date",
+      "section": "Tests",
+      "required": true,
+      "input_type": "date",
+      "visibleWhen": {
+        "field": "do_you_have_a_sonography_report_to_confirm_the_lmp_date",
+        "operator": "eq",
+        "value": "yes"
+      },
+      "question_code": "lmp_date_edit"
+    },
+    {
+      "label": "Upload sonography report image",
+      "section": "Tests",
+      "required": true,
+      "input_type": "image",
+      "captureMode": "LIVE_CAMERA_ONLY",
+      "visibleWhen": {
+        "field": "do_you_have_a_sonography_report_to_confirm_the_lmp_date",
+        "operator": "eq",
+        "value": "yes"
+      },
+      "question_code": "upload_sonography_report_image"
+    },
+    {
+      "label": "Current gestational age in weeks",
+      "section": "Tests",
+      "required": true,
+      "input_type": "number",
+      "computedFrom": "GESTATIONAL_AGE_AT_VISIT",
+      "question_code": "current_gestational_age_in_weeks"
+    },
+    {
+      "label": "EDD",
+      "section": "Tests",
+      "required": true,
+      "input_type": "date",
+      "computedFrom": "EDD_FROM_LMP",
+      "question_code": "edd"
+    },
+    {
+      "label": "Height of the woman in cm",
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "number",
+      "numericRange": {
+        "min": 120,
+        "max": 190
+      },
+      "question_code": "height_of_the_woman_in_cm"
+    },
+    {
+      "label": "Current weight of the woman in kg",
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "number",
+      "numericRange": {
+        "min": 25,
+        "max": 100
+      },
+      "question_code": "current_weight_of_the_woman_in_kg"
+    },
+    {
+      "label": "BMI",
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "number",
+      "computedFrom": "BMI",
+      "question_code": "bmi"
+    },
+    {
+      "label": "Gestational weight gain",
+      "options": [
+        {
+          "label": "Normal",
+          "sort_order": 0,
+          "value_code": "normal"
+        },
+        {
+          "label": "Severe",
+          "sort_order": 1,
+          "value_code": "severe"
+        }
+      ],
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "radio",
+      "computedFrom": "GESTATIONAL_WEIGHT_GAIN",
+      "question_code": "gestational_weight_gain"
+    },
+    {
+      "label": "Capture the mid-upper arm circumference in cm",
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "number",
+      "numericRange": {
+        "min": 10,
+        "max": 40
+      },
+      "question_code": "mid_upper_arm_circumference_in_cm"
+    },
+    {
+      "label": "Have you been experiencing any of these since the last visit?",
+      "options": [
+        {
+          "label": "Severe abdominal pain",
+          "sort_order": 0,
+          "value_code": "severe_abdominal_pain"
+        },
+        {
+          "label": "Bleeding from Vagina",
+          "sort_order": 1,
+          "value_code": "bleeding_from_vagina"
+        },
+        {
+          "label": "Abnormal Vaginal discharge (foul smelling and yellow)",
+          "sort_order": 2,
+          "value_code": "abnormal_vaginal_discharge_foul_smelling_and_yellow"
+        },
+        {
+          "label": "Vomiting for more than 24 hours",
+          "sort_order": 3,
+          "value_code": "vomiting_for_more_than_24_hours"
+        },
+        {
+          "label": "Convulsions",
+          "sort_order": 4,
+          "value_code": "convulsions"
+        },
+        {
+          "label": "Severe Headaches, blurred vision",
+          "sort_order": 5,
+          "value_code": "severe_headaches_blurred_vision"
+        },
+        {
+          "label": "Dizziness",
+          "sort_order": 6,
+          "value_code": "dizziness"
+        },
+        {
+          "label": "Breathlessness",
+          "sort_order": 7,
+          "value_code": "breathlessness"
+        },
+        {
+          "label": "Palpitation",
+          "sort_order": 8,
+          "value_code": "palpitation"
+        },
+        {
+          "label": "Increased frequency of urination",
+          "sort_order": 9,
+          "value_code": "increased_frequency_of_urination"
+        },
+        {
+          "label": "Vaginal Itching",
+          "sort_order": 10,
+          "value_code": "vaginal_itching"
+        },
+        {
+          "label": "Burning micturition",
+          "sort_order": 11,
+          "value_code": "burning_micturition"
+        },
+        {
+          "label": "No abnormal signs and symptoms",
+          "sort_order": 12,
+          "value_code": "no_abnormal_signs_and_symptoms"
+        }
+      ],
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "multiselect",
+      "question_code": "have_you_been_experiencing_any_of_these_since_the_last_visit"
+    },
+    {
+      "label": "Check Palm and Nails",
+      "options": [
+        {
+          "label": "Pale",
+          "sort_order": 0,
+          "value_code": "pale"
+        },
+        {
+          "label": "Yellow",
+          "sort_order": 1,
+          "value_code": "yellow"
+        },
+        {
+          "label": "Normal",
+          "sort_order": 2,
+          "value_code": "normal"
+        }
+      ],
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "select",
+      "question_code": "check_palm_and_nails"
+    },
+    {
+      "label": "Check Sclera (Eyes)",
+      "options": [
+        {
+          "label": "Pale",
+          "sort_order": 0,
+          "value_code": "pale"
+        },
+        {
+          "label": "Yellow",
+          "sort_order": 1,
+          "value_code": "yellow"
+        },
+        {
+          "label": "Normal",
+          "sort_order": 2,
+          "value_code": "normal"
+        }
+      ],
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "select",
+      "question_code": "check_sclera_eyes"
+    },
+    {
+      "label": "Check Skin",
+      "options": [
+        {
+          "label": "Pale",
+          "sort_order": 0,
+          "value_code": "pale"
+        },
+        {
+          "label": "Yellow",
+          "sort_order": 1,
+          "value_code": "yellow"
+        },
+        {
+          "label": "Normal",
+          "sort_order": 2,
+          "value_code": "normal"
+        }
+      ],
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "select",
+      "question_code": "check_skin"
+    },
+    {
+      "label": "Swelling",
+      "options": [
+        {
+          "label": "No swelling",
+          "sort_order": 0,
+          "value_code": "no_swelling"
+        },
+        {
+          "label": "Swollen hands",
+          "sort_order": 1,
+          "value_code": "swollen_hands"
+        },
+        {
+          "label": "Swollen feet",
+          "sort_order": 2,
+          "value_code": "swollen_feet"
+        },
+        {
+          "label": "Swollen face",
+          "sort_order": 3,
+          "value_code": "swollen_face"
+        }
+      ],
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "multiselect",
+      "question_code": "swelling"
+    },
+    {
+      "label": "Dehydration",
+      "options": [
+        {
+          "label": "Dry tongue",
+          "sort_order": 0,
+          "value_code": "dry_tongue"
+        },
+        {
+          "label": "Loss of skin turgor",
+          "sort_order": 1,
+          "value_code": "loss_of_skin_turgor"
+        },
+        {
+          "label": "No",
+          "sort_order": 2,
+          "value_code": "no"
+        }
+      ],
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "multiselect",
+      "question_code": "dehydration"
+    },
+    {
+      "label": "Blood Pressure (BP) Systolic",
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "number",
+      "numericRange": {
+        "min": 70,
+        "max": 300
+      },
+      "question_code": "blood_pressure_bp_systolic"
+    },
+    {
+      "label": "Blood Pressure (BP) Diastolic",
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "number",
+      "numericRange": {
+        "min": 40,
+        "max": 130
+      },
+      "question_code": "blood_pressure_bp_diastolic"
+    },
+    {
+      "label": "Body Temperature in °F",
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "number",
+      "numericRange": {
+        "min": 94,
+        "max": 105
+      },
+      "question_code": "body_temperature_in_f"
+    },
+    {
+      "label": "Haemoglobin (Hb) g/dl",
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "number",
+      "numericRange": {
+        "min": 1,
+        "max": 18
+      },
+      "question_code": "haemoglobin_hb_g_dl"
+    },
+    {
+      "label": "How many hours ago did you take last meal?",
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "number",
+      "question_code": "how_many_hours_ago_did_you_take_last_meal"
+    },
+    {
+      "label": "Blood Glucose in mg/dl",
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "number",
+      "numericRange": {
+        "min": 40,
+        "max": 400
+      },
+      "question_code": "blood_glucose_in_mg_dl"
+    },
+    {
+      "label": "Urine Test",
+      "options": [
+        {
+          "label": "Normal",
+          "sort_order": 0,
+          "value_code": "normal"
+        },
+        {
+          "label": "Infection",
+          "sort_order": 1,
+          "value_code": "infection"
+        },
+        {
+          "label": "Sugar",
+          "sort_order": 2,
+          "value_code": "sugar"
+        },
+        {
+          "label": "Protein",
+          "sort_order": 3,
+          "value_code": "protein"
+        }
+      ],
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "multiselect",
+      "question_code": "urine_test"
+    },
+    {
+      "label": "Fetal Movements",
+      "options": [
+        {
+          "label": "Absent",
+          "sort_order": 0,
+          "value_code": "absent"
+        },
+        {
+          "label": "Present",
+          "sort_order": 1,
+          "value_code": "present"
+        }
+      ],
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "radio",
+      "visibleWhen": {
+        "field": "current_gestational_age_in_weeks",
+        "operator": "gte",
+        "value": 20
+      },
+      "question_code": "fetal_movements"
+    },
+    {
+      "label": "Fetal Heart Rate",
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "number",
+      "visibleWhen": {
+        "field": "current_gestational_age_in_weeks",
+        "operator": "gte",
+        "value": 20
+      },
+      "question_code": "fetal_heart_rate"
+    },
+    {
+      "label": "Fundal Height in cm",
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "number",
+      "numericRange": {
+        "min": 10,
+        "max": 50
+      },
+      "visibleWhen": {
+        "field": "current_gestational_age_in_weeks",
+        "operator": "gte",
+        "value": 20
+      },
+      "question_code": "fundal_height_in_cm"
+    },
+    {
+      "label": "Vaccination status",
+      "options": [
+        {
+          "label": "None",
+          "sort_order": 0,
+          "value_code": "none"
+        },
+        {
+          "label": "Td1 Date",
+          "sort_order": 1,
+          "value_code": "td1_date"
+        },
+        {
+          "label": "Td2 Date",
+          "sort_order": 2,
+          "value_code": "td2_date"
+        },
+        {
+          "label": "Booster Date",
+          "sort_order": 3,
+          "value_code": "booster_date"
+        }
+      ],
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "multiselect_date",
+      "question_code": "vaccination_status"
+    },
+    {
+      "label": "Which of these food stuff have you consumed in the last 24 hours?",
+      "options": [
+        {
+          "label": "Cereals (nachni, bajra, jwari, gahu, rice etc.)",
+          "sort_order": 0,
+          "value_code": "cereals_nachni_bajra_jwari_gahu_rice_etc"
+        },
+        {
+          "label": "Pulses/Legumes (tur dal, chana, moong, etc.)",
+          "sort_order": 1,
+          "value_code": "pulses_legumes_tur_dal_chana_moong_etc"
+        },
+        {
+          "label": "Nuts and seeds (Ground nuts, almond etc)",
+          "sort_order": 2,
+          "value_code": "nuts_and_seeds_ground_nuts_almond_etc"
+        },
+        {
+          "label": "Dairy products Milk/milk products (paneer, dahi, taak, etc.)",
+          "sort_order": 3,
+          "value_code": "dairy_products_milk_milk_products_paneer_dahi_taak_etc"
+        },
+        {
+          "label": "Fruits",
+          "sort_order": 4,
+          "value_code": "fruits"
+        },
+        {
+          "label": "Vegetables",
+          "sort_order": 5,
+          "value_code": "vegetables"
+        },
+        {
+          "label": "Green vegetables",
+          "sort_order": 6,
+          "value_code": "green_vegetables"
+        },
+        {
+          "label": "Other vitamin A–rich fruits and vegetables (Mango, papaya, pumpkin, carrot)",
+          "sort_order": 7,
+          "value_code": "other_vitamin_a_rich_fruits_and_vegetables_mango_papaya_pumpkin_carrot"
+        },
+        {
+          "label": "Eggs",
+          "sort_order": 8,
+          "value_code": "eggs"
+        },
+        {
+          "label": "Poultry/meat/fish",
+          "sort_order": 9,
+          "value_code": "poultry_meat_fish"
+        }
+      ],
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "multiselect",
+      "question_code": "which_of_these_food_stuff_have_you_consumed_in_the_last_24_hours"
+    },
+    {
+      "label": "Which of these food stuff do you avoid eating?",
+      "options": [
+        {
+          "label": "Cereals (nachni, bajra, jwari, gahu, rice etc.)",
+          "sort_order": 0,
+          "value_code": "cereals_nachni_bajra_jwari_gahu_rice_etc"
+        },
+        {
+          "label": "Pulses/Legumes (tur dal, chana, moong, etc.)",
+          "sort_order": 1,
+          "value_code": "pulses_legumes_tur_dal_chana_moong_etc"
+        },
+        {
+          "label": "Nuts and seeds (Ground nuts, almond etc)",
+          "sort_order": 2,
+          "value_code": "nuts_and_seeds_ground_nuts_almond_etc"
+        },
+        {
+          "label": "Dairy products Milk/milk products (paneer, dahi, taak, etc.)",
+          "sort_order": 3,
+          "value_code": "dairy_products_milk_milk_products_paneer_dahi_taak_etc"
+        },
+        {
+          "label": "Fruits",
+          "sort_order": 4,
+          "value_code": "fruits"
+        },
+        {
+          "label": "Vegetables",
+          "sort_order": 5,
+          "value_code": "vegetables"
+        },
+        {
+          "label": "Green vegetables",
+          "sort_order": 6,
+          "value_code": "green_vegetables"
+        },
+        {
+          "label": "Other vitamin A–rich fruits and vegetables (Mango, papaya, pumpkin, carrot)",
+          "sort_order": 7,
+          "value_code": "other_vitamin_a_rich_fruits_and_vegetables_mango_papaya_pumpkin_carrot"
+        },
+        {
+          "label": "Eggs",
+          "sort_order": 8,
+          "value_code": "eggs"
+        },
+        {
+          "label": "Poultry/meat/fish",
+          "sort_order": 9,
+          "value_code": "poultry_meat_fish"
+        }
+      ],
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "multiselect",
+      "question_code": "which_of_these_food_stuff_do_you_avoid_eating"
+    },
+    {
+      "label": "Are you taking IFA tablets?",
+      "options": [
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
+      ],
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "are_you_taking_ifa_tablets"
+    },
+    {
+      "label": "How many IFA tablets did you consume since last visit?",
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "number",
+      "numericRange": {
+        "min": 0,
+        "max": 35
+      },
+      "visibleWhen": {
+        "field": "are_you_taking_ifa_tablets",
+        "operator": "eq",
+        "value": "yes"
+      },
+      "question_code": "how_many_ifa_tablets_did_you_consume_since_last_visit"
+    },
+    {
+      "label": "If no, what is the reasons for non consumption of IFA tablets?",
+      "options": [
+        {
+          "label": "Forgot to take",
+          "sort_order": 0,
+          "value_code": "forgot_to_take"
+        },
+        {
+          "label": "Due to side effects (Constipation, black stool, nausea)",
+          "sort_order": 1,
+          "value_code": "due_to_side_effects_constipation_black_stool_nausea"
+        },
+        {
+          "label": "Misconception about IFA",
+          "sort_order": 2,
+          "value_code": "misconception_about_ifa"
+        },
+        {
+          "label": "Tablets not available",
+          "sort_order": 3,
+          "value_code": "tablets_not_available"
+        },
+        {
+          "label": "Other",
+          "sort_order": 4,
+          "value_code": "other"
+        }
+      ],
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "multiselect",
+      "visibleWhen": {
+        "field": "are_you_taking_ifa_tablets",
+        "operator": "eq",
+        "value": "no"
+      },
+      "question_code": "if_no_what_is_the_reasons_for_non_consumption_of_ifa_tablets"
+    },
+    {
+      "label": "Calcium tablets received and consumed?",
+      "options": [
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
+      ],
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "calcium_tablets_received_and_consumed"
+    },
+    {
+      "label": "Have you visited health facility since my last visit",
+      "options": [
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
+      ],
+      "section": "History",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "have_you_visited_health_facility_since_my_last_visit"
+    },
+    {
+      "label": "If yes, enter date of latest ANC visit at the health facility",
+      "section": "History",
+      "required": true,
+      "input_type": "date",
+      "visibleWhen": {
+        "field": "have_you_visited_health_facility_since_my_last_visit",
+        "operator": "eq",
+        "value": "yes"
+      },
+      "question_code": "if_yes_enter_date_of_latest_anc_visit_at_the_health_facility"
+    },
+    {
+      "label": "Advised place of delivery",
+      "options": [
+        {
+          "label": "Civil Hospital",
+          "sort_order": 0,
+          "value_code": "civil_hospital"
+        },
+        {
+          "label": "Sub-district Hospital",
+          "sort_order": 1,
+          "value_code": "sub_district_hospital"
+        },
+        {
+          "label": "Rural Hospital",
+          "sort_order": 2,
+          "value_code": "rural_hospital"
+        },
+        {
+          "label": "Primary Health Centre",
+          "sort_order": 3,
+          "value_code": "primary_health_centre"
+        },
+        {
+          "label": "Subcentre",
+          "sort_order": 4,
+          "value_code": "subcentre"
+        },
+        {
+          "label": "Pvt. Hospital",
+          "sort_order": 5,
+          "value_code": "pvt_hospital"
+        },
+        {
+          "label": "Other",
+          "sort_order": 6,
+          "value_code": "other"
+        }
+      ],
+      "section": "History",
+      "required": true,
+      "input_type": "select",
+      "question_code": "advised_place_of_delivery"
+    },
+    {
+      "label": "Sickle Cell",
+      "options": [
+        {
+          "label": "Tested and result is normal",
+          "sort_order": 0,
+          "value_code": "tested_and_result_is_normal"
+        },
+        {
+          "label": "Sickle Cell Trait (SCT carrier)",
+          "sort_order": 1,
+          "value_code": "sickle_cell_trait_sct_carrier"
+        },
+        {
+          "label": "Sickle Cell Disease (SCD)",
+          "sort_order": 2,
+          "value_code": "sickle_cell_disease_scd"
+        },
+        {
+          "label": "Tested earlier but result not available",
+          "sort_order": 3,
+          "value_code": "tested_earlier_but_result_not_available"
+        },
+        {
+          "label": "Not tested yet",
+          "sort_order": 4,
+          "value_code": "not_tested_yet"
+        },
+        {
+          "label": "Don’t know/ Not aware",
+          "sort_order": 5,
+          "value_code": "dont_know_not_aware"
+        }
+      ],
+      "section": "History",
+      "required": true,
+      "input_type": "select",
+      "question_code": "sickle_cell"
+    },
+    {
+      "label": "Which of the following contraceptive/family planning method does the woman plan to use after delivery?",
+      "options": [
+        {
+          "label": "Condoms",
+          "sort_order": 0,
+          "value_code": "condoms"
+        },
+        {
+          "label": "Oral contraceptive pills (Mala-N or other)",
+          "sort_order": 1,
+          "value_code": "oral_contraceptive_pills_mala_n_or_other"
+        },
+        {
+          "label": "Emergency contraceptive pills",
+          "sort_order": 2,
+          "value_code": "emergency_contraceptive_pills"
+        },
+        {
+          "label": "Injectable contraceptives (Antara)",
+          "sort_order": 3,
+          "value_code": "injectable_contraceptives_antara"
+        },
+        {
+          "label": "IUCD (Copper-T)",
+          "sort_order": 4,
+          "value_code": "iucd_copper_t"
+        },
+        {
+          "label": "Lactational Amenorrhea Method (LAM)",
+          "sort_order": 5,
+          "value_code": "lactational_amenorrhea_method_lam"
+        },
+        {
+          "label": "Safe period, calendar method",
+          "sort_order": 6,
+          "value_code": "safe_period_calendar_method"
+        },
+        {
+          "label": "Withdrawal method (coitus interruptus)",
+          "sort_order": 7,
+          "value_code": "withdrawal_method_coitus_interruptus"
+        },
+        {
+          "label": "Female sterilization (Tubectomy)",
+          "sort_order": 8,
+          "value_code": "female_sterilization_tubectomy"
+        },
+        {
+          "label": "Male sterilization (Vasectomy, NSSK)",
+          "sort_order": 9,
+          "value_code": "male_sterilization_vasectomy_nssk"
+        },
+        {
+          "label": "Not using any contraceptive method",
+          "sort_order": 10,
+          "value_code": "not_using_any_contraceptive_method"
+        }
+      ],
+      "section": "History",
+      "required": true,
+      "input_type": "multiselect",
+      "question_code": "contraceptive_family_planning_method_planned_after_delivery"
+    },
+    {
+      "label": "Feeling sad, anxious, or stressed most days?",
+      "options": [
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
+      ],
+      "section": "History",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "feeling_sad_anxious_or_stressed_most_days"
+    },
+    {
+      "label": "Adequate family support during pregnancy?",
+      "options": [
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
+      ],
+      "section": "History",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "adequate_family_support_during_pregnancy"
+    },
+    {
+      "label": "Are you going to migrate to other place any time during pregnancy?",
+      "options": [
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
+      ],
+      "section": "History",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "are_you_going_to_migrate_to_other_place_any_time_during_pregnancy"
+    },
+    {
+      "label": "Have you done USG since last visit",
+      "options": [
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
+      ],
+      "section": "History",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "have_you_done_usg_since_last_visit"
+    },
+    {
+      "label": "If yes, date of USG",
+      "section": "History",
+      "required": true,
+      "input_type": "date",
+      "visibleWhen": {
+        "field": "have_you_done_usg_since_last_visit",
+        "operator": "eq",
+        "value": "yes"
+      },
+      "question_code": "if_yes_date_of_usg"
+    },
+    {
+      "label": "Type of USG",
+      "options": [
+        {
+          "label": "Routine USG",
+          "sort_order": 0,
+          "value_code": "routine_usg"
+        },
+        {
+          "label": "Anomaly scan",
+          "sort_order": 1,
+          "value_code": "anomaly_scan"
+        },
+        {
+          "label": "Doppler USG",
+          "sort_order": 2,
+          "value_code": "doppler_usg"
+        },
+        {
+          "label": "Other",
+          "sort_order": 3,
+          "value_code": "other"
+        }
+      ],
+      "section": "History",
+      "required": true,
+      "input_type": "select",
+      "visibleWhen": {
+        "field": "have_you_done_usg_since_last_visit",
+        "operator": "eq",
+        "value": "yes"
+      },
+      "question_code": "type_of_usg"
+    },
+    {
+      "label": "USG finding",
+      "options": [
+        {
+          "label": "Abnormal",
+          "sort_order": 0,
+          "value_code": "abnormal"
+        },
+        {
+          "label": "Normal",
+          "sort_order": 1,
+          "value_code": "normal"
+        }
+      ],
+      "section": "History",
+      "required": true,
+      "input_type": "select",
+      "visibleWhen": {
+        "field": "have_you_done_usg_since_last_visit",
+        "operator": "eq",
+        "value": "yes"
+      },
+      "question_code": "usg_finding"
+    },
+    {
+      "label": "Has the transport contact been shared with and saved by the beneficiary/family?",
+      "options": [
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
+      ],
+      "section": "History",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "has_the_transport_contact_been_shared_with_and_saved_by_the_beneficiary_family"
+    },
+    {
+      "label": "Has the family set aside or arranged funds for delivery/emergency expenses?",
+      "options": [
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
+      ],
+      "section": "History",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "has_the_family_set_aside_or_arranged_funds_for_delivery_emergency_expenses"
+    },
+    {
+      "label": "Has a birth companion been identified to accompany the woman during delivery/emergency?",
+      "options": [
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
+      ],
+      "section": "History",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "has_a_birth_companion_been_identified_to_accompany_the_woman_during_delivery_emergency"
+    },
+    {
+      "label": "Remarks",
+      "section": "History",
+      "required": false,
+      "input_type": "text",
+      "question_code": "remarks"
+    },
+    {
+      "label": "As a Sakhi, have you guided the beneficiary on the following?",
+      "options": [
+        {
+          "label": "Birth Preparedness & Complication Readiness",
+          "sort_order": 0,
+          "value_code": "birth_preparedness_complication_readiness"
+        },
+        {
+          "label": "Nutrition during pregnancy",
+          "sort_order": 1,
+          "value_code": "nutrition_during_pregnancy"
+        },
+        {
+          "label": "IFA & calcium compliance",
+          "sort_order": 2,
+          "value_code": "ifa_calcium_compliance"
+        },
+        {
+          "label": "Danger signs awareness",
+          "sort_order": 3,
+          "value_code": "danger_signs_awareness"
+        },
+        {
+          "label": "Rest & workload reduction",
+          "sort_order": 4,
+          "value_code": "rest_workload_reduction"
+        },
+        {
+          "label": "Hygiene and Sanitation practices",
+          "sort_order": 5,
+          "value_code": "hygiene_and_sanitation_practices"
+        },
+        {
+          "label": "Institutional delivery benefits",
+          "sort_order": 6,
+          "value_code": "institutional_delivery_benefits"
+        },
+        {
+          "label": "Dangers of Substance Abuse",
+          "sort_order": 7,
+          "value_code": "dangers_of_substance_abuse"
+        },
+        {
+          "label": "Family Planning Methods",
+          "sort_order": 8,
+          "value_code": "family_planning_methods"
+        }
+      ],
+      "section": "History",
+      "required": false,
+      "input_type": "multiselect",
+      "question_code": "as_a_sakhi_have_you_guided_the_beneficiary_on_the_following"
+    }
+  ],
+  "validationJson": []
+}

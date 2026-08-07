@@ -1,0 +1,1532 @@
+{
+  "schemaJson": [
+    {
+      "label": "Date of visit",
+      "section": "Tests",
+      "required": true,
+      "input_type": "date",
+      "question_code": "date_of_visit"
+    },
+    {
+      "label": "Visit type",
+      "section": "Tests",
+      "required": true,
+      "input_type": "text",
+      "question_code": "visit_type"
+    },
+    {
+      "label": "Have you been able to meet the beneficiary for the visit?",
+      "options": [
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
+      ],
+      "section": "Tests",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "have_you_been_able_to_meet_the_beneficiary_for_the_visit"
+    },
+    {
+      "label": "If no, mention reasons",
+      "options": [
+        {
+          "label": "Migrated, status known",
+          "sort_order": 0,
+          "value_code": "migrated_status_known"
+        },
+        {
+          "label": "Migrated, status unknown",
+          "sort_order": 1,
+          "value_code": "migrated_status_unknown"
+        },
+        {
+          "label": "Caregiver and Child not available (gone out, hospitalised)",
+          "sort_order": 2,
+          "value_code": "caregiver_and_child_not_available_gone_out_hospitalised"
+        },
+        {
+          "label": "Caregiver busy for the child check up",
+          "sort_order": 3,
+          "value_code": "caregiver_busy_for_the_child_check_up"
+        },
+        {
+          "label": "Other",
+          "sort_order": 4,
+          "value_code": "other"
+        }
+      ],
+      "section": "Tests",
+      "required": true,
+      "input_type": "select",
+      "visibleWhen": {
+        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "operator": "eq",
+        "value": "no"
+      },
+      "question_code": "if_no_mention_reasons"
+    },
+    {
+      "label": "RCH Number",
+      "section": "Tests",
+      "required": true,
+      "input_type": "text",
+      "question_code": "rch_number"
+    },
+    {
+      "label": "Date of birth",
+      "section": "Tests",
+      "required": true,
+      "input_type": "date",
+      "question_code": "date_of_birth"
+    },
+    {
+      "label": "Name of the Child",
+      "section": "Tests",
+      "required": true,
+      "input_type": "text",
+      "question_code": "name_of_the_child"
+    },
+    {
+      "label": "Age in months",
+      "section": "Tests",
+      "required": true,
+      "input_type": "number",
+      "computedFrom": "CHILD_AGE_MONTHS",
+      "question_code": "age_in_months"
+    },
+    {
+      "label": "Sex of the Infant",
+      "options": [
+        {
+          "label": "Male",
+          "sort_order": 0,
+          "value_code": "male"
+        },
+        {
+          "label": "Female",
+          "sort_order": 1,
+          "value_code": "female"
+        },
+        {
+          "label": "Transgender",
+          "sort_order": 2,
+          "value_code": "transgender"
+        }
+      ],
+      "section": "Tests",
+      "required": true,
+      "input_type": "select",
+      "question_code": "sex_of_the_infant"
+    },
+    {
+      "label": "Birth weight in kg",
+      "section": "Tests",
+      "required": true,
+      "input_type": "number",
+      "numericRange": {
+        "min": 0.5,
+        "max": 6
+      },
+      "question_code": "birth_weight_in_kg"
+    },
+    {
+      "label": "Length of the baby at the time of birth in cm",
+      "section": "Tests",
+      "required": true,
+      "input_type": "number",
+      "numericRange": {
+        "min": 25,
+        "max": 99
+      },
+      "question_code": "length_of_the_baby_at_the_time_of_birth_in_cm"
+    },
+    {
+      "label": "Premature child",
+      "options": [
+        {
+          "label": "Full term (≥37 weeks)",
+          "sort_order": 0,
+          "value_code": "full_term_gte_37_weeks"
+        },
+        {
+          "label": "Preterm (<37 weeks)",
+          "sort_order": 1,
+          "value_code": "preterm_lt_37_weeks"
+        },
+        {
+          "label": "Don't know",
+          "sort_order": 2,
+          "value_code": "dont_know"
+        }
+      ],
+      "section": "Tests",
+      "required": true,
+      "input_type": "select",
+      "question_code": "premature_child"
+    },
+    {
+      "label": "Current feeding practice",
+      "options": [
+        {
+          "label": "Exclusive breastfeeding",
+          "sort_order": 0,
+          "value_code": "exclusive_breastfeeding"
+        },
+        {
+          "label": "Top feed + breastfeed",
+          "sort_order": 1,
+          "value_code": "top_feed_plus_breastfeed"
+        },
+        {
+          "label": "Only top feed (cowmilk/buffalo milk/goat milk/formula milk)",
+          "sort_order": 2,
+          "value_code": "only_top_feed_cowmilk_buffalo_milk_goat_milk_formula_milk"
+        },
+        {
+          "label": "Water + breastfeed",
+          "sort_order": 3,
+          "value_code": "water_plus_breastfeed"
+        },
+        {
+          "label": "Not able to drink/feed",
+          "sort_order": 4,
+          "value_code": "not_able_to_drink_feed"
+        }
+      ],
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "multiselect",
+      "question_code": "current_feeding_practice"
+    },
+    {
+      "label": "Sucking (Breast Feeding)",
+      "options": [
+        {
+          "label": "Good",
+          "sort_order": 0,
+          "value_code": "good"
+        },
+        {
+          "label": "Poor",
+          "sort_order": 1,
+          "value_code": "poor"
+        }
+      ],
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "sucking_breast_feeding"
+    },
+    {
+      "label": "Feeding concerns",
+      "options": [
+        {
+          "label": "Mother not alive",
+          "sort_order": 0,
+          "value_code": "mother_not_alive"
+        },
+        {
+          "label": "Mother has cracked/inverted nipples",
+          "sort_order": 1,
+          "value_code": "mother_has_cracked_inverted_nipples"
+        },
+        {
+          "label": "Baby not latching properly",
+          "sort_order": 2,
+          "value_code": "baby_not_latching_properly"
+        },
+        {
+          "label": "Low milk supply",
+          "sort_order": 3,
+          "value_code": "low_milk_supply"
+        },
+        {
+          "label": "Breast engorgement or swelling",
+          "sort_order": 4,
+          "value_code": "breast_engorgement_or_swelling"
+        },
+        {
+          "label": "Baby refusing to feed",
+          "sort_order": 5,
+          "value_code": "baby_refusing_to_feed"
+        },
+        {
+          "label": "Other",
+          "sort_order": 6,
+          "value_code": "other"
+        },
+        {
+          "label": "No concerns",
+          "sort_order": 7,
+          "value_code": "no_concerns"
+        }
+      ],
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "multiselect",
+      "question_code": "feeding_concerns"
+    },
+    {
+      "label": "Have you started complementary feeding for your child?",
+      "options": [
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
+      ],
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "have_you_started_complementary_feeding_for_your_child"
+    },
+    {
+      "label": "How many times do child take meal in a day? (Full meal Excluding snacks)",
+      "options": [
+        {
+          "label": "Once a day",
+          "sort_order": 0,
+          "value_code": "once_a_day"
+        },
+        {
+          "label": "Twice a day",
+          "sort_order": 1,
+          "value_code": "twice_a_day"
+        },
+        {
+          "label": "Three times a day",
+          "sort_order": 2,
+          "value_code": "three_times_a_day"
+        },
+        {
+          "label": "More than 3 times in a day",
+          "sort_order": 3,
+          "value_code": "more_than_3_times_in_a_day"
+        }
+      ],
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "select",
+      "visibleWhen": {
+        "field": "have_you_started_complementary_feeding_for_your_child",
+        "operator": "eq",
+        "value": "yes"
+      },
+      "question_code": "how_many_times_do_child_take_meal_in_a_day"
+    },
+    {
+      "label": "Which of these food stuff have child consumed in the last 24 hours?",
+      "options": [
+        {
+          "label": "Grains, Roots and Tubers (Rice, wheat, maize, millet, roti, bread, potato, sweet potato)",
+          "sort_order": 0,
+          "value_code": "grains_roots_and_tubers"
+        },
+        {
+          "label": "Legumes and Nuts (Lentils (dal), beans, peas, chickpeas, groundnuts)",
+          "sort_order": 1,
+          "value_code": "legumes_and_nuts"
+        },
+        {
+          "label": "Dairy products (Milk, curd/yogurt, cheese.)",
+          "sort_order": 2,
+          "value_code": "dairy_products"
+        },
+        {
+          "label": "Vitamin A–Rich Fruits and Vegetables (Carrot, pumpkin, mango, papaya, dark green leafy vegetables)",
+          "sort_order": 3,
+          "value_code": "vitamin_a_rich_fruits_and_vegetables"
+        },
+        {
+          "label": "Other Fruits and Vegetables (Banana, apple, tomato, cucumber, other seasonal fruits/vegetables)",
+          "sort_order": 4,
+          "value_code": "other_fruits_and_vegetables"
+        },
+        {
+          "label": "Eggs",
+          "sort_order": 5,
+          "value_code": "eggs"
+        },
+        {
+          "label": "Flesh Foods (Meat, fish, chicken, organ meat (liver))",
+          "sort_order": 6,
+          "value_code": "flesh_foods"
+        }
+      ],
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "multiselect",
+      "visibleWhen": {
+        "field": "have_you_started_complementary_feeding_for_your_child",
+        "operator": "eq",
+        "value": "yes"
+      },
+      "question_code": "which_of_these_food_stuff_have_child_consumed_in_the_last_24_hours"
+    },
+    {
+      "label": "Which of the following foods does the child avoid eating or you avoid giving to the child?",
+      "options": [
+        {
+          "label": "Grains, Roots and Tubers (Rice, wheat, maize, millet, roti, bread, potato, sweet potato)",
+          "sort_order": 0,
+          "value_code": "grains_roots_and_tubers"
+        },
+        {
+          "label": "Legumes and Nuts (Lentils (dal), beans, peas, chickpeas, groundnuts)",
+          "sort_order": 1,
+          "value_code": "legumes_and_nuts"
+        },
+        {
+          "label": "Dairy products (Milk, curd/yogurt, cheese.)",
+          "sort_order": 2,
+          "value_code": "dairy_products"
+        },
+        {
+          "label": "Vitamin A–Rich Fruits and Vegetables (Carrot, pumpkin, mango, papaya, dark green leafy vegetables)",
+          "sort_order": 3,
+          "value_code": "vitamin_a_rich_fruits_and_vegetables"
+        },
+        {
+          "label": "Other Fruits and Vegetables (Banana, apple, tomato, cucumber, other seasonal fruits/vegetables)",
+          "sort_order": 4,
+          "value_code": "other_fruits_and_vegetables"
+        },
+        {
+          "label": "Eggs",
+          "sort_order": 5,
+          "value_code": "eggs"
+        },
+        {
+          "label": "Flesh Foods (Meat, fish, chicken, organ meat (liver))",
+          "sort_order": 6,
+          "value_code": "flesh_foods"
+        }
+      ],
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "multiselect",
+      "visibleWhen": {
+        "field": "have_you_started_complementary_feeding_for_your_child",
+        "operator": "eq",
+        "value": "yes"
+      },
+      "question_code": "which_of_the_following_foods_does_the_child_avoid_eating_or_you_avoid_giving_to_the_child"
+    },
+    {
+      "label": "Activity level",
+      "options": [
+        {
+          "label": "Active & moving",
+          "sort_order": 0,
+          "value_code": "active_and_moving"
+        },
+        {
+          "label": "Reduced movement",
+          "sort_order": 1,
+          "value_code": "reduced_movement"
+        },
+        {
+          "label": "Lethargic",
+          "sort_order": 2,
+          "value_code": "lethargic"
+        }
+      ],
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "select",
+      "question_code": "activity_level"
+    },
+    {
+      "label": "Is there any deformity detected in the infant?",
+      "options": [
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
+      ],
+      "section": "Symptoms",
+      "required": false,
+      "input_type": "radio",
+      "question_code": "is_there_any_deformity_detected_in_the_infant"
+    },
+    {
+      "label": "Thermal care practices",
+      "options": [
+        {
+          "label": "Wiped/bathed/dried regularly",
+          "sort_order": 0,
+          "value_code": "wiped_bathed_dried_regularly"
+        },
+        {
+          "label": "Kept warm",
+          "sort_order": 1,
+          "value_code": "kept_warm"
+        },
+        {
+          "label": "Kangaroo care till 2 months",
+          "sort_order": 2,
+          "value_code": "kangaroo_care_till_2_months"
+        }
+      ],
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "multiselect",
+      "visibleWhen": {
+        "field": "age_in_months",
+        "operator": "lt",
+        "value": 2
+      },
+      "question_code": "thermal_care_practices"
+    },
+    {
+      "label": "Is the Child showing all Developmental Milestones as per his/her age? (check for the signs given to you in the module)",
+      "options": [
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
+      ],
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "is_the_child_showing_all_developmental_milestones_as_per_his_her_age"
+    },
+    {
+      "label": "Is the baby showing any danger signs since last visit?",
+      "options": [
+        {
+          "label": "Dry cough/Wet cough/Persistent cough",
+          "sort_order": 0,
+          "value_code": "dry_wet_persistent_cough"
+        },
+        {
+          "label": "Fast breathing (>60breaths/min), grunting, chest in-drawing",
+          "sort_order": 1,
+          "value_code": "fast_breathing_grunting_chest_in_drawing"
+        },
+        {
+          "label": "Severe hypothermia: <96°F",
+          "sort_order": 2,
+          "value_code": "severe_hypothermia_lt_96f"
+        },
+        {
+          "label": "Severe hyperthermia: >100°F",
+          "sort_order": 3,
+          "value_code": "severe_hyperthermia_gt_100f"
+        },
+        {
+          "label": "Yellow eyes, palms, soles, body, face etc",
+          "sort_order": 4,
+          "value_code": "yellow_eyes_palms_soles_body_face_etc"
+        },
+        {
+          "label": "Pallor sclera, palms, soles, etc (for 13-24 months only)",
+          "sort_order": 5,
+          "value_code": "pallor_sclera_palms_soles_etc_13_24_months_only"
+        },
+        {
+          "label": "Blue color (cyanosis) around lips/skin",
+          "sort_order": 6,
+          "value_code": "blue_color_cyanosis_around_lips_skin"
+        },
+        {
+          "label": "Presence of oedema (pitting)",
+          "sort_order": 7,
+          "value_code": "presence_of_oedema_pitting"
+        },
+        {
+          "label": "Convulsions: Twitching, fits, or abnormal movements",
+          "sort_order": 8,
+          "value_code": "convulsions_twitching_fits_or_abnormal_movements"
+        },
+        {
+          "label": "Lethargy, floppiness, or inability to wake up",
+          "sort_order": 9,
+          "value_code": "lethargy_floppiness_or_inability_to_wake_up"
+        },
+        {
+          "label": "Not able to drink/feed",
+          "sort_order": 10,
+          "value_code": "not_able_to_drink_feed"
+        },
+        {
+          "label": "Vomits everything",
+          "sort_order": 11,
+          "value_code": "vomits_everything"
+        },
+        {
+          "label": "Diarrhoea",
+          "sort_order": 12,
+          "value_code": "diarrhoea"
+        },
+        {
+          "label": "Blood in stool",
+          "sort_order": 13,
+          "value_code": "blood_in_stool"
+        },
+        {
+          "label": "No abnormal signs/symptoms",
+          "sort_order": 14,
+          "value_code": "no_abnormal_signs_symptoms"
+        }
+      ],
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "multiselect",
+      "question_code": "is_the_baby_showing_any_danger_signs_since_last_visit"
+    },
+    {
+      "label": "Child temprature in °F",
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "number",
+      "numericRange": {
+        "min": 93,
+        "max": 105
+      },
+      "question_code": "child_temprature_in_f"
+    },
+    {
+      "label": "Child Respiratory Rate 2 - 12 months",
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "number",
+      "numericRange": {
+        "min": 10,
+        "max": 90
+      },
+      "question_code": "child_respiratory_rate_2_12_months"
+    },
+    {
+      "label": "Current Length in cm",
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "number",
+      "numericRange": {
+        "min": 25,
+        "max": 99
+      },
+      "question_code": "current_length_in_cm"
+    },
+    {
+      "label": "Current Weight in kg",
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "number",
+      "numericRange": {
+        "min": 0.5,
+        "max": 15
+      },
+      "question_code": "current_weight_in_kg"
+    },
+    {
+      "label": "Nutritional status (Wasting)",
+      "options": [
+        {
+          "label": "Normal",
+          "sort_order": 0,
+          "value_code": "normal"
+        },
+        {
+          "label": "MAM",
+          "sort_order": 1,
+          "value_code": "mam"
+        },
+        {
+          "label": "SAM",
+          "sort_order": 2,
+          "value_code": "sam"
+        }
+      ],
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "select",
+      "computedFrom": "NUTRITIONAL_ZSCORE",
+      "question_code": "nutritional_status_wasting"
+    },
+    {
+      "label": "Nutritional status (Stunting)",
+      "options": [
+        {
+          "label": "Normal",
+          "sort_order": 0,
+          "value_code": "normal"
+        },
+        {
+          "label": "Moderately stunted",
+          "sort_order": 1,
+          "value_code": "moderately_stunted"
+        },
+        {
+          "label": "Severely stunted",
+          "sort_order": 2,
+          "value_code": "severely_stunted"
+        }
+      ],
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "select",
+      "computedFrom": "NUTRITIONAL_ZSCORE",
+      "question_code": "nutritional_status_stunting"
+    },
+    {
+      "label": "Nutritional status (Underweight)",
+      "options": [
+        {
+          "label": "Normal",
+          "sort_order": 0,
+          "value_code": "normal"
+        },
+        {
+          "label": "MUW",
+          "sort_order": 1,
+          "value_code": "muw"
+        },
+        {
+          "label": "SUW",
+          "sort_order": 2,
+          "value_code": "suw"
+        }
+      ],
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "select",
+      "computedFrom": "NUTRITIONAL_ZSCORE",
+      "question_code": "nutritional_status_underweight"
+    },
+    {
+      "label": "MUAC (in cms)",
+      "section": "Symptoms",
+      "required": true,
+      "input_type": "number",
+      "numericRange": {
+        "min": 5,
+        "max": 25
+      },
+      "visibleWhen": {
+        "field": "age_in_months",
+        "operator": "gte",
+        "value": 6
+      },
+      "question_code": "muac_in_cms"
+    },
+    {
+      "label": "What is the SOURCE OF IMMUNIZATION data collected?",
+      "options": [
+        {
+          "label": "RCH Card",
+          "sort_order": 0,
+          "value_code": "rch_card"
+        },
+        {
+          "label": "Reported by Caregiver",
+          "sort_order": 1,
+          "value_code": "reported_by_caregiver"
+        },
+        {
+          "label": "Other",
+          "sort_order": 2,
+          "value_code": "other"
+        }
+      ],
+      "section": "History",
+      "required": true,
+      "input_type": "select",
+      "question_code": "source_of_immunization_data_collected"
+    },
+    {
+      "label": "BCG",
+      "options": [
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
+      ],
+      "section": "History",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "bcg"
+    },
+    {
+      "label": "BCG date",
+      "section": "History",
+      "required": true,
+      "input_type": "date",
+      "visibleWhen": {
+        "field": "bcg",
+        "operator": "eq",
+        "value": "yes"
+      },
+      "question_code": "bcg_date"
+    },
+    {
+      "label": "OPV-0",
+      "options": [
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
+      ],
+      "section": "History",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "opv_0"
+    },
+    {
+      "label": "OPV-0 date",
+      "section": "History",
+      "required": true,
+      "input_type": "date",
+      "visibleWhen": {
+        "field": "opv_0",
+        "operator": "eq",
+        "value": "yes"
+      },
+      "question_code": "opv_0_date"
+    },
+    {
+      "label": "Hepatitis B – Birth Dose",
+      "options": [
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
+      ],
+      "section": "History",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "hepatitis_b_birth_dose"
+    },
+    {
+      "label": "Hepatitis B date – Birth Dose",
+      "section": "History",
+      "required": true,
+      "input_type": "date",
+      "visibleWhen": {
+        "field": "hepatitis_b_birth_dose",
+        "operator": "eq",
+        "value": "yes"
+      },
+      "question_code": "hepatitis_b_date_birth_dose"
+    },
+    {
+      "label": "Vitamin K",
+      "options": [
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
+      ],
+      "section": "History",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "vitamin_k"
+    },
+    {
+      "label": "Vitamin K date",
+      "section": "History",
+      "required": true,
+      "input_type": "date",
+      "visibleWhen": {
+        "field": "vitamin_k",
+        "operator": "eq",
+        "value": "yes"
+      },
+      "question_code": "vitamin_k_date"
+    },
+    {
+      "label": "OPV-1",
+      "options": [
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
+      ],
+      "section": "History",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "opv_1"
+    },
+    {
+      "label": "OPV-1 date",
+      "section": "History",
+      "required": true,
+      "input_type": "date",
+      "visibleWhen": {
+        "field": "opv_1",
+        "operator": "eq",
+        "value": "yes"
+      },
+      "question_code": "opv_1_date"
+    },
+    {
+      "label": "Pentavalent-1/DPT1",
+      "options": [
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
+      ],
+      "section": "History",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "pentavalent_1_dpt1"
+    },
+    {
+      "label": "Pentavalent-1/DPT1 date",
+      "section": "History",
+      "required": true,
+      "input_type": "date",
+      "visibleWhen": {
+        "field": "pentavalent_1_dpt1",
+        "operator": "eq",
+        "value": "yes"
+      },
+      "question_code": "pentavalent_1_dpt1_date"
+    },
+    {
+      "label": "IPV-1",
+      "options": [
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
+      ],
+      "section": "History",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "ipv_1"
+    },
+    {
+      "label": "IPV-1 date",
+      "section": "History",
+      "required": true,
+      "input_type": "date",
+      "visibleWhen": {
+        "field": "ipv_1",
+        "operator": "eq",
+        "value": "yes"
+      },
+      "question_code": "ipv_1_date"
+    },
+    {
+      "label": "Rotavirus1",
+      "options": [
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
+      ],
+      "section": "History",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "rotavirus1"
+    },
+    {
+      "label": "Rotavirus1 date",
+      "section": "History",
+      "required": true,
+      "input_type": "date",
+      "visibleWhen": {
+        "field": "rotavirus1",
+        "operator": "eq",
+        "value": "yes"
+      },
+      "question_code": "rotavirus1_date"
+    },
+    {
+      "label": "PCV1 (if Applicable)",
+      "options": [
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
+      ],
+      "section": "History",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "pcv1"
+    },
+    {
+      "label": "PCV1 date (if Applicable)",
+      "section": "History",
+      "required": true,
+      "input_type": "date",
+      "visibleWhen": {
+        "field": "pcv1",
+        "operator": "eq",
+        "value": "yes"
+      },
+      "question_code": "pcv1_date"
+    },
+    {
+      "label": "OPV-2",
+      "options": [
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
+      ],
+      "section": "History",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "opv_2"
+    },
+    {
+      "label": "OPV-2 date",
+      "section": "History",
+      "required": true,
+      "input_type": "date",
+      "visibleWhen": {
+        "field": "opv_2",
+        "operator": "eq",
+        "value": "yes"
+      },
+      "question_code": "opv_2_date"
+    },
+    {
+      "label": "Pentavalent-2/DPT2",
+      "options": [
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
+      ],
+      "section": "History",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "pentavalent_2_dpt2"
+    },
+    {
+      "label": "Pentavalent-2/DPT2 date",
+      "section": "History",
+      "required": true,
+      "input_type": "date",
+      "visibleWhen": {
+        "field": "pentavalent_2_dpt2",
+        "operator": "eq",
+        "value": "yes"
+      },
+      "question_code": "pentavalent_2_dpt2_date"
+    },
+    {
+      "label": "Rotavirus2",
+      "options": [
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
+      ],
+      "section": "History",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "rotavirus2"
+    },
+    {
+      "label": "Rotavirus2 date",
+      "section": "History",
+      "required": true,
+      "input_type": "date",
+      "visibleWhen": {
+        "field": "rotavirus2",
+        "operator": "eq",
+        "value": "yes"
+      },
+      "question_code": "rotavirus2_date"
+    },
+    {
+      "label": "OPV-3",
+      "options": [
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
+      ],
+      "section": "History",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "opv_3"
+    },
+    {
+      "label": "OPV-3 date",
+      "section": "History",
+      "required": true,
+      "input_type": "date",
+      "visibleWhen": {
+        "field": "opv_3",
+        "operator": "eq",
+        "value": "yes"
+      },
+      "question_code": "opv_3_date"
+    },
+    {
+      "label": "Pentavalent-3/DPT3",
+      "options": [
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
+      ],
+      "section": "History",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "pentavalent_3_dpt3"
+    },
+    {
+      "label": "Pentavalent-3/DPT3 date",
+      "section": "History",
+      "required": true,
+      "input_type": "date",
+      "visibleWhen": {
+        "field": "pentavalent_3_dpt3",
+        "operator": "eq",
+        "value": "yes"
+      },
+      "question_code": "pentavalent_3_dpt3_date"
+    },
+    {
+      "label": "IPV2",
+      "options": [
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
+      ],
+      "section": "History",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "ipv2"
+    },
+    {
+      "label": "IPV2 date",
+      "section": "History",
+      "required": true,
+      "input_type": "date",
+      "visibleWhen": {
+        "field": "ipv2",
+        "operator": "eq",
+        "value": "yes"
+      },
+      "question_code": "ipv2_date"
+    },
+    {
+      "label": "Rotavirus3",
+      "options": [
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
+      ],
+      "section": "History",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "rotavirus3"
+    },
+    {
+      "label": "Rotavirus3 date",
+      "section": "History",
+      "required": true,
+      "input_type": "date",
+      "visibleWhen": {
+        "field": "rotavirus3",
+        "operator": "eq",
+        "value": "yes"
+      },
+      "question_code": "rotavirus3_date"
+    },
+    {
+      "label": "PCV2 (if Applicable)",
+      "options": [
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
+      ],
+      "section": "History",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "pcv2"
+    },
+    {
+      "label": "PCV2 date (if Applicable)",
+      "section": "History",
+      "required": true,
+      "input_type": "date",
+      "visibleWhen": {
+        "field": "pcv2",
+        "operator": "eq",
+        "value": "yes"
+      },
+      "question_code": "pcv2_date"
+    },
+    {
+      "label": "MMR-1/MR1",
+      "options": [
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
+      ],
+      "section": "History",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "mmr_1_mr1"
+    },
+    {
+      "label": "MMR-1/MR1 date",
+      "section": "History",
+      "required": true,
+      "input_type": "date",
+      "visibleWhen": {
+        "field": "mmr_1_mr1",
+        "operator": "eq",
+        "value": "yes"
+      },
+      "question_code": "mmr_1_mr1_date"
+    },
+    {
+      "label": "PCV booster",
+      "options": [
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
+      ],
+      "section": "History",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "pcv_booster"
+    },
+    {
+      "label": "PCV booster date",
+      "section": "History",
+      "required": true,
+      "input_type": "date",
+      "visibleWhen": {
+        "field": "pcv_booster",
+        "operator": "eq",
+        "value": "yes"
+      },
+      "question_code": "pcv_booster_date"
+    },
+    {
+      "label": "Vitamin A",
+      "options": [
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
+      ],
+      "section": "History",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "vitamin_a"
+    },
+    {
+      "label": "Vitamin A date",
+      "section": "History",
+      "required": true,
+      "input_type": "date",
+      "visibleWhen": {
+        "field": "vitamin_a",
+        "operator": "eq",
+        "value": "yes"
+      },
+      "question_code": "vitamin_a_date"
+    },
+    {
+      "label": "OPV booster",
+      "options": [
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
+      ],
+      "section": "History",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "opv_booster"
+    },
+    {
+      "label": "OPV booster date",
+      "section": "History",
+      "required": true,
+      "input_type": "date",
+      "visibleWhen": {
+        "field": "opv_booster",
+        "operator": "eq",
+        "value": "yes"
+      },
+      "question_code": "opv_booster_date"
+    },
+    {
+      "label": "MMR2/MR2",
+      "options": [
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
+      ],
+      "section": "History",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "mmr2_mr2"
+    },
+    {
+      "label": "MMR2/MR2 date",
+      "section": "History",
+      "required": true,
+      "input_type": "date",
+      "visibleWhen": {
+        "field": "mmr2_mr2",
+        "operator": "eq",
+        "value": "yes"
+      },
+      "question_code": "mmr2_mr2_date"
+    },
+    {
+      "label": "DPT booster1",
+      "options": [
+        {
+          "label": "Yes",
+          "sort_order": 0,
+          "value_code": "yes"
+        },
+        {
+          "label": "No",
+          "sort_order": 1,
+          "value_code": "no"
+        }
+      ],
+      "section": "History",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "dpt_booster1"
+    },
+    {
+      "label": "DPT booster1 date",
+      "section": "History",
+      "required": true,
+      "input_type": "date",
+      "visibleWhen": {
+        "field": "dpt_booster1",
+        "operator": "eq",
+        "value": "yes"
+      },
+      "question_code": "dpt_booster1_date"
+    },
+    {
+      "label": "Remarks",
+      "section": "History",
+      "required": false,
+      "input_type": "text",
+      "question_code": "remarks"
+    },
+    {
+      "label": "As a Sakhi, have you guided the beneficiary on the following?",
+      "options": [
+        {
+          "label": "Feeding and Nutrition Counselling",
+          "sort_order": 0,
+          "value_code": "feeding_and_nutrition_counselling"
+        },
+        {
+          "label": "Growth Monitoring",
+          "sort_order": 1,
+          "value_code": "growth_monitoring"
+        },
+        {
+          "label": "Immunization Counselling",
+          "sort_order": 2,
+          "value_code": "immunization_counselling"
+        },
+        {
+          "label": "Hygiene and Infection Prevention",
+          "sort_order": 3,
+          "value_code": "hygiene_and_infection_prevention"
+        },
+        {
+          "label": "Illness Screening and Danger Signs",
+          "sort_order": 4,
+          "value_code": "illness_screening_and_danger_signs"
+        },
+        {
+          "label": "Developmental Milestones",
+          "sort_order": 5,
+          "value_code": "developmental_milestones"
+        },
+        {
+          "label": "Injury Prevention and safety precautions",
+          "sort_order": 6,
+          "value_code": "injury_prevention_and_safety_precautions"
+        },
+        {
+          "label": "Follow-Up and Referral",
+          "sort_order": 7,
+          "value_code": "follow_up_and_referral"
+        }
+      ],
+      "section": "History",
+      "required": true,
+      "input_type": "multiselect",
+      "question_code": "as_a_sakhi_have_you_guided_the_beneficiary_on_the_following"
+    }
+  ],
+  "validationJson": []
+}
