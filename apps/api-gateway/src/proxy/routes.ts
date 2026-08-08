@@ -87,6 +87,11 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
   { prefix: '/quick-response', target: appConfig.APPROVAL_SERVICE_URL, requiresAuth: true },
   { prefix: '/incentives', target: appConfig.INCENTIVE_WAGES_SERVICE_URL, requiresAuth: true },
   {
+    prefix: '/incentive-rates',
+    target: appConfig.INCENTIVE_WAGES_SERVICE_URL,
+    requiresAuth: true,
+  },
+  {
     prefix: '/notifications',
     target: appConfig.NOTIFICATION_ESCALATION_SERVICE_URL,
     requiresAuth: true,
