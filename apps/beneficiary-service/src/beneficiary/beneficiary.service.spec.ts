@@ -27,6 +27,9 @@ describe('BeneficiaryService', () => {
     createEnrollment: jest.fn(),
     updateMotherLmp: jest.fn(),
     reactivateCase: jest.fn(),
+    countByCaseType: jest.fn(),
+    countByRiskGrade: jest.fn(),
+    upsertRiskConditionSummary: jest.fn(),
   } as unknown as jest.Mocked<BeneficiaryRepository>;
   let service: BeneficiaryService;
 
@@ -1209,5 +1212,206 @@ describe('BeneficiaryService', () => {
     await expect(service.create(baseMotherInput, CALLER_ID, AUTH_HEADER)).rejects.toThrow(
       'db down',
     );
+  });
+
+  describe('getRegistrationSummary', () => {
+    it('scopes a SAKHI caller to their own cases', async () => {
+      repository.countByCaseType.mockResolvedValue({ total: 5, motherCount: 3, childCount: 2 });
+
+      const result = await service.getRegistrationSummary({}, caller(), AUTH_HEADER);
+
+      expect(repository.countByCaseType).toHaveBeenCalledWith(
+        expect.objectContaining({ sakhiId: CALLER_ID }),
+      );
+      expect(result).toEqual({ total: 5, motherCount: 3, childCount: 2 });
+    });
+
+    it('scopes a SUPERVISOR caller to their roster', async () => {
+      listSakhiIdsForSupervisorMock.mockResolvedValue(['sakhi-a', 'sakhi-b']);
+      repository.countByCaseType.mockResolvedValue({ total: 0, motherCount: 0, childCount: 0 });
+
+      await service.getRegistrationSummary({}, caller({ roles: ['SUPERVISOR'] }), AUTH_HEADER);
+
+      expect(repository.countByCaseType).toHaveBeenCalledWith(
+        expect.objectContaining({ sakhiIds: ['sakhi-a', 'sakhi-b'] }),
+      );
+    });
+
+    it('rejects a SUPERVISOR sakhiId outside their roster', async () => {
+      listSakhiIdsForSupervisorMock.mockResolvedValue(['sakhi-a']);
+
+      await expect(
+        service.getRegistrationSummary(
+          { sakhiId: 'sakhi-outside' },
+          caller({ roles: ['SUPERVISOR'] }),
+          AUTH_HEADER,
+        ),
+      ).rejects.toThrow("sakhiId is not in this Supervisor's roster.");
+    });
+
+    it('leaves a MANAGER/ADMIN caller unscoped with no sakhiId filter', async () => {
+      repository.countByCaseType.mockResolvedValue({ total: 10, motherCount: 6, childCount: 4 });
+
+      await service.getRegistrationSummary({}, caller({ roles: ['MANAGER'] }), AUTH_HEADER);
+
+      expect(repository.countByCaseType).toHaveBeenCalledWith(
+        expect.not.objectContaining({ sakhiId: expect.anything() }),
+      );
+    });
+
+    it('rejects fromDate after toDate', async () => {
+      await expect(
+        service.getRegistrationSummary(
+          { fromDate: '2026-02-01', toDate: '2026-01-01' },
+          caller(),
+          AUTH_HEADER,
+        ),
+      ).rejects.toThrow('fromDate must be on or before toDate.');
+    });
+
+    it('rejects a SUPERVISOR caller with no project scope', async () => {
+      await expect(
+        service.getRegistrationSummary(
+          {},
+          caller({ roles: ['SUPERVISOR'], projectId: null }),
+          AUTH_HEADER,
+        ),
+      ).rejects.toThrow('Supervisor caller has no project scope.');
+    });
+  });
+
+  describe('getRiskSummary', () => {
+    it('returns counts grouped by grade, scoped to the caller', async () => {
+      repository.countByRiskGrade.mockResolvedValue({
+        total: 3,
+        byGrade: { HIGH: 2, NORMAL: 1 },
+        everAtRiskCount: 2,
+        referralTriggerCount: 1,
+      });
+
+      const result = await service.getRiskSummary({}, caller(), AUTH_HEADER);
+
+      expect(repository.countByRiskGrade).toHaveBeenCalledWith(
+        expect.objectContaining({ sakhiId: CALLER_ID }),
+      );
+      expect(result.byGrade).toEqual({ HIGH: 2, NORMAL: 1 });
+    });
+
+    it('rejects fromDate after toDate', async () => {
+      await expect(
+        service.getRiskSummary(
+          { fromDate: '2026-02-01', toDate: '2026-01-01' },
+          caller(),
+          AUTH_HEADER,
+        ),
+      ).rejects.toThrow('fromDate must be on or before toDate.');
+    });
+  });
+
+  describe('upsertRiskConditionSummary', () => {
+    const RISK_CONDITION_ID = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
+    const dto = {
+      riskConditionId: RISK_CONDITION_ID,
+      phase: 'ANC' as const,
+      grade: 'HIGH',
+      gradeRank: 3,
+      assessedAt: new Date('2026-01-01'),
+      isReferralTrigger: true,
+      isHrVisitTrigger: false,
+    };
+
+    it('404s when the beneficiary case does not exist', async () => {
+      repository.findById.mockResolvedValue(null);
+
+      await expect(
+        service.upsertRiskConditionSummary('unknown-id', dto, caller(), AUTH_HEADER),
+      ).rejects.toThrow('Beneficiary case not found.');
+    });
+
+    it('403s when a SAKHI targets a beneficiary that is not their own', async () => {
+      repository.findById.mockResolvedValue({ id: 'ben-1', sakhiId: 'someone-else' } as never);
+
+      await expect(
+        service.upsertRiskConditionSummary(
+          'ben-1',
+          dto,
+          caller({ id: CALLER_ID, roles: ['SAKHI'] }),
+          AUTH_HEADER,
+        ),
+      ).rejects.toThrow('This beneficiary case is outside your own roster.');
+      expect(repository.upsertRiskConditionSummary).not.toHaveBeenCalled();
+    });
+
+    it('allows a SAKHI to upsert their own beneficiary', async () => {
+      repository.findById.mockResolvedValue({ id: 'ben-1', sakhiId: CALLER_ID } as never);
+      repository.upsertRiskConditionSummary.mockResolvedValue({} as never);
+
+      await service.upsertRiskConditionSummary(
+        'ben-1',
+        dto,
+        caller({ id: CALLER_ID, roles: ['SAKHI'] }),
+        AUTH_HEADER,
+      );
+
+      expect(repository.upsertRiskConditionSummary).toHaveBeenCalled();
+    });
+
+    it("403s when a SUPERVISOR's roster does not include the beneficiary's Sakhi", async () => {
+      repository.findById.mockResolvedValue({ id: 'ben-1', sakhiId: 'sakhi-outside' } as never);
+      listSakhiIdsForSupervisorMock.mockResolvedValue(['sakhi-inside']);
+
+      await expect(
+        service.upsertRiskConditionSummary(
+          'ben-1',
+          dto,
+          caller({ roles: ['SUPERVISOR'] }),
+          AUTH_HEADER,
+        ),
+      ).rejects.toThrow("This beneficiary case is outside this Supervisor's roster.");
+      expect(repository.upsertRiskConditionSummary).not.toHaveBeenCalled();
+    });
+
+    it('allows a MANAGER/ADMIN caller unrestricted', async () => {
+      repository.findById.mockResolvedValue({ id: 'ben-1', sakhiId: 'any-sakhi' } as never);
+      repository.upsertRiskConditionSummary.mockResolvedValue({} as never);
+
+      await service.upsertRiskConditionSummary(
+        'ben-1',
+        dto,
+        caller({ roles: ['MANAGER'] }),
+        AUTH_HEADER,
+      );
+
+      expect(repository.upsertRiskConditionSummary).toHaveBeenCalled();
+    });
+
+    it('passes through all fields to the repository upsert', async () => {
+      repository.findById.mockResolvedValue({ id: 'ben-1', sakhiId: CALLER_ID } as never);
+      repository.upsertRiskConditionSummary.mockResolvedValue({} as never);
+
+      await service.upsertRiskConditionSummary(
+        'ben-1',
+        {
+          ...dto,
+          observedValueJson: { systolicBp: 145 },
+          visitId: 'visit-1',
+          submissionId: 'submission-1',
+          ruleVersionId: 'rule-version-1',
+        },
+        caller({ id: CALLER_ID, roles: ['SAKHI'] }),
+        AUTH_HEADER,
+      );
+
+      expect(repository.upsertRiskConditionSummary).toHaveBeenCalledWith(
+        'ben-1',
+        expect.objectContaining({
+          riskConditionId: RISK_CONDITION_ID,
+          grade: 'HIGH',
+          gradeRank: 3,
+          isReferralTrigger: true,
+          isHrVisitTrigger: false,
+        }),
+      );
+    });
   });
 });

@@ -10,8 +10,16 @@ import {
   SUMMARY_PHASES,
 } from './beneficiary.constants';
 import { createBeneficiarySchema } from './dto/create-beneficiary.dto';
-import { listBeneficiariesQuerySchema } from './dto/list-beneficiaries.dto';
+import {
+  listBeneficiariesQuerySchema,
+  normalizeRegisteredDateAliases,
+} from './dto/list-beneficiaries.dto';
+import {
+  summaryQuerySchema,
+  normalizeRegisteredDateAliases as normalizeSummaryDateAliases,
+} from './dto/summary-query.dto';
 import { upsertSocioDemographicsSchema } from './dto/upsert-socio-demographics.dto';
+import { upsertRiskConditionSummarySchema } from './dto/upsert-risk-condition-summary.dto';
 import { applyLmpChangeSchema } from './dto/apply-lmp-change.dto';
 import {
   asyncHandler,
@@ -199,6 +207,19 @@ const beneficiaryListPageSchema = z.object({
   }),
 });
 
+const registrationSummarySchema = z.object({
+  total: z.number().int(),
+  motherCount: z.number().int(),
+  childCount: z.number().int(),
+});
+
+const riskSummarySchema = z.object({
+  total: z.number().int(),
+  byGrade: z.record(z.string(), z.number().int()),
+  everAtRiskCount: z.number().int(),
+  referralTriggerCount: z.number().int(),
+});
+
 function envelope<T extends z.ZodTypeAny>(data: T) {
   return z.object({ success: z.literal(true), message: z.string(), data });
 }
@@ -252,8 +273,72 @@ export function createBeneficiaryRouter(service: BeneficiaryService) {
       if (!req.user) return next(unauthorized());
       const authorizationHeader = req.header('authorization');
       if (!authorizationHeader) return next(unauthorized());
-      const query = req.query as unknown as z.infer<typeof listBeneficiariesQuerySchema>;
+      const query = normalizeRegisteredDateAliases(
+        req.query as unknown as z.infer<typeof listBeneficiariesQuerySchema>,
+      );
       res.json(ok(await service.list(query, req.user, authorizationHeader)));
+    }),
+  );
+
+  doc.get(
+    '/beneficiaries/registration-summary',
+    {
+      summary:
+        'Registration Summary widget — total/mother/child counts of in-scope beneficiary ' +
+        'cases. Same role-scoping (sakhiId) and registrationDate range (fromDate/toDate) as ' +
+        'GET /beneficiaries, minus pagination/search.',
+      tags: ['Beneficiaries'],
+      responses: {
+        200: { description: 'Registration counts', schema: envelope(registrationSummarySchema) },
+        400: errorResponse(400, { message: 'fromDate must be on or before toDate.' }),
+        401: errorResponse(401),
+        403: errorResponse(403, { message: "sakhiId is not in this Supervisor's roster." }),
+        500: errorResponse(500),
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(summaryQuerySchema, 'query'),
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const query = normalizeSummaryDateAliases(
+        req.query as unknown as z.infer<typeof summaryQuerySchema>,
+      );
+      res.json(ok(await service.getRegistrationSummary(query, req.user, authorizationHeader)));
+    }),
+  );
+
+  doc.get(
+    '/beneficiaries/risk-summary',
+    {
+      summary:
+        "Risk Summary widget — counts of in-scope beneficiaries' risk condition summaries " +
+        'grouped by latestGrade, plus everAtRiskCount/referralTriggerCount. Same role-scoping ' +
+        '(sakhiId) and registrationDate range (fromDate/toDate) as GET /beneficiaries. Counts ' +
+        'per condition (a beneficiary with 2 HIGH conditions contributes 2 to byGrade.HIGH), ' +
+        'not collapsed to one grade per beneficiary.',
+      tags: ['Beneficiaries'],
+      responses: {
+        200: { description: 'Risk grade counts', schema: envelope(riskSummarySchema) },
+        400: errorResponse(400, { message: 'fromDate must be on or before toDate.' }),
+        401: errorResponse(401),
+        403: errorResponse(403, { message: "sakhiId is not in this Supervisor's roster." }),
+        500: errorResponse(500),
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(summaryQuerySchema, 'query'),
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const query = normalizeSummaryDateAliases(
+        req.query as unknown as z.infer<typeof summaryQuerySchema>,
+      );
+      res.json(ok(await service.getRiskSummary(query, req.user, authorizationHeader)));
     }),
   );
 
@@ -387,6 +472,48 @@ export function createBeneficiaryRouter(service: BeneficiaryService) {
       const updated = await service.applyLmpChange(
         req.params.id,
         req.body.lmpDate,
+        req.user,
+        authorizationHeader,
+      );
+      res.json(ok(updated));
+    }),
+  );
+
+  doc.patch(
+    '/beneficiaries/:id/risk-condition-summary',
+    {
+      summary:
+        "Upsert a beneficiary's per-condition risk rollup (Beneficiary_risk_condition_summary) " +
+        "— gated by requireRoles('SAKHI') since this codebase has no machine/service-account " +
+        "identity: the call chain originates from a SAKHI's form submission (visit-form-service " +
+        "-> risk-referral-service -> here), forwarding the SAKHI's own token at each hop. Not the " +
+        "source of truth — risk-referral-service's risk_assessments/risk_flags tables are; this " +
+        'is a derived rollup updated after every applicable visit/risk evaluation.',
+      tags: ['Beneficiaries'],
+      params: idParamsSchema,
+      responses: {
+        200: {
+          description: 'Risk condition summary upserted',
+          schema: envelope(riskConditionSummarySchema),
+        },
+        400: errorResponse(400, { message: 'gradeRank: Required' }),
+        401: errorResponse(401),
+        403: errorResponse(403, { message: 'This beneficiary case is outside your own roster.' }),
+        404: errorResponse(404, { message: 'Beneficiary case not found.' }),
+        500: errorResponse(500),
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI'),
+    validate(idParamsSchema, 'params'),
+    validateBody(upsertRiskConditionSummarySchema),
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const updated = await service.upsertRiskConditionSummary(
+        req.params.id,
+        req.body,
         req.user,
         authorizationHeader,
       );

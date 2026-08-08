@@ -1,6 +1,10 @@
 import { z } from 'zod';
 import { BENEFICIARY_STATUSES, CASE_TYPES } from '../beneficiary.constants';
 
+const dateOnlySchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'must be a date-only string (YYYY-MM-DD)');
+
 /**
  * Query params for `GET /beneficiaries`, per SRS FR-S-9.2 ("Search by name
  * and mobile number. Filter by pada (multi-select) and risk level
@@ -12,17 +16,23 @@ import { BENEFICIARY_STATUSES, CASE_TYPES } from '../beneficiary.constants';
  * `sakhiId` lets a SUPERVISOR/MANAGER/ADMIN caller scope the list to one
  * Sakhi's roster (a SAKHI caller's own id always wins regardless of this
  * param — see BeneficiaryService.list). `fromDate`/`toDate` range-filter on
- * registrationDate. `cursor`/`limit` are the HLD-mandated cursor pagination —
- * `cursor` is opaque, returned as `nextCursor` in the response and passed
- * back unchanged for the next page.
+ * registrationDate; `registeredFrom`/`registeredTo` are accepted as
+ * equivalent aliases (the milestone's requested param names) — both pairs
+ * are normalized onto `fromDate`/`toDate` before the service layer sees the
+ * query, so BeneficiaryService/BeneficiaryRepository need no changes.
+ * `cursor`/`limit` are the HLD-mandated cursor pagination — `cursor` is
+ * opaque, returned as `nextCursor` in the response and passed back unchanged
+ * for the next page.
  */
 // Deliberately a plain z.object (AnyZodObject), not wrapped in .refine() —
 // createDocumentedRouter() auto-infers this schema as the route's OpenAPI
 // query parameters straight from the `validate(schema, 'query')` middleware,
-// and zod-to-openapi cannot introspect a ZodEffects (what .refine() produces)
-// as a parameter object; it throws MissingParameterDataError at service
-// startup, not a per-request error. The fromDate<=toDate cross-field check
-// lives in beneficiary.service.ts instead — see assertValidDateRange().
+// and zod-to-openapi cannot introspect a ZodEffects (what .refine()/.transform()
+// produces) as a parameter object; it throws MissingParameterDataError at
+// service startup, not a per-request error. So alias normalization can't
+// live in this schema either — it happens in beneficiary.controller.ts,
+// right after validate() parses the query, alongside the existing
+// fromDate<=toDate cross-field check (in beneficiary.service.ts).
 export const listBeneficiariesQuerySchema = z
   .object({
     projectId: z.string().uuid().optional(),
@@ -35,14 +45,11 @@ export const listBeneficiariesQuerySchema = z
     name: z.string().trim().min(1).max(200).optional(),
     mobileNumber: z.string().trim().min(1).max(20).optional(),
     // Range filter on registrationDate — date-only strings (@db.Date column).
-    fromDate: z
-      .string()
-      .regex(/^\d{4}-\d{2}-\d{2}$/, 'must be a date-only string (YYYY-MM-DD)')
-      .optional(),
-    toDate: z
-      .string()
-      .regex(/^\d{4}-\d{2}-\d{2}$/, 'must be a date-only string (YYYY-MM-DD)')
-      .optional(),
+    fromDate: dateOnlySchema.optional(),
+    toDate: dateOnlySchema.optional(),
+    // Aliases for fromDate/toDate — see this schema's doc comment.
+    registeredFrom: dateOnlySchema.optional(),
+    registeredTo: dateOnlySchema.optional(),
     // Opaque, base64-encoded cursor — see beneficiary.repository.ts's encode/decodeCursor.
     cursor: z.string().trim().min(1).optional(),
     limit: z.coerce.number().int().min(1).max(100).default(50),
@@ -50,3 +57,18 @@ export const listBeneficiariesQuerySchema = z
   .strict();
 
 export type ListBeneficiariesQueryInput = z.infer<typeof listBeneficiariesQuerySchema>;
+
+/**
+ * Normalizes `registeredFrom`/`registeredTo` onto `fromDate`/`toDate` — an
+ * explicit `fromDate`/`toDate` wins if a caller (incorrectly) sends both
+ * forms for the same bound, rather than silently picking one.
+ */
+export function normalizeRegisteredDateAliases(
+  query: ListBeneficiariesQueryInput,
+): ListBeneficiariesQueryInput {
+  return {
+    ...query,
+    fromDate: query.fromDate ?? query.registeredFrom,
+    toDate: query.toDate ?? query.registeredTo,
+  };
+}

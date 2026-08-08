@@ -13,12 +13,15 @@ import {
 import type {
   BeneficiaryRiskConditionSummary,
   BeneficiaryStatusHistory,
+  Prisma,
 } from '../../../../node_modules/.prisma/client-beneficiary-service';
 import type { BeneficiaryStatus, CaseType } from './beneficiary.constants';
 import { buildSearchTokens, evaluateDuplicateMatch } from './beneficiary.duplicate-detection';
 import { computeBmi, withDecryptedName } from './beneficiary.mapper';
 import type { BeneficiaryListFilters, BeneficiaryRepository } from './beneficiary.repository';
 import type { CreateBeneficiaryInput } from './dto/create-beneficiary.dto';
+import type { UpsertRiskConditionSummaryInput } from './dto/upsert-risk-condition-summary.dto';
+import type { SummaryQueryInput } from './dto/summary-query.dto';
 import type { UpsertSocioDemographicsInput } from './dto/upsert-socio-demographics.dto';
 import { resolveHealthBlockIdFromPhc, resolveVillageNames } from '../geography/geography.client';
 import { resolveLookupIdsByValueCode, resolveLookupValues } from '../lookups/lookup.client';
@@ -186,6 +189,43 @@ export interface ListBeneficiariesQuery {
   limit: number;
 }
 
+/**
+ * Resolves the sakhiId/sakhiIds scoping filters shared by `list()` and the
+ * count-only summary endpoints: a SAKHI only ever sees their own cases, a
+ * SUPERVISOR is scoped to their own roster (optionally narrowed to one
+ * in-roster sakhiId), and MANAGER/ADMIN are unscoped unless they pass an
+ * explicit sakhiId. Throws forbidden() for an out-of-roster sakhiId or a
+ * SUPERVISOR with no project claim — same guards `list()` already enforced
+ * inline before this was extracted for reuse by the summary endpoints.
+ */
+async function resolveSakhiScoping(
+  querySakhiId: string | undefined,
+  caller: AuthenticatedUser,
+  authorizationHeader: string,
+): Promise<{ sakhiId?: string; sakhiIds?: string[] }> {
+  if (caller.roles.includes('SAKHI')) {
+    return { sakhiId: caller.id };
+  }
+  if (caller.roles.includes('SUPERVISOR')) {
+    if (!caller.projectId) {
+      throw forbidden('Supervisor caller has no project scope.');
+    }
+    const roster = await listSakhiIdsForSupervisor(
+      caller.projectId,
+      caller.id,
+      authorizationHeader,
+    );
+    if (querySakhiId) {
+      if (!roster.includes(querySakhiId)) {
+        throw forbidden("sakhiId is not in this Supervisor's roster.");
+      }
+      return { sakhiId: querySakhiId };
+    }
+    return { sakhiIds: roster };
+  }
+  return querySakhiId ? { sakhiId: querySakhiId } : {};
+}
+
 /** Business logic for the beneficiary enrollment lifecycle. */
 export class BeneficiaryService {
   constructor(private readonly repository: BeneficiaryRepository) {}
@@ -286,6 +326,100 @@ export class BeneficiaryService {
       caller.roles.includes('SAKHI'),
     );
     return { items: enriched, nextCursor: page.nextCursor };
+  }
+
+  /**
+   * Registration Summary widget — total/mother/child counts of in-scope
+   * beneficiary cases, same role-scoping and optional fromDate/toDate range
+   * as `list()`.
+   */
+  async getRegistrationSummary(
+    query: SummaryQueryInput,
+    caller: AuthenticatedUser,
+    authorizationHeader: string,
+  ) {
+    if (query.fromDate && query.toDate && query.fromDate > query.toDate) {
+      throw badRequest('fromDate must be on or before toDate.');
+    }
+    const scoping = await resolveSakhiScoping(query.sakhiId, caller, authorizationHeader);
+    return this.repository.countByCaseType({
+      ...scoping,
+      fromDate: query.fromDate,
+      toDate: query.toDate,
+    });
+  }
+
+  /**
+   * Risk Summary widget — counts of in-scope beneficiaries' risk condition
+   * summaries grouped by latestGrade, same role-scoping/date-range as
+   * `list()`/getRegistrationSummary. Counts per-condition, not collapsed to
+   * one grade per beneficiary (see BeneficiaryRepository.countByRiskGrade).
+   */
+  async getRiskSummary(
+    query: SummaryQueryInput,
+    caller: AuthenticatedUser,
+    authorizationHeader: string,
+  ) {
+    if (query.fromDate && query.toDate && query.fromDate > query.toDate) {
+      throw badRequest('fromDate must be on or before toDate.');
+    }
+    const scoping = await resolveSakhiScoping(query.sakhiId, caller, authorizationHeader);
+    return this.repository.countByRiskGrade({
+      ...scoping,
+      fromDate: query.fromDate,
+      toDate: query.toDate,
+    });
+  }
+
+  /**
+   * Upserts a beneficiary's per-condition risk rollup — called
+   * server-to-server by risk-referral-service after it evaluates a
+   * submission and writes its own RiskAssessment/RiskFlag source-of-truth
+   * rows (see BeneficiaryRepository.upsertRiskConditionSummary for the
+   * baseline/latest/everHighest semantics).
+   *
+   * Gated by requireRoles('SAKHI') at the route (this codebase has no
+   * machine/service-account identity — the call chain forwards the
+   * originating SAKHI's own token through visit-form-service and
+   * risk-referral-service). assertCallerCanTouchCase alone doesn't cover
+   * this route: it only scopes SUPERVISOR callers, early-returning for
+   * everyone else — so a SAKHI reaching this method must be checked
+   * explicitly, or any authenticated Sakhi could upsert any beneficiary's
+   * risk rollup regardless of whose case it is.
+   */
+  async upsertRiskConditionSummary(
+    beneficiaryId: string,
+    dto: UpsertRiskConditionSummaryInput,
+    caller: AuthenticatedUser,
+    authorizationHeader: string,
+  ) {
+    const found = await this.repository.findById(beneficiaryId);
+    if (!found) throw notFound('Beneficiary case not found.');
+
+    if (caller.roles.includes('SAKHI')) {
+      if (found.sakhiId !== caller.id) {
+        throw forbidden('This beneficiary case is outside your own roster.');
+      }
+    } else {
+      await assertCallerCanTouchCase(found.sakhiId, caller, authorizationHeader);
+    }
+
+    return this.repository.upsertRiskConditionSummary(beneficiaryId, {
+      riskConditionId: dto.riskConditionId,
+      phase: dto.phase,
+      grade: dto.grade,
+      gradeRank: dto.gradeRank,
+      // Untyped external JSON crossing into Prisma's InputJsonValue at this
+      // one boundary — the zod schema (z.record) already guarantees a plain
+      // JSON-serializable object.
+      observedValueJson: (dto.observedValueJson as Prisma.InputJsonValue | undefined) ?? null,
+      visitId: dto.visitId ?? null,
+      submissionId: dto.submissionId ?? null,
+      assessedAt: dto.assessedAt,
+      isReferralTrigger: dto.isReferralTrigger,
+      isHrVisitTrigger: dto.isHrVisitTrigger,
+      ruleVersionId: dto.ruleVersionId ?? null,
+    });
   }
 
   async getById(id: string, authorizationHeader: string) {

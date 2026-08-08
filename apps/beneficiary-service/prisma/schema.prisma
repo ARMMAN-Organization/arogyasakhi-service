@@ -348,6 +348,13 @@ model BeneficiaryRiskConditionSummary {
   baselineSubmissionId         String?      @map("baseline_submission_id")
   baselineAssessedAt           DateTime?    @map("baseline_assessed_at")
   latestGrade                  String?      @map("latest_grade") @db.VarChar(50)
+  // Severity rank of latestGrade within its own risk_condition's gradeScale
+  // (BINARY / NORMAL_MILD_MODERATE_SEVERE / NORMAL_LOW_MEDIUM_HIGH per the
+  // ERD) — this service doesn't own risk_conditions and can't rank a grade
+  // string itself (no cross-service joins), so risk-referral-service
+  // computes and pushes the rank alongside the grade. Used only to decide
+  // whether an incoming grade should replace everHighestGrade below.
+  latestGradeRank               Int?         @map("latest_grade_rank")
   latestObservedValueJson      Json?        @map("latest_observed_value_json")
   // visit_instances.visit_id — owned by another service.
   latestVisitId                String?      @map("latest_visit_id")
@@ -355,6 +362,9 @@ model BeneficiaryRiskConditionSummary {
   latestSubmissionId           String?      @map("latest_submission_id")
   latestAssessedAt             DateTime?    @map("latest_assessed_at")
   everHighestGrade             String?      @map("ever_highest_grade") @db.VarChar(50)
+  // See latestGradeRank — the highest rank ever recorded, so a later lower
+  // grade can be recognized as lower without re-deriving rank from a string.
+  everHighestGradeRank          Int?         @map("ever_highest_grade_rank")
   everHighestObservedValueJson Json?        @map("ever_highest_observed_value_json")
   // visit_instances.visit_id — owned by another service.
   everHighestVisitId           String?      @map("ever_highest_visit_id")
@@ -370,6 +380,10 @@ model BeneficiaryRiskConditionSummary {
 
   beneficiaryCase BeneficiaryCase @relation(fields: [beneficiaryId], references: [id])
 
+  // One row per beneficiary+condition (per the ERD's derivation note) — lets
+  // PATCH /beneficiaries/:id/risk-condition-summary use a real upsert instead
+  // of a racy find-then-write.
+  @@unique([beneficiaryId, riskConditionId])
   @@map("Beneficiary_risk_condition_summary")
 }
 
