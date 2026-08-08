@@ -280,21 +280,27 @@ describe('ReopenRequestService', () => {
     expect(consoleErrorSpy).toHaveBeenCalled();
   });
 
-  it('propagates a beneficiary reactivation failure — NOT tolerated like audit/notification', async () => {
+  it('does not fail the request when beneficiary reactivation fails after the decision is already committed', async () => {
     const pending = reopenRequest();
-    repository.findById.mockResolvedValueOnce(pending);
+    const decided = reopenRequest({ supervisorStatus: 'APPROVED', decidedByUserId: supervisorId });
+    repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(decided);
     repository.decide.mockResolvedValue(true);
     beneficiaryClient.reactivateCase.mockRejectedValue(
       Object.assign(new Error('Cannot reactivate a case with status ACTIVE.'), { status: 409 }),
     );
 
+    // supervisorStatus is already committed to APPROVED by repository.decide,
+    // and decide()'s own PENDING-only guard means this request could never be
+    // re-decided to retry just the reactivation — so a failure here must not
+    // fail the whole request, same tolerance as the audit/notification calls.
     await expect(
       service.decide(pending.id, supervisorId, { decision: 'APPROVED' }, authHeader),
-    ).rejects.toMatchObject({ status: 409 });
-    // The decision itself is already committed (repository.decide succeeded)
-    // — only the downstream reactivation call failed and correctly surfaced.
+    ).resolves.toBe(decided);
     expect(repository.decide).toHaveBeenCalled();
-    expect(auditClient.log).not.toHaveBeenCalled();
-    expect(notificationClient.notify).not.toHaveBeenCalled();
+    expect(consoleErrorSpy).toHaveBeenCalled();
+    // The audit/notification calls still run — a downstream reactivation
+    // failure isn't a reason to also skip the audit trail or Sakhi notice.
+    expect(auditClient.log).toHaveBeenCalled();
+    expect(notificationClient.notify).toHaveBeenCalled();
   });
 });

@@ -73,12 +73,17 @@ export class ReopenRequestService {
    *
    * On APPROVED, also reactivates the beneficiary case (FR-SV-4.7's
    * "Beneficiary is added to Sakhi's Open beneficiary list") via
-   * beneficiary-service. Unlike the audit/notification calls below, this one
-   * is NOT tolerated — an "approved" reopen that never actually reactivated
-   * the beneficiary is a data-integrity bug, not a hiccup the caller should
-   * see as a success. It runs after the reopen_requests row is already
-   * committed, so a failure here still leaves the request correctly marked
-   * APPROVED (fixable via retry), not stuck PENDING.
+   * beneficiary-service. This call is best-effort (logged, not thrown) —
+   * `repository.decide()` just above already committed
+   * `supervisorStatus = 'APPROVED'`, and this method's own guard
+   * (`supervisorStatus !== 'PENDING'`) means a reopen request can never be
+   * decided a second time to retry just this step; any retry attempt 409s
+   * immediately. Letting this call fail the whole request would leave the
+   * request stuck showing APPROVED with the beneficiary still CLOSED and no
+   * way to fix it except a direct beneficiary-service call — same failure
+   * shape as the audit/notification calls below, so it's tolerated the same
+   * way, with a distinct log line calling out that this one needs manual
+   * follow-up, not just a shrug.
    *
    * Writes the audit_log entry and notifies the Sakhi here, not in
    * approval-service's Quick Response layer — this endpoint is the only
@@ -107,7 +112,16 @@ export class ReopenRequestService {
     }
 
     if (dto.decision === 'APPROVED') {
-      await this.beneficiaryClient.reactivateCase(existing.beneficiaryId, authorizationHeader);
+      try {
+        await this.beneficiaryClient.reactivateCase(existing.beneficiaryId, authorizationHeader);
+      } catch (err) {
+        console.error(
+          `Reopen request ${id} was approved but reactivating beneficiary ` +
+            `${existing.beneficiaryId} failed (this request cannot be re-decided to retry — ` +
+            `needs manual follow-up):`,
+          err,
+        );
+      }
     }
 
     const decided = await this.repository.findById(id);
