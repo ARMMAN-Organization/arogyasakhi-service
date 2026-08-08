@@ -4,6 +4,7 @@ import type { AuditClient } from './audit.client';
 import type { NotificationClient } from './notification.client';
 import type { ApprovalClient } from './approval.client';
 import type { LookupClient } from './lookup.client';
+import type { BeneficiaryClient } from './beneficiary.client';
 import type { CreateReopenRequestInput } from './dto/create-reopen-request.dto';
 import type { DecideReopenRequestInput } from './dto/decide-reopen-request.dto';
 
@@ -15,6 +16,7 @@ export class ReopenRequestService {
     private readonly notificationClient: NotificationClient,
     private readonly approvalClient: ApprovalClient,
     private readonly lookupClient: LookupClient,
+    private readonly beneficiaryClient: BeneficiaryClient,
   ) {}
 
   /**
@@ -69,6 +71,15 @@ export class ReopenRequestService {
    * REJECTED is the persisted "Cannot re-open" state — the beneficiary
    * simply stays whatever Closed state it already had; no separate flag.
    *
+   * On APPROVED, also reactivates the beneficiary case (FR-SV-4.7's
+   * "Beneficiary is added to Sakhi's Open beneficiary list") via
+   * beneficiary-service. Unlike the audit/notification calls below, this one
+   * is NOT tolerated — an "approved" reopen that never actually reactivated
+   * the beneficiary is a data-integrity bug, not a hiccup the caller should
+   * see as a success. It runs after the reopen_requests row is already
+   * committed, so a failure here still leaves the request correctly marked
+   * APPROVED (fixable via retry), not stuck PENDING.
+   *
    * Writes the audit_log entry and notifies the Sakhi here, not in
    * approval-service's Quick Response layer — this endpoint is the only
    * place a reopen decision is actually persisted (Quick Response is one
@@ -93,6 +104,10 @@ export class ReopenRequestService {
       // conditional update — same outcome as the check above, just caught a
       // beat later instead of trusting a stale read.
       throw conflict('This reopen request has already been decided.');
+    }
+
+    if (dto.decision === 'APPROVED') {
+      await this.beneficiaryClient.reactivateCase(existing.beneficiaryId, authorizationHeader);
     }
 
     const decided = await this.repository.findById(id);

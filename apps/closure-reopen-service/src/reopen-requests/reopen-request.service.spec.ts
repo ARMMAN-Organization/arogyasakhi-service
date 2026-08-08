@@ -4,6 +4,7 @@ import type { AuditClient } from './audit.client';
 import type { NotificationClient } from './notification.client';
 import type { ApprovalClient } from './approval.client';
 import type { LookupClient } from './lookup.client';
+import type { BeneficiaryClient } from './beneficiary.client';
 import type { CreateReopenRequestInput } from './dto/create-reopen-request.dto';
 import type { DecideReopenRequestInput } from './dto/decide-reopen-request.dto';
 
@@ -41,6 +42,9 @@ describe('ReopenRequestService', () => {
   const lookupClient = {
     resolveApprovalStatusId: jest.fn(),
   } as unknown as jest.Mocked<LookupClient>;
+  const beneficiaryClient = {
+    reactivateCase: jest.fn(),
+  } as unknown as jest.Mocked<BeneficiaryClient>;
   let service: ReopenRequestService;
   const supervisorId = '44444444-4444-4444-4444-444444444444';
   const authHeader = 'Bearer token';
@@ -49,12 +53,17 @@ describe('ReopenRequestService', () => {
   beforeEach(() => {
     jest.resetAllMocks();
     consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    beneficiaryClient.reactivateCase.mockResolvedValue({
+      id: '22222222-2222-2222-2222-222222222222',
+      currentStatus: 'ACTIVE',
+    });
     service = new ReopenRequestService(
       repository,
       auditClient,
       notificationClient,
       approvalClient,
       lookupClient,
+      beneficiaryClient,
     );
   });
 
@@ -129,7 +138,7 @@ describe('ReopenRequestService', () => {
     });
   });
 
-  it('approves a PENDING reopen request, audits, and notifies the Sakhi', async () => {
+  it('approves a PENDING reopen request, reactivates the beneficiary, audits, and notifies the Sakhi', async () => {
     const pending = reopenRequest();
     const decided = reopenRequest({ supervisorStatus: 'APPROVED', decidedByUserId: supervisorId });
     repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(decided);
@@ -138,6 +147,10 @@ describe('ReopenRequestService', () => {
     const dto: DecideReopenRequestInput = { decision: 'APPROVED' };
     await expect(service.decide(pending.id, supervisorId, dto, authHeader)).resolves.toBe(decided);
     expect(repository.decide).toHaveBeenCalledWith(pending.id, supervisorId, dto);
+    expect(beneficiaryClient.reactivateCase).toHaveBeenCalledWith(
+      pending.beneficiaryId,
+      authHeader,
+    );
     expect(auditClient.log).toHaveBeenCalledWith(
       supervisorId,
       'QUICK_RESPONSE_APPROVE',
@@ -155,7 +168,7 @@ describe('ReopenRequestService', () => {
     );
   });
 
-  it('rejects a PENDING reopen request — persisted as the "Cannot re-open" state', async () => {
+  it('rejects a PENDING reopen request — persisted as the "Cannot re-open" state, no reactivation', async () => {
     const pending = reopenRequest();
     const decided = reopenRequest({ supervisorStatus: 'REJECTED', decidedByUserId: supervisorId });
     repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(decided);
@@ -164,6 +177,7 @@ describe('ReopenRequestService', () => {
     const dto: DecideReopenRequestInput = { decision: 'REJECTED' };
     const result = await service.decide(pending.id, supervisorId, dto, authHeader);
     expect(result?.supervisorStatus).toBe('REJECTED');
+    expect(beneficiaryClient.reactivateCase).not.toHaveBeenCalled();
     expect(auditClient.log).toHaveBeenCalledWith(
       supervisorId,
       'QUICK_RESPONSE_REJECT',
@@ -264,5 +278,23 @@ describe('ReopenRequestService', () => {
     ).resolves.toBe(decided);
     expect(notificationClient.notify).not.toHaveBeenCalled();
     expect(consoleErrorSpy).toHaveBeenCalled();
+  });
+
+  it('propagates a beneficiary reactivation failure — NOT tolerated like audit/notification', async () => {
+    const pending = reopenRequest();
+    repository.findById.mockResolvedValueOnce(pending);
+    repository.decide.mockResolvedValue(true);
+    beneficiaryClient.reactivateCase.mockRejectedValue(
+      Object.assign(new Error('Cannot reactivate a case with status ACTIVE.'), { status: 409 }),
+    );
+
+    await expect(
+      service.decide(pending.id, supervisorId, { decision: 'APPROVED' }, authHeader),
+    ).rejects.toMatchObject({ status: 409 });
+    // The decision itself is already committed (repository.decide succeeded)
+    // — only the downstream reactivation call failed and correctly surfaced.
+    expect(repository.decide).toHaveBeenCalled();
+    expect(auditClient.log).not.toHaveBeenCalled();
+    expect(notificationClient.notify).not.toHaveBeenCalled();
   });
 });
