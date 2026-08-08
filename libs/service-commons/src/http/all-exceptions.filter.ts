@@ -11,7 +11,19 @@ const STATUS_TO_CODE: Record<number, ErrorCode> = {
   409: ErrorCode.CONFLICT,
   413: ErrorCode.PAYLOAD_TOO_LARGE,
   422: ErrorCode.UNPROCESSABLE,
+  501: ErrorCode.NOT_IMPLEMENTED,
 };
+
+/**
+ * 5xx statuses whose message is safe to return verbatim. A 501 is a
+ * deliberate statement about this API's contract ("this capability isn't
+ * built yet"), authored by us and carrying no internals — unlike a 500/502,
+ * where the message may be a raw driver or upstream error. Without this, a
+ * 501's explanation is replaced by the generic 5xx text and the client can
+ * only show "Something went wrong", which reads as a crash rather than an
+ * unavailable feature.
+ */
+const CLIENT_SAFE_SERVER_STATUSES = new Set([501]);
 
 /** Correlation id for the response body; falls back to a fresh uuid if the
  * request-id middleware did not run (it always should). */
@@ -34,14 +46,16 @@ export function errorHandler(err: unknown, req: Request, res: Response, _next: N
   const status = err instanceof HttpError ? err.status : 500;
   const errorCode = STATUS_TO_CODE[status] ?? ErrorCode.INTERNAL_ERROR;
   const traceId = traceIdOf(req);
-  const clientMessage =
-    status >= 500
-      ? 'Something went wrong. Please try again.'
-      : err instanceof Error
-        ? err.message
-        : 'Request failed.';
+  const maskMessage = status >= 500 && !CLIENT_SAFE_SERVER_STATUSES.has(status);
+  const clientMessage = maskMessage
+    ? 'Something went wrong. Please try again.'
+    : err instanceof Error
+      ? err.message
+      : 'Request failed.';
 
-  if (status >= 500) {
+  // A client-safe 5xx (501) is expected behaviour, not a fault — logging it as
+  // an unhandled error would bury real incidents in noise.
+  if (maskMessage) {
     req.log?.error({ requestId: traceId, path: req.url, err }, 'Unhandled server error');
   }
 
