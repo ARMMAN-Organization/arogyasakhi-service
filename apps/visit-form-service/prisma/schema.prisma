@@ -193,6 +193,13 @@ model FormDefinition {
   formName        String               @map("form_name") @db.VarChar(80)
   entityType      FormEntityType       @map("entity_type")
   status          FormDefinitionStatus
+  // rule_sets.rule_set_id — owned by rules-service, no cross-service
+  // relation. Null for a form with no risk-relevant fields (e.g. SUPERVISOR/
+  // SYSTEM entityType forms) — such a form simply skips risk evaluation on
+  // submission. Set once per form by an ADMIN; there is no admin endpoint to
+  // manage this yet (seeded/updated directly) — a known gap, not in scope
+  // for this milestone.
+  riskRuleSetId   String?              @map("risk_rule_set_id")
   createdAt       DateTime             @default(now()) @map("created_at")
   createdByUserId String?              @map("created_by_user_id")
   updatedAt       DateTime             @updatedAt @map("updated_at")

@@ -1,3 +1,4 @@
+import type { Prisma } from '../../../../node_modules/.prisma/client-beneficiary-service';
 import type { BeneficiaryStatus, CasePhase, CaseType, Sex } from './beneficiary.constants';
 
 export interface BeneficiaryListFilters {
@@ -31,6 +32,14 @@ export interface BeneficiaryListFilters {
 export interface BeneficiaryListPage<T> {
   items: T[];
   nextCursor: string | null;
+}
+
+/** Same role-scoping shape as BeneficiaryListFilters, for the count-only summary widgets. */
+export interface BeneficiarySummaryFilters {
+  sakhiId?: string;
+  sakhiIds?: string[];
+  fromDate?: string;
+  toDate?: string;
 }
 
 export interface DuplicateSearchTokens {
@@ -109,6 +118,20 @@ export interface SocioDemographicsCreateData {
   socialCategoryLookupId: string | null;
   familyMembersCount: number | null;
   childrenUnder5Count: number | null;
+}
+
+export interface UpsertRiskConditionSummaryData {
+  riskConditionId: string;
+  phase: string;
+  grade: string;
+  gradeRank: number;
+  observedValueJson: Prisma.InputJsonValue | null;
+  visitId: string | null;
+  submissionId: string | null;
+  assessedAt: Date;
+  isReferralTrigger: boolean;
+  isHrVisitTrigger: boolean;
+  ruleVersionId: string | null;
 }
 
 export interface CreateEnrollmentInput {

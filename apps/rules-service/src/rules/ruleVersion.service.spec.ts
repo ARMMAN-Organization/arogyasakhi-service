@@ -1,5 +1,8 @@
 import { RuleVersionService } from './ruleVersion.service';
 import type { RuleVersionRepository } from './ruleVersion.repository';
+import { evaluateRulePack } from './ruleSet.evaluator';
+
+jest.mock('./ruleSet.evaluator');
 
 describe('RuleVersionService', () => {
   const repository = {
@@ -9,6 +12,7 @@ describe('RuleVersionService', () => {
     publishNewVersion: jest.fn(),
   } as unknown as jest.Mocked<RuleVersionRepository>;
   let service: RuleVersionService;
+  const evaluateRulePackMock = jest.mocked(evaluateRulePack);
 
   beforeEach(() => {
     jest.resetAllMocks();
@@ -142,6 +146,85 @@ describe('RuleVersionService', () => {
       repository.publishNewVersion.mockRejectedValue(dbError);
 
       await expect(service.publish(setId, { rulesJson: {} }, 'admin-1')).rejects.toBe(dbError);
+    });
+  });
+
+  describe('evaluate', () => {
+    it('evaluates against the published version and returns ruleVersionId alongside the results', async () => {
+      repository.findSetById.mockResolvedValue({ id: setId } as never);
+      repository.findPublishedBySetId.mockResolvedValue({
+        id: 'ver-1',
+        ruleSetId: setId,
+        rulesJson: { rules: [] },
+      } as never);
+      evaluateRulePackMock.mockResolvedValue({
+        overallRiskCategory: 'HIGH',
+        conditions: [
+          {
+            riskConditionId: 'cond-1',
+            grade: 'HIGH',
+            gradeRank: 3,
+            isReferralTrigger: true,
+            isEducationTrigger: false,
+            isHrVisitTrigger: true,
+            observedValueJson: { systolicBp: 145 },
+          },
+        ],
+      });
+
+      const result = await service.evaluate(setId, { answers: { systolicBp: 145 } });
+
+      expect(evaluateRulePackMock).toHaveBeenCalledWith({ rules: [] }, { systolicBp: 145 });
+      expect(result).toEqual({
+        ruleVersionId: 'ver-1',
+        overallRiskCategory: 'HIGH',
+        conditions: [
+          {
+            riskConditionId: 'cond-1',
+            grade: 'HIGH',
+            gradeRank: 3,
+            isReferralTrigger: true,
+            isEducationTrigger: false,
+            isHrVisitTrigger: true,
+            observedValueJson: { systolicBp: 145 },
+          },
+        ],
+      });
+    });
+
+    it('404s when the rule set itself does not exist, never checking for a published version', async () => {
+      repository.findSetById.mockResolvedValue(null);
+
+      await expect(service.evaluate(setId, { answers: {} })).rejects.toMatchObject({
+        status: 404,
+        message: 'Rule set not found.',
+      });
+      expect(repository.findPublishedBySetId).not.toHaveBeenCalled();
+      expect(evaluateRulePackMock).not.toHaveBeenCalled();
+    });
+
+    it('404s when the rule set exists but has no published version, never evaluating', async () => {
+      repository.findSetById.mockResolvedValue({ id: setId } as never);
+      repository.findPublishedBySetId.mockResolvedValue(null);
+
+      await expect(service.evaluate(setId, { answers: {} })).rejects.toMatchObject({
+        status: 404,
+        message: 'No published rule pack version found for this rule set.',
+      });
+      expect(evaluateRulePackMock).not.toHaveBeenCalled();
+    });
+
+    it('propagates evaluateRulePack errors (e.g. malformed decision-graph output) unchanged', async () => {
+      repository.findSetById.mockResolvedValue({ id: setId } as never);
+      repository.findPublishedBySetId.mockResolvedValue({
+        id: 'ver-1',
+        ruleSetId: setId,
+        rulesJson: {},
+      } as never);
+      const badRequestError = { status: 400, message: 'bad output' };
+      evaluateRulePackMock.mockRejectedValue(badRequestError);
+
+      await expect(service.evaluate(setId, { answers: {} })).rejects.toBe(badRequestError);
     });
   });
 });

@@ -200,7 +200,17 @@ export class AuthService {
             'User does not hold an active SAKHI role; cannot create a Sakhi profile.',
           );
         }
-        if (!sakhiRole.projectId) {
+        // This read reflects the DB *before* the transaction below applies
+        // input.projectId — a caller assigning a project and a Sakhi profile
+        // in the same PATCH (roleCode: 'SAKHI', projectId, supervisorId/etc.)
+        // must not be told "no project assigned" just because the write
+        // hasn't happened yet. Only trust input.projectId here when this
+        // same request's roleCode update targets the SAKHI role itself.
+        const effectiveProjectId =
+          input.roleCode === 'SAKHI' && input.projectId !== undefined
+            ? input.projectId
+            : sakhiRole.projectId;
+        if (!effectiveProjectId) {
           throw badRequest(
             "User's SAKHI role has no project assigned; cannot create a Sakhi profile.",
           );
@@ -210,7 +220,7 @@ export class AuthService {
         }
         sakhiProfileCreate = {
           userId: id,
-          primaryProjectId: sakhiRole.projectId,
+          primaryProjectId: effectiveProjectId,
           phoneNumber: input.phoneNumber,
           activeFrom: input.activeFrom ? new Date(input.activeFrom) : new Date(),
         };

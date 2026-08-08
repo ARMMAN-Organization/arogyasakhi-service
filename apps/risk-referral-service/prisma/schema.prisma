@@ -165,6 +165,10 @@ model RiskAssessment {
 
   riskFlags RiskFlag[]
 
+  // A retried POST /risk-assessments call (dropped-connection retry from
+  // visit-form-service) must not double-write — same idempotency pattern as
+  // form_submissions.localSubmissionUuid/beneficiary_cases.localCaseUuid.
+  @@unique([submissionId])
   @@map("risk_assessments")
 }
 

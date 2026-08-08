@@ -1,8 +1,10 @@
 import type { PrismaService } from '../prisma/prisma.service';
 import type {
   BeneficiaryListFilters,
+  BeneficiarySummaryFilters,
   CreateEnrollmentInput,
   DuplicateSearchTokens,
+  UpsertRiskConditionSummaryData,
 } from './beneficiary.repository.types';
 
 // Re-exported so existing importers of `./beneficiary.repository` keep working;
@@ -111,6 +113,155 @@ export class BeneficiaryRepository {
     const items = hasMore ? rows.slice(0, filters.limit) : rows;
     const lastItem = items[items.length - 1];
     return { items, nextCursor: hasMore && lastItem ? encodeCursor(lastItem) : null };
+  }
+
+  /**
+   * Counts in-scope beneficiary cases by caseType for the Registration
+   * Summary widget — same role-scoping/date-range semantics as findMany's
+   * `sakhiId`/`sakhiIds`/`fromDate`/`toDate` filters, just no pagination or
+   * detail rows since this is a count-only aggregate.
+   */
+  async countByCaseType(filters: BeneficiarySummaryFilters) {
+    const where: NonNullable<Parameters<typeof this.prisma.beneficiaryCase.groupBy>[0]>['where'] = {
+      isDeleted: false,
+    };
+    if (filters.sakhiId) where.sakhiId = filters.sakhiId;
+    if (filters.sakhiIds) where.sakhiId = { in: filters.sakhiIds };
+    if (filters.fromDate || filters.toDate) {
+      where.registrationDate = {
+        ...(filters.fromDate ? { gte: new Date(`${filters.fromDate}T00:00:00.000Z`) } : {}),
+        ...(filters.toDate ? { lte: new Date(`${filters.toDate}T23:59:59.999Z`) } : {}),
+      };
+    }
+
+    const grouped = await this.prisma.beneficiaryCase.groupBy({
+      by: ['caseType'],
+      where,
+      _count: { _all: true },
+    });
+
+    const motherCount = grouped.find((g) => g.caseType === 'MOTHER')?._count._all ?? 0;
+    const childCount = grouped.find((g) => g.caseType === 'CHILD')?._count._all ?? 0;
+    return { total: motherCount + childCount, motherCount, childCount };
+  }
+
+  /**
+   * Counts in-scope beneficiaries' latest risk grade per condition for the
+   * Risk Summary widget. Counts per-condition (one BeneficiaryRiskConditionSummary
+   * row per beneficiary+condition), not collapsed to one grade per beneficiary
+   * — matches the table's own grain.
+   */
+  async countByRiskGrade(filters: BeneficiarySummaryFilters) {
+    const caseWhere: NonNullable<
+      Parameters<typeof this.prisma.beneficiaryCase.findMany>[0]
+    >['where'] = { isDeleted: false };
+    if (filters.sakhiId) caseWhere.sakhiId = filters.sakhiId;
+    if (filters.sakhiIds) caseWhere.sakhiId = { in: filters.sakhiIds };
+    if (filters.fromDate || filters.toDate) {
+      caseWhere.registrationDate = {
+        ...(filters.fromDate ? { gte: new Date(`${filters.fromDate}T00:00:00.000Z`) } : {}),
+        ...(filters.toDate ? { lte: new Date(`${filters.toDate}T23:59:59.999Z`) } : {}),
+      };
+    }
+
+    const summaries = await this.prisma.beneficiaryRiskConditionSummary.findMany({
+      where: { beneficiaryCase: caseWhere },
+      select: { latestGrade: true, everAtRiskFlag: true, currentReferralTriggerFlag: true },
+    });
+
+    const byGrade: Record<string, number> = {};
+    let everAtRiskCount = 0;
+    let referralTriggerCount = 0;
+    for (const summary of summaries) {
+      const grade = summary.latestGrade ?? 'UNGRADED';
+      byGrade[grade] = (byGrade[grade] ?? 0) + 1;
+      if (summary.everAtRiskFlag) everAtRiskCount++;
+      if (summary.currentReferralTriggerFlag) referralTriggerCount++;
+    }
+
+    return { total: summaries.length, byGrade, everAtRiskCount, referralTriggerCount };
+  }
+
+  /**
+   * Upserts the per-condition risk rollup pushed by risk-referral-service
+   * after it evaluates a submission (see the ERD's derivation note on
+   * Beneficiary_risk_condition_summary: "not the source of truth... updated
+   * after every applicable visit/risk evaluation"). `latest*` always
+   * updates; `baseline*` is set only on first insert (never overwritten —
+   * baseline is a point-in-time snapshot); `everHighest*`/`everAtRiskFlag`
+   * only move toward "more severe," never back down, once any non-NORMAL
+   * grade has ever been recorded. `currentReferralTriggerFlag`/
+   * `currentHrVisitTriggerFlag` always reflect only the latest push, not an
+   * "ever" history.
+   *
+   * Uses the (beneficiaryId, riskConditionId) unique constraint for a real
+   * upsert — no separate find-then-write race window.
+   */
+  async upsertRiskConditionSummary(beneficiaryId: string, data: UpsertRiskConditionSummaryData) {
+    const existing = await this.prisma.beneficiaryRiskConditionSummary.findUnique({
+      where: {
+        beneficiaryId_riskConditionId: { beneficiaryId, riskConditionId: data.riskConditionId },
+      },
+    });
+
+    const isEverAtRisk = data.grade !== 'NORMAL' || (existing?.everAtRiskFlag ?? false);
+    const outranksEverHighest =
+      existing?.everHighestGradeRank == null || data.gradeRank > existing.everHighestGradeRank;
+
+    return this.prisma.beneficiaryRiskConditionSummary.upsert({
+      where: {
+        beneficiaryId_riskConditionId: { beneficiaryId, riskConditionId: data.riskConditionId },
+      },
+      create: {
+        beneficiaryId,
+        riskConditionId: data.riskConditionId,
+        phase: data.phase as never,
+        baselineGrade: data.grade,
+        baselineObservedValueJson: data.observedValueJson ?? undefined,
+        baselineVisitId: data.visitId,
+        baselineSubmissionId: data.submissionId,
+        baselineAssessedAt: data.assessedAt,
+        latestGrade: data.grade,
+        latestGradeRank: data.gradeRank,
+        latestObservedValueJson: data.observedValueJson ?? undefined,
+        latestVisitId: data.visitId,
+        latestSubmissionId: data.submissionId,
+        latestAssessedAt: data.assessedAt,
+        everHighestGrade: data.grade,
+        everHighestGradeRank: data.gradeRank,
+        everHighestObservedValueJson: data.observedValueJson ?? undefined,
+        everHighestVisitId: data.visitId,
+        everHighestSubmissionId: data.submissionId,
+        everHighestAssessedAt: data.assessedAt,
+        everAtRiskFlag: data.grade !== 'NORMAL',
+        currentReferralTriggerFlag: data.isReferralTrigger,
+        currentHrVisitTriggerFlag: data.isHrVisitTrigger,
+        sourceRuleVersionId: data.ruleVersionId,
+      },
+      update: {
+        phase: data.phase as never,
+        latestGrade: data.grade,
+        latestGradeRank: data.gradeRank,
+        latestObservedValueJson: data.observedValueJson ?? undefined,
+        latestVisitId: data.visitId,
+        latestSubmissionId: data.submissionId,
+        latestAssessedAt: data.assessedAt,
+        everAtRiskFlag: isEverAtRisk,
+        ...(outranksEverHighest
+          ? {
+              everHighestGrade: data.grade,
+              everHighestGradeRank: data.gradeRank,
+              everHighestObservedValueJson: data.observedValueJson ?? undefined,
+              everHighestVisitId: data.visitId,
+              everHighestSubmissionId: data.submissionId,
+              everHighestAssessedAt: data.assessedAt,
+            }
+          : {}),
+        currentReferralTriggerFlag: data.isReferralTrigger,
+        currentHrVisitTriggerFlag: data.isHrVisitTrigger,
+        sourceRuleVersionId: data.ruleVersionId,
+      },
+    });
   }
 
   findById(id: string) {

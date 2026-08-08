@@ -12,6 +12,7 @@ import { appConfig } from './config/app-config';
 import { PrismaService } from './prisma/prisma.service';
 import { createHealthRouter } from './health/health.controller';
 import { createReferralModule } from './referrals/referral.module';
+import { createRiskAssessmentModule } from './risk-assessments/riskAssessment.module';
 import { buildRiskReferralServiceOpenApiDocument } from './docs/openapi';
 
 // Re-export shared HTTP helpers so feature routers can import from a single place.
@@ -52,15 +53,24 @@ export function createApp(prisma: PrismaService): Application {
   app.use(requestId);
 
   const referralModule = createReferralModule(prisma);
+  const riskAssessmentModule = createRiskAssessmentModule(prisma);
 
   // All routes live under the global `api/v1` prefix.
   const api = express.Router();
   api.use(createHealthRouter(prisma));
-  // Built from referralModule.registry — every route registered via
+  // Built from every feature module's registry — every route registered via
   // createDocumentedRouter() above is already in the spec, so this can never
   // drift from what's actually mounted.
-  api.use(createSwaggerRouter(buildRiskReferralServiceOpenApiDocument(referralModule.registry)));
+  api.use(
+    createSwaggerRouter(
+      buildRiskReferralServiceOpenApiDocument(
+        referralModule.registry,
+        riskAssessmentModule.registry,
+      ),
+    ),
+  );
   api.use(referralModule.router);
+  api.use(riskAssessmentModule.router);
   app.use('/api/v1', api);
 
   app.use(notFoundHandler);
