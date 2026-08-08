@@ -13,6 +13,7 @@ import {
 import { validateSubmission } from './form-validation';
 import { syncSocioDemographics } from '../beneficiaries/socio-demographics.client';
 import { getAncestorChain } from '../geography/geography.client';
+import { triggerRiskAssessment } from '../risk-assessments/riskAssessment.client';
 
 /**
  * Business logic for the dynamic-forms feature: fetching the active version,
@@ -192,6 +193,24 @@ export class FormService {
     // after the submission is durably saved — see syncSocioDemographics.
     if (formCode === 'MOTHER_REGISTRATION') {
       await syncSocioDemographics(dto.beneficiaryId, dto.formData, authorizationHeader);
+    }
+
+    // Triggers the risk-grading pipeline for every visit-linked submission
+    // whose form has a risk_rule_set_id configured (see FormDefinition's
+    // schema comment) — a form with no ruleSetId set (e.g. SUPERVISOR/SYSTEM
+    // entityType forms) simply has nothing to evaluate. Best-effort, same
+    // stance as syncSocioDemographics above.
+    if (dto.visitId && version.formDefinition.riskRuleSetId) {
+      await triggerRiskAssessment(
+        {
+          beneficiaryId: dto.beneficiaryId,
+          visitId: dto.visitId,
+          submissionId: created.id,
+          ruleSetId: version.formDefinition.riskRuleSetId,
+          answers: dto.formData,
+        },
+        authorizationHeader,
+      );
     }
 
     return toApiFormSubmission(created);

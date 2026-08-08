@@ -40,3 +40,31 @@ export async function findSakhiById(
   const body = (await res.json()) as { data: Sakhi };
   return body.data;
 }
+
+/**
+ * Resolves the Sakhi ids reporting to a given Supervisor, via auth-service's
+ * existing `GET /projects/:projectId/sakhis` — mirrors beneficiary-service's
+ * sakhi.client.ts's listSakhiIdsForSupervisor exactly. Used to scope
+ * `GET /visits/visit-summary` to a Supervisor's own Sakhis' visits.
+ */
+export async function listSakhiIdsForSupervisor(
+  projectId: string,
+  supervisorId: string,
+  authorizationHeader: string,
+): Promise<string[]> {
+  let res: Response;
+  try {
+    res = await fetch(`${GATEWAY_BASE_URL}/api/v1/projects/${projectId}/sakhis`, {
+      headers: { Authorization: authorizationHeader },
+    });
+  } catch {
+    throw badGateway('Unable to resolve Sakhis — the auth service is unreachable.');
+  }
+
+  if (!res.ok) {
+    throw badGateway('Unable to resolve Sakhis — the auth service returned an error.');
+  }
+
+  const body = (await res.json()) as { data: Sakhi[] };
+  return body.data.filter((sakhi) => sakhi.supervisorId === supervisorId).map((s) => s.sakhiId);
+}
