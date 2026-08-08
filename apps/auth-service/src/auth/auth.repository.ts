@@ -182,6 +182,25 @@ export class AuthRepository {
   }
 
   /**
+   * Reactivates a deactivated user's account (Quick Response's DATA_RESTORE
+   * card, approved) — flips status back to ACTIVE. Only updates a row whose
+   * status is currently one of the deactivated states; a DELETED account is
+   * deliberately excluded — that's a distinct, more serious state a bare
+   * reactivation must never silently reverse. updateMany's affected count
+   * (rather than a separate read-then-write) is the concurrency guard: if
+   * status already changed between the caller's findUserById and this call,
+   * the count comes back 0 and the service turns that into a 409 instead of
+   * silently overwriting a since-changed account.
+   */
+  async reactivateUser(userId: string): Promise<boolean> {
+    const result = await this.prisma.user.updateMany({
+      where: { id: userId, isDeleted: false, status: { in: ['INACTIVE', 'LOCKED', 'PAUSED'] } },
+      data: { status: 'ACTIVE' },
+    });
+    return result.count > 0;
+  }
+
+  /**
    * Applies the `users`/`user_roles`/`sakhi_profiles` portions of an update,
    * and — when `revokeSessions` is set — the session revocation that must
    * accompany a username/password change, all in one transaction: either

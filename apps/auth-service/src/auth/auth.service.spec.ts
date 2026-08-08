@@ -74,6 +74,7 @@ describe('AuthService', () => {
     findActiveUserRole: jest.fn(),
     findSakhiProfileByUserId: jest.fn(),
     updateUserTransaction: jest.fn(),
+    reactivateUser: jest.fn(),
   } as unknown as jest.Mocked<AuthRepository>;
 
   const signer = {
@@ -900,6 +901,59 @@ describe('AuthService', () => {
         sakhiProfile: { id: 'sakhi-profile-1', data: { employeeCode: 'EMP-00999' } },
         revokeSessions: true,
       });
+    });
+  });
+
+  describe('reactivateUser', () => {
+    it('reactivates an INACTIVE user and returns the full profile', async () => {
+      repository.findUserById.mockResolvedValue({ ...ACTIVE_USER, status: 'INACTIVE' } as never);
+      repository.reactivateUser.mockResolvedValue(true);
+      repository.findUserByIdWithProfile.mockResolvedValue(updatedUserRow() as never);
+
+      const result = await service.reactivateUser('user-1');
+
+      expect(repository.reactivateUser).toHaveBeenCalledWith('user-1');
+      expect(result.status).toBe('ACTIVE');
+    });
+
+    it.each(['INACTIVE', 'LOCKED', 'PAUSED'])('reactivates a %s user', async (status) => {
+      repository.findUserById.mockResolvedValue({ ...ACTIVE_USER, status } as never);
+      repository.reactivateUser.mockResolvedValue(true);
+      repository.findUserByIdWithProfile.mockResolvedValue(updatedUserRow() as never);
+
+      await expect(service.reactivateUser('user-1')).resolves.toMatchObject({
+        status: 'ACTIVE',
+      });
+    });
+
+    it('404s when the user does not exist', async () => {
+      repository.findUserById.mockResolvedValue(null);
+      await expect(service.reactivateUser('missing')).rejects.toMatchObject({ status: 404 });
+      expect(repository.reactivateUser).not.toHaveBeenCalled();
+    });
+
+    it('404s for a soft-deleted user', async () => {
+      repository.findUserById.mockResolvedValue({ ...ACTIVE_USER, isDeleted: true } as never);
+      await expect(service.reactivateUser('user-1')).rejects.toMatchObject({ status: 404 });
+      expect(repository.reactivateUser).not.toHaveBeenCalled();
+    });
+
+    it('409s when the user is already ACTIVE', async () => {
+      repository.findUserById.mockResolvedValue({ ...ACTIVE_USER, status: 'ACTIVE' } as never);
+      await expect(service.reactivateUser('user-1')).rejects.toMatchObject({ status: 409 });
+      expect(repository.reactivateUser).not.toHaveBeenCalled();
+    });
+
+    it('409s for a DELETED account — never silently reactivated', async () => {
+      repository.findUserById.mockResolvedValue({ ...ACTIVE_USER, status: 'DELETED' } as never);
+      await expect(service.reactivateUser('user-1')).rejects.toMatchObject({ status: 409 });
+      expect(repository.reactivateUser).not.toHaveBeenCalled();
+    });
+
+    it('409s when the conditional update races with a concurrent status change', async () => {
+      repository.findUserById.mockResolvedValue({ ...ACTIVE_USER, status: 'INACTIVE' } as never);
+      repository.reactivateUser.mockResolvedValue(false);
+      await expect(service.reactivateUser('user-1')).rejects.toMatchObject({ status: 409 });
     });
   });
 });
