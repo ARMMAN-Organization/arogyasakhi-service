@@ -239,6 +239,7 @@ export class BeneficiaryRepository {
         sourceRuleVersionId: data.ruleVersionId,
       },
       update: {
+        phase: data.phase as never,
         latestGrade: data.grade,
         latestGradeRank: data.gradeRank,
         latestObservedValueJson: data.observedValueJson ?? undefined,
