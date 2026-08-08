@@ -126,7 +126,7 @@ export function createVisitInstanceRouter(service: VisitInstanceService) {
       },
     },
     trustGatewayIdentity,
-    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER'),
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
     validate(visitSummaryQuerySchema, 'query'),
     asyncHandler(async (req, res, next) => {
       if (!req.user) return next(unauthorized());
@@ -183,7 +183,7 @@ export function createVisitInstanceRouter(service: VisitInstanceService) {
       },
     },
     trustGatewayIdentity,
-    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER'),
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
     validate(idParamsSchema, 'params'),
     validateBody(updateVisitInstanceSchema),
     asyncHandler(async (req, res, next) => {
