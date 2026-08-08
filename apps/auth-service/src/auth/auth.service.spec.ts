@@ -821,6 +821,70 @@ describe('AuthService', () => {
           ).rejects.toMatchObject({ status: 400 });
           expect(repository.updateUserTransaction).not.toHaveBeenCalled();
         });
+
+        it("creates the profile using this same request's projectId, when roleCode SAKHI and projectId are both set in one call", async () => {
+          // Regression test: previously, assigning a SAKHI's projectId and
+          // creating their Sakhi profile (supervisorId/phoneNumber) in the
+          // same PATCH failed with "SAKHI role has no project assigned" —
+          // the profile-creation check read findActiveUserRole's
+          // *pre-update* row instead of this same request's input.projectId.
+          repository.findSakhiProfileByUserId.mockResolvedValue(null);
+          repository.findActiveUserRole.mockImplementation(((_userId: string, roleCode: string) =>
+            Promise.resolve(
+              roleCode === 'SAKHI' ? { id: 'user-role-1', projectId: null } : null,
+            )) as never);
+          repository.findProjectById.mockResolvedValue({ projectId: 'project-new' } as never);
+          repository.updateUserTransaction.mockResolvedValue(updatedUserRow() as never);
+
+          await service.updateUser('user-1', {
+            roleCode: 'SAKHI',
+            projectId: 'project-new',
+            supervisorId: 'supervisor-1',
+            phoneNumber: '+919876544139',
+          });
+
+          expect(repository.updateUserTransaction).toHaveBeenCalledWith(
+            'user-1',
+            expect.objectContaining({
+              userRole: { id: 'user-role-1', data: { projectId: 'project-new' } },
+              sakhiProfile: {
+                create: {
+                  userId: 'user-1',
+                  primaryProjectId: 'project-new',
+                  phoneNumber: '+919876544139',
+                  activeFrom: expect.any(Date),
+                },
+                data: { supervisorId: 'supervisor-1', phoneNumber: '+919876544139' },
+              },
+            }),
+          );
+        });
+
+        it('still throws 400 when projectId is set for a DIFFERENT roleCode than SAKHI', async () => {
+          // input.projectId should only be trusted as the effective project
+          // when this same request's roleCode update targets SAKHI itself —
+          // a MANAGER role's projectId update must not leak into an
+          // unrelated Sakhi-profile creation.
+          repository.findSakhiProfileByUserId.mockResolvedValue(null);
+          repository.findActiveUserRole.mockImplementation(((_userId: string, roleCode: string) =>
+            Promise.resolve(
+              roleCode === 'MANAGER'
+                ? { id: 'manager-role-1', projectId: 'manager-project-1' }
+                : roleCode === 'SAKHI'
+                  ? { id: 'sakhi-role-1', projectId: null }
+                  : null,
+            )) as never);
+          repository.findProjectById.mockResolvedValue({ projectId: 'manager-project-1' } as never);
+
+          await expect(
+            service.updateUser('user-1', {
+              roleCode: 'MANAGER',
+              projectId: 'manager-project-1',
+              phoneNumber: '+919876544139',
+            }),
+          ).rejects.toMatchObject({ status: 400 });
+          expect(repository.updateUserTransaction).not.toHaveBeenCalled();
+        });
       });
 
       it('maps a duplicate employeeCode to a 409 conflict', async () => {
