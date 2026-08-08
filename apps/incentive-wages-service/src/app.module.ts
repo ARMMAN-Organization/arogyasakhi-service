@@ -12,6 +12,7 @@ import { appConfig } from './config/app-config';
 import { PrismaService } from './prisma/prisma.service';
 import { createHealthRouter } from './health/health.controller';
 import { createIncentiveEventModule } from './incentives/incentiveEvent.module';
+import { createIncentiveRateModule } from './rates/incentiveRate.module';
 import { buildIncentiveWagesServiceOpenApiDocument } from './docs/openapi';
 
 // Re-export shared HTTP helpers so feature routers can import from a single place.
@@ -19,6 +20,8 @@ export {
   asyncHandler,
   ok,
   fail,
+  notFound,
+  validate,
   validateBody,
   requireRoles,
   trustGatewayIdentity,
@@ -50,17 +53,24 @@ export function createApp(prisma: PrismaService): Application {
   app.use(requestId);
 
   const incentiveEventModule = createIncentiveEventModule(prisma);
+  const incentiveRateModule = createIncentiveRateModule(prisma);
 
   // All routes live under the global `api/v1` prefix.
   const api = express.Router();
   api.use(createHealthRouter(prisma));
-  // Built from incentiveEventModule.registry — every route registered via
+  // Built from every feature module's registry — every route registered via
   // createDocumentedRouter() above is already in the spec, so this can never
   // drift from what's actually mounted.
   api.use(
-    createSwaggerRouter(buildIncentiveWagesServiceOpenApiDocument(incentiveEventModule.registry)),
+    createSwaggerRouter(
+      buildIncentiveWagesServiceOpenApiDocument(
+        incentiveEventModule.registry,
+        incentiveRateModule.registry,
+      ),
+    ),
   );
   api.use(incentiveEventModule.router);
+  api.use(incentiveRateModule.router);
   app.use('/api/v1', api);
 
   app.use(notFoundHandler);
