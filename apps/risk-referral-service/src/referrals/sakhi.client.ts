@@ -1,5 +1,7 @@
 import { badGateway } from '@armman/service-commons';
-import { appConfig } from '../config/app-config';
+
+// Read directly (not via appConfig) — see beneficiary.client.ts for why.
+const API_GATEWAY_BASE_URL = process.env.API_GATEWAY_BASE_URL ?? 'http://localhost:3000';
 
 interface ApiSakhi {
   sakhiId: string;
@@ -23,7 +25,7 @@ export async function listSakhiIdsForSupervisor(
 ): Promise<string[]> {
   let res: Response;
   try {
-    res = await fetch(`${appConfig.API_GATEWAY_BASE_URL}/api/v1/projects/${projectId}/sakhis`, {
+    res = await fetch(`${API_GATEWAY_BASE_URL}/api/v1/projects/${projectId}/sakhis`, {
       headers: { Authorization: authorizationHeader },
     });
   } catch {

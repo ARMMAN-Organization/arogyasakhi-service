@@ -1,5 +1,11 @@
 import { badGateway, HttpError } from '@armman/service-commons';
-import { appConfig } from '../config/app-config';
+
+// Read directly (not via appConfig) so importing this client doesn't pull in
+// app-config's full schema — that schema requires DATABASE_URL/PUBLIC_BASE_URLS
+// with no defaults, which fails module load (process.exit) in any test that
+// never otherwise loads config, e.g. this service's own jest workers in CI.
+// Matches beneficiary-service's geography.client.ts/sakhi.client.ts convention.
+const API_GATEWAY_BASE_URL = process.env.API_GATEWAY_BASE_URL ?? 'http://localhost:3000';
 
 export interface BeneficiaryCaseRecord {
   id: string;
@@ -22,7 +28,7 @@ export class BeneficiaryClient {
   ): Promise<BeneficiaryCaseRecord | null> {
     let res: Response;
     try {
-      res = await fetch(`${appConfig.API_GATEWAY_BASE_URL}/api/v1/beneficiaries/${beneficiaryId}`, {
+      res = await fetch(`${API_GATEWAY_BASE_URL}/api/v1/beneficiaries/${beneficiaryId}`, {
         headers: { Authorization: authorizationHeader },
       });
     } catch {
