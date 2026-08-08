@@ -9,6 +9,7 @@ import {
   ok,
   requireRoles,
   trustGatewayIdentity,
+  unauthorized,
   validate,
   validateBody,
 } from '../app.module';
@@ -133,7 +134,10 @@ export function createReferralRouter(service: ReferralService) {
         200: { description: 'Referral decided', schema: envelope(referralSchema) },
         400: { description: 'Validation error', schema: apiErrorSchema },
         401: { description: 'Unauthenticated', schema: apiErrorSchema },
-        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+        403: {
+          description: "Caller role not permitted, or outside this Supervisor's roster",
+          schema: apiErrorSchema,
+        },
         404: { description: 'Referral not found', schema: apiErrorSchema },
         409: { description: 'Referral is not in PENDING_FOLLOWUP status', schema: apiErrorSchema },
       },
@@ -142,8 +146,11 @@ export function createReferralRouter(service: ReferralService) {
     requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
     validate(referralIdParamsSchema, 'params'),
     validateBody(decideReferralRequestSchema),
-    asyncHandler(async (req, res) => {
-      const updated = await service.decide(req.params.id, req.body);
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const updated = await service.decide(req.params.id, req.body, req.user, authorizationHeader);
       res.json(ok(updated));
     }),
   );

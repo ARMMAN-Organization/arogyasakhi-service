@@ -23,6 +23,7 @@ export {
   validateBody,
   requireRoles,
   trustGatewayIdentity,
+  unauthorized,
   createDocumentedRouter,
   HttpError,
   ErrorCode,
