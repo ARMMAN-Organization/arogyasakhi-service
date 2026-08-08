@@ -127,6 +127,7 @@ async function enrichListPage(
   items: Record<string, unknown>[],
   authorizationHeader: string,
   supervisorRoster?: Map<string, string>,
+  skipSakhiNameLookup = false,
 ): Promise<Record<string, unknown>[]> {
   if (items.length === 0) return [];
 
@@ -135,9 +136,16 @@ async function enrichListPage(
   const villageIdOf = (item: Record<string, unknown>) =>
     (item.pii as { villageId: string | null }).villageId;
 
-  const uncoveredSakhiIds = [
-    ...new Set(items.map(sakhiIdOf).filter((id) => !supervisorRoster?.has(id))),
-  ];
+  // A SAKHI caller only ever sees their own cases (list() forces
+  // filters.sakhiId = caller.id), so every row's sakhiId is the caller's
+  // own id — falling through to the per-id fallback below would call
+  // GET /sakhis/:sakhiId, which is SUPERVISOR/MANAGER/ADMIN-only and 403s a
+  // SAKHI's own token, turning into a 502 for every SAKHI caller. Skip the
+  // lookup entirely for this caller instead of trying to resolve a name
+  // they already know is their own.
+  const uncoveredSakhiIds = skipSakhiNameLookup
+    ? []
+    : [...new Set(items.map(sakhiIdOf).filter((id) => !supervisorRoster?.has(id)))];
 
   const [projectNames, villageNames, fallbackSakhiNames] = await Promise.all([
     resolveProjectNames(authorizationHeader),
@@ -271,7 +279,12 @@ export class BeneficiaryService {
       supervisorProjectId && supervisorId
         ? await listSakhiNamesForSupervisor(supervisorProjectId, supervisorId, authorizationHeader)
         : undefined;
-    const enriched = await enrichListPage(decrypted, authorizationHeader, supervisorRoster);
+    const enriched = await enrichListPage(
+      decrypted,
+      authorizationHeader,
+      supervisorRoster,
+      caller.roles.includes('SAKHI'),
+    );
     return { items: enriched, nextCursor: page.nextCursor };
   }
 

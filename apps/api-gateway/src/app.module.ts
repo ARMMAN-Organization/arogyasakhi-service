@@ -13,6 +13,7 @@ import { createHealthRouter } from './health/health.controller';
 import { createInfoRouter } from './info/info.controller';
 import { createDocsRouter } from './docs/docs.controller';
 import { registerProxies } from './proxy/register-proxies';
+import { buildCorsMiddleware } from './cors/cors-middleware';
 
 export {
   asyncHandler,
@@ -39,18 +40,7 @@ export function createApp(signer: Pick<TokenSigner, 'verify'>): Application {
 
   app.use(pinoHttp(buildLoggerOptions(appConfig.LOG_LEVEL)));
   app.use(helmet());
-  app.use((req, res, next) => {
-    const origin = req.header('origin');
-    if (origin && appConfig.CORS_ORIGINS.includes(origin)) {
-      res.setHeader('Access-Control-Allow-Origin', origin);
-      res.setHeader('Access-Control-Allow-Credentials', 'true');
-    }
-    if (req.method === 'OPTIONS') {
-      res.sendStatus(204);
-      return;
-    }
-    next();
-  });
+  app.use(buildCorsMiddleware(appConfig.CORS_ORIGINS));
   app.use(requestId);
 
   registerProxies(app, signer);

@@ -410,6 +410,34 @@ describe('BeneficiaryService', () => {
       expect(call.sakhiId).toBe('sakhi-1');
     });
 
+    it('never calls getSakhiName for a SAKHI caller — every row is already their own case', async () => {
+      // Regression test: GET /sakhis/:sakhiId (which getSakhiName calls) is
+      // SUPERVISOR/MANAGER/ADMIN-only in auth-service — a SAKHI's own token
+      // gets 403'd there, which getSakhiName turns into a 502. Every row a
+      // SAKHI sees is already forced to their own sakhiId, so there is
+      // nothing to look up.
+      repository.findMany.mockResolvedValue({
+        items: [
+          {
+            id: 'x',
+            sakhiId: 'sakhi-1',
+            projectId: 'project-1',
+            pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe'), villageId: null },
+          },
+        ] as never,
+        nextCursor: null,
+      });
+
+      const result = await service.list(
+        { limit: 50 },
+        caller({ id: 'sakhi-1', roles: ['SAKHI'] }),
+        AUTH_HEADER,
+      );
+
+      expect(getSakhiNameMock).not.toHaveBeenCalled();
+      expect(result.items[0]).toMatchObject({ sakhiName: null });
+    });
+
     it('SUPERVISOR caller sees only their own Sakhis, resolved via the Sakhi lookup', async () => {
       repository.findMany.mockResolvedValue({ items: [], nextCursor: null });
       listSakhiIdsForSupervisorMock.mockResolvedValue(['sakhi-a', 'sakhi-b']);
