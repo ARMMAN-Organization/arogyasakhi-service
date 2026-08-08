@@ -1,6 +1,7 @@
 import { Prisma } from '../../../../node_modules/.prisma/client-incentive-wages-service';
 import { IncentiveEventService } from './incentiveEvent.service';
 import type { IncentiveEventRepository } from './incentiveEvent.repository';
+import type { IncentiveRateRepository } from '../rates/incentiveRate.repository';
 import type { CreateIncentiveEventInput } from './dto/create-incentiveEvent.dto';
 
 describe('IncentiveEventService', () => {
@@ -8,11 +9,14 @@ describe('IncentiveEventService', () => {
     findMany: jest.fn(),
     create: jest.fn(),
   } as unknown as jest.Mocked<IncentiveEventRepository>;
+  const rateRepository = {
+    findById: jest.fn(),
+  } as unknown as jest.Mocked<IncentiveRateRepository>;
   let service: IncentiveEventService;
 
   beforeEach(() => {
     jest.resetAllMocks();
-    service = new IncentiveEventService(repository);
+    service = new IncentiveEventService(repository, rateRepository);
   });
 
   it('lists via repository', async () => {
@@ -28,9 +32,13 @@ describe('IncentiveEventService', () => {
     eventMonth: new Date('2026-07-01'),
     rateId: '33333333-3333-3333-3333-333333333333',
     quantity: 1,
-    amountInr: 150,
     eligibilityStatus: 'ELIGIBLE',
     calculatedAt: new Date('2026-07-14T10:00:00Z'),
+  };
+
+  const rateRow = {
+    id: baseDto.rateId,
+    amountInr: new Prisma.Decimal(150),
   };
 
   const createdRow = {
@@ -41,7 +49,7 @@ describe('IncentiveEventService', () => {
     eventMonth: baseDto.eventMonth,
     rateId: baseDto.rateId,
     quantity: new Prisma.Decimal(baseDto.quantity ?? 1),
-    amountInr: new Prisma.Decimal(baseDto.amountInr),
+    amountInr: new Prisma.Decimal(150),
     eligibilityStatus: baseDto.eligibilityStatus,
     calculatedAt: baseDto.calculatedAt,
     createdAt: new Date(),
@@ -58,13 +66,24 @@ describe('IncentiveEventService', () => {
     await expect(service.list()).resolves.toBe(rows);
   });
 
-  it('creates via repository with the given data', async () => {
+  it('re-derives amountInr from the referenced rate, never trusting a client value', async () => {
+    rateRepository.findById.mockResolvedValue(rateRow as never);
     repository.create.mockResolvedValue(createdRow);
+
     await expect(service.create(baseDto)).resolves.toBe(createdRow);
-    expect(repository.create).toHaveBeenCalledWith(baseDto);
+
+    expect(rateRepository.findById).toHaveBeenCalledWith(baseDto.rateId);
+    expect(repository.create).toHaveBeenCalledWith({ ...baseDto, amountInr: 150 });
+  });
+
+  it('404s when rateId does not reference an existing rate', async () => {
+    rateRepository.findById.mockResolvedValue(null);
+    await expect(service.create(baseDto)).rejects.toMatchObject({ status: 404 });
+    expect(repository.create).not.toHaveBeenCalled();
   });
 
   it('propagates repository errors on create', async () => {
+    rateRepository.findById.mockResolvedValue(rateRow as never);
     repository.create.mockRejectedValue(new Error('db down'));
     await expect(service.create(baseDto)).rejects.toThrow('db down');
   });

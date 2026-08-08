@@ -3,6 +3,7 @@ import type { PrismaService } from '../prisma/prisma.service';
 import { IncentiveEventRepository } from './incentiveEvent.repository';
 import { IncentiveEventService } from './incentiveEvent.service';
 import { createIncentiveEventRouter } from './incentiveEvent.controller';
+import { IncentiveRateRepository } from '../rates/incentiveRate.repository';
 
 /**
  * Composition root for the incentives feature: wires repository → service →
@@ -10,6 +11,7 @@ import { createIncentiveEventRouter } from './incentiveEvent.controller';
  */
 export function createIncentiveEventModule(prisma: PrismaService): DocumentedRouter {
   const repository = new IncentiveEventRepository(prisma);
-  const service = new IncentiveEventService(repository);
+  const rateRepository = new IncentiveRateRepository(prisma);
+  const service = new IncentiveEventService(repository, rateRepository);
   return createIncentiveEventRouter(service);
 }
