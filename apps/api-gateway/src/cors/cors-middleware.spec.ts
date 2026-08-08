@@ -59,6 +59,16 @@ describe('buildCorsMiddleware', () => {
     expect(next).toHaveBeenCalled();
   });
 
+  it('sets Vary: Origin on every response, since Allow-Origin is echoed conditionally per request', () => {
+    const middleware = buildCorsMiddleware([ALLOWED_ORIGIN]);
+    const req = mockReq({ origin: ALLOWED_ORIGIN });
+    const res = mockRes();
+
+    middleware(req, res as never, jest.fn());
+
+    expect(res.headers['Vary']).toBe('Origin');
+  });
+
   describe('OPTIONS preflight', () => {
     it('echoes back the browser-requested method and headers', () => {
       const middleware = buildCorsMiddleware([ALLOWED_ORIGIN]);
@@ -113,6 +123,21 @@ describe('buildCorsMiddleware', () => {
 
       expect(res.headers['Access-Control-Allow-Origin']).toBeUndefined();
       expect(res.sendStatus).toHaveBeenCalledWith(204);
+    });
+
+    it('sets Vary to include the preflight request headers, so a cache keys on them too', () => {
+      const middleware = buildCorsMiddleware([ALLOWED_ORIGIN]);
+      const req = mockReq(
+        { origin: ALLOWED_ORIGIN, 'access-control-request-method': 'PATCH' },
+        'OPTIONS',
+      );
+      const res = mockRes();
+
+      middleware(req, res as never, jest.fn());
+
+      expect(res.headers['Vary']).toBe(
+        'Origin, Access-Control-Request-Method, Access-Control-Request-Headers',
+      );
     });
   });
 });

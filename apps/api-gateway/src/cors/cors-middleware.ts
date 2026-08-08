@@ -25,12 +25,25 @@ const DEFAULT_ALLOWED_METHODS = 'GET,POST,PATCH,PUT,DELETE,OPTIONS';
  */
 export function buildCorsMiddleware(corsOrigins: readonly string[]) {
   return function corsMiddleware(req: Request, res: Response, next: NextFunction): void {
+    // Access-Control-Allow-Origin is echoed conditionally per request (it
+    // varies by the Origin header), so any cache sitting in front of this
+    // gateway (CDN, reverse proxy) must key on Origin too — otherwise a
+    // response computed for one origin could be served to a different one.
+    res.setHeader('Vary', 'Origin');
+
     const origin = req.header('origin');
     if (origin && corsOrigins.includes(origin)) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Access-Control-Allow-Credentials', 'true');
     }
     if (req.method === 'OPTIONS') {
+      // Same reasoning as above: Allow-Methods/-Headers are echoed from the
+      // preflight's own Access-Control-Request-* headers, so a cache must
+      // key on those too, not just Origin.
+      res.setHeader(
+        'Vary',
+        'Origin, Access-Control-Request-Method, Access-Control-Request-Headers',
+      );
       res.setHeader(
         'Access-Control-Allow-Methods',
         req.header('access-control-request-method') ?? DEFAULT_ALLOWED_METHODS,
