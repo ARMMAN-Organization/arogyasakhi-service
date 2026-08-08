@@ -3,6 +3,12 @@ import type { QuickResponseRepository } from './quick-response.repository';
 import type { LookupClient } from './lookup.client';
 import type { EscalationClient } from './escalation.client';
 import type { ReopenRequestClient } from './reopen-request.client';
+import type { BeneficiaryClient } from './beneficiary.client';
+import type { NotificationClient } from './notification.client';
+import type { ClosureClient } from './closure.client';
+import type { ReferralClient } from './referral.client';
+import type { IncentiveClient } from './incentive.client';
+import type { UserClient } from './user.client';
 
 function approvalRequest(overrides: Partial<Record<string, unknown>> = {}) {
   return {
@@ -54,6 +60,7 @@ describe('QuickResponseService', () => {
   const repository = {
     findMany: jest.fn(),
     findById: jest.fn(),
+    markDecided: jest.fn(),
   } as unknown as jest.Mocked<QuickResponseRepository>;
   const lookupClient = {
     resolveApprovalStatusId: jest.fn(),
@@ -63,12 +70,48 @@ describe('QuickResponseService', () => {
     findById: jest.fn(),
   } as unknown as jest.Mocked<EscalationClient>;
   const reopenRequestClient = { decide: jest.fn() } as unknown as jest.Mocked<ReopenRequestClient>;
+  const beneficiaryClient = {
+    applyLmpChange: jest.fn(),
+    getById: jest.fn(),
+  } as unknown as jest.Mocked<BeneficiaryClient>;
+  const notificationClient = { notify: jest.fn() } as unknown as jest.Mocked<NotificationClient>;
+  const closureClient = { decide: jest.fn() } as unknown as jest.Mocked<ClosureClient>;
+  const referralClient = { decide: jest.fn() } as unknown as jest.Mocked<ReferralClient>;
+  const incentiveClient = {
+    triggerAccompaniedReferral: jest.fn(),
+  } as unknown as jest.Mocked<IncentiveClient>;
+  const userClient = { reactivateUser: jest.fn() } as unknown as jest.Mocked<UserClient>;
   let service: QuickResponseService;
   const authHeader = 'Bearer token';
+  let consoleErrorSpy: jest.SpyInstance;
+
+  const DECIDED_BY_USER_ID = '55555555-5555-5555-5555-555555555555';
 
   beforeEach(() => {
     jest.resetAllMocks();
-    service = new QuickResponseService(repository, lookupClient, escalationClient, reopenRequestClient);
+    consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    // Default so every decide() test's post-side-effect markDecided call
+    // resolves a real lookup id rather than hitting the "no lookup value
+    // found" log branch — tests asserting list()'s own filtering override
+    // this per-call as needed.
+    lookupClient.resolveApprovalStatusId.mockResolvedValue('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+    repository.markDecided.mockResolvedValue(true);
+    service = new QuickResponseService(
+      repository,
+      lookupClient,
+      escalationClient,
+      reopenRequestClient,
+      beneficiaryClient,
+      notificationClient,
+      closureClient,
+      referralClient,
+      incentiveClient,
+      userClient,
+    );
+  });
+
+  afterEach(() => {
+    consoleErrorSpy.mockRestore();
   });
 
   describe('list', () => {
@@ -135,6 +178,7 @@ describe('QuickResponseService', () => {
       const result = await service.decide(
         '66666666-6666-6666-6666-666666666666',
         { cardSource: 'escalation_events', decision: 'OKAY' },
+        DECIDED_BY_USER_ID,
         authHeader,
       );
       expect(result).toMatchObject({ decision: 'OKAY', acknowledged: true });
@@ -147,6 +191,7 @@ describe('QuickResponseService', () => {
         service.decide(
           '66666666-6666-6666-6666-666666666666',
           { cardSource: 'escalation_events', decision: 'OKAY' },
+          DECIDED_BY_USER_ID,
           authHeader,
         ),
       ).rejects.toMatchObject({ status: 404 });
@@ -159,6 +204,7 @@ describe('QuickResponseService', () => {
         service.decide(
           '66666666-6666-6666-6666-666666666666',
           { cardSource: 'escalation_events', decision: 'APPROVE' },
+          DECIDED_BY_USER_ID,
           authHeader,
         ),
       ).rejects.toMatchObject({ status: 501 });
@@ -177,6 +223,7 @@ describe('QuickResponseService', () => {
       const result = await service.decide(
         '11111111-1111-1111-1111-111111111111',
         { cardSource: 'approval_requests', decision: 'APPROVE' },
+        DECIDED_BY_USER_ID,
         authHeader,
       );
 
@@ -201,6 +248,7 @@ describe('QuickResponseService', () => {
       const result = await service.decide(
         '11111111-1111-1111-1111-111111111111',
         { cardSource: 'approval_requests', decision: 'REJECT' },
+        DECIDED_BY_USER_ID,
         authHeader,
       );
       expect(result.decision).toBe('REJECT');
@@ -212,6 +260,7 @@ describe('QuickResponseService', () => {
         service.decide(
           'unknown-id',
           { cardSource: 'approval_requests', decision: 'APPROVE' },
+          DECIDED_BY_USER_ID,
           authHeader,
         ),
       ).rejects.toMatchObject({ status: 404 });
@@ -226,6 +275,7 @@ describe('QuickResponseService', () => {
         service.decide(
           '11111111-1111-1111-1111-111111111111',
           { cardSource: 'approval_requests', decision: 'APPROVE' },
+          DECIDED_BY_USER_ID,
           authHeader,
         ),
       ).rejects.toMatchObject({ status: 409 });
@@ -237,28 +287,771 @@ describe('QuickResponseService', () => {
         service.decide(
           '11111111-1111-1111-1111-111111111111',
           { cardSource: 'approval_requests', decision: 'OKAY' },
+          DECIDED_BY_USER_ID,
           authHeader,
         ),
       ).rejects.toMatchObject({ status: 400 });
     });
   });
 
-  describe('decide — the other 6 stubbed card types', () => {
-    it.each([
-      'LMP_CHANGE',
-      'ACCOMPANIED_REFERRAL',
-      'CLOSURE_REVIEW',
-      'REFERRAL_INCOMPLETE',
-      'DATA_RESTORE',
-    ])('501s a decision on a %s card', async (requestType) => {
-      repository.findById.mockResolvedValue(approvalRequest({ requestType }));
+  describe("decide — DATA_RESTORE (reactivates the requesting Sakhi's account)", () => {
+    function dataRestoreRequest(overrides: Partial<Record<string, unknown>> = {}) {
+      return approvalRequest({
+        requestType: 'DATA_RESTORE',
+        reopenRequestId: null,
+        beneficiaryId: null,
+        requestedByUserId: '99999999-9999-9999-9999-999999999999',
+        ...overrides,
+      });
+    }
+
+    it('approves: reactivates the requesting Sakhi via UserClient and notifies', async () => {
+      const card = dataRestoreRequest();
+      repository.findById.mockResolvedValue(card);
+      userClient.reactivateUser.mockResolvedValue({
+        id: card.requestedByUserId as string,
+        status: 'ACTIVE',
+      });
+
+      const result = await service.decide(
+        card.id as string,
+        { cardSource: 'approval_requests', decision: 'APPROVE' },
+        DECIDED_BY_USER_ID,
+        authHeader,
+      );
+
+      expect(userClient.reactivateUser).toHaveBeenCalledWith(card.requestedByUserId, authHeader);
+      expect(notificationClient.notify).toHaveBeenCalledWith(
+        card.requestedByUserId,
+        'DATA_RESTORE_UPDATE',
+        expect.any(String),
+        expect.any(String),
+        authHeader,
+      );
+      expect(result.decision).toBe('APPROVE');
+    });
+
+    it('rejects: makes no reactivation call, still notifies', async () => {
+      const card = dataRestoreRequest();
+      repository.findById.mockResolvedValue(card);
+
+      const result = await service.decide(
+        card.id as string,
+        { cardSource: 'approval_requests', decision: 'REJECT' },
+        DECIDED_BY_USER_ID,
+        authHeader,
+      );
+
+      expect(userClient.reactivateUser).not.toHaveBeenCalled();
+      expect(notificationClient.notify).toHaveBeenCalled();
+      expect(result.decision).toBe('REJECT');
+    });
+
+    it('rejects an invalid decision value', async () => {
+      const card = dataRestoreRequest();
+      repository.findById.mockResolvedValue(card);
+
       await expect(
         service.decide(
-          '11111111-1111-1111-1111-111111111111',
-          { cardSource: 'approval_requests', decision: 'APPROVE' },
+          card.id as string,
+          { cardSource: 'approval_requests', decision: 'OKAY' },
+          DECIDED_BY_USER_ID,
           authHeader,
         ),
-      ).rejects.toMatchObject({ status: 501 });
+      ).rejects.toMatchObject({ status: 400 });
+      expect(userClient.reactivateUser).not.toHaveBeenCalled();
+    });
+
+    it('propagates a reactivation failure — NOT tolerated like the notification', async () => {
+      const card = dataRestoreRequest();
+      repository.findById.mockResolvedValue(card);
+      userClient.reactivateUser.mockRejectedValue(
+        Object.assign(new Error('This user is already ACTIVE.'), { status: 409 }),
+      );
+
+      await expect(
+        service.decide(
+          card.id as string,
+          { cardSource: 'approval_requests', decision: 'APPROVE' },
+          DECIDED_BY_USER_ID,
+          authHeader,
+        ),
+      ).rejects.toMatchObject({ status: 409 });
+      expect(notificationClient.notify).not.toHaveBeenCalled();
+    });
+
+    it('does not fail the request when notifying the Sakhi throws after reactivation succeeds', async () => {
+      const card = dataRestoreRequest();
+      repository.findById.mockResolvedValue(card);
+      userClient.reactivateUser.mockResolvedValue({
+        id: card.requestedByUserId as string,
+        status: 'ACTIVE',
+      });
+      notificationClient.notify.mockRejectedValue(
+        Object.assign(new Error('Forbidden'), { status: 403 }),
+      );
+
+      const result = await service.decide(
+        card.id as string,
+        { cardSource: 'approval_requests', decision: 'APPROVE' },
+        DECIDED_BY_USER_ID,
+        authHeader,
+      );
+      expect(result.decision).toBe('APPROVE');
+      expect(consoleErrorSpy).toHaveBeenCalled();
+    });
+  });
+
+  describe('list — DATA_RESTORE is visible even though it has no decision path yet', () => {
+    it('returns DATA_RESTORE alongside every other card type', async () => {
+      lookupClient.resolveApprovalStatusId.mockResolvedValue(
+        'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      );
+      repository.findMany.mockResolvedValue([
+        approvalRequest({ id: 'card-restore', requestType: 'DATA_RESTORE' }),
+        approvalRequest({ id: 'card-reopen', requestType: 'REOPEN' }),
+        approvalRequest({ id: 'card-lmp', requestType: 'LMP_CHANGE' }),
+        approvalRequest({ id: 'card-closure', requestType: 'CLOSURE_REVIEW' }),
+        approvalRequest({ id: 'card-ref-inc', requestType: 'REFERRAL_INCOMPLETE' }),
+        approvalRequest({ id: 'card-acc-ref', requestType: 'ACCOMPANIED_REFERRAL' }),
+      ]);
+      escalationClient.list.mockResolvedValue({ cards: [], nextCursor: null });
+
+      const result = await service.list({ status: 'PENDING', limit: 50 }, authHeader);
+      const types = result.cards.map((c) => c.cardType);
+
+      expect(types).toEqual(
+        expect.arrayContaining([
+          'DATA_RESTORE',
+          'REOPEN',
+          'LMP_CHANGE',
+          'CLOSURE_REVIEW',
+          'REFERRAL_INCOMPLETE',
+          'ACCOMPANIED_REFERRAL',
+        ]),
+      );
+      expect(result.cards).toHaveLength(6);
+    });
+  });
+
+  describe('decide — CLOSURE_REVIEW (approval_requests)', () => {
+    function closureReviewRequest(overrides: Partial<Record<string, unknown>> = {}) {
+      return approvalRequest({
+        requestType: 'CLOSURE_REVIEW',
+        reopenRequestId: null,
+        closureId: '55555555-5555-5555-5555-555555555555',
+        ...overrides,
+      });
+    }
+
+    it('approves: decides via ClosureClient', async () => {
+      const card = closureReviewRequest();
+      repository.findById.mockResolvedValue(card);
+      closureClient.decide.mockResolvedValue({
+        id: card.closureId as unknown as string,
+        beneficiaryId: card.beneficiaryId as string,
+        supervisorStatus: 'APPROVED',
+      });
+
+      const result = await service.decide(
+        card.id as string,
+        { cardSource: 'approval_requests', decision: 'APPROVE' },
+        DECIDED_BY_USER_ID,
+        authHeader,
+      );
+
+      expect(closureClient.decide).toHaveBeenCalledWith(
+        card.closureId,
+        'APPROVED',
+        undefined,
+        authHeader,
+      );
+      expect(result.decision).toBe('APPROVE');
+    });
+
+    it('rejects: decides via ClosureClient with REJECTED', async () => {
+      const card = closureReviewRequest();
+      repository.findById.mockResolvedValue(card);
+      closureClient.decide.mockResolvedValue({
+        id: card.closureId as unknown as string,
+        beneficiaryId: card.beneficiaryId as string,
+        supervisorStatus: 'REJECTED',
+      });
+
+      const result = await service.decide(
+        card.id as string,
+        { cardSource: 'approval_requests', decision: 'REJECT' },
+        DECIDED_BY_USER_ID,
+        authHeader,
+      );
+      expect(closureClient.decide).toHaveBeenCalledWith(
+        card.closureId,
+        'REJECTED',
+        undefined,
+        authHeader,
+      );
+      expect(result.decision).toBe('REJECT');
+    });
+
+    it('500s when the card has no linked closure', async () => {
+      const card = closureReviewRequest({ closureId: null });
+      repository.findById.mockResolvedValue(card);
+
+      await expect(
+        service.decide(
+          card.id as string,
+          { cardSource: 'approval_requests', decision: 'APPROVE' },
+          DECIDED_BY_USER_ID,
+          authHeader,
+        ),
+      ).rejects.toMatchObject({ status: 500 });
+      expect(closureClient.decide).not.toHaveBeenCalled();
+    });
+
+    it('rejects an invalid decision value for a CLOSURE_REVIEW card', async () => {
+      const card = closureReviewRequest();
+      repository.findById.mockResolvedValue(card);
+
+      await expect(
+        service.decide(
+          card.id as string,
+          { cardSource: 'approval_requests', decision: 'OKAY' },
+          DECIDED_BY_USER_ID,
+          authHeader,
+        ),
+      ).rejects.toMatchObject({ status: 400 });
+      expect(closureClient.decide).not.toHaveBeenCalled();
+    });
+
+    it('propagates a 409 from closure-reopen-service (already-decided closure)', async () => {
+      const card = closureReviewRequest();
+      repository.findById.mockResolvedValue(card);
+      closureClient.decide.mockRejectedValue(
+        Object.assign(new Error('Already decided'), { status: 409 }),
+      );
+
+      await expect(
+        service.decide(
+          card.id as string,
+          { cardSource: 'approval_requests', decision: 'APPROVE' },
+          DECIDED_BY_USER_ID,
+          authHeader,
+        ),
+      ).rejects.toMatchObject({ status: 409 });
+    });
+  });
+
+  describe('decide — REFERRAL_INCOMPLETE (approval_requests)', () => {
+    function referralIncompleteRequest(overrides: Partial<Record<string, unknown>> = {}) {
+      return approvalRequest({
+        requestType: 'REFERRAL_INCOMPLETE',
+        reopenRequestId: null,
+        referralId: '66666666-6666-6666-6666-666666666666',
+        ...overrides,
+      });
+    }
+
+    it('approves: decides via ReferralClient with LAPSE and notifies the Sakhi', async () => {
+      const card = referralIncompleteRequest();
+      repository.findById.mockResolvedValue(card);
+      referralClient.decide.mockResolvedValue({
+        id: card.referralId as unknown as string,
+        beneficiaryId: card.beneficiaryId as string,
+        status: 'LAPSED',
+      });
+
+      const result = await service.decide(
+        card.id as string,
+        { cardSource: 'approval_requests', decision: 'APPROVE' },
+        DECIDED_BY_USER_ID,
+        authHeader,
+      );
+
+      expect(referralClient.decide).toHaveBeenCalledWith(card.referralId, 'LAPSE', authHeader);
+      expect(notificationClient.notify).toHaveBeenCalledWith(
+        card.requestedByUserId,
+        'REFERRAL_INCOMPLETE_UPDATE',
+        expect.any(String),
+        expect.any(String),
+        authHeader,
+      );
+      expect(result.decision).toBe('APPROVE');
+    });
+
+    it('rejects: decides via ReferralClient with REFILL', async () => {
+      const card = referralIncompleteRequest();
+      repository.findById.mockResolvedValue(card);
+      referralClient.decide.mockResolvedValue({
+        id: card.referralId as unknown as string,
+        beneficiaryId: card.beneficiaryId as string,
+        status: 'PENDING_FOLLOWUP',
+      });
+
+      const result = await service.decide(
+        card.id as string,
+        { cardSource: 'approval_requests', decision: 'REJECT' },
+        DECIDED_BY_USER_ID,
+        authHeader,
+      );
+      expect(referralClient.decide).toHaveBeenCalledWith(card.referralId, 'REFILL', authHeader);
+      expect(result.decision).toBe('REJECT');
+    });
+
+    it('500s when the card has no linked referral', async () => {
+      const card = referralIncompleteRequest({ referralId: null });
+      repository.findById.mockResolvedValue(card);
+
+      await expect(
+        service.decide(
+          card.id as string,
+          { cardSource: 'approval_requests', decision: 'APPROVE' },
+          DECIDED_BY_USER_ID,
+          authHeader,
+        ),
+      ).rejects.toMatchObject({ status: 500 });
+      expect(referralClient.decide).not.toHaveBeenCalled();
+    });
+
+    it('rejects an invalid decision value for a REFERRAL_INCOMPLETE card', async () => {
+      const card = referralIncompleteRequest();
+      repository.findById.mockResolvedValue(card);
+
+      await expect(
+        service.decide(
+          card.id as string,
+          { cardSource: 'approval_requests', decision: 'OKAY' },
+          DECIDED_BY_USER_ID,
+          authHeader,
+        ),
+      ).rejects.toMatchObject({ status: 400 });
+      expect(referralClient.decide).not.toHaveBeenCalled();
+    });
+
+    it('propagates a 409 from risk-referral-service (referral not PENDING_FOLLOWUP)', async () => {
+      const card = referralIncompleteRequest();
+      repository.findById.mockResolvedValue(card);
+      referralClient.decide.mockRejectedValue(
+        Object.assign(new Error('Cannot decide'), { status: 409 }),
+      );
+
+      await expect(
+        service.decide(
+          card.id as string,
+          { cardSource: 'approval_requests', decision: 'APPROVE' },
+          DECIDED_BY_USER_ID,
+          authHeader,
+        ),
+      ).rejects.toMatchObject({ status: 409 });
+    });
+
+    it('does not fail the request when notifying the Sakhi throws after the decision is applied', async () => {
+      const card = referralIncompleteRequest();
+      repository.findById.mockResolvedValue(card);
+      referralClient.decide.mockResolvedValue({
+        id: card.referralId as unknown as string,
+        beneficiaryId: card.beneficiaryId as string,
+        status: 'LAPSED',
+      });
+      notificationClient.notify.mockRejectedValue(
+        Object.assign(new Error('Forbidden'), { status: 403 }),
+      );
+
+      const result = await service.decide(
+        card.id as string,
+        { cardSource: 'approval_requests', decision: 'APPROVE' },
+        DECIDED_BY_USER_ID,
+        authHeader,
+      );
+      expect(result.decision).toBe('APPROVE');
+      expect(consoleErrorSpy).toHaveBeenCalled();
+    });
+  });
+
+  describe('decide — ACCOMPANIED_REFERRAL (approval_requests)', () => {
+    function accompaniedReferralRequest(overrides: Partial<Record<string, unknown>> = {}) {
+      return approvalRequest({
+        requestType: 'ACCOMPANIED_REFERRAL',
+        reopenRequestId: null,
+        referralId: '77777777-7777-7777-7777-777777777777',
+        ...overrides,
+      });
+    }
+
+    it('approves: completes the referral, resolves the Sakhi, triggers the incentive, notifies', async () => {
+      const card = accompaniedReferralRequest();
+      repository.findById.mockResolvedValue(card);
+      referralClient.decide.mockResolvedValue({
+        id: card.referralId as unknown as string,
+        beneficiaryId: card.beneficiaryId as string,
+        status: 'COMPLETED',
+      });
+      beneficiaryClient.getById.mockResolvedValue({
+        id: card.beneficiaryId as string,
+        sakhiId: '88888888-8888-8888-8888-888888888888',
+      });
+
+      const result = await service.decide(
+        card.id as string,
+        { cardSource: 'approval_requests', decision: 'APPROVE' },
+        DECIDED_BY_USER_ID,
+        authHeader,
+      );
+
+      expect(referralClient.decide).toHaveBeenCalledWith(card.referralId, 'COMPLETE', authHeader);
+      expect(beneficiaryClient.getById).toHaveBeenCalledWith(card.beneficiaryId, authHeader);
+      expect(incentiveClient.triggerAccompaniedReferral).toHaveBeenCalledWith(
+        '88888888-8888-8888-8888-888888888888',
+        card.referralId,
+        authHeader,
+      );
+      expect(notificationClient.notify).toHaveBeenCalledWith(
+        card.requestedByUserId,
+        'ACCOMPANIED_REFERRAL_UPDATE',
+        expect.any(String),
+        expect.any(String),
+        authHeader,
+      );
+      expect(result.decision).toBe('APPROVE');
+    });
+
+    it('rejects: makes no referral-side call, no incentive, still notifies', async () => {
+      const card = accompaniedReferralRequest();
+      repository.findById.mockResolvedValue(card);
+
+      const result = await service.decide(
+        card.id as string,
+        { cardSource: 'approval_requests', decision: 'REJECT' },
+        DECIDED_BY_USER_ID,
+        authHeader,
+      );
+
+      expect(referralClient.decide).not.toHaveBeenCalled();
+      expect(incentiveClient.triggerAccompaniedReferral).not.toHaveBeenCalled();
+      expect(notificationClient.notify).toHaveBeenCalled();
+      expect(result.decision).toBe('REJECT');
+    });
+
+    it('500s when the card has no linked referral', async () => {
+      const card = accompaniedReferralRequest({ referralId: null });
+      repository.findById.mockResolvedValue(card);
+
+      await expect(
+        service.decide(
+          card.id as string,
+          { cardSource: 'approval_requests', decision: 'APPROVE' },
+          DECIDED_BY_USER_ID,
+          authHeader,
+        ),
+      ).rejects.toMatchObject({ status: 500 });
+      expect(referralClient.decide).not.toHaveBeenCalled();
+    });
+
+    it('rejects an invalid decision value', async () => {
+      const card = accompaniedReferralRequest();
+      repository.findById.mockResolvedValue(card);
+
+      await expect(
+        service.decide(
+          card.id as string,
+          { cardSource: 'approval_requests', decision: 'OKAY' },
+          DECIDED_BY_USER_ID,
+          authHeader,
+        ),
+      ).rejects.toMatchObject({ status: 400 });
+    });
+
+    it('propagates a referral decision failure without notifying or triggering an incentive', async () => {
+      const card = accompaniedReferralRequest();
+      repository.findById.mockResolvedValue(card);
+      referralClient.decide.mockRejectedValue(
+        Object.assign(new Error('Cannot decide'), { status: 409 }),
+      );
+
+      await expect(
+        service.decide(
+          card.id as string,
+          { cardSource: 'approval_requests', decision: 'APPROVE' },
+          DECIDED_BY_USER_ID,
+          authHeader,
+        ),
+      ).rejects.toMatchObject({ status: 409 });
+      expect(beneficiaryClient.getById).not.toHaveBeenCalled();
+      expect(incentiveClient.triggerAccompaniedReferral).not.toHaveBeenCalled();
+      expect(notificationClient.notify).not.toHaveBeenCalled();
+    });
+
+    it('does not fail the request when the incentive trigger fails after the referral is already COMPLETED', async () => {
+      const card = accompaniedReferralRequest();
+      repository.findById.mockResolvedValue(card);
+      referralClient.decide.mockResolvedValue({
+        id: card.referralId as unknown as string,
+        beneficiaryId: card.beneficiaryId as string,
+        status: 'COMPLETED',
+      });
+      beneficiaryClient.getById.mockResolvedValue({
+        id: card.beneficiaryId as string,
+        sakhiId: '88888888-8888-8888-8888-888888888888',
+      });
+      incentiveClient.triggerAccompaniedReferral.mockRejectedValue(
+        Object.assign(new Error('No active incentive rate'), { status: 404 }),
+      );
+
+      const result = await service.decide(
+        card.id as string,
+        { cardSource: 'approval_requests', decision: 'APPROVE' },
+        DECIDED_BY_USER_ID,
+        authHeader,
+      );
+
+      // The referral decision (already committed, unretryable) must not be
+      // undone by a downstream incentive failure — the request still
+      // succeeds and the Sakhi is still notified.
+      expect(result.decision).toBe('APPROVE');
+      expect(notificationClient.notify).toHaveBeenCalled();
+    });
+
+    it('404s when the linked beneficiary cannot be found', async () => {
+      const card = accompaniedReferralRequest();
+      repository.findById.mockResolvedValue(card);
+      referralClient.decide.mockResolvedValue({
+        id: card.referralId as unknown as string,
+        beneficiaryId: card.beneficiaryId as string,
+        status: 'COMPLETED',
+      });
+      beneficiaryClient.getById.mockResolvedValue(null);
+
+      await expect(
+        service.decide(
+          card.id as string,
+          { cardSource: 'approval_requests', decision: 'APPROVE' },
+          DECIDED_BY_USER_ID,
+          authHeader,
+        ),
+      ).rejects.toMatchObject({ status: 404 });
+      expect(incentiveClient.triggerAccompaniedReferral).not.toHaveBeenCalled();
+    });
+
+    it('does not fail the request when notifying the Sakhi throws after approval is applied', async () => {
+      const card = accompaniedReferralRequest();
+      repository.findById.mockResolvedValue(card);
+      referralClient.decide.mockResolvedValue({
+        id: card.referralId as unknown as string,
+        beneficiaryId: card.beneficiaryId as string,
+        status: 'COMPLETED',
+      });
+      beneficiaryClient.getById.mockResolvedValue({
+        id: card.beneficiaryId as string,
+        sakhiId: '88888888-8888-8888-8888-888888888888',
+      });
+      notificationClient.notify.mockRejectedValue(
+        Object.assign(new Error('Forbidden'), { status: 403 }),
+      );
+
+      const result = await service.decide(
+        card.id as string,
+        { cardSource: 'approval_requests', decision: 'APPROVE' },
+        DECIDED_BY_USER_ID,
+        authHeader,
+      );
+      expect(result.decision).toBe('APPROVE');
+      expect(consoleErrorSpy).toHaveBeenCalled();
+    });
+  });
+
+  describe('decide — LMP_CHANGE (approval_requests)', () => {
+    function lmpChangeRequest(overrides: Partial<Record<string, unknown>> = {}) {
+      return approvalRequest({
+        requestType: 'LMP_CHANGE',
+        reopenRequestId: null,
+        requestPayloadJson: {
+          newLmpDate: '2026-06-15',
+          sonographyImageUrl: 'https://example.com/sonography-proof.jpg',
+        },
+        ...overrides,
+      });
+    }
+
+    it('approves: applies the LMP change via BeneficiaryClient and notifies the Sakhi', async () => {
+      const card = lmpChangeRequest();
+      repository.findById.mockResolvedValue(card);
+      beneficiaryClient.applyLmpChange.mockResolvedValue({ id: card.beneficiaryId as string });
+
+      const result = await service.decide(
+        card.id as string,
+        { cardSource: 'approval_requests', decision: 'APPROVE' },
+        DECIDED_BY_USER_ID,
+        authHeader,
+      );
+
+      expect(beneficiaryClient.applyLmpChange).toHaveBeenCalledWith(
+        card.beneficiaryId,
+        '2026-06-15',
+        authHeader,
+      );
+      expect(notificationClient.notify).toHaveBeenCalledWith(
+        card.requestedByUserId,
+        'LMP_CHANGE_UPDATE',
+        expect.any(String),
+        expect.any(String),
+        authHeader,
+      );
+      expect(result.decision).toBe('APPROVE');
+    });
+
+    it('rejects: does not call BeneficiaryClient, still notifies the Sakhi', async () => {
+      const card = lmpChangeRequest();
+      repository.findById.mockResolvedValue(card);
+
+      const result = await service.decide(
+        card.id as string,
+        { cardSource: 'approval_requests', decision: 'REJECT' },
+        DECIDED_BY_USER_ID,
+        authHeader,
+      );
+
+      expect(beneficiaryClient.applyLmpChange).not.toHaveBeenCalled();
+      expect(notificationClient.notify).toHaveBeenCalled();
+      expect(result.decision).toBe('REJECT');
+    });
+
+    it('422s on approve when requestPayloadJson has no valid newLmpDate', async () => {
+      const card = lmpChangeRequest({ requestPayloadJson: { sonographyImageUrl: 'x' } });
+      repository.findById.mockResolvedValue(card);
+
+      await expect(
+        service.decide(
+          card.id as string,
+          { cardSource: 'approval_requests', decision: 'APPROVE' },
+          DECIDED_BY_USER_ID,
+          authHeader,
+        ),
+      ).rejects.toMatchObject({ status: 422 });
+      expect(beneficiaryClient.applyLmpChange).not.toHaveBeenCalled();
+    });
+
+    it('rejects an invalid decision value for an LMP_CHANGE card', async () => {
+      const card = lmpChangeRequest();
+      repository.findById.mockResolvedValue(card);
+
+      await expect(
+        service.decide(
+          card.id as string,
+          { cardSource: 'approval_requests', decision: 'OKAY' },
+          DECIDED_BY_USER_ID,
+          authHeader,
+        ),
+      ).rejects.toMatchObject({ status: 400 });
+    });
+
+    it('propagates a BeneficiaryClient failure on approve (not tolerated)', async () => {
+      const card = lmpChangeRequest();
+      repository.findById.mockResolvedValue(card);
+      beneficiaryClient.applyLmpChange.mockRejectedValue(
+        Object.assign(new Error('Bad gateway'), { status: 502 }),
+      );
+
+      await expect(
+        service.decide(
+          card.id as string,
+          { cardSource: 'approval_requests', decision: 'APPROVE' },
+          DECIDED_BY_USER_ID,
+          authHeader,
+        ),
+      ).rejects.toMatchObject({ status: 502 });
+      expect(notificationClient.notify).not.toHaveBeenCalled();
+    });
+
+    it('does not fail the request when notifying the Sakhi throws after approval is applied', async () => {
+      const card = lmpChangeRequest();
+      repository.findById.mockResolvedValue(card);
+      beneficiaryClient.applyLmpChange.mockResolvedValue({ id: card.beneficiaryId as string });
+      notificationClient.notify.mockRejectedValue(
+        Object.assign(new Error('Forbidden'), { status: 403 }),
+      );
+
+      const result = await service.decide(
+        card.id as string,
+        { cardSource: 'approval_requests', decision: 'APPROVE' },
+        DECIDED_BY_USER_ID,
+        authHeader,
+      );
+      expect(result.decision).toBe('APPROVE');
+      expect(consoleErrorSpy).toHaveBeenCalled();
+    });
+
+    it('marks the card decided (decisionStatusLookupId, decidedByUserId) after a successful approve', async () => {
+      const card = lmpChangeRequest();
+      repository.findById.mockResolvedValue(card);
+      beneficiaryClient.applyLmpChange.mockResolvedValue({ id: card.beneficiaryId as string });
+
+      await service.decide(
+        card.id as string,
+        { cardSource: 'approval_requests', decision: 'APPROVE', decisionNotes: 'Looks right' },
+        DECIDED_BY_USER_ID,
+        authHeader,
+      );
+
+      expect(repository.markDecided).toHaveBeenCalledWith(
+        card.id,
+        'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        DECIDED_BY_USER_ID,
+        'Looks right',
+        undefined,
+      );
+    });
+
+    it('409s on re-approving an already-decided LMP_CHANGE card — the core bug this guard closes', async () => {
+      const card = lmpChangeRequest({ decidedAt: new Date('2026-08-05T12:00:00.000Z') });
+      repository.findById.mockResolvedValue(card);
+
+      await expect(
+        service.decide(
+          card.id as string,
+          { cardSource: 'approval_requests', decision: 'APPROVE' },
+          DECIDED_BY_USER_ID,
+          authHeader,
+        ),
+      ).rejects.toMatchObject({ status: 409 });
+      // The LMP write and Sakhi notification must never re-run on a re-approve.
+      expect(beneficiaryClient.applyLmpChange).not.toHaveBeenCalled();
+      expect(notificationClient.notify).not.toHaveBeenCalled();
+    });
+
+    it('does not fail the request when markDecided fails after the LMP change already applied', async () => {
+      const card = lmpChangeRequest();
+      repository.findById.mockResolvedValue(card);
+      beneficiaryClient.applyLmpChange.mockResolvedValue({ id: card.beneficiaryId as string });
+      repository.markDecided.mockRejectedValue(new Error('db down'));
+
+      const result = await service.decide(
+        card.id as string,
+        { cardSource: 'approval_requests', decision: 'APPROVE' },
+        DECIDED_BY_USER_ID,
+        authHeader,
+      );
+
+      expect(result.decision).toBe('APPROVE');
+      expect(consoleErrorSpy).toHaveBeenCalled();
+    });
+  });
+
+  describe('decide — already-decided guard applies to every approval_requests card type', () => {
+    it('409s on a REOPEN card that was already decided', async () => {
+      const card = approvalRequest({
+        requestType: 'REOPEN',
+        decidedAt: new Date('2026-08-05T12:00:00.000Z'),
+      });
+      repository.findById.mockResolvedValue(card);
+
+      await expect(
+        service.decide(
+          card.id as string,
+          { cardSource: 'approval_requests', decision: 'APPROVE' },
+          DECIDED_BY_USER_ID,
+          authHeader,
+        ),
+      ).rejects.toMatchObject({ status: 409 });
+      expect(reopenRequestClient.decide).not.toHaveBeenCalled();
     });
   });
 });

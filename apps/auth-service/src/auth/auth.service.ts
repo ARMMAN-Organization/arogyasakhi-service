@@ -20,6 +20,12 @@ import type { UpdateUserInput } from './dto/update-user.dto';
 // their definitions live in auth.mapper.ts.
 export type { AuthTokens, CreatedUser, UserProfile } from './auth.mapper';
 
+/** The calling principal's own scope, as carried on their JWT/trusted-identity headers. */
+export interface CallerScope {
+  readonly id: string;
+  readonly roles: string[];
+}
+
 /** Prisma unique-constraint violation code (mobileNumber/email/roleCode etc). */
 const PRISMA_UNIQUE_CONSTRAINT_CODE = 'P2002';
 
@@ -254,6 +260,59 @@ export class AuthService {
       }
       throw err;
     }
+  }
+
+  /**
+   * Reactivates a deactivated Sakhi's account after an approved DATA_RESTORE
+   * Quick Response card. Deliberately a narrow, single-purpose operation —
+   * unlike the general `PATCH /users/:id` (ADMIN-only, can change anything
+   * about a user), this only ever flips status back to ACTIVE, so it can
+   * safely be opened to SUPERVISOR/MANAGER without widening what they can
+   * otherwise do to a user record.
+   *
+   * Restricted to SAKHI targets only — the route's role check
+   * (SUPERVISOR/MANAGER/ADMIN can call it) says nothing about who can be
+   * reactivated, so without this a SUPERVISOR could otherwise flip any
+   * deactivated account back to ACTIVE, including another SUPERVISOR's or
+   * an ADMIN's. A SUPERVISOR caller is further scoped to their own Sakhi
+   * roster (sakhiProfile.supervisorId), the same ownership check
+   * SakhiService.listByProject applies to reads.
+   */
+  async reactivateUser(userId: string, caller: CallerScope): Promise<UserProfile> {
+    const existing = await this.repository.findUserByIdWithProfile(userId);
+    if (!existing || existing.isDeleted) throw notFound('User not found.');
+
+    const targetRoleCodes = existing.userRoles.map((ur) => ur.role.roleCode);
+    if (!targetRoleCodes.includes('SAKHI')) {
+      throw forbidden('Only Sakhi accounts can be reactivated via this endpoint.');
+    }
+    if (
+      caller.roles.includes('SUPERVISOR') &&
+      !caller.roles.includes('MANAGER') &&
+      !caller.roles.includes('ADMIN') &&
+      existing.sakhiProfile?.supervisorId !== caller.id
+    ) {
+      throw forbidden('This Sakhi is not in your roster.');
+    }
+
+    if (existing.status === 'ACTIVE') {
+      throw conflict('This user is already ACTIVE.');
+    }
+    if (existing.status === 'DELETED') {
+      throw conflict('A DELETED account cannot be reactivated this way.');
+    }
+
+    const reactivated = await this.repository.reactivateUser(userId);
+    if (!reactivated) {
+      // Raced with another status change between the read above and the
+      // conditional update — same outcome as the checks above, just caught a
+      // beat later instead of trusting a stale read.
+      throw conflict('This user is no longer eligible for reactivation.');
+    }
+
+    const user = await this.repository.findUserByIdWithProfile(userId);
+    if (!user) throw notFound('User not found.');
+    return toUserProfile(user);
   }
 
   async getProfile(userId: string): Promise<UserProfile | null> {

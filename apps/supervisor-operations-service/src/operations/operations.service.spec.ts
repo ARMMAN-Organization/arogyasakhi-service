@@ -85,44 +85,67 @@ describe('OperationsService', () => {
     await expect(service.listEvents()).resolves.toBe(rows);
   });
 
-  it('creates an event via repository with the given data', async () => {
+  it('creates an event via repository, stamping supervisorId from the caller', async () => {
     const dto: CreateSupervisorEventInput = {
       projectId: '22222222-2222-2222-2222-222222222222',
-      supervisorId: '33333333-3333-3333-3333-333333333333',
       eventType: 'MEETING',
       eventDate: new Date('2026-07-01'),
       topicsJson: ['review'],
       status: 'SCHEDULED',
     };
     repository.createEvent.mockResolvedValue(eventRow);
-    await expect(service.createEvent(dto)).resolves.toBe(eventRow);
-    expect(repository.createEvent).toHaveBeenCalledWith(dto);
+    await expect(service.createEvent(dto, supervisorCaller)).resolves.toBe(eventRow);
+    expect(repository.createEvent).toHaveBeenCalledWith({
+      ...dto,
+      supervisorId: supervisorCaller.id,
+    });
+  });
+
+  it('stamps supervisorId from each caller independently, ignoring any client-supplied value', async () => {
+    const dto: CreateSupervisorEventInput = {
+      projectId: '22222222-2222-2222-2222-222222222222',
+      eventType: 'MEETING',
+      eventDate: new Date('2026-07-01'),
+      topicsJson: ['review'],
+      status: 'SCHEDULED',
+    };
+    repository.createEvent.mockResolvedValue(eventRow);
+
+    await service.createEvent(dto, otherSupervisorCaller);
+    expect(repository.createEvent).toHaveBeenCalledWith({
+      ...dto,
+      supervisorId: otherSupervisorCaller.id,
+    });
   });
 
   it('propagates repository errors on createEvent', async () => {
     repository.createEvent.mockRejectedValue(new Error('db down'));
     await expect(
-      service.createEvent({
-        projectId: '22222222-2222-2222-2222-222222222222',
-        supervisorId: '33333333-3333-3333-3333-333333333333',
-        eventType: 'MEETING',
-        eventDate: new Date('2026-07-01'),
-        topicsJson: ['review'],
-        status: 'SCHEDULED',
-      }),
+      service.createEvent(
+        {
+          projectId: '22222222-2222-2222-2222-222222222222',
+          eventType: 'MEETING',
+          eventDate: new Date('2026-07-01'),
+          topicsJson: ['review'],
+          status: 'SCHEDULED',
+        },
+        supervisorCaller,
+      ),
     ).rejects.toThrow('db down');
   });
 
   it('rejects a COMPLETED event with no photoMediaId without hitting the repository', async () => {
     await expect(
-      service.createEvent({
-        projectId: '22222222-2222-2222-2222-222222222222',
-        supervisorId: '33333333-3333-3333-3333-333333333333',
-        eventType: 'MEETING',
-        eventDate: new Date('2026-07-01'),
-        topicsJson: ['review'],
-        status: 'COMPLETED',
-      }),
+      service.createEvent(
+        {
+          projectId: '22222222-2222-2222-2222-222222222222',
+          eventType: 'MEETING',
+          eventDate: new Date('2026-07-01'),
+          topicsJson: ['review'],
+          status: 'COMPLETED',
+        },
+        supervisorCaller,
+      ),
     ).rejects.toThrow('photoMediaId is required when status is COMPLETED.');
     expect(repository.createEvent).not.toHaveBeenCalled();
   });
@@ -130,7 +153,6 @@ describe('OperationsService', () => {
   it('allows a COMPLETED event when photoMediaId is present', async () => {
     const dto: CreateSupervisorEventInput = {
       projectId: '22222222-2222-2222-2222-222222222222',
-      supervisorId: '33333333-3333-3333-3333-333333333333',
       eventType: 'MEETING',
       eventDate: new Date('2026-07-01'),
       topicsJson: ['review'],
@@ -138,14 +160,16 @@ describe('OperationsService', () => {
       photoMediaId: '55555555-5555-5555-5555-555555555555',
     };
     repository.createEvent.mockResolvedValue(eventRow);
-    await expect(service.createEvent(dto)).resolves.toBe(eventRow);
-    expect(repository.createEvent).toHaveBeenCalledWith(dto);
+    await expect(service.createEvent(dto, supervisorCaller)).resolves.toBe(eventRow);
+    expect(repository.createEvent).toHaveBeenCalledWith({
+      ...dto,
+      supervisorId: supervisorCaller.id,
+    });
   });
 
   it('rejects a duplicate event for the same supervisor/project/eventDate, without creating anything', async () => {
     const dto: CreateSupervisorEventInput = {
       projectId: '22222222-2222-2222-2222-222222222222',
-      supervisorId: '33333333-3333-3333-3333-333333333333',
       eventType: 'MEETING',
       eventDate: new Date('2026-07-01T10:00:00Z'),
       topicsJson: ['review'],
@@ -153,9 +177,11 @@ describe('OperationsService', () => {
     };
     repository.findConflictingEvent.mockResolvedValue(eventRow);
 
-    await expect(service.createEvent(dto)).rejects.toMatchObject({ status: 409 });
+    await expect(service.createEvent(dto, supervisorCaller)).rejects.toMatchObject({
+      status: 409,
+    });
     expect(repository.findConflictingEvent).toHaveBeenCalledWith(
-      dto.supervisorId,
+      supervisorCaller.id,
       dto.projectId,
       dto.eventDate,
     );
@@ -165,7 +191,6 @@ describe('OperationsService', () => {
   it('allows creating an event when no conflicting event exists', async () => {
     const dto: CreateSupervisorEventInput = {
       projectId: '22222222-2222-2222-2222-222222222222',
-      supervisorId: '33333333-3333-3333-3333-333333333333',
       eventType: 'MEETING',
       eventDate: new Date('2026-07-01T10:00:00Z'),
       topicsJson: ['review'],
@@ -174,8 +199,11 @@ describe('OperationsService', () => {
     repository.findConflictingEvent.mockResolvedValue(null);
     repository.createEvent.mockResolvedValue(eventRow);
 
-    await expect(service.createEvent(dto)).resolves.toBe(eventRow);
-    expect(repository.createEvent).toHaveBeenCalledWith(dto);
+    await expect(service.createEvent(dto, supervisorCaller)).resolves.toBe(eventRow);
+    expect(repository.createEvent).toHaveBeenCalledWith({
+      ...dto,
+      supervisorId: supervisorCaller.id,
+    });
   });
 
   it('lists events with filters via repository', async () => {

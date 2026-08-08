@@ -27,9 +27,9 @@ export const bulkUpsertLookupValuesSchema = z
     values: z.array(bulkUpsertLookupValueItemSchema).min(1),
   })
   .strict()
-  .refine(
-    (data) => new Set(data.values.map((v) => v.valueCode)).size === data.values.length,
-    { message: 'valueCode must be unique within the payload.', path: ['values'] },
-  );
+  .refine((data) => new Set(data.values.map((v) => v.valueCode)).size === data.values.length, {
+    message: 'valueCode must be unique within the payload.',
+    path: ['values'],
+  });
 
 export type BulkUpsertLookupValuesInput = z.infer<typeof bulkUpsertLookupValuesSchema>;

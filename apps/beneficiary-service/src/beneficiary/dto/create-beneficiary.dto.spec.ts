@@ -142,6 +142,39 @@ describe('createBeneficiarySchema', () => {
       });
       expect(result.success).toBe(true);
     });
+
+    it('normalizes a lowercase rchNumber to uppercase (GOI requirement)', () => {
+      const result = createBeneficiarySchema.safeParse({
+        pii: { ...basePii, rchNumber: 'ka201900042' },
+        case: { ...baseCase, caseType: 'MOTHER' },
+        motherDetails: { lmpDate: '2025-10-01' },
+        consent,
+      });
+      expect(result.success).toBe(true);
+      if (result.success) expect(result.data.pii.rchNumber).toBe('KA201900042');
+    });
+
+    it('leaves an already-uppercase rchNumber unchanged', () => {
+      const result = createBeneficiarySchema.safeParse({
+        pii: { ...basePii, rchNumber: 'KA201900042' },
+        case: { ...baseCase, caseType: 'MOTHER' },
+        motherDetails: { lmpDate: '2025-10-01' },
+        consent,
+      });
+      expect(result.success).toBe(true);
+      if (result.success) expect(result.data.pii.rchNumber).toBe('KA201900042');
+    });
+
+    it('trims surrounding whitespace before uppercasing a mixed-case rchNumber', () => {
+      const result = createBeneficiarySchema.safeParse({
+        pii: { ...basePii, rchNumber: '  Ka2019 00042  ' },
+        case: { ...baseCase, caseType: 'MOTHER' },
+        motherDetails: { lmpDate: '2025-10-01' },
+        consent,
+      });
+      expect(result.success).toBe(true);
+      if (result.success) expect(result.data.pii.rchNumber).toBe('KA2019 00042');
+    });
   });
 
   describe('socioDemographics (optional, Registration_PW_D rows 23-34)', () => {

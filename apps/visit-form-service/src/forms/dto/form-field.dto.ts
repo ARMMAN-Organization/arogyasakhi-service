@@ -3,6 +3,19 @@ import { z } from 'zod';
 
 extendZodWithOpenApi(z);
 
+/** One SRS Category 5 skip-logic condition — see visibleWhen below. */
+export const visibleWhenConditionSchema = z.object({
+  field: z.string().trim().min(1),
+  // 'contains' checks a multiselect answer (an array of value_codes)
+  // for membership — e.g. show a dose date field only when its
+  // checkbox is one of the checked options on has_the_women_received_td_dose.
+  operator: z.enum(['eq', 'gte', 'lt', 'isSet', 'contains']),
+  // Bare z.any() has no inferable OpenAPI type — annotated so the
+  // OpenAPI generator doesn't throw when this schema is used as a
+  // documented request/response body (see createDocumentedRouter()).
+  value: z.any().openapi({ type: 'object' }).optional(),
+});
+
 /**
  * Shape of one entry in `form_versions.schema_json`. Only the parts confirmed
  * by docs/Arogya_Sakhi_Database_Design_ERD_Table_Definitions.docx.md §4.0 (the
@@ -29,9 +42,14 @@ extendZodWithOpenApi(z);
  *   with no section fall into a client-rendered catch-all tab — no special
  *   handling needed here beyond allowing the field to be absent.
  * Categories 1 (date rules) and 3 (cross-field, on validation_json — see
- * cross-field-rule.dto.ts) are the only other SRS-named categories; date
- * rules are deliberately NOT modeled here yet (see the forms API design doc
- * §7 — which comparison field a date rule reads from isn't specified).
+ * crossFieldRuleSchema below) are the only other SRS-named categories.
+ * - dateRule: SRS Category 1 — future-date rejection and date-vs-date
+ *   comparisons against another field on the same submission (e.g. LMP
+ *   must be on/after registration date minus 240 days). All bounds are
+ *   inclusive: a value exactly on the boundary is valid.
+ * - pattern: a closed set of named character-class checks (never a raw
+ *   regex in JSON) — e.g. rejecting digits/symbols in a name field per
+ *   Registration_PW_D Q19 ("should not accept any special characters").
  */
 export const formFieldSchema = z
   .object({
@@ -56,19 +74,20 @@ export const formFieldSchema = z
     // Fixed digit-count fields (e.g. a 10-digit mobile number) — distinct from
     // numericRange, which bounds a value rather than its digit length.
     exactLength: z.number().int().positive().optional(),
-    visibleWhen: z
-      .object({
-        field: z.string().trim().min(1),
-        // 'contains' checks a multiselect answer (an array of value_codes)
-        // for membership — e.g. show a dose date field only when its
-        // checkbox is one of the checked options on has_the_women_received_td_dose.
-        operator: z.enum(['eq', 'gte', 'lt', 'isSet', 'contains']),
-        // Bare z.any() has no inferable OpenAPI type — annotated so the
-        // OpenAPI generator doesn't throw when this schema is used as a
-        // documented request/response body (see createDocumentedRouter()).
-        value: z.any().openapi({ type: 'object' }).optional(),
-      })
-      .optional(),
+    // A single {field,operator,value} condition ONLY — never an array.
+    // The mobile client's FormVisibilityEvaluator does not parse an
+    // array-of-conditions shape and crashes the whole form load if it sees
+    // one (see the ANC_VISIT/INFANT_VISIT incident this schema-level
+    // rejection follows: array-form visibleWhen was briefly published to
+    // AND a field's own condition with "met beneficiary = yes", and every
+    // Sakhi got "We couldn't load this visit's data" with no way to
+    // submit). Rejected here at the schema level — not just absent from
+    // current seed content — so this can't be reintroduced via the live
+    // admin form-authoring PATCH endpoint (`PATCH
+    // /admin/forms/:formCode/versions/:versionId`) either, for ANY form,
+    // not only the two that already had the incident. Re-allow the array
+    // shape only once mobile ships a parser for it, not before.
+    visibleWhen: visibleWhenConditionSchema.optional(),
     computedFrom: z
       .enum([
         'EDD_FROM_LMP',
@@ -85,10 +104,35 @@ export const formFieldSchema = z
     captureMode: z.enum(['LIVE_CAMERA_ONLY']).optional(),
     requirePlaybackComplete: z.boolean().optional(),
     section: z.string().trim().min(1).optional(),
+    // SRS Category 1 — date-vs-date comparisons, evaluated only when this
+    // field and the referenced field both have a value (a missing value is
+    // the required-field check's concern, not this rule's). All comparisons
+    // are inclusive of the boundary day.
+    dateRule: z
+      .object({
+        notFuture: z.boolean().optional(),
+        notBefore: z
+          .object({ field: z.string().trim().min(1), offsetDays: z.number().int().optional() })
+          .optional(),
+        notAfter: z
+          .object({ field: z.string().trim().min(1), offsetDays: z.number().int().optional() })
+          .optional(),
+        minDaysFrom: z
+          .object({ field: z.string().trim().min(1), days: z.number().int() })
+          .optional(),
+        maxDaysFrom: z
+          .object({ field: z.string().trim().min(1), days: z.number().int() })
+          .optional(),
+      })
+      .optional(),
+    // Named character-class checks — never a raw regex in JSON, to keep
+    // seed data free of arbitrary executable-ish patterns.
+    pattern: z.enum(['NAME_NO_SPECIAL_CHARS']).optional(),
   })
   .strict();
 
 export type FormField = z.infer<typeof formFieldSchema>;
+export type VisibleWhenCondition = z.infer<typeof visibleWhenConditionSchema>;
 
 export const schemaJsonSchema = z.array(formFieldSchema).min(1);
 
@@ -101,6 +145,16 @@ export const schemaJsonSchema = z.array(formFieldSchema).min(1);
  * `offset` for that last rule's constant. ANY_OF_REQUIRED is a fifth rule,
  * added for MOTHER_REGISTRATION's date_of_birth/age_of_the_beneficiary pair
  * (either one satisfies the requirement) — see CR037beneficiaryagedobfieldgap.md.
+ * EXCLUSIVE_OPTION is a sixth rule — Registration_PW_D's repeated "if 'None'/
+ * 'No known condition' is selected, disable all other options" checkbox
+ * groups (Q43, Q44, Q58). The client-side disabling itself is a mobile-app
+ * concern; this rule is the server-side check that the *submitted* answer
+ * never combines an exclusive value with anything else.
+ * REQUIRED_IF_SELECTED is a seventh rule — the recurring "☐ <option>; Date:"
+ * multiselect_date pattern (Registration_PW_D's Td dose, Q49 vaccination at
+ * birth), where the doc requires each option's paired date field be filled
+ * whenever that option is checked (e.g. "If marked to any option other than
+ * 'None' then date is mandatory").
  */
 // A discriminated union has no inferable OpenAPI type on its own — annotated
 // so the OpenAPI generator doesn't throw when this schema is used as a
@@ -122,6 +176,21 @@ export const crossFieldRuleSchema = z
       .object({
         rule: z.literal('ANY_OF_REQUIRED'),
         fields: z.array(z.string().trim().min(1)).min(2),
+      })
+      .strict(),
+    z
+      .object({
+        rule: z.literal('EXCLUSIVE_OPTION'),
+        field: z.string().trim().min(1),
+        exclusiveValues: z.array(z.string().trim().min(1)).min(1),
+      })
+      .strict(),
+    z
+      .object({
+        rule: z.literal('REQUIRED_IF_SELECTED'),
+        field: z.string().trim().min(1),
+        // Selected value_code -> the question_code of its paired date field.
+        optionFieldMap: z.record(z.string(), z.string().trim().min(1)),
       })
       .strict(),
   ])

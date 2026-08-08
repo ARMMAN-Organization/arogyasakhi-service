@@ -48,6 +48,12 @@
       "section": "Consent",
       "required": true,
       "input_type": "date",
+      "dateRule": {
+        "notFuture": true,
+        "notAfter": { "field": "registration_date" },
+        "minDaysFrom": { "field": "registration_date", "days": 30 },
+        "maxDaysFrom": { "field": "registration_date", "days": 240 }
+      },
       "question_code": "lmp_date"
     },
     {
@@ -149,6 +155,7 @@
       "section": "Personal Info",
       "required": true,
       "input_type": "text",
+      "pattern": "NAME_NO_SPECIAL_CHARS",
       "question_code": "beneficiary_name"
     },
     {
@@ -724,6 +731,10 @@
         "value": "anc_1_completed",
         "operator": "eq"
       },
+      "dateRule": {
+        "notBefore": { "field": "lmp_date" },
+        "notAfter": { "field": "registration_date", "offsetDays": 5 }
+      },
       "question_code": "if_anc1_completed_please_record_the_date"
     },
     {
@@ -855,6 +866,7 @@
       "input_type": "date",
       "required": false,
       "section": "Health History",
+      "dateRule": { "notFuture": true },
       "visibleWhen": {
         "field": "has_the_women_received_td_dose",
         "operator": "contains",
@@ -867,6 +879,7 @@
       "input_type": "date",
       "required": false,
       "section": "Health History",
+      "dateRule": { "notFuture": true, "notBefore": { "field": "td_1_date" } },
       "visibleWhen": {
         "field": "has_the_women_received_td_dose",
         "operator": "contains",
@@ -879,6 +892,7 @@
       "input_type": "date",
       "required": false,
       "section": "Health History",
+      "dateRule": { "notFuture": true, "notBefore": { "field": "td_2_date" } },
       "visibleWhen": {
         "field": "has_the_women_received_td_dose",
         "operator": "contains",
@@ -1595,6 +1609,30 @@
     {
       "rule": "ANY_OF_REQUIRED",
       "fields": ["date_of_birth", "age_of_the_beneficiary"]
+    },
+    {
+      "rule": "EXCLUSIVE_OPTION",
+      "field": "if_anc1_completed_are_you_identified_with_any_high_risk_condition_as_communicated_by_doctor_during_the_latest_anc_checkup_self_reported",
+      "exclusiveValues": ["no_known_medical_condition_identified_during_check_up", "don_t_know"]
+    },
+    {
+      "rule": "EXCLUSIVE_OPTION",
+      "field": "has_the_women_received_td_dose",
+      "exclusiveValues": ["none_received_yet"]
+    },
+    {
+      "rule": "REQUIRED_IF_SELECTED",
+      "field": "has_the_women_received_td_dose",
+      "optionFieldMap": {
+        "td_1_date": "td_1_date",
+        "td_2_date": "td_2_date",
+        "td_booster_date": "td_booster_date"
+      }
+    },
+    {
+      "rule": "EXCLUSIVE_OPTION",
+      "field": "have_you_ever_been_diagnosed_with_or_treated_for_any_of_the_following_medical_conditions",
+      "exclusiveValues": ["no_known_medical_condition", "don_t_know"]
     }
   ]
 }

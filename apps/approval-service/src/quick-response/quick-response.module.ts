@@ -6,6 +6,12 @@ import { createQuickResponseRouter } from './quick-response.controller';
 import { LookupClient } from './lookup.client';
 import { EscalationClient } from './escalation.client';
 import { ReopenRequestClient } from './reopen-request.client';
+import { BeneficiaryClient } from './beneficiary.client';
+import { NotificationClient } from './notification.client';
+import { ClosureClient } from './closure.client';
+import { ReferralClient } from './referral.client';
+import { IncentiveClient } from './incentive.client';
+import { UserClient } from './user.client';
 
 /**
  * Composition root for the Quick Response feature: wires repository +
@@ -18,6 +24,12 @@ export function createQuickResponseModule(prisma: PrismaService): DocumentedRout
     new LookupClient(),
     new EscalationClient(),
     new ReopenRequestClient(),
+    new BeneficiaryClient(),
+    new NotificationClient(),
+    new ClosureClient(),
+    new ReferralClient(),
+    new IncentiveClient(),
+    new UserClient(),
   );
   return createQuickResponseRouter(service);
 }

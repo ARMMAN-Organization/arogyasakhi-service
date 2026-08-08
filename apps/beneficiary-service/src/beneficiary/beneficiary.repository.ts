@@ -9,6 +9,7 @@ import type {
 // the interface definitions live in beneficiary.repository.types.ts.
 export type {
   BeneficiaryListFilters,
+  BeneficiaryListPage,
   CaseCreateData,
   ChildDetailsCreateData,
   CreateEnrollmentInput,
@@ -16,6 +17,30 @@ export type {
   MotherDetailsCreateData,
   PiiCreateData,
 } from './beneficiary.repository.types';
+
+interface ListCursor {
+  createdAt: string;
+  id: string;
+}
+
+/** Encodes a row's sort key as an opaque pagination cursor. */
+function encodeCursor(row: { createdAt: Date; id: string }): string {
+  const cursor: ListCursor = { createdAt: row.createdAt.toISOString(), id: row.id };
+  return Buffer.from(JSON.stringify(cursor)).toString('base64url');
+}
+
+/** Decodes a cursor produced by encodeCursor; returns null on any malformed input. */
+function decodeCursor(cursor: string): ListCursor | null {
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
+    if (typeof parsed?.createdAt === 'string' && typeof parsed?.id === 'string') {
+      return parsed as ListCursor;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 /** Data-access layer for beneficiary cases. Only this domain touches these tables. */
 export class BeneficiaryRepository {
@@ -28,8 +53,16 @@ export class BeneficiaryRepository {
    * (no plaintext column to filter on), so search matches the same
    * non-reversible hash used for duplicate detection — exact match on the
    * normalized value, not a partial/fuzzy match.
+   *
+   * Cursor pagination sorts by (createdAt desc, id desc) — createdAt alone
+   * isn't guaranteed unique, so the id tiebreaks it into a stable order. A
+   * page fetches `limit + 1` rows to detect whether a next page exists
+   * without a separate count query; the extra row is trimmed before
+   * returning. An unparseable `filters.cursor` is treated as "start from the
+   * beginning" — a stale/corrupted cursor value degrades to a fresh first
+   * page rather than a hard failure.
    */
-  findMany(filters: BeneficiaryListFilters) {
+  async findMany(filters: BeneficiaryListFilters) {
     const where: NonNullable<Parameters<typeof this.prisma.beneficiaryCase.findMany>[0]>['where'] =
       {
         isDeleted: false,
@@ -50,13 +83,34 @@ export class BeneficiaryRepository {
     }
     if (filters.sakhiId) where.sakhiId = filters.sakhiId;
     if (filters.sakhiIds) where.sakhiId = { in: filters.sakhiIds };
+    if (filters.fromDate || filters.toDate) {
+      where.registrationDate = {
+        ...(filters.fromDate ? { gte: new Date(`${filters.fromDate}T00:00:00.000Z`) } : {}),
+        ...(filters.toDate ? { lte: new Date(`${filters.toDate}T23:59:59.999Z`) } : {}),
+      };
+    }
 
-    return this.prisma.beneficiaryCase.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      take: 50,
-      include: { pii: true },
+    const decodedCursor = filters.cursor ? decodeCursor(filters.cursor) : null;
+
+    const rows = await this.prisma.beneficiaryCase.findMany({
+      where: decodedCursor
+        ? {
+            ...where,
+            OR: [
+              { createdAt: { lt: new Date(decodedCursor.createdAt) } },
+              { createdAt: new Date(decodedCursor.createdAt), id: { lt: decodedCursor.id } },
+            ],
+          }
+        : where,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: filters.limit + 1,
+      include: { pii: true, motherCaseDetails: true, childCaseDetails: true },
     });
+
+    const hasMore = rows.length > filters.limit;
+    const items = hasMore ? rows.slice(0, filters.limit) : rows;
+    const lastItem = items[items.length - 1];
+    return { items, nextCursor: hasMore && lastItem ? encodeCursor(lastItem) : null };
   }
 
   findById(id: string) {
@@ -216,6 +270,53 @@ export class BeneficiaryRepository {
       where: { beneficiaryId },
       create: { beneficiaryId, ...data },
       update: data,
+    });
+  }
+
+  /**
+   * Updates an existing mother case's LMP/EDD after an approved LMP_CHANGE
+   * (FR-SV-4.2). Returns null if no `mother_case_details` row exists for this
+   * beneficiary — the service turns that into a 404, since there is nothing
+   * to update (a CHILD case, or a MOTHER case with no details row yet).
+   */
+  async updateMotherLmp(beneficiaryId: string, lmpDate: Date, eddDate: Date) {
+    const result = await this.prisma.motherCaseDetails.updateMany({
+      where: { beneficiaryId },
+      data: { lmpDate, eddDate },
+    });
+    return result.count > 0;
+  }
+
+  /**
+   * Reactivates a CLOSED beneficiary case after an approved reopen request
+   * (FR-SV-4.7/FR-S-10.3) — flips currentStatus back to ACTIVE and records
+   * the transition in beneficiary_status_history for audit, in one
+   * transaction. Only updates a row that is still CLOSED — updateMany's
+   * affected count (rather than a separate read-then-write) is the
+   * concurrency guard: if the case's status already changed between the
+   * caller's findById and this call, the count comes back 0 and the service
+   * turns that into a 409 instead of silently overwriting a since-changed
+   * case. Same pattern as closures/reopen-requests/referrals.
+   */
+  async reactivateCase(beneficiaryId: string, reactivatedByUserId: string): Promise<boolean> {
+    return this.prisma.$transaction(async (tx) => {
+      const result = await tx.beneficiaryCase.updateMany({
+        where: { id: beneficiaryId, isDeleted: false, currentStatus: 'CLOSED' },
+        data: { currentStatus: 'ACTIVE' },
+      });
+      if (result.count === 0) return false;
+
+      await tx.beneficiaryStatusHistory.create({
+        data: {
+          beneficiaryId,
+          fromStatus: 'CLOSED',
+          toStatus: 'ACTIVE',
+          reasonCode: 'REOPEN_APPROVED',
+          changedByUserId: reactivatedByUserId,
+          changedAt: new Date(),
+        },
+      });
+      return true;
     });
   }
 }

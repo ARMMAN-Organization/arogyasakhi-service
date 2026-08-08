@@ -12,6 +12,7 @@ import {
 import { createBeneficiarySchema } from './dto/create-beneficiary.dto';
 import { listBeneficiariesQuerySchema } from './dto/list-beneficiaries.dto';
 import { upsertSocioDemographicsSchema } from './dto/upsert-socio-demographics.dto';
+import { applyLmpChangeSchema } from './dto/apply-lmp-change.dto';
 import {
   asyncHandler,
   createDocumentedRouter,
@@ -37,6 +38,11 @@ const piiResponseSchema = z.object({
   // phoneEnc/addressLineEnc columns.
   mobileNumber: z.string().nullable().openapi({ example: '9876543210' }),
   address: z.string().nullable(),
+  // Decrypted server-side for display, same as fullName/mobileNumber/address
+  // — never the raw rchNumberEnc column. Null when the Sakhi left RCH
+  // enrollment unanswered or had no card available (see
+  // create-beneficiary.dto.ts's rchNumber note).
+  rchNumber: z.string().nullable().openapi({ example: 'KA201900042' }),
   villageId: z.string().uuid().nullable(),
   padaId: z.string().uuid().nullable(),
   healthSubCentreId: z.string().uuid().nullable(),
@@ -166,12 +172,31 @@ const beneficiaryCaseDetailSchema = beneficiaryCaseSchema.extend({
   socioDemographics: socioDemographicsSchema.nullable(),
 });
 
-// List rows carry PII (decrypted name) but not the full detail-view
-// includes (risk/status history/mother-or-child details/consent) — per
-// SRS FR-S-9.2 / HLD's filter table, the list only needs to support
-// search/filter and a compact display row.
+// List rows carry PII (decrypted name) and mother-or-child details (EDD/LMP/
+// BMI, or birthdate) — the Supervisor app's list UI needs these without a
+// follow-up detail call — but not the full detail-view's consent/risk/status
+// history, which only the single-case detail endpoint returns.
+//
+// sakhiName/projectName/villageName are resolved server-side from
+// auth-service (see BeneficiaryService.list's enrichListPage) since
+// beneficiary_cases/pii stores only the bare ids — the Supervisor
+// monitoring / Manager listing UI needs display names without a per-row
+// follow-up call. Nullable: a stale/deleted Sakhi, project, or village
+// resolves to null rather than failing the whole list response.
 const beneficiaryListItemSchema = beneficiaryCaseSchema.extend({
   pii: piiResponseSchema,
+  motherCaseDetails: motherCaseDetailsSchema.nullable(),
+  childCaseDetails: childCaseDetailsSchema.nullable(),
+  sakhiName: z.string().nullable().openapi({ example: 'Priya Sharma' }),
+  projectName: z.string().nullable().openapi({ example: 'GEP 2026-27' }),
+  villageName: z.string().nullable().openapi({ example: 'Sample Village' }),
+});
+
+const beneficiaryListPageSchema = z.object({
+  items: z.array(beneficiaryListItemSchema),
+  nextCursor: z.string().nullable().openapi({
+    description: 'Pass back as `cursor` to fetch the next page; null when this is the last page.',
+  }),
 });
 
 function envelope<T extends z.ZodTypeAny>(data: T) {
@@ -198,16 +223,25 @@ export function createBeneficiaryRouter(service: BeneficiaryService) {
   doc.get(
     '/beneficiaries',
     {
-      summary: 'List beneficiary cases',
+      summary:
+        'List beneficiary cases. Filters: projectId, villageId, padaId, sakhiId, caseType, ' +
+        'status, atRiskOnly, name, mobileNumber, fromDate/toDate (registrationDate range). ' +
+        "Cursor-paginated via cursor/limit (default 50, max 100) — pass the response's " +
+        'nextCursor back as `cursor` to fetch the next page. A SAKHI caller is always scoped ' +
+        'to their own cases regardless of sakhiId; a SUPERVISOR is scoped to their own Sakhi ' +
+        'roster and may narrow further to one sakhiId within it (403 if not in their roster); ' +
+        'MANAGER/ADMIN are unscoped. Each row includes sakhiName/projectName/villageName, ' +
+        'resolved server-side for display (null if the referenced Sakhi/project/village is ' +
+        'stale or unresolvable).',
       tags: ['Beneficiaries'],
       responses: {
         200: {
           description: 'Beneficiary cases retrieved',
-          schema: envelope(z.array(beneficiaryListItemSchema)),
+          schema: envelope(beneficiaryListPageSchema),
         },
         400: errorResponse(400, { message: 'atRiskOnly: Expected boolean, received string' }),
         401: errorResponse(401),
-        403: errorResponse(403),
+        403: errorResponse(403, { message: "sakhiId is not in this Supervisor's roster." }),
         500: errorResponse(500),
       },
     },
@@ -316,6 +350,81 @@ export function createBeneficiaryRouter(service: BeneficiaryService) {
       const updated = await service.upsertSocioDemographics(
         req.params.id,
         req.body,
+        authorizationHeader,
+      );
+      res.json(ok(updated));
+    }),
+  );
+
+  doc.patch(
+    '/beneficiaries/:id/lmp',
+    {
+      summary: 'Apply an approved LMP change (FR-SV-4.2) — server-to-server only',
+      tags: ['Beneficiaries'],
+      params: idParamsSchema,
+      responses: {
+        200: {
+          description: 'LMP/EDD updated; the updated case is returned',
+          schema: envelope(beneficiaryCaseDetailSchema),
+        },
+        400: errorResponse(400, { message: 'lmpDate: Required' }),
+        401: errorResponse(401),
+        403: errorResponse(403, {
+          message: "This beneficiary case is outside this Supervisor's roster.",
+        }),
+        404: errorResponse(404, { message: 'Beneficiary case not found.' }),
+        500: errorResponse(500),
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(idParamsSchema, 'params'),
+    validateBody(applyLmpChangeSchema),
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const updated = await service.applyLmpChange(
+        req.params.id,
+        req.body.lmpDate,
+        req.user,
+        authorizationHeader,
+      );
+      res.json(ok(updated));
+    }),
+  );
+
+  doc.patch(
+    '/beneficiaries/:id/reactivate',
+    {
+      summary: 'Reactivate a CLOSED beneficiary case (FR-SV-4.7) — server-to-server only',
+      tags: ['Beneficiaries'],
+      params: idParamsSchema,
+      responses: {
+        200: {
+          description: 'Case reactivated; the updated case is returned',
+          schema: envelope(beneficiaryCaseDetailSchema),
+        },
+        401: errorResponse(401),
+        403: errorResponse(403, {
+          message: "This beneficiary case is outside this Supervisor's roster.",
+        }),
+        404: errorResponse(404, { message: 'Beneficiary case not found.' }),
+        409: errorResponse(409, { message: 'Cannot reactivate a case with status ACTIVE.' }),
+        500: errorResponse(500),
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(idParamsSchema, 'params'),
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const updated = await service.reactivateCase(
+        req.params.id,
+        req.user.id,
+        req.user,
         authorizationHeader,
       );
       res.json(ok(updated));

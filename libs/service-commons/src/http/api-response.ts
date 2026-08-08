@@ -30,6 +30,10 @@ export enum ErrorCode {
   CONFLICT = 'CONFLICT',
   UNPROCESSABLE = 'UNPROCESSABLE',
   PAYLOAD_TOO_LARGE = 'PAYLOAD_TOO_LARGE',
+  /** A documented capability that is deliberately not built yet (HTTP 501) —
+   * distinct from INTERNAL_ERROR so clients can tell "unavailable feature"
+   * apart from "the server broke". */
+  NOT_IMPLEMENTED = 'NOT_IMPLEMENTED',
   INTERNAL_ERROR = 'INTERNAL_ERROR',
 }
 

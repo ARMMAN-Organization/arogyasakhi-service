@@ -9,7 +9,12 @@ export class IncentiveEventRepository {
     return this.prisma.incentiveEvent.findMany({ orderBy: { createdAt: 'desc' }, take: 50 });
   }
 
-  create(data: CreateIncentiveEventInput) {
+  /**
+   * `amountInr` is not part of `CreateIncentiveEventInput` — it's resolved
+   * server-side by the service from the referenced rate, never trusted from
+   * the client (see createIncentiveEventSchema's doc comment).
+   */
+  create(data: CreateIncentiveEventInput & { amountInr: number }) {
     return this.prisma.incentiveEvent.create({ data });
   }
 }

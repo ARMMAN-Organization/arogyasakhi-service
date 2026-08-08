@@ -31,7 +31,7 @@ export class OperationsRepository {
     });
   }
 
-  createEvent(data: CreateSupervisorEventInput) {
+  createEvent(data: CreateSupervisorEventInput & { supervisorId: string }) {
     return this.prisma.supervisorEvent.create({ data });
   }
 

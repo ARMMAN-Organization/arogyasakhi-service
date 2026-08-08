@@ -1,5 +1,7 @@
 import { addDays } from '@armman/core';
 import {
+  badRequest,
+  conflict,
   encryptPii,
   forbidden,
   hashForSearch,
@@ -18,9 +20,14 @@ import { computeBmi, withDecryptedName } from './beneficiary.mapper';
 import type { BeneficiaryListFilters, BeneficiaryRepository } from './beneficiary.repository';
 import type { CreateBeneficiaryInput } from './dto/create-beneficiary.dto';
 import type { UpsertSocioDemographicsInput } from './dto/upsert-socio-demographics.dto';
-import { resolveHealthBlockIdFromPhc } from '../geography/geography.client';
+import { resolveHealthBlockIdFromPhc, resolveVillageNames } from '../geography/geography.client';
 import { resolveLookupIdsByValueCode, resolveLookupValues } from '../lookups/lookup.client';
-import { listSakhiIdsForSupervisor } from '../sakhi/sakhi.client';
+import {
+  getSakhiName,
+  listSakhiIdsForSupervisor,
+  listSakhiNamesForSupervisor,
+} from '../sakhi/sakhi.client';
+import { resolveProjectNames } from '../projects/project.client';
 
 /**
  * Maps each socioDemographics *LookupId field to the lookup_categories
@@ -74,17 +81,101 @@ async function withResolvedSocioDemographics<T extends Record<string, unknown>>(
 
 const GESTATION_DAYS = 280;
 
+/**
+ * Enforces the same scoping `list()` applies to reads on a single-case
+ * mutation: a SUPERVISOR may only touch a case belonging to their own Sakhi
+ * roster; MANAGER/ADMIN are unscoped. Throws forbidden() otherwise. Callers
+ * without a SUPERVISOR/MANAGER/ADMIN role never reach these mutations
+ * (blocked by requireRoles at the route), so SAKHI is not handled here.
+ */
+async function assertCallerCanTouchCase(
+  caseSakhiId: string,
+  caller: AuthenticatedUser,
+  authorizationHeader: string,
+): Promise<void> {
+  if (!caller.roles.includes('SUPERVISOR')) return;
+  if (!caller.projectId) {
+    throw forbidden('Supervisor caller has no project scope.');
+  }
+  const roster = await listSakhiIdsForSupervisor(caller.projectId, caller.id, authorizationHeader);
+  if (!roster.includes(caseSakhiId)) {
+    throw forbidden("This beneficiary case is outside this Supervisor's roster.");
+  }
+}
+
+/**
+ * Enriches a page of `GET /beneficiaries` rows with display-ready
+ * sakhiName/projectName/villageName — beneficiary_cases/pii stores only the
+ * bare ids (no cross-service joins, per this service's forklift rule), but
+ * the Supervisor-monitoring/Manager-listing UI needs names without a
+ * follow-up call per row.
+ *
+ * sakhiName is resolved from `supervisorRoster` when the caller already
+ * fetched one for scoping (SUPERVISOR path in list()) — no extra round-trip
+ * in the common case. Otherwise (MANAGER/ADMIN, or any sakhiId missing from
+ * a passed roster) each distinct sakhiId not already covered is resolved
+ * with a deduped per-id `getSakhiName` fallback call, capped at the page's
+ * unique Sakhi count. projectName/villageName always come from one
+ * dedicated list call each (see resolveProjectNames/resolveVillageNames) —
+ * both are small, mostly-static datasets with no filter-by-id support.
+ *
+ * A name that can't be resolved (stale/deleted Sakhi, project, or village)
+ * is `null`, never a failed request — the beneficiary case itself is still
+ * valid data. An empty page skips every lookup call entirely.
+ */
+async function enrichListPage(
+  items: Record<string, unknown>[],
+  authorizationHeader: string,
+  supervisorRoster?: Map<string, string>,
+): Promise<Record<string, unknown>[]> {
+  if (items.length === 0) return [];
+
+  const sakhiIdOf = (item: Record<string, unknown>) => item.sakhiId as string;
+  const projectIdOf = (item: Record<string, unknown>) => item.projectId as string;
+  const villageIdOf = (item: Record<string, unknown>) =>
+    (item.pii as { villageId: string | null }).villageId;
+
+  const uncoveredSakhiIds = [
+    ...new Set(items.map(sakhiIdOf).filter((id) => !supervisorRoster?.has(id))),
+  ];
+
+  const [projectNames, villageNames, fallbackSakhiNames] = await Promise.all([
+    resolveProjectNames(authorizationHeader),
+    resolveVillageNames(authorizationHeader),
+    Promise.all(uncoveredSakhiIds.map((id) => getSakhiName(id, authorizationHeader))),
+  ]);
+  const sakhiNameById = new Map<string, string | null>([
+    ...(supervisorRoster ?? []),
+    ...uncoveredSakhiIds.map((id, i) => [id, fallbackSakhiNames[i]] as const),
+  ]);
+
+  return items.map((item) => {
+    const villageId = villageIdOf(item);
+    return {
+      ...item,
+      sakhiName: sakhiNameById.get(sakhiIdOf(item)) ?? null,
+      projectName: projectNames.get(projectIdOf(item)) ?? null,
+      villageName: villageId ? (villageNames.get(villageId) ?? null) : null,
+    };
+  });
+}
+
 /** Public list-query params — see ListBeneficiariesQuery in the DTO for validation. */
 export interface ListBeneficiariesQuery {
   projectId?: string;
   villageId?: string;
   padaId?: string;
+  sakhiId?: string;
   status?: BeneficiaryStatus;
   caseType?: CaseType;
   atRiskOnly?: boolean;
   /** Raw search text — hashed the same way as duplicate-detection tokens (exact match only). */
   name?: string;
   mobileNumber?: string;
+  fromDate?: string;
+  toDate?: string;
+  cursor?: string;
+  limit: number;
 }
 
 /** Business logic for the beneficiary enrollment lifecycle. */
@@ -94,18 +185,32 @@ export class BeneficiaryService {
   /**
    * Lists beneficiary cases per SRS FR-S-9.2 / HLD's filter set, scoped by
    * the caller's role: a SAKHI only ever sees their own cases (their own id
-   * always wins over anything else), a SUPERVISOR only sees cases belonging
-   * to their own Sakhis (resolved via auth-service's existing
-   * `/projects/:projectId/sakhis`, filtered by supervisorId — no new
-   * auth-service endpoint), and MANAGER/ADMIN see everything unscoped. Each
-   * row's name is decrypted server-side for display — the search hash
-   * itself is never returned.
+   * always wins over anything else, so a SAKHI-supplied `sakhiId` is
+   * ignored), a SUPERVISOR only sees cases belonging to their own Sakhis
+   * (resolved via auth-service's existing `/projects/:projectId/sakhis`,
+   * filtered by supervisorId — no new auth-service endpoint) — if they
+   * narrow the list to one `sakhiId`, it must be a member of their own
+   * roster or the call is rejected rather than silently returning nothing —
+   * and MANAGER/ADMIN see everything unscoped, including any `sakhiId` they
+   * choose to filter by. Each row's name is decrypted server-side for
+   * display — the search hash itself is never returned. Results are
+   * cursor-paginated (HLD's cursor-pagination mandate) — see
+   * BeneficiaryRepository.findMany for the cursor's shape.
    */
   async list(
     query: ListBeneficiariesQuery,
     caller: AuthenticatedUser,
     authorizationHeader: string,
   ) {
+    // Cross-field check on fromDate/toDate — kept out of the Zod query
+    // schema's own .refine() so that schema stays an AnyZodObject
+    // (createDocumentedRouter() auto-infers it as this route's OpenAPI query
+    // parameters; a .refine()'d ZodEffects can't be introspected there and
+    // crashes the whole service at startup, not just this one request).
+    if (query.fromDate && query.toDate && query.fromDate > query.toDate) {
+      throw badRequest('fromDate must be on or before toDate.');
+    }
+
     const filters: BeneficiaryListFilters = {
       projectId: query.projectId,
       villageId: query.villageId,
@@ -117,7 +222,14 @@ export class BeneficiaryService {
       phoneHash: query.mobileNumber
         ? hashForSearch(normalizeForSearch(query.mobileNumber))
         : undefined,
+      fromDate: query.fromDate,
+      toDate: query.toDate,
+      cursor: query.cursor,
+      limit: query.limit,
     };
+
+    let supervisorProjectId: string | undefined;
+    let supervisorId: string | undefined;
 
     if (caller.roles.includes('SAKHI')) {
       filters.sakhiId = caller.id;
@@ -128,15 +240,39 @@ export class BeneficiaryService {
       if (!caller.projectId) {
         throw forbidden('Supervisor caller has no project scope.');
       }
-      filters.sakhiIds = await listSakhiIdsForSupervisor(
+      const roster = await listSakhiIdsForSupervisor(
         caller.projectId,
         caller.id,
         authorizationHeader,
       );
+      if (query.sakhiId) {
+        if (!roster.includes(query.sakhiId)) {
+          throw forbidden("sakhiId is not in this Supervisor's roster.");
+        }
+        filters.sakhiId = query.sakhiId;
+      } else {
+        filters.sakhiIds = roster;
+      }
+      supervisorProjectId = caller.projectId;
+      supervisorId = caller.id;
+    } else if (query.sakhiId) {
+      // MANAGER/ADMIN: unscoped by default, but an explicit sakhiId still
+      // narrows the list — no roster to validate against.
+      filters.sakhiId = query.sakhiId;
     }
 
-    const cases = await this.repository.findMany(filters);
-    return cases.map(withDecryptedName);
+    const page = await this.repository.findMany(filters);
+    const decrypted = page.items.map(withDecryptedName);
+    // Reuses the roster call already made above for scoping, resolved a
+    // second time for displayName instead of caching the first response —
+    // simpler than threading an extra return value through every branch
+    // above, and this call only happens for the SUPERVISOR path.
+    const supervisorRoster =
+      supervisorProjectId && supervisorId
+        ? await listSakhiNamesForSupervisor(supervisorProjectId, supervisorId, authorizationHeader)
+        : undefined;
+    const enriched = await enrichListPage(decrypted, authorizationHeader, supervisorRoster);
+    return { items: enriched, nextCursor: page.nextCursor };
   }
 
   async getById(id: string, authorizationHeader: string) {
@@ -210,6 +346,75 @@ export class BeneficiaryService {
     if (dto.childrenUnder5Count !== undefined) data.childrenUnder5Count = dto.childrenUnder5Count;
 
     await this.repository.upsertSocioDemographics(beneficiaryId, data);
+    return this.getById(beneficiaryId, authorizationHeader);
+  }
+
+  /**
+   * Applies an approved LMP change (FR-SV-4.2) — recomputes eddDate from the
+   * same GESTATION_DAYS formula used at registration so lmpDate/eddDate can
+   * never drift out of sync. Called server-to-server by approval-service
+   * once a Supervisor approves an LMP_CHANGE Quick Response card.
+   *
+   * Deliberately does not regenerate the ANC visit schedule — schedules are
+   * generated offline on the Sakhi's device (FR-S-2.2) and uploaded via
+   * visit-form-service's POST /visit-schedules/bulk; this service owns no
+   * schedule-generation logic to trigger. Re-syncing/regenerating the
+   * schedule after an LMP change is the Sakhi app's responsibility, not
+   * this endpoint's — a known, accepted gap, not an oversight.
+   *
+   * A SUPERVISOR caller may only apply this to a case in their own Sakhi
+   * roster (same scoping as list()) — this endpoint is reachable by a human
+   * Supervisor role, not just server-to-server, so it needs the same IDOR
+   * guard as any other single-case mutation.
+   */
+  async applyLmpChange(
+    beneficiaryId: string,
+    lmpDate: Date,
+    caller: AuthenticatedUser,
+    authorizationHeader: string,
+  ) {
+    const existing = await this.repository.findById(beneficiaryId);
+    if (!existing) throw notFound('Beneficiary case not found.');
+    await assertCallerCanTouchCase(existing.sakhiId, caller, authorizationHeader);
+
+    const eddDate = addDays(lmpDate, GESTATION_DAYS);
+    const updated = await this.repository.updateMotherLmp(beneficiaryId, lmpDate, eddDate);
+    if (!updated) throw notFound('Beneficiary case not found.');
+    return this.getById(beneficiaryId, authorizationHeader);
+  }
+
+  /**
+   * Reactivates a CLOSED beneficiary case after an approved reopen request
+   * (FR-SV-4.7/FR-S-10.3) — the "Beneficiary is added to Sakhi's Open
+   * beneficiary list" outcome. Called server-to-server by
+   * closure-reopen-service once a Supervisor approves a ReopenRequest.
+   *
+   * A SUPERVISOR caller may only reactivate a case in their own Sakhi
+   * roster (same scoping as list()) — this endpoint is reachable by a human
+   * Supervisor role, not just server-to-server, so it needs the same IDOR
+   * guard as any other single-case mutation.
+   */
+  async reactivateCase(
+    beneficiaryId: string,
+    reactivatedByUserId: string,
+    caller: AuthenticatedUser,
+    authorizationHeader: string,
+  ) {
+    const existing = await this.repository.findById(beneficiaryId);
+    if (!existing) throw notFound('Beneficiary case not found.');
+    await assertCallerCanTouchCase(existing.sakhiId, caller, authorizationHeader);
+    if (existing.currentStatus !== 'CLOSED') {
+      throw conflict(`Cannot reactivate a case with status ${existing.currentStatus}.`);
+    }
+
+    const reactivated = await this.repository.reactivateCase(beneficiaryId, reactivatedByUserId);
+    if (!reactivated) {
+      // Raced with another status change between the read above and the
+      // conditional update — same outcome as the check above, just caught a
+      // beat later instead of trusting a stale read.
+      throw conflict(`Cannot reactivate a case with status ${existing.currentStatus}.`);
+    }
+
     return this.getById(beneficiaryId, authorizationHeader);
   }
 

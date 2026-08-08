@@ -244,6 +244,36 @@ export function createAuthRouter(service: AuthService, signer: TokenSigner) {
     }),
   );
 
+  doc.patch(
+    '/users/:id/reactivate',
+    {
+      summary:
+        "Reactivate a deactivated user's account (Quick Response DATA_RESTORE card, approved) — " +
+        'a narrow status-only operation, unlike the general PATCH /users/:id',
+      tags: ['Users'],
+      params: userIdParamsSchema,
+      responses: {
+        200: { description: 'User reactivated', schema: envelope(userProfileSchema) },
+        401: errorResponse(401),
+        403: errorResponse(403, {
+          message: 'Only Sakhi accounts can be reactivated via this endpoint.',
+        }),
+        404: errorResponse(404, { message: 'User not found.' }),
+        409: errorResponse(409, { message: 'This user is already ACTIVE.' }),
+        500: errorResponse(500),
+      },
+    },
+    authenticate(signer),
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(userIdParamsSchema, 'params'),
+    asyncHandler(async (req, res, next) => {
+      // authenticate(signer) runs first and calls next(unauthorized()) if it
+      // fails, so req.user is always populated by the time this handler runs.
+      if (!req.user) return next(unauthorized());
+      res.json(ok(await service.reactivateUser(req.params.id, req.user)));
+    }),
+  );
+
   doc.get(
     '/me',
     {

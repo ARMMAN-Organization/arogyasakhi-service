@@ -88,7 +88,7 @@ export function createIncentiveEventRouter(service: IncentiveEventService) {
       },
     },
     trustGatewayIdentity,
-    requireRoles('ADMIN'),
+    requireRoles('SUPERVISOR', 'ADMIN'),
     validateBody(createIncentiveEventSchema),
     asyncHandler(async (req, res) => {
       const created = await service.create(req.body);

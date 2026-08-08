@@ -178,7 +178,13 @@ describe('LookupService', () => {
     it('reports no-op writes as unchanged when valueLabel/sortOrder already match', async () => {
       repository.findCategoryByCode.mockResolvedValue(category as never);
       repository.findValuesByCategoryId.mockResolvedValue([
-        { id: 'val-1', valueCode: 'GRADUATE', valueLabel: 'Graduate', sortOrder: 4, parentLookupValueId: null },
+        {
+          id: 'val-1',
+          valueCode: 'GRADUATE',
+          valueLabel: 'Graduate',
+          sortOrder: 4,
+          parentLookupValueId: null,
+        },
       ] as never);
 
       const input = { values: [{ valueCode: 'GRADUATE', valueLabel: 'Graduate', sortOrder: 4 }] };
@@ -191,11 +197,19 @@ describe('LookupService', () => {
     it('updates only valueCodes whose valueLabel or sortOrder differ', async () => {
       repository.findCategoryByCode.mockResolvedValue(category as never);
       repository.findValuesByCategoryId.mockResolvedValue([
-        { id: 'val-1', valueCode: 'PRIMARY', valueLabel: 'Primary', sortOrder: 1, parentLookupValueId: null },
+        {
+          id: 'val-1',
+          valueCode: 'PRIMARY',
+          valueLabel: 'Primary',
+          sortOrder: 1,
+          parentLookupValueId: null,
+        },
       ] as never);
 
       const input = {
-        values: [{ valueCode: 'PRIMARY', valueLabel: 'Primary education (Class 1-5)', sortOrder: 1 }],
+        values: [
+          { valueCode: 'PRIMARY', valueLabel: 'Primary education (Class 1-5)', sortOrder: 1 },
+        ],
       };
       const result = await service.bulkUpsertValues('EDUCATION_LEVEL', input);
 
@@ -210,8 +224,20 @@ describe('LookupService', () => {
     it('splits a mixed payload into created/updated/unchanged in one call', async () => {
       repository.findCategoryByCode.mockResolvedValue(category as never);
       repository.findValuesByCategoryId.mockResolvedValue([
-        { id: 'val-1', valueCode: 'PRIMARY', valueLabel: 'Primary', sortOrder: 1, parentLookupValueId: null },
-        { id: 'val-2', valueCode: 'GRADUATE', valueLabel: 'Graduate', sortOrder: 4, parentLookupValueId: null },
+        {
+          id: 'val-1',
+          valueCode: 'PRIMARY',
+          valueLabel: 'Primary',
+          sortOrder: 1,
+          parentLookupValueId: null,
+        },
+        {
+          id: 'val-2',
+          valueCode: 'GRADUATE',
+          valueLabel: 'Graduate',
+          sortOrder: 4,
+          parentLookupValueId: null,
+        },
       ] as never);
 
       const input = {
@@ -233,7 +259,10 @@ describe('LookupService', () => {
     it('creates a value with parentLookupValueId when it belongs to the same category', async () => {
       repository.findCategoryByCode.mockResolvedValue(category as never);
       repository.findValuesByCategoryId.mockResolvedValue([] as never);
-      repository.findValueById.mockResolvedValue({ id: 'parent-1', lookupCategoryId: 'cat-1' } as never);
+      repository.findValueById.mockResolvedValue({
+        id: 'parent-1',
+        lookupCategoryId: 'cat-1',
+      } as never);
 
       const input = {
         values: [{ valueCode: 'SUB', valueLabel: 'Sub', parentLookupValueId: 'parent-1' }],
@@ -246,7 +275,13 @@ describe('LookupService', () => {
     it('never touches an existing value absent from the payload', async () => {
       repository.findCategoryByCode.mockResolvedValue(category as never);
       repository.findValuesByCategoryId.mockResolvedValue([
-        { id: 'val-1', valueCode: 'ILLITERATE', valueLabel: 'Illiterate', sortOrder: 0, parentLookupValueId: null },
+        {
+          id: 'val-1',
+          valueCode: 'ILLITERATE',
+          valueLabel: 'Illiterate',
+          sortOrder: 0,
+          parentLookupValueId: null,
+        },
       ] as never);
 
       const input = { values: [{ valueCode: 'TENTH_PASS', valueLabel: '10th Pass' }] };
@@ -263,14 +298,22 @@ describe('LookupService', () => {
 
     it('is idempotent: running the same payload twice reports everything unchanged the second time', async () => {
       repository.findCategoryByCode.mockResolvedValue(category as never);
-      const input = { values: [{ valueCode: 'TENTH_PASS', valueLabel: '10th Pass', sortOrder: 3 }] };
+      const input = {
+        values: [{ valueCode: 'TENTH_PASS', valueLabel: '10th Pass', sortOrder: 3 }],
+      };
 
       repository.findValuesByCategoryId.mockResolvedValueOnce([] as never);
       const first = await service.bulkUpsertValues('EDUCATION_LEVEL', input);
       expect(first.created).toEqual(['TENTH_PASS']);
 
       repository.findValuesByCategoryId.mockResolvedValueOnce([
-        { id: 'val-1', valueCode: 'TENTH_PASS', valueLabel: '10th Pass', sortOrder: 3, parentLookupValueId: null },
+        {
+          id: 'val-1',
+          valueCode: 'TENTH_PASS',
+          valueLabel: '10th Pass',
+          sortOrder: 3,
+          parentLookupValueId: null,
+        },
       ] as never);
       const second = await service.bulkUpsertValues('EDUCATION_LEVEL', input);
       expect(second).toEqual({ created: [], updated: [], unchanged: ['TENTH_PASS'] });
@@ -285,10 +328,13 @@ describe('LookupService', () => {
       expect(repository.bulkUpsertValues).not.toHaveBeenCalled();
     });
 
-    it('throws 422 when a new value\'s parentLookupValueId belongs to a different category', async () => {
+    it("throws 422 when a new value's parentLookupValueId belongs to a different category", async () => {
       repository.findCategoryByCode.mockResolvedValue(category as never);
       repository.findValuesByCategoryId.mockResolvedValue([] as never);
-      repository.findValueById.mockResolvedValue({ id: 'parent-1', lookupCategoryId: 'other-cat' } as never);
+      repository.findValueById.mockResolvedValue({
+        id: 'parent-1',
+        lookupCategoryId: 'other-cat',
+      } as never);
 
       const input = {
         values: [{ valueCode: 'SUB', valueLabel: 'Sub', parentLookupValueId: 'parent-1' }],
@@ -299,12 +345,21 @@ describe('LookupService', () => {
       expect(repository.bulkUpsertValues).not.toHaveBeenCalled();
     });
 
-    it('throws 422 when an updated value\'s parentLookupValueId belongs to a different category', async () => {
+    it("throws 422 when an updated value's parentLookupValueId belongs to a different category", async () => {
       repository.findCategoryByCode.mockResolvedValue(category as never);
       repository.findValuesByCategoryId.mockResolvedValue([
-        { id: 'val-1', valueCode: 'PRIMARY', valueLabel: 'Primary', sortOrder: 1, parentLookupValueId: null },
+        {
+          id: 'val-1',
+          valueCode: 'PRIMARY',
+          valueLabel: 'Primary',
+          sortOrder: 1,
+          parentLookupValueId: null,
+        },
       ] as never);
-      repository.findValueById.mockResolvedValue({ id: 'parent-1', lookupCategoryId: 'other-cat' } as never);
+      repository.findValueById.mockResolvedValue({
+        id: 'parent-1',
+        lookupCategoryId: 'other-cat',
+      } as never);
 
       const input = {
         values: [{ valueCode: 'PRIMARY', valueLabel: 'Primary', parentLookupValueId: 'parent-1' }],
@@ -318,7 +373,13 @@ describe('LookupService', () => {
     it('clears an existing parentLookupValueId when the payload sends null', async () => {
       repository.findCategoryByCode.mockResolvedValue(category as never);
       repository.findValuesByCategoryId.mockResolvedValue([
-        { id: 'val-1', valueCode: 'SUB', valueLabel: 'Sub', sortOrder: 0, parentLookupValueId: 'parent-1' },
+        {
+          id: 'val-1',
+          valueCode: 'SUB',
+          valueLabel: 'Sub',
+          sortOrder: 0,
+          parentLookupValueId: 'parent-1',
+        },
       ] as never);
 
       const input = {
@@ -339,7 +400,13 @@ describe('LookupService', () => {
     it('treats an already-parentless value with parentLookupValueId: null as unchanged', async () => {
       repository.findCategoryByCode.mockResolvedValue(category as never);
       repository.findValuesByCategoryId.mockResolvedValue([
-        { id: 'val-1', valueCode: 'GRADUATE', valueLabel: 'Graduate', sortOrder: 4, parentLookupValueId: null },
+        {
+          id: 'val-1',
+          valueCode: 'GRADUATE',
+          valueLabel: 'Graduate',
+          sortOrder: 4,
+          parentLookupValueId: null,
+        },
       ] as never);
 
       const input = {

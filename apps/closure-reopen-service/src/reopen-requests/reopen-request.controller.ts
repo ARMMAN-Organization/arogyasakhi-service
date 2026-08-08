@@ -1,6 +1,7 @@
 import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
 import { z } from 'zod';
 import type { ReopenRequestService } from './reopen-request.service';
+import { createReopenRequestSchema } from './dto/create-reopen-request.dto';
 import { decideReopenRequestSchema } from './dto/decide-reopen-request.dto';
 import {
   asyncHandler,
@@ -67,6 +68,28 @@ function envelope<T extends z.ZodTypeAny>(data: T) {
  */
 export function createReopenRequestRouter(service: ReopenRequestService) {
   const doc = createDocumentedRouter();
+
+  doc.post(
+    '/reopen-requests',
+    {
+      summary: 'Raise a reopen request for a closed beneficiary (FR-S-10.3)',
+      tags: ['Reopen Requests'],
+      responses: {
+        201: { description: 'Reopen request created', schema: envelope(reopenRequestSchema) },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI'),
+    validateBody(createReopenRequestSchema),
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const created = await service.create(req.body, req.user.id, req.headers.authorization ?? '');
+      res.status(201).json(ok(created));
+    }),
+  );
 
   doc.patch(
     '/reopen-requests/:id/decision',

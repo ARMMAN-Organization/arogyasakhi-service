@@ -67,6 +67,10 @@
       "section": "Consent",
       "required": true,
       "input_type": "date",
+      "dateRule": {
+        "notFuture": true,
+        "maxDaysFrom": { "field": "registrtion_date", "days": 183 }
+      },
       "question_code": "date_of_birth_of_infant"
     },
     {
@@ -89,7 +93,12 @@
       "section": "Personal Info",
       "required": true,
       "input_type": "number",
-      "question_code": "mother_beneficiary_id"
+      "question_code": "mother_beneficiary_id",
+      "visibleWhen": {
+        "field": "who_are_you_registering_in_the_program",
+        "operator": "eq",
+        "value": "child_of_a_registered_pregnant_woman"
+      }
     },
     {
       "label": "Registrtion date",
@@ -159,6 +168,7 @@
       "section": "Personal Info",
       "required": true,
       "input_type": "text",
+      "pattern": "NAME_NO_SPECIAL_CHARS",
       "question_code": "caregiver_name_first_name_middle_name_last_name"
     },
     {
@@ -191,6 +201,7 @@
       "section": "Personal Info",
       "required": true,
       "input_type": "number",
+      "exactLength": 10,
       "question_code": "mobile_number"
     },
     {
@@ -943,6 +954,54 @@
       "question_code": "vaccination_taken_at_birth"
     },
     {
+      "label": "BCG date",
+      "section": "Infant Details",
+      "required": false,
+      "input_type": "date",
+      "visibleWhen": {
+        "field": "vaccination_taken_at_birth",
+        "operator": "contains",
+        "value": "bcg_date"
+      },
+      "question_code": "bcg_date"
+    },
+    {
+      "label": "OPV date",
+      "section": "Infant Details",
+      "required": false,
+      "input_type": "date",
+      "visibleWhen": {
+        "field": "vaccination_taken_at_birth",
+        "operator": "contains",
+        "value": "opv_date"
+      },
+      "question_code": "opv_date"
+    },
+    {
+      "label": "Hepatitis B date",
+      "section": "Infant Details",
+      "required": false,
+      "input_type": "date",
+      "visibleWhen": {
+        "field": "vaccination_taken_at_birth",
+        "operator": "contains",
+        "value": "hepatitis_b_date"
+      },
+      "question_code": "hepatitis_b_date"
+    },
+    {
+      "label": "Vitamin K date",
+      "section": "Infant Details",
+      "required": false,
+      "input_type": "date",
+      "visibleWhen": {
+        "field": "vaccination_taken_at_birth",
+        "operator": "contains",
+        "value": "vitamin_k_date"
+      },
+      "question_code": "vitamin_k_date"
+    },
+    {
       "label": "Remarks",
       "section": "Infant Details",
       "required": false,
@@ -954,6 +1013,21 @@
     {
       "rule": "ANY_OF_REQUIRED",
       "fields": ["mother_date_of_birth", "mother_age"]
+    },
+    {
+      "rule": "EXCLUSIVE_OPTION",
+      "field": "vaccination_taken_at_birth",
+      "exclusiveValues": ["none"]
+    },
+    {
+      "rule": "REQUIRED_IF_SELECTED",
+      "field": "vaccination_taken_at_birth",
+      "optionFieldMap": {
+        "bcg_date": "bcg_date",
+        "opv_date": "opv_date",
+        "hepatitis_b_date": "hepatitis_b_date",
+        "vitamin_k_date": "vitamin_k_date"
+      }
     }
   ]
 }

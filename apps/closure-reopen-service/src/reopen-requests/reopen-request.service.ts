@@ -2,6 +2,10 @@ import { conflict, notFound } from '@armman/service-commons';
 import type { ReopenRequestRepository } from './reopen-request.repository';
 import type { AuditClient } from './audit.client';
 import type { NotificationClient } from './notification.client';
+import type { ApprovalClient } from './approval.client';
+import type { LookupClient } from './lookup.client';
+import type { BeneficiaryClient } from './beneficiary.client';
+import type { CreateReopenRequestInput } from './dto/create-reopen-request.dto';
 import type { DecideReopenRequestInput } from './dto/decide-reopen-request.dto';
 
 /** Reopen request domain logic. Data access is delegated to the repository. */
@@ -10,12 +14,76 @@ export class ReopenRequestService {
     private readonly repository: ReopenRequestRepository,
     private readonly auditClient: AuditClient,
     private readonly notificationClient: NotificationClient,
+    private readonly approvalClient: ApprovalClient,
+    private readonly lookupClient: LookupClient,
+    private readonly beneficiaryClient: BeneficiaryClient,
   ) {}
+
+  /**
+   * Raises a Sakhi's reopen request (FR-S-10.3) and, on success, raises the
+   * matching REOPEN Quick Response card in approval-service. The reopen
+   * request is the source of truth — a failure raising the card is logged
+   * and tolerated rather than failing an already-successful submission
+   * (same tolerance the decide() audit/notification calls use).
+   */
+  async create(
+    dto: CreateReopenRequestInput,
+    requestedByUserId: string,
+    authorizationHeader: string,
+  ) {
+    const created = await this.repository.create({ ...dto, requestedByUserId });
+
+    try {
+      const decisionStatusLookupId = await this.lookupClient.resolveApprovalStatusId(
+        'PENDING',
+        authorizationHeader,
+      );
+      if (decisionStatusLookupId) {
+        await this.approvalClient.create(
+          {
+            requestType: 'REOPEN',
+            beneficiaryId: created.beneficiaryId,
+            sourceEntityType: 'ReopenRequest',
+            sourceEntityId: created.id,
+            reopenRequestId: created.id,
+            requestedByUserId,
+            decisionStatusLookupId,
+          },
+          authorizationHeader,
+        );
+      } else {
+        console.error(
+          `Reopen request ${created.id} was created but no PENDING APPROVAL_STATUS lookup value was found — Quick Response card not raised.`,
+        );
+      }
+    } catch (err) {
+      console.error(
+        `Reopen request ${created.id} was created but raising its Quick Response card failed:`,
+        err,
+      );
+    }
+
+    return created;
+  }
 
   /**
    * Decides a Supervisor's reopen request (Quick Response's REOPEN card).
    * REJECTED is the persisted "Cannot re-open" state — the beneficiary
    * simply stays whatever Closed state it already had; no separate flag.
+   *
+   * On APPROVED, also reactivates the beneficiary case (FR-SV-4.7's
+   * "Beneficiary is added to Sakhi's Open beneficiary list") via
+   * beneficiary-service. This call is best-effort (logged, not thrown) —
+   * `repository.decide()` just above already committed
+   * `supervisorStatus = 'APPROVED'`, and this method's own guard
+   * (`supervisorStatus !== 'PENDING'`) means a reopen request can never be
+   * decided a second time to retry just this step; any retry attempt 409s
+   * immediately. Letting this call fail the whole request would leave the
+   * request stuck showing APPROVED with the beneficiary still CLOSED and no
+   * way to fix it except a direct beneficiary-service call — same failure
+   * shape as the audit/notification calls below, so it's tolerated the same
+   * way, with a distinct log line calling out that this one needs manual
+   * follow-up, not just a shrug.
    *
    * Writes the audit_log entry and notifies the Sakhi here, not in
    * approval-service's Quick Response layer — this endpoint is the only
@@ -41,6 +109,19 @@ export class ReopenRequestService {
       // conditional update — same outcome as the check above, just caught a
       // beat later instead of trusting a stale read.
       throw conflict('This reopen request has already been decided.');
+    }
+
+    if (dto.decision === 'APPROVED') {
+      try {
+        await this.beneficiaryClient.reactivateCase(existing.beneficiaryId, authorizationHeader);
+      } catch (err) {
+        console.error(
+          `Reopen request ${id} was approved but reactivating beneficiary ` +
+            `${existing.beneficiaryId} failed (this request cannot be re-decided to retry — ` +
+            `needs manual follow-up):`,
+          err,
+        );
+      }
     }
 
     const decided = await this.repository.findById(id);

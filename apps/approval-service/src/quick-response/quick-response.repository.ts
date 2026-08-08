@@ -35,4 +35,37 @@ export class QuickResponseRepository {
   findById(id: string) {
     return this.prisma.approvalRequest.findFirst({ where: { id, isDeleted: false } });
   }
+
+  /**
+   * Marks an approval_requests card decided — conditional on `decidedAt`
+   * still being null, so a race between two concurrent decisions on the
+   * same card only ever wins once. Returns false (not an error) when the
+   * conditional update matches nothing, so the caller can turn that into a
+   * 409 the same way every other decide() flow in this codebase does.
+   *
+   * Every APPROVAL_REQUEST_CARD_TYPES card type needs this — without it, a
+   * card's real side effect (LMP write, referral/closure/reopen status
+   * change) can be re-triggered by re-approving the same card, since
+   * nothing on the approval_requests row itself ever recorded that it was
+   * already decided.
+   */
+  async markDecided(
+    id: string,
+    decisionStatusLookupId: string,
+    decidedByUserId: string,
+    decisionNotes: string | undefined,
+    decisionReasonCodeLookupId: string | undefined,
+  ): Promise<boolean> {
+    const result = await this.prisma.approvalRequest.updateMany({
+      where: { id, isDeleted: false, decidedAt: null },
+      data: {
+        decisionStatusLookupId,
+        decidedByUserId,
+        decidedAt: new Date(),
+        decisionNotes: decisionNotes ?? null,
+        decisionReasonCodeLookupId: decisionReasonCodeLookupId ?? null,
+      },
+    });
+    return result.count > 0;
+  }
 }

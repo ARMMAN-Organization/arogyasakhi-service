@@ -7,6 +7,7 @@ export interface PiiRow {
   fullNameEnc: Buffer;
   phoneEnc: Buffer | null;
   addressLineEnc: Buffer | null;
+  rchNumberEnc: Buffer | null;
   villageId: string | null;
   padaId: string | null;
   healthSubCentreId: string | null;
@@ -60,6 +61,7 @@ export function withDecryptedName<T extends { pii: PiiRow; [k: string]: unknown 
       fullName: decryptPii(pii.fullNameEnc),
       mobileNumber: pii.phoneEnc ? decryptPii(pii.phoneEnc) : null,
       address: pii.addressLineEnc ? decryptPii(pii.addressLineEnc) : null,
+      rchNumber: pii.rchNumberEnc ? decryptPii(pii.rchNumberEnc) : null,
       villageId: pii.villageId,
       padaId: pii.padaId,
       healthSubCentreId: pii.healthSubCentreId,

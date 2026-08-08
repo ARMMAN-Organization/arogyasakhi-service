@@ -58,6 +58,24 @@ describe('withDecryptedName', () => {
     expect(result.pii).toMatchObject({ mobileNumber: null, address: null });
   });
 
+  it('decrypts rchNumber from pii', () => {
+    const result = withDecryptedName({
+      id: 'x',
+      pii: basePii({ rchNumberEnc: encryptPii('KA201900042') }),
+    } as never);
+
+    expect(result.pii).toMatchObject({ rchNumber: 'KA201900042' });
+  });
+
+  it('leaves rchNumber null without attempting to decrypt', () => {
+    const result = withDecryptedName({
+      id: 'x',
+      pii: basePii({ rchNumberEnc: null }),
+    } as never);
+
+    expect(result.pii).toMatchObject({ rchNumber: null });
+  });
+
   it('projects socioDemographics when present, allow-listing only documented fields', () => {
     const result = withDecryptedName({
       id: 'x',
