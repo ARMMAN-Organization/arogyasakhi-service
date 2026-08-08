@@ -2,12 +2,14 @@ import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
 import { z } from 'zod';
 import type { ReferralService } from './referral.service';
 import { createReferralSchema } from './dto/create-referral.dto';
+import { decideReferralSchema } from './dto/decide-referral.dto';
 import {
   asyncHandler,
   createDocumentedRouter,
   ok,
   requireRoles,
   trustGatewayIdentity,
+  validate,
   validateBody,
 } from '../app.module';
 
@@ -50,6 +52,14 @@ const referralSchema = z.object({
   supervisorApprovalStatus: z.enum(['NOT_REQUIRED', 'PENDING', 'APPROVED', 'REJECTED']),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
+});
+
+const referralIdParamsSchema = z
+  .object({ id: z.string().uuid().openapi({ example: '123e4567-e89b-12d3-a456-426614174000' }) })
+  .strict();
+
+const decideReferralRequestSchema = decideReferralSchema.extend({
+  decision: decideReferralSchema.shape.decision.openapi({ example: 'LAPSE' }),
 });
 
 const apiErrorSchema = z.object({
@@ -110,6 +120,31 @@ export function createReferralRouter(service: ReferralService) {
     asyncHandler(async (req, res) => {
       const created = await service.create(req.body);
       res.status(201).json(ok(created));
+    }),
+  );
+
+  doc.patch(
+    '/referrals/:id/decision',
+    {
+      summary: "Decide a referral's follow-up outcome (FR-SV-4.5, FR-SV-4.9)",
+      tags: ['Referrals'],
+      params: referralIdParamsSchema,
+      responses: {
+        200: { description: 'Referral decided', schema: envelope(referralSchema) },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+        404: { description: 'Referral not found', schema: apiErrorSchema },
+        409: { description: 'Referral is not in PENDING_FOLLOWUP status', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(referralIdParamsSchema, 'params'),
+    validateBody(decideReferralRequestSchema),
+    asyncHandler(async (req, res) => {
+      const updated = await service.decide(req.params.id, req.body);
+      res.json(ok(updated));
     }),
   );
 
