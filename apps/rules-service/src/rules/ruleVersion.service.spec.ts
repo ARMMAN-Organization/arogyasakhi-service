@@ -151,6 +151,7 @@ describe('RuleVersionService', () => {
 
   describe('evaluate', () => {
     it('evaluates against the published version and returns ruleVersionId alongside the results', async () => {
+      repository.findSetById.mockResolvedValue({ id: setId } as never);
       repository.findPublishedBySetId.mockResolvedValue({
         id: 'ver-1',
         ruleSetId: setId,
@@ -191,16 +192,30 @@ describe('RuleVersionService', () => {
       });
     });
 
-    it('422s when the rule set has no published version, never evaluating', async () => {
+    it('404s when the rule set itself does not exist, never checking for a published version', async () => {
+      repository.findSetById.mockResolvedValue(null);
+
+      await expect(service.evaluate(setId, { answers: {} })).rejects.toMatchObject({
+        status: 404,
+        message: 'Rule set not found.',
+      });
+      expect(repository.findPublishedBySetId).not.toHaveBeenCalled();
+      expect(evaluateRulePackMock).not.toHaveBeenCalled();
+    });
+
+    it('404s when the rule set exists but has no published version, never evaluating', async () => {
+      repository.findSetById.mockResolvedValue({ id: setId } as never);
       repository.findPublishedBySetId.mockResolvedValue(null);
 
       await expect(service.evaluate(setId, { answers: {} })).rejects.toMatchObject({
-        status: 422,
+        status: 404,
+        message: 'No published rule pack version found for this rule set.',
       });
       expect(evaluateRulePackMock).not.toHaveBeenCalled();
     });
 
     it('propagates evaluateRulePack errors (e.g. malformed decision-graph output) unchanged', async () => {
+      repository.findSetById.mockResolvedValue({ id: setId } as never);
       repository.findPublishedBySetId.mockResolvedValue({
         id: 'ver-1',
         ruleSetId: setId,

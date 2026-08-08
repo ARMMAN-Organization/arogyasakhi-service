@@ -97,13 +97,22 @@ function validateResultEntry(entry: unknown, index: number): RiskEvaluationResul
   if (typeof e.gradeRank !== 'number') {
     throw badRequest(`conditions[${index}].gradeRank must be a number.`);
   }
+  if (typeof e.isReferralTrigger !== 'boolean') {
+    throw badRequest(`conditions[${index}].isReferralTrigger must be a boolean.`);
+  }
+  if (typeof e.isEducationTrigger !== 'boolean') {
+    throw badRequest(`conditions[${index}].isEducationTrigger must be a boolean.`);
+  }
+  if (typeof e.isHrVisitTrigger !== 'boolean') {
+    throw badRequest(`conditions[${index}].isHrVisitTrigger must be a boolean.`);
+  }
   return {
     riskConditionId: e.riskConditionId,
     grade: e.grade,
     gradeRank: e.gradeRank,
-    isReferralTrigger: Boolean(e.isReferralTrigger),
-    isEducationTrigger: Boolean(e.isEducationTrigger),
-    isHrVisitTrigger: Boolean(e.isHrVisitTrigger),
+    isReferralTrigger: e.isReferralTrigger,
+    isEducationTrigger: e.isEducationTrigger,
+    isHrVisitTrigger: e.isHrVisitTrigger,
     observedValueJson: (e.observedValueJson as Record<string, unknown> | undefined) ?? null,
   };
 }

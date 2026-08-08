@@ -48,10 +48,19 @@ describe('evaluateRulePack', () => {
     });
   });
 
-  it('defaults missing boolean triggers to false and observedValueJson to null', async () => {
+  it('defaults observedValueJson to null when omitted', async () => {
     const result = await evaluateRulePack(IDENTITY_GRAPH, {
       overallRiskCategory: 'NORMAL',
-      conditions: [{ riskConditionId: 'cond-1', grade: 'NORMAL', gradeRank: 0 }],
+      conditions: [
+        {
+          riskConditionId: 'cond-1',
+          grade: 'NORMAL',
+          gradeRank: 0,
+          isReferralTrigger: false,
+          isEducationTrigger: false,
+          isHrVisitTrigger: false,
+        },
+      ],
     });
 
     expect(result.conditions[0]).toEqual({
@@ -63,6 +72,36 @@ describe('evaluateRulePack', () => {
       isHrVisitTrigger: false,
       observedValueJson: null,
     });
+  });
+
+  it('rejects a condition entry with a missing (non-boolean) trigger field, rather than silently defaulting to false', async () => {
+    await expect(
+      evaluateRulePack(IDENTITY_GRAPH, {
+        overallRiskCategory: 'NORMAL',
+        conditions: [{ riskConditionId: 'cond-1', grade: 'NORMAL', gradeRank: 0 }],
+      }),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('rejects a condition entry whose trigger field is the string "false", rather than coercing it truthy', async () => {
+    // Regression test: Boolean("false") === true — a decision graph authored
+    // visually (not in code) that happens to emit the literal string "false"
+    // for a trigger column must be rejected, not silently flip the trigger on.
+    await expect(
+      evaluateRulePack(IDENTITY_GRAPH, {
+        overallRiskCategory: 'NORMAL',
+        conditions: [
+          {
+            riskConditionId: 'cond-1',
+            grade: 'NORMAL',
+            gradeRank: 0,
+            isReferralTrigger: 'false',
+            isEducationTrigger: false,
+            isHrVisitTrigger: false,
+          },
+        ],
+      }),
+    ).rejects.toMatchObject({ status: 400 });
   });
 
   it('rejects an output that is not an object', async () => {

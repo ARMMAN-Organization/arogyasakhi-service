@@ -186,8 +186,8 @@ export function createRuleVersionRouter(service: RuleVersionService) {
         400: { description: 'Malformed answers or decision-graph output', schema: apiErrorSchema },
         401: { description: 'Unauthenticated', schema: apiErrorSchema },
         403: { description: 'Caller role not permitted', schema: apiErrorSchema },
-        422: {
-          description: 'No published rule pack version found for this rule set',
+        404: {
+          description: 'Rule set not found, or it has no published version',
           schema: apiErrorSchema,
         },
         500: { description: 'Server error', schema: apiErrorSchema },

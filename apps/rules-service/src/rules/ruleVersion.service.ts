@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { conflict, notFound, unprocessable } from '@armman/service-commons';
+import { conflict, notFound } from '@armman/service-commons';
 import type { RuleVersionRepository } from './ruleVersion.repository';
 import type { PublishRuleVersionInput } from './dto/publish-ruleVersion.dto';
 import type { EvaluateRuleSetInput } from './dto/evaluate-ruleSet.dto';
@@ -70,16 +70,22 @@ export class RuleVersionService {
    * describes, previously unimplemented (this service only stored rule
    * packs opaquely; nothing interpreted rulesJson until now).
    *
-   * 404 if the set has no published version — never silently evaluates
-   * against a DRAFT (an unreviewed rule pack must not affect real risk
-   * grading). Returns the published version's own id as `ruleVersionId`
-   * alongside the results, so the caller (risk-referral-service) can record
-   * which rule version produced a given RiskAssessment.
+   * 404 if the set doesn't exist, and a separate 404 if it exists but has no
+   * published version — same two-step check as getPublished() just above,
+   * so a stale/typo'd ruleSetId is distinguishable from a real set that
+   * simply hasn't been published yet. Never silently evaluates against a
+   * DRAFT (an unreviewed rule pack must not affect real risk grading).
+   * Returns the published version's own id as `ruleVersionId` alongside the
+   * results, so the caller (risk-referral-service) can record which rule
+   * version produced a given RiskAssessment.
    */
   async evaluate(ruleSetId: string, dto: EvaluateRuleSetInput) {
+    const set = await this.repository.findSetById(ruleSetId);
+    if (!set) throw notFound('Rule set not found.');
+
     const version = await this.repository.findPublishedBySetId(ruleSetId);
     if (!version) {
-      throw unprocessable('No published rule pack version found for this rule set.');
+      throw notFound('No published rule pack version found for this rule set.');
     }
 
     const evaluation = await evaluateRulePack(version.rulesJson, dto.answers);
