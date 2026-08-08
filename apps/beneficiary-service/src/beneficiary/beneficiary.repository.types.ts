@@ -20,6 +20,17 @@ export interface BeneficiaryListFilters {
    * default-deny result (supervisor has no Sakhis), never "no filter".
    */
   sakhiIds?: string[];
+  /** Registration date range, inclusive on both ends. */
+  fromDate?: string;
+  toDate?: string;
+  /** Opaque cursor from a prior page's `nextCursor` — see findMany's doc comment. */
+  cursor?: string;
+  limit: number;
+}
+
+export interface BeneficiaryListPage<T> {
+  items: T[];
+  nextCursor: string | null;
 }
 
 export interface DuplicateSearchTokens {
