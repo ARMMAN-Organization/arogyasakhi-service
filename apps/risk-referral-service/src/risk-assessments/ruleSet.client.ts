@@ -1,4 +1,4 @@
-import { badGateway, unprocessable, HttpError } from '@armman/service-commons';
+import { badGateway, notFound, HttpError } from '@armman/service-commons';
 
 const API_GATEWAY_BASE_URL = process.env.API_GATEWAY_BASE_URL ?? 'http://localhost:3000';
 
@@ -22,9 +22,10 @@ interface EvaluateResponse {
  * Calls rules-service's `POST /rules/:setId/evaluate` through the gateway,
  * forwarding the caller's own Authorization header (this codebase has no
  * machine/service-account identity — see that endpoint's doc comment).
- * 422 (no published version for this rule set) is re-thrown as-is so the
- * caller can decide how to surface "this form's ruleSetId has nothing
- * published yet" — not swallowed into a generic 502.
+ * 404 (rule set not found, or found but has no published version) is
+ * re-thrown as-is so the caller can decide how to surface "this form's
+ * ruleSetId is unconfigured/has nothing published yet" — not swallowed into
+ * a generic 502.
  */
 export async function evaluateRuleSet(
   ruleSetId: string,
@@ -42,9 +43,9 @@ export async function evaluateRuleSet(
     throw badGateway('Unable to evaluate the rule set — rules-service is unreachable.');
   }
 
-  if (res.status === 422) {
+  if (res.status === 404) {
     const body = (await res.json().catch(() => null)) as { message?: string } | null;
-    throw unprocessable(body?.message ?? 'No published rule pack version found for this rule set.');
+    throw notFound(body?.message ?? 'No published rule pack version found for this rule set.');
   }
   if (!res.ok) {
     if (res.status >= 400 && res.status < 500) {

@@ -71,10 +71,14 @@ function envelope<T extends z.ZodTypeAny>(data: T) {
  *
  * Called server-to-server by visit-form-service after it persists a
  * visit-linked, VALID form submission — see riskAssessment.service.ts for
- * the full evaluate -> persist -> push pipeline. Gated by
- * requireRoles('SAKHI') since this codebase has no machine/service-account
- * identity: the call chain forwards the SAKHI's own token from the
- * originating submission.
+ * the full evaluate -> persist -> push pipeline. The originating call is
+ * always a forwarded SAKHI token (this codebase has no machine/
+ * service-account identity), but SUPERVISOR/MANAGER/ADMIN are also allowed
+ * to match the service's own full authorization matrix (a SAKHI may only
+ * act on her own beneficiary, a SUPERVISOR only on a beneficiary whose
+ * Sakhi is in her roster, MANAGER/ADMIN unrestricted) — e.g. an admin tool
+ * manually re-triggering grading for a beneficiary outside the normal
+ * submission flow.
  */
 export function createRiskAssessmentRouter(service: RiskAssessmentService) {
   const doc = createDocumentedRouter();
@@ -89,9 +93,10 @@ export function createRiskAssessmentRouter(service: RiskAssessmentService) {
         'original assessment rather than re-evaluating.',
       tags: ['Risk Assessments'],
       responses: {
-        201: { description: 'Risk assessment created', schema: envelope(riskAssessmentSchema) },
-        200: {
-          description: 'Existing risk assessment for this submissionId returned as-is',
+        201: {
+          description:
+            'Risk assessment created (or, for a retried submissionId, the original ' +
+            'assessment returned as-is)',
           schema: envelope(riskAssessmentSchema),
         },
         400: {
@@ -103,19 +108,18 @@ export function createRiskAssessmentRouter(service: RiskAssessmentService) {
           description: "Caller role not permitted, or beneficiary outside caller's own roster",
           schema: apiErrorSchema,
         },
-        404: { description: 'Beneficiary case not found', schema: apiErrorSchema },
-        422: {
-          description: 'No published rule pack version found for the given ruleSetId',
+        404: {
+          description: 'Beneficiary case not found, or the rule set has no published version',
           schema: apiErrorSchema,
         },
         502: {
-          description: 'rules-service or beneficiary-service unreachable',
+          description: 'rules-service unreachable',
           schema: apiErrorSchema,
         },
       },
     },
     trustGatewayIdentity,
-    requireRoles('SAKHI'),
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
     validateBody(createRiskAssessmentRequestSchema),
     asyncHandler(async (req, res, next) => {
       if (!req.user) return next(unauthorized());
