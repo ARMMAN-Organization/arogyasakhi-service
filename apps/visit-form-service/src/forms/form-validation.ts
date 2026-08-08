@@ -110,15 +110,14 @@ function evaluateVisibilityCondition(
 
 /**
  * Evaluates SRS Category 5 skip logic for one field against the submitted
- * formData. `visibleWhen` is either a single condition or an array of
- * conditions ANDed together — a field with multiple conditions (e.g. gated
- * behind both "met the beneficiary = yes" and its own gestational-age
- * threshold) is visible only when every condition passes.
+ * formData. `visibleWhen` is a single {field,operator,value} condition only
+ * — never an array — since the mobile client's FormVisibilityEvaluator
+ * doesn't parse an array-of-conditions shape (see form-field.dto.ts's
+ * visibleWhen doc comment).
  */
 export function isVisible(field: FormField, formData: Record<string, unknown>): boolean {
   if (!field.visibleWhen) return true;
-  const conditions = Array.isArray(field.visibleWhen) ? field.visibleWhen : [field.visibleWhen];
-  return conditions.every((condition) => evaluateVisibilityCondition(condition, formData));
+  return evaluateVisibilityCondition(field.visibleWhen, formData);
 }
 
 /**

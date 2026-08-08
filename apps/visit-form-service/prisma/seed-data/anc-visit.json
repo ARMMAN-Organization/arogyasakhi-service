@@ -129,7 +129,7 @@
         "notFuture": true
       },
       "visibleWhen": {
-        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "field": "do_you_have_a_sonography_report_to_confirm_the_lmp_date",
         "operator": "eq",
         "value": "yes"
       },
@@ -142,7 +142,7 @@
       "input_type": "image",
       "captureMode": "LIVE_CAMERA_ONLY",
       "visibleWhen": {
-        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "field": "do_you_have_a_sonography_report_to_confirm_the_lmp_date",
         "operator": "eq",
         "value": "yes"
       },
@@ -633,9 +633,9 @@
       "required": true,
       "input_type": "radio",
       "visibleWhen": {
-        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
-        "operator": "eq",
-        "value": "yes"
+        "field": "current_gestational_age_in_weeks",
+        "operator": "gte",
+        "value": "20"
       },
       "question_code": "fetal_movements"
     },
@@ -645,9 +645,9 @@
       "required": true,
       "input_type": "number",
       "visibleWhen": {
-        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
-        "operator": "eq",
-        "value": "yes"
+        "field": "current_gestational_age_in_weeks",
+        "operator": "gte",
+        "value": "20"
       },
       "question_code": "fetal_heart_rate"
     },
@@ -661,9 +661,9 @@
         "max": 50
       },
       "visibleWhen": {
-        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
-        "operator": "eq",
-        "value": "yes"
+        "field": "current_gestational_age_in_weeks",
+        "operator": "gte",
+        "value": "20"
       },
       "question_code": "fundal_height_in_cm"
     },
@@ -863,7 +863,7 @@
         "max": 35
       },
       "visibleWhen": {
-        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "field": "are_you_taking_ifa_tablets",
         "operator": "eq",
         "value": "yes"
       },
@@ -965,7 +965,7 @@
         "notFuture": true
       },
       "visibleWhen": {
-        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "field": "have_you_visited_health_facility_since_my_last_visit",
         "operator": "eq",
         "value": "yes"
       },

@@ -74,14 +74,20 @@ export const formFieldSchema = z
     // Fixed digit-count fields (e.g. a 10-digit mobile number) — distinct from
     // numericRange, which bounds a value rather than its digit length.
     exactLength: z.number().int().positive().optional(),
-    // A single condition, or an array of conditions ANDed together (all must
-    // pass for the field to be visible) — e.g. a visit-form field that is
-    // both gated behind "met the beneficiary = yes" AND its own condition
-    // (gestational age, USG done, etc). Most fields only ever need one
-    // condition, so the plain single-object shape is still accepted as-is.
-    visibleWhen: z
-      .union([visibleWhenConditionSchema, z.array(visibleWhenConditionSchema).min(1)])
-      .optional(),
+    // A single {field,operator,value} condition ONLY — never an array.
+    // The mobile client's FormVisibilityEvaluator does not parse an
+    // array-of-conditions shape and crashes the whole form load if it sees
+    // one (see the ANC_VISIT/INFANT_VISIT incident this schema-level
+    // rejection follows: array-form visibleWhen was briefly published to
+    // AND a field's own condition with "met beneficiary = yes", and every
+    // Sakhi got "We couldn't load this visit's data" with no way to
+    // submit). Rejected here at the schema level — not just absent from
+    // current seed content — so this can't be reintroduced via the live
+    // admin form-authoring PATCH endpoint (`PATCH
+    // /admin/forms/:formCode/versions/:versionId`) either, for ANY form,
+    // not only the two that already had the incident. Re-allow the array
+    // shape only once mobile ships a parser for it, not before.
+    visibleWhen: visibleWhenConditionSchema.optional(),
     computedFrom: z
       .enum([
         'EDD_FROM_LMP',

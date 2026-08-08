@@ -252,59 +252,6 @@ describe('isVisible — contains operator', () => {
   });
 });
 
-describe('isVisible — array of conditions (AND)', () => {
-  const usgDateField: FormField = {
-    question_code: 'if_yes_date_of_usg',
-    label: 'If yes, date of USG',
-    input_type: 'date',
-    required: true,
-    visibleWhen: [
-      { field: 'have_you_done_usg_since_last_visit', operator: 'eq', value: 'yes' },
-      {
-        field: 'have_you_been_able_to_meet_the_beneficiary_for_the_visit',
-        operator: 'eq',
-        value: 'yes',
-      },
-    ],
-  };
-
-  it('is visible when every condition passes', () => {
-    const visible = isVisible(usgDateField, {
-      have_you_done_usg_since_last_visit: 'yes',
-      have_you_been_able_to_meet_the_beneficiary_for_the_visit: 'yes',
-    });
-
-    expect(visible).toBe(true);
-  });
-
-  it('is hidden when only one of two conditions passes', () => {
-    const visible = isVisible(usgDateField, {
-      have_you_done_usg_since_last_visit: 'yes',
-      have_you_been_able_to_meet_the_beneficiary_for_the_visit: 'no',
-    });
-
-    expect(visible).toBe(false);
-  });
-
-  it('is hidden when neither condition passes', () => {
-    const visible = isVisible(usgDateField, {
-      have_you_done_usg_since_last_visit: 'no',
-      have_you_been_able_to_meet_the_beneficiary_for_the_visit: 'no',
-    });
-
-    expect(visible).toBe(false);
-  });
-
-  it('skips the required check for a field hidden by any one failing condition', () => {
-    const violations = validateSubmission([usgDateField], [], {
-      have_you_done_usg_since_last_visit: 'yes',
-      have_you_been_able_to_meet_the_beneficiary_for_the_visit: 'no',
-    });
-
-    expect(violations).toEqual([]);
-  });
-});
-
 describe('validateSubmission — dateRule (LMP: notFuture, notAfter, minDaysFrom, maxDaysFrom)', () => {
   const registrationDateField: FormField = {
     question_code: 'registration_date',

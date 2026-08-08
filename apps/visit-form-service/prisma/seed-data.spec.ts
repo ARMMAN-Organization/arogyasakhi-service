@@ -258,6 +258,28 @@ describe('anc-visit.json', () => {
   });
 
   it('gates every Q5+ field behind met-beneficiary=yes', () => {
+    // fetal_movements/fetal_heart_rate/fundal_height_in_cm are excluded here:
+    // per the source doc (row 10), they gate on gestational age >= 20 weeks
+    // instead, not on met-beneficiary — see the dedicated test below.
+    //
+    // lmp_date_edit/upload_sonography_report_image are excluded here: they
+    // gate on do_you_have_a_sonography_report_to_confirm_the_lmp_date=yes
+    // instead — that field is itself gated on met-beneficiary=yes, so the
+    // met-beneficiary condition still applies, one step removed. See the
+    // dedicated test below.
+    //
+    // how_many_ifa_tablets_did_you_consume_since_last_visit is excluded
+    // here: per the source doc (row 36-37), it gates on
+    // are_you_taking_ifa_tablets=yes instead — that field is itself gated
+    // on met-beneficiary=yes, same one-step-removed pattern as the
+    // sonography-report group above. See the dedicated test below.
+    //
+    // if_yes_enter_date_of_latest_anc_visit_at_the_health_facility is
+    // excluded here: per the source doc (Q40/Q41), it gates on
+    // have_you_visited_health_facility_since_my_last_visit=yes instead —
+    // that field is itself gated on met-beneficiary=yes, same
+    // one-step-removed pattern as the groups above. See the dedicated test
+    // below.
     for (const field of fields) {
       if (
         [
@@ -265,12 +287,75 @@ describe('anc-visit.json', () => {
           'visit_type',
           'have_you_been_able_to_meet_the_beneficiary_for_the_visit',
           'if_no_mention_reasons',
+          'fetal_movements',
+          'fetal_heart_rate',
+          'fundal_height_in_cm',
+          'lmp_date_edit',
+          'upload_sonography_report_image',
+          'how_many_ifa_tablets_did_you_consume_since_last_visit',
+          'if_yes_enter_date_of_latest_anc_visit_at_the_health_facility',
         ].includes(field.question_code)
       ) {
         continue;
       }
       expect(field.visibleWhen).toEqual(MET_BENEFICIARY_YES);
     }
+  });
+
+  it('shows fetal_movements/fetal_heart_rate/fundal_height_in_cm only from 20 weeks gestation (row 10)', () => {
+    const GESTATIONAL_AGE_GTE_20 = {
+      field: 'current_gestational_age_in_weeks',
+      operator: 'gte',
+      value: '20',
+    };
+    for (const code of ['fetal_movements', 'fetal_heart_rate', 'fundal_height_in_cm']) {
+      expect(byCode.get(code)?.visibleWhen).toEqual(GESTATIONAL_AGE_GTE_20);
+    }
+  });
+
+  it('shows the IFA tablet count only when are_you_taking_ifa_tablets=yes (row 36-37)', () => {
+    expect(
+      byCode.get('how_many_ifa_tablets_did_you_consume_since_last_visit')?.visibleWhen,
+    ).toEqual({
+      field: 'are_you_taking_ifa_tablets',
+      operator: 'eq',
+      value: 'yes',
+    });
+    // The gating field itself is still met-beneficiary-gated, so the chain
+    // as a whole reduces to met-beneficiary=yes AND are-taking-ifa=yes.
+    expect(byCode.get('are_you_taking_ifa_tablets')?.visibleWhen).toEqual(MET_BENEFICIARY_YES);
+  });
+
+  it('gates the LMP-edit date and sonography image behind having a sonography report, not met-beneficiary directly', () => {
+    const HAS_SONOGRAPHY_REPORT_YES = {
+      field: 'do_you_have_a_sonography_report_to_confirm_the_lmp_date',
+      operator: 'eq',
+      value: 'yes',
+    };
+    expect(byCode.get('lmp_date_edit')?.visibleWhen).toEqual(HAS_SONOGRAPHY_REPORT_YES);
+    expect(byCode.get('upload_sonography_report_image')?.visibleWhen).toEqual(
+      HAS_SONOGRAPHY_REPORT_YES,
+    );
+    // The gating field itself is still met-beneficiary-gated, so the chain
+    // as a whole reduces to met-beneficiary=yes AND has-report=yes.
+    expect(
+      byCode.get('do_you_have_a_sonography_report_to_confirm_the_lmp_date')?.visibleWhen,
+    ).toEqual(MET_BENEFICIARY_YES);
+  });
+
+  it('shows the latest-ANC-visit date only when have_you_visited_health_facility_since_my_last_visit=yes (Q40/Q41)', () => {
+    expect(
+      byCode.get('if_yes_enter_date_of_latest_anc_visit_at_the_health_facility')?.visibleWhen,
+    ).toEqual({
+      field: 'have_you_visited_health_facility_since_my_last_visit',
+      operator: 'eq',
+      value: 'yes',
+    });
+    // The gating field itself is still met-beneficiary-gated, so the chain
+    // as a whole reduces to met-beneficiary=yes AND visited-facility=yes.
+    expect(byCode.get('have_you_visited_health_facility_since_my_last_visit')?.visibleWhen).toEqual(
+      MET_BENEFICIARY_YES,
+    );
   });
 
   it('applies notFuture to the LMP edit date (Q8)', () => {
