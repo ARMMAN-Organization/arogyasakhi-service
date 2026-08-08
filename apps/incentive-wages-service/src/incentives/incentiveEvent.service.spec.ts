@@ -38,7 +38,10 @@ describe('IncentiveEventService', () => {
 
   const rateRow = {
     id: baseDto.rateId,
+    rateType: 'VISIT',
     amountInr: new Prisma.Decimal(150),
+    effectiveFrom: new Date('2026-01-01'),
+    effectiveTo: null,
   };
 
   const createdRow = {
@@ -80,6 +83,44 @@ describe('IncentiveEventService', () => {
     rateRepository.findById.mockResolvedValue(null);
     await expect(service.create(baseDto)).rejects.toMatchObject({ status: 404 });
     expect(repository.create).not.toHaveBeenCalled();
+  });
+
+  it("422s when the rate's rateType does not match the event's sourceEntityType", async () => {
+    rateRepository.findById.mockResolvedValue({ ...rateRow, rateType: 'REFERRAL' } as never);
+
+    await expect(service.create(baseDto)).rejects.toMatchObject({ status: 422 });
+    expect(repository.create).not.toHaveBeenCalled();
+  });
+
+  it('422s when the rate is not yet effective as of calculatedAt', async () => {
+    rateRepository.findById.mockResolvedValue({
+      ...rateRow,
+      effectiveFrom: new Date('2026-08-01'),
+    } as never);
+
+    await expect(service.create(baseDto)).rejects.toMatchObject({ status: 422 });
+    expect(repository.create).not.toHaveBeenCalled();
+  });
+
+  it('422s when the rate has already expired as of calculatedAt', async () => {
+    rateRepository.findById.mockResolvedValue({
+      ...rateRow,
+      effectiveTo: new Date('2026-06-01'),
+    } as never);
+
+    await expect(service.create(baseDto)).rejects.toMatchObject({ status: 422 });
+    expect(repository.create).not.toHaveBeenCalled();
+  });
+
+  it('succeeds when calculatedAt falls exactly on effectiveFrom or effectiveTo (inclusive bounds)', async () => {
+    rateRepository.findById.mockResolvedValue({
+      ...rateRow,
+      effectiveFrom: baseDto.calculatedAt,
+      effectiveTo: baseDto.calculatedAt,
+    } as never);
+    repository.create.mockResolvedValue(createdRow);
+
+    await expect(service.create(baseDto)).resolves.toBe(createdRow);
   });
 
   it('propagates repository errors on create', async () => {
