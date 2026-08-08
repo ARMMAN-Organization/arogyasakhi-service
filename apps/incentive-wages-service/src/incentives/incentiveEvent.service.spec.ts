@@ -14,9 +14,20 @@ describe('IncentiveEventService', () => {
   } as unknown as jest.Mocked<IncentiveRateRepository>;
   let service: IncentiveEventService;
 
+  // Pinned so the rate's effective-window check (anchored to the server
+  // clock, not the caller-supplied calculatedAt — see create()'s doc
+  // comment) has a fixed "now" to assert against.
+  const NOW = new Date('2026-07-20T00:00:00Z');
+
   beforeEach(() => {
     jest.resetAllMocks();
+    jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate'] });
+    jest.setSystemTime(NOW);
     service = new IncentiveEventService(repository, rateRepository);
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
   });
 
   it('lists via repository', async () => {
@@ -92,7 +103,7 @@ describe('IncentiveEventService', () => {
     expect(repository.create).not.toHaveBeenCalled();
   });
 
-  it('422s when the rate is not yet effective as of calculatedAt', async () => {
+  it('422s when the rate is not yet effective (effectiveFrom is in the future)', async () => {
     rateRepository.findById.mockResolvedValue({
       ...rateRow,
       effectiveFrom: new Date('2026-08-01'),
@@ -102,7 +113,7 @@ describe('IncentiveEventService', () => {
     expect(repository.create).not.toHaveBeenCalled();
   });
 
-  it('422s when the rate has already expired as of calculatedAt', async () => {
+  it('422s when the rate has already expired', async () => {
     rateRepository.findById.mockResolvedValue({
       ...rateRow,
       effectiveTo: new Date('2026-06-01'),
@@ -112,15 +123,32 @@ describe('IncentiveEventService', () => {
     expect(repository.create).not.toHaveBeenCalled();
   });
 
-  it('succeeds when calculatedAt falls exactly on effectiveFrom or effectiveTo (inclusive bounds)', async () => {
+  it('succeeds when the current time falls exactly on effectiveFrom or effectiveTo (inclusive bounds)', async () => {
     rateRepository.findById.mockResolvedValue({
       ...rateRow,
-      effectiveFrom: baseDto.calculatedAt,
-      effectiveTo: baseDto.calculatedAt,
+      effectiveFrom: NOW,
+      effectiveTo: NOW,
     } as never);
     repository.create.mockResolvedValue(createdRow);
 
     await expect(service.create(baseDto)).resolves.toBe(createdRow);
+  });
+
+  it("ignores a caller-supplied calculatedAt outside the rate's effective window — the check is server-clock-anchored, not client-controlled", async () => {
+    // A rate that is NOT effective now (expired well before NOW), paired
+    // with a calculatedAt the client claims falls inside the window. Must
+    // still 422 — calculatedAt must never be able to make an expired/
+    // not-yet-effective rate pass this check.
+    rateRepository.findById.mockResolvedValue({
+      ...rateRow,
+      effectiveFrom: new Date('2026-01-01'),
+      effectiveTo: new Date('2026-02-01'),
+    } as never);
+
+    await expect(
+      service.create({ ...baseDto, calculatedAt: new Date('2026-01-15') }),
+    ).rejects.toMatchObject({ status: 422 });
+    expect(repository.create).not.toHaveBeenCalled();
   });
 
   it('propagates repository errors on create', async () => {
