@@ -76,6 +76,10 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
   // from /rules, so it needs its own gateway entry (mirrors /admin/forms).
   { prefix: '/admin/rules', target: appConfig.RULES_SERVICE_URL, requiresAuth: true },
   { prefix: '/referrals', target: appConfig.RISK_REFERRAL_SERVICE_URL, requiresAuth: true },
+  // Internal-use endpoint, not part of a human-facing surface —
+  // visit-form-service calls it through the gateway after persisting a
+  // visit-linked submission, to trigger the risk-grading pipeline.
+  { prefix: '/risk-assessments', target: appConfig.RISK_REFERRAL_SERVICE_URL, requiresAuth: true },
   { prefix: '/closures', target: appConfig.CLOSURE_REOPEN_SERVICE_URL, requiresAuth: true },
   // Internal-use decision endpoint, not part of the public Quick Response
   // surface — approval-service calls it through the gateway (rather than
