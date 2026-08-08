@@ -136,7 +136,7 @@ export function createMediaAssetRouter(service: MediaAssetService) {
       },
     },
     trustGatewayIdentity,
-    requireRoles('SAKHI'),
+    requireRoles('SAKHI', 'SUPERVISOR'),
     validateBody(createMediaAssetSchema),
     asyncHandler(async (req, res) => {
       const created = await service.create(req.body);
