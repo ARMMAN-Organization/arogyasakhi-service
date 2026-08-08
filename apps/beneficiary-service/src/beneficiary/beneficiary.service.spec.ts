@@ -109,15 +109,27 @@ describe('BeneficiaryService', () => {
 
   describe('applyLmpChange', () => {
     const beneficiaryId = '22222222-2222-2222-2222-222222222222';
+    const sakhiId = '55555555-5555-5555-5555-555555555555';
+
+    function caseRow(overrides: Partial<Record<string, unknown>> = {}) {
+      return {
+        id: beneficiaryId,
+        sakhiId,
+        pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
+        ...overrides,
+      };
+    }
 
     it('recomputes eddDate (lmpDate + 280 days) and persists via the repository', async () => {
+      repository.findById.mockResolvedValue(caseRow() as never);
       repository.updateMotherLmp.mockResolvedValue(true);
-      repository.findById.mockResolvedValue({
-        id: beneficiaryId,
-        pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
-      } as never);
 
-      await service.applyLmpChange(beneficiaryId, new Date('2026-06-15'), AUTH_HEADER);
+      await service.applyLmpChange(
+        beneficiaryId,
+        new Date('2026-06-15'),
+        caller({ roles: ['ADMIN'] }),
+        AUTH_HEADER,
+      );
 
       expect(repository.updateMotherLmp).toHaveBeenCalledWith(
         beneficiaryId,
@@ -127,38 +139,86 @@ describe('BeneficiaryService', () => {
     });
 
     it('returns the updated case via getById', async () => {
+      repository.findById.mockResolvedValue(caseRow() as never);
       repository.updateMotherLmp.mockResolvedValue(true);
-      const found = {
-        id: beneficiaryId,
-        pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
-      };
-      repository.findById.mockResolvedValue(found as never);
 
       const result = await service.applyLmpChange(
         beneficiaryId,
         new Date('2026-06-15'),
+        caller({ roles: ['ADMIN'] }),
         AUTH_HEADER,
       );
       expect(result).toMatchObject({ id: beneficiaryId });
     });
 
+    it('404s on an unknown beneficiary id', async () => {
+      repository.findById.mockResolvedValue(null);
+
+      await expect(
+        service.applyLmpChange(
+          beneficiaryId,
+          new Date('2026-06-15'),
+          caller({ roles: ['ADMIN'] }),
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 404 });
+      expect(repository.updateMotherLmp).not.toHaveBeenCalled();
+    });
+
     it('404s when no mother_case_details row exists for this beneficiary', async () => {
+      repository.findById.mockResolvedValue(caseRow() as never);
       repository.updateMotherLmp.mockResolvedValue(false);
 
       await expect(
-        service.applyLmpChange(beneficiaryId, new Date('2026-06-15'), AUTH_HEADER),
+        service.applyLmpChange(
+          beneficiaryId,
+          new Date('2026-06-15'),
+          caller({ roles: ['ADMIN'] }),
+          AUTH_HEADER,
+        ),
       ).rejects.toMatchObject({ status: 404 });
-      expect(repository.findById).not.toHaveBeenCalled();
+    });
+
+    it('403s when a SUPERVISOR targets a case outside their own roster', async () => {
+      repository.findById.mockResolvedValue(caseRow() as never);
+      listSakhiIdsForSupervisorMock.mockResolvedValue(['some-other-sakhi']);
+
+      await expect(
+        service.applyLmpChange(
+          beneficiaryId,
+          new Date('2026-06-15'),
+          caller({ roles: ['SUPERVISOR'] }),
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(repository.updateMotherLmp).not.toHaveBeenCalled();
+    });
+
+    it('allows a SUPERVISOR to update a case in their own roster', async () => {
+      repository.findById.mockResolvedValue(caseRow() as never);
+      repository.updateMotherLmp.mockResolvedValue(true);
+      listSakhiIdsForSupervisorMock.mockResolvedValue([sakhiId]);
+
+      await service.applyLmpChange(
+        beneficiaryId,
+        new Date('2026-06-15'),
+        caller({ roles: ['SUPERVISOR'] }),
+        AUTH_HEADER,
+      );
+
+      expect(repository.updateMotherLmp).toHaveBeenCalled();
     });
   });
 
   describe('reactivateCase', () => {
     const beneficiaryId = '22222222-2222-2222-2222-222222222222';
     const supervisorId = '44444444-4444-4444-4444-444444444444';
+    const sakhiId = '55555555-5555-5555-5555-555555555555';
 
     function caseRow(overrides: Partial<Record<string, unknown>> = {}) {
       return {
         id: beneficiaryId,
+        sakhiId,
         currentStatus: 'CLOSED',
         pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
         ...overrides,
@@ -171,7 +231,12 @@ describe('BeneficiaryService', () => {
         .mockResolvedValueOnce(caseRow() as never);
       repository.reactivateCase.mockResolvedValue(true);
 
-      const result = await service.reactivateCase(beneficiaryId, supervisorId, AUTH_HEADER);
+      const result = await service.reactivateCase(
+        beneficiaryId,
+        supervisorId,
+        caller({ roles: ['ADMIN'] }),
+        AUTH_HEADER,
+      );
 
       expect(repository.reactivateCase).toHaveBeenCalledWith(beneficiaryId, supervisorId);
       expect(result).toMatchObject({ id: beneficiaryId });
@@ -181,7 +246,12 @@ describe('BeneficiaryService', () => {
       repository.findById.mockResolvedValue(null);
 
       await expect(
-        service.reactivateCase(beneficiaryId, supervisorId, AUTH_HEADER),
+        service.reactivateCase(
+          beneficiaryId,
+          supervisorId,
+          caller({ roles: ['ADMIN'] }),
+          AUTH_HEADER,
+        ),
       ).rejects.toMatchObject({ status: 404 });
       expect(repository.reactivateCase).not.toHaveBeenCalled();
     });
@@ -190,7 +260,12 @@ describe('BeneficiaryService', () => {
       repository.findById.mockResolvedValue(caseRow({ currentStatus: 'ACTIVE' }) as never);
 
       await expect(
-        service.reactivateCase(beneficiaryId, supervisorId, AUTH_HEADER),
+        service.reactivateCase(
+          beneficiaryId,
+          supervisorId,
+          caller({ roles: ['ADMIN'] }),
+          AUTH_HEADER,
+        ),
       ).rejects.toMatchObject({ status: 409 });
       expect(repository.reactivateCase).not.toHaveBeenCalled();
     });
@@ -200,8 +275,45 @@ describe('BeneficiaryService', () => {
       repository.reactivateCase.mockResolvedValue(false);
 
       await expect(
-        service.reactivateCase(beneficiaryId, supervisorId, AUTH_HEADER),
+        service.reactivateCase(
+          beneficiaryId,
+          supervisorId,
+          caller({ roles: ['ADMIN'] }),
+          AUTH_HEADER,
+        ),
       ).rejects.toMatchObject({ status: 409 });
+    });
+
+    it('403s when a SUPERVISOR targets a case outside their own roster', async () => {
+      repository.findById.mockResolvedValue(caseRow() as never);
+      listSakhiIdsForSupervisorMock.mockResolvedValue(['some-other-sakhi']);
+
+      await expect(
+        service.reactivateCase(
+          beneficiaryId,
+          supervisorId,
+          caller({ id: supervisorId, roles: ['SUPERVISOR'] }),
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(repository.reactivateCase).not.toHaveBeenCalled();
+    });
+
+    it('allows a SUPERVISOR to reactivate a case in their own roster', async () => {
+      repository.findById
+        .mockResolvedValueOnce(caseRow() as never)
+        .mockResolvedValueOnce(caseRow() as never);
+      repository.reactivateCase.mockResolvedValue(true);
+      listSakhiIdsForSupervisorMock.mockResolvedValue([sakhiId]);
+
+      await service.reactivateCase(
+        beneficiaryId,
+        supervisorId,
+        caller({ id: supervisorId, roles: ['SUPERVISOR'] }),
+        AUTH_HEADER,
+      );
+
+      expect(repository.reactivateCase).toHaveBeenCalledWith(beneficiaryId, supervisorId);
     });
   });
 

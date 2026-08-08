@@ -905,55 +905,111 @@ describe('AuthService', () => {
   });
 
   describe('reactivateUser', () => {
-    it('reactivates an INACTIVE user and returns the full profile', async () => {
-      repository.findUserById.mockResolvedValue({ ...ACTIVE_USER, status: 'INACTIVE' } as never);
-      repository.reactivateUser.mockResolvedValue(true);
-      repository.findUserByIdWithProfile.mockResolvedValue(updatedUserRow() as never);
+    const ADMIN_CALLER = { id: 'admin-1', roles: ['ADMIN'] };
+    const SUPERVISOR_CALLER = { id: 'supervisor-1', roles: ['SUPERVISOR'] };
 
-      const result = await service.reactivateUser('user-1');
+    function sakhiRow(overrides: Record<string, unknown> = {}) {
+      return {
+        ...ACTIVE_USER,
+        status: 'INACTIVE',
+        sakhiProfile: { id: 'sakhi-profile-1', supervisorId: 'supervisor-1' },
+        ...overrides,
+      };
+    }
+
+    it('reactivates an INACTIVE Sakhi and returns the full profile', async () => {
+      repository.findUserByIdWithProfile.mockResolvedValueOnce(sakhiRow() as never);
+      repository.reactivateUser.mockResolvedValue(true);
+      repository.findUserByIdWithProfile.mockResolvedValueOnce(updatedUserRow() as never);
+
+      const result = await service.reactivateUser('user-1', ADMIN_CALLER);
 
       expect(repository.reactivateUser).toHaveBeenCalledWith('user-1');
       expect(result.status).toBe('ACTIVE');
     });
 
-    it.each(['INACTIVE', 'LOCKED', 'PAUSED'])('reactivates a %s user', async (status) => {
-      repository.findUserById.mockResolvedValue({ ...ACTIVE_USER, status } as never);
+    it.each(['INACTIVE', 'LOCKED', 'PAUSED'])('reactivates a %s Sakhi', async (status) => {
+      repository.findUserByIdWithProfile.mockResolvedValueOnce(sakhiRow({ status }) as never);
       repository.reactivateUser.mockResolvedValue(true);
-      repository.findUserByIdWithProfile.mockResolvedValue(updatedUserRow() as never);
+      repository.findUserByIdWithProfile.mockResolvedValueOnce(updatedUserRow() as never);
 
-      await expect(service.reactivateUser('user-1')).resolves.toMatchObject({
+      await expect(service.reactivateUser('user-1', ADMIN_CALLER)).resolves.toMatchObject({
         status: 'ACTIVE',
       });
     });
 
     it('404s when the user does not exist', async () => {
-      repository.findUserById.mockResolvedValue(null);
-      await expect(service.reactivateUser('missing')).rejects.toMatchObject({ status: 404 });
+      repository.findUserByIdWithProfile.mockResolvedValue(null);
+      await expect(service.reactivateUser('missing', ADMIN_CALLER)).rejects.toMatchObject({
+        status: 404,
+      });
       expect(repository.reactivateUser).not.toHaveBeenCalled();
     });
 
     it('404s for a soft-deleted user', async () => {
-      repository.findUserById.mockResolvedValue({ ...ACTIVE_USER, isDeleted: true } as never);
-      await expect(service.reactivateUser('user-1')).rejects.toMatchObject({ status: 404 });
+      repository.findUserByIdWithProfile.mockResolvedValue(sakhiRow({ isDeleted: true }) as never);
+      await expect(service.reactivateUser('user-1', ADMIN_CALLER)).rejects.toMatchObject({
+        status: 404,
+      });
       expect(repository.reactivateUser).not.toHaveBeenCalled();
     });
 
+    it('403s when the target is not a Sakhi account', async () => {
+      repository.findUserByIdWithProfile.mockResolvedValue(
+        sakhiRow({ userRoles: [{ role: { roleCode: 'SUPERVISOR' } }] }) as never,
+      );
+      await expect(service.reactivateUser('user-1', ADMIN_CALLER)).rejects.toMatchObject({
+        status: 403,
+      });
+      expect(repository.reactivateUser).not.toHaveBeenCalled();
+    });
+
+    it('403s when a SUPERVISOR targets a Sakhi outside their own roster', async () => {
+      repository.findUserByIdWithProfile.mockResolvedValue(
+        sakhiRow({
+          sakhiProfile: { id: 'sakhi-profile-1', supervisorId: 'some-other-supervisor' },
+        }) as never,
+      );
+      await expect(service.reactivateUser('user-1', SUPERVISOR_CALLER)).rejects.toMatchObject({
+        status: 403,
+      });
+      expect(repository.reactivateUser).not.toHaveBeenCalled();
+    });
+
+    it('allows a SUPERVISOR to reactivate a Sakhi in their own roster', async () => {
+      repository.findUserByIdWithProfile.mockResolvedValueOnce(sakhiRow() as never);
+      repository.reactivateUser.mockResolvedValue(true);
+      repository.findUserByIdWithProfile.mockResolvedValueOnce(updatedUserRow() as never);
+
+      await expect(service.reactivateUser('user-1', SUPERVISOR_CALLER)).resolves.toMatchObject({
+        status: 'ACTIVE',
+      });
+    });
+
     it('409s when the user is already ACTIVE', async () => {
-      repository.findUserById.mockResolvedValue({ ...ACTIVE_USER, status: 'ACTIVE' } as never);
-      await expect(service.reactivateUser('user-1')).rejects.toMatchObject({ status: 409 });
+      repository.findUserByIdWithProfile.mockResolvedValue(sakhiRow({ status: 'ACTIVE' }) as never);
+      await expect(service.reactivateUser('user-1', ADMIN_CALLER)).rejects.toMatchObject({
+        status: 409,
+      });
       expect(repository.reactivateUser).not.toHaveBeenCalled();
     });
 
     it('409s for a DELETED account — never silently reactivated', async () => {
-      repository.findUserById.mockResolvedValue({ ...ACTIVE_USER, status: 'DELETED' } as never);
-      await expect(service.reactivateUser('user-1')).rejects.toMatchObject({ status: 409 });
+      repository.findUserByIdWithProfile.mockResolvedValue(
+        sakhiRow({ status: 'DELETED' }) as never,
+      );
+      await expect(service.reactivateUser('user-1', ADMIN_CALLER)).rejects.toMatchObject({
+        status: 409,
+      });
       expect(repository.reactivateUser).not.toHaveBeenCalled();
     });
 
     it('409s when the conditional update races with a concurrent status change', async () => {
-      repository.findUserById.mockResolvedValue({ ...ACTIVE_USER, status: 'INACTIVE' } as never);
+      repository.findUserByIdWithProfile.mockResolvedValue(sakhiRow() as never);
       repository.reactivateUser.mockResolvedValue(false);
-      await expect(service.reactivateUser('user-1')).rejects.toMatchObject({ status: 409 });
+      await expect(service.reactivateUser('user-1', ADMIN_CALLER)).rejects.toMatchObject({
+        status: 409,
+      });
     });
   });
 });
