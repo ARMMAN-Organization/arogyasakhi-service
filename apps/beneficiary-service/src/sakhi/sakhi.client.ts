@@ -6,6 +6,7 @@ const AUTH_SERVICE_BASE_URL = process.env.AUTH_SERVICE_BASE_URL ?? 'http://local
 
 interface ApiSakhi {
   sakhiId: string;
+  displayName: string;
   supervisorId: string | null;
 }
 
@@ -45,4 +46,71 @@ export async function listSakhiIdsForSupervisor(
 
   const body = (await res.json()) as { data: ApiSakhi[] };
   return body.data.filter((sakhi) => sakhi.supervisorId === supervisorId).map((s) => s.sakhiId);
+}
+
+/**
+ * Resolves sakhiId -> displayName for every Sakhi reporting to a given
+ * Supervisor, via the same `GET /projects/:projectId/sakhis` call as
+ * {@link listSakhiIdsForSupervisor} — used by BeneficiaryService.list to
+ * enrich response rows with a display-ready sakhiName for a SUPERVISOR
+ * caller without a second round-trip, since that roster call already
+ * happens for scoping.
+ */
+export async function listSakhiNamesForSupervisor(
+  projectId: string,
+  supervisorId: string,
+  authorizationHeader: string,
+): Promise<Map<string, string>> {
+  let res: Response;
+  try {
+    res = await fetch(`${AUTH_SERVICE_BASE_URL}/api/v1/projects/${projectId}/sakhis`, {
+      headers: { Authorization: authorizationHeader },
+    });
+  } catch {
+    throw badGateway('Unable to resolve Sakhis — the auth service is unreachable.');
+  }
+
+  if (!res.ok) {
+    throw badGateway('Unable to resolve Sakhis — the auth service returned an error.');
+  }
+
+  const body = (await res.json()) as { data: ApiSakhi[] };
+  return new Map(
+    body.data
+      .filter((sakhi) => sakhi.supervisorId === supervisorId)
+      .map((s) => [s.sakhiId, s.displayName]),
+  );
+}
+
+/**
+ * Resolves a single sakhiId -> displayName via auth-service's existing
+ * `GET /sakhis/:sakhiId`. Used as the MANAGER/ADMIN fallback path in
+ * BeneficiaryService.list's row enrichment, where there is no per-Supervisor
+ * roster call to piggyback on and rows can span multiple projects/Sakhis a
+ * SUPERVISOR-scoped roster call would never cover.
+ *
+ * A 404 (unknown/deleted Sakhi) resolves to `null` — the beneficiary case
+ * itself is still valid data, so a stale sakhiId must not fail the whole
+ * list response. Only a genuine dependency failure (network/5xx) is a 502.
+ */
+export async function getSakhiName(
+  sakhiId: string,
+  authorizationHeader: string,
+): Promise<string | null> {
+  let res: Response;
+  try {
+    res = await fetch(`${AUTH_SERVICE_BASE_URL}/api/v1/sakhis/${sakhiId}`, {
+      headers: { Authorization: authorizationHeader },
+    });
+  } catch {
+    throw badGateway('Unable to resolve a Sakhi — the auth service is unreachable.');
+  }
+
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    throw badGateway('Unable to resolve a Sakhi — the auth service returned an error.');
+  }
+
+  const body = (await res.json()) as { data: ApiSakhi };
+  return body.data.displayName;
 }

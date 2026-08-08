@@ -3,13 +3,19 @@ import { encryptPii, type AuthenticatedUser } from '@armman/service-commons';
 import { BeneficiaryService } from './beneficiary.service';
 import type { BeneficiaryRepository } from './beneficiary.repository';
 import type { CreateBeneficiaryInput } from './dto/create-beneficiary.dto';
-import { resolveHealthBlockIdFromPhc } from '../geography/geography.client';
+import { resolveHealthBlockIdFromPhc, resolveVillageNames } from '../geography/geography.client';
 import { resolveLookupValues } from '../lookups/lookup.client';
-import { listSakhiIdsForSupervisor } from '../sakhi/sakhi.client';
+import {
+  getSakhiName,
+  listSakhiIdsForSupervisor,
+  listSakhiNamesForSupervisor,
+} from '../sakhi/sakhi.client';
+import { resolveProjectNames } from '../projects/project.client';
 
 jest.mock('../geography/geography.client');
 jest.mock('../lookups/lookup.client');
 jest.mock('../sakhi/sakhi.client');
+jest.mock('../projects/project.client');
 
 describe('BeneficiaryService', () => {
   const originalEnv = { ...process.env };
@@ -29,6 +35,10 @@ describe('BeneficiaryService', () => {
   const resolveHealthBlockIdFromPhcMock = jest.mocked(resolveHealthBlockIdFromPhc);
   const resolveLookupValuesMock = jest.mocked(resolveLookupValues);
   const listSakhiIdsForSupervisorMock = jest.mocked(listSakhiIdsForSupervisor);
+  const listSakhiNamesForSupervisorMock = jest.mocked(listSakhiNamesForSupervisor);
+  const getSakhiNameMock = jest.mocked(getSakhiName);
+  const resolveVillageNamesMock = jest.mocked(resolveVillageNames);
+  const resolveProjectNamesMock = jest.mocked(resolveProjectNames);
 
   function caller(overrides: Partial<AuthenticatedUser> = {}): AuthenticatedUser {
     return {
@@ -100,6 +110,10 @@ describe('BeneficiaryService', () => {
     process.env.PII_SEARCH_HASH_KEY = randomBytes(32).toString('base64');
     resolveHealthBlockIdFromPhcMock.mockResolvedValue('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
     resolveLookupValuesMock.mockResolvedValue({});
+    resolveProjectNamesMock.mockResolvedValue(new Map());
+    resolveVillageNamesMock.mockResolvedValue(new Map());
+    getSakhiNameMock.mockResolvedValue(null);
+    listSakhiNamesForSupervisorMock.mockResolvedValue(new Map());
     service = new BeneficiaryService(repository);
   });
 
@@ -511,6 +525,173 @@ describe('BeneficiaryService', () => {
         service.list({ limit: 50 }, caller({ roles: ['SUPERVISOR'] }), AUTH_HEADER),
       ).rejects.toMatchObject({ status: 502 });
       expect(repository.findMany).not.toHaveBeenCalled();
+    });
+
+    it('enriches rows with sakhiName/projectName/villageName, resolved server-side', async () => {
+      repository.findMany.mockResolvedValue({
+        items: [
+          {
+            id: 'x',
+            sakhiId: 'sakhi-a',
+            projectId: 'project-1',
+            pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe'), villageId: 'village-1' },
+          },
+        ] as never,
+        nextCursor: null,
+      });
+      resolveProjectNamesMock.mockResolvedValue(new Map([['project-1', 'GEP 2026-27']]));
+      resolveVillageNamesMock.mockResolvedValue(new Map([['village-1', 'Sample Village']]));
+      getSakhiNameMock.mockResolvedValue('Priya Sharma');
+
+      const result = await service.list({ limit: 50 }, caller({ roles: ['ADMIN'] }), AUTH_HEADER);
+
+      expect(result.items[0]).toMatchObject({
+        sakhiName: 'Priya Sharma',
+        projectName: 'GEP 2026-27',
+        villageName: 'Sample Village',
+      });
+    });
+
+    it('resolves sakhiName from the roster call already made for SUPERVISOR scoping — no extra per-id call', async () => {
+      repository.findMany.mockResolvedValue({
+        items: [
+          {
+            id: 'x',
+            sakhiId: 'sakhi-a',
+            projectId: 'project-1',
+            pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe'), villageId: null },
+          },
+        ] as never,
+        nextCursor: null,
+      });
+      listSakhiIdsForSupervisorMock.mockResolvedValue(['sakhi-a']);
+      listSakhiNamesForSupervisorMock.mockResolvedValue(new Map([['sakhi-a', 'Priya Sharma']]));
+
+      const result = await service.list(
+        { limit: 50 },
+        caller({ roles: ['SUPERVISOR'], projectId: 'project-1' }),
+        AUTH_HEADER,
+      );
+
+      expect(result.items[0]).toMatchObject({ sakhiName: 'Priya Sharma' });
+      expect(getSakhiNameMock).not.toHaveBeenCalled();
+    });
+
+    it('falls back to a per-id Sakhi lookup for a MANAGER/ADMIN page (no roster call made)', async () => {
+      repository.findMany.mockResolvedValue({
+        items: [
+          {
+            id: 'x',
+            sakhiId: 'sakhi-a',
+            projectId: 'project-1',
+            pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe'), villageId: null },
+          },
+        ] as never,
+        nextCursor: null,
+      });
+      getSakhiNameMock.mockResolvedValue('Priya Sharma');
+
+      const result = await service.list({ limit: 50 }, caller({ roles: ['MANAGER'] }), AUTH_HEADER);
+
+      expect(result.items[0]).toMatchObject({ sakhiName: 'Priya Sharma' });
+      expect(getSakhiNameMock).toHaveBeenCalledWith('sakhi-a', AUTH_HEADER);
+    });
+
+    it('resolves a stale/deleted Sakhi, project, or village to null names, not a failed request', async () => {
+      repository.findMany.mockResolvedValue({
+        items: [
+          {
+            id: 'x',
+            sakhiId: 'deleted-sakhi',
+            projectId: 'deleted-project',
+            pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe'), villageId: 'deleted-village' },
+          },
+        ] as never,
+        nextCursor: null,
+      });
+      // Defaults from beforeEach already resolve nothing (empty maps, null Sakhi name).
+
+      const result = await service.list({ limit: 50 }, caller({ roles: ['ADMIN'] }), AUTH_HEADER);
+
+      expect(result.items[0]).toMatchObject({
+        sakhiName: null,
+        projectName: null,
+        villageName: null,
+      });
+    });
+
+    it('a case with no villageId on file gets a null villageName without calling anything extra', async () => {
+      repository.findMany.mockResolvedValue({
+        items: [
+          {
+            id: 'x',
+            sakhiId: 'sakhi-a',
+            projectId: 'project-1',
+            pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe'), villageId: null },
+          },
+        ] as never,
+        nextCursor: null,
+      });
+
+      const result = await service.list({ limit: 50 }, caller({ roles: ['ADMIN'] }), AUTH_HEADER);
+
+      expect(result.items[0]).toMatchObject({ villageName: null });
+    });
+
+    it('an empty page skips every name-resolution call entirely', async () => {
+      repository.findMany.mockResolvedValue({ items: [], nextCursor: null });
+
+      await service.list({ limit: 50 }, caller({ roles: ['ADMIN'] }), AUTH_HEADER);
+
+      expect(resolveProjectNamesMock).not.toHaveBeenCalled();
+      expect(resolveVillageNamesMock).not.toHaveBeenCalled();
+      expect(getSakhiNameMock).not.toHaveBeenCalled();
+    });
+
+    it('dedupes repeated sakhiIds on a page into a single lookup per id', async () => {
+      repository.findMany.mockResolvedValue({
+        items: [
+          {
+            id: 'x',
+            sakhiId: 'sakhi-a',
+            projectId: 'project-1',
+            pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe'), villageId: null },
+          },
+          {
+            id: 'y',
+            sakhiId: 'sakhi-a',
+            projectId: 'project-1',
+            pii: { id: 'pii-2', fullNameEnc: encryptPii('John Doe'), villageId: null },
+          },
+        ] as never,
+        nextCursor: null,
+      });
+      getSakhiNameMock.mockResolvedValue('Priya Sharma');
+
+      await service.list({ limit: 50 }, caller({ roles: ['ADMIN'] }), AUTH_HEADER);
+
+      expect(getSakhiNameMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('propagates a genuine auth-service dependency failure while enriching names', async () => {
+      repository.findMany.mockResolvedValue({
+        items: [
+          {
+            id: 'x',
+            sakhiId: 'sakhi-a',
+            projectId: 'project-1',
+            pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe'), villageId: null },
+          },
+        ] as never,
+        nextCursor: null,
+      });
+      resolveProjectNamesMock.mockRejectedValue(
+        Object.assign(new Error('bad gateway'), { status: 502 }),
+      );
+
+      await expect(
+        service.list({ limit: 50 }, caller({ roles: ['ADMIN'] }), AUTH_HEADER),
+      ).rejects.toMatchObject({ status: 502 });
     });
 
     it('passes through risk condition summaries and status history from the repository', async () => {

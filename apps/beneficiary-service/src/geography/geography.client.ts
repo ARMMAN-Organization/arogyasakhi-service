@@ -10,6 +10,7 @@ interface GeographyUnit {
   parentId: string | null;
   geoType: 'STATE' | 'DISTRICT' | 'BLOCK' | 'PHC' | 'SUBCENTRE' | 'VILLAGE' | 'PADA';
   status: 'ACTIVE' | 'INACTIVE';
+  name: string;
 }
 
 /** Fetches one geography unit through the gateway, mapping transport/HTTP
@@ -91,4 +92,38 @@ export async function resolveHealthBlockIdFromPhc(
   }
 
   return parent.geographyUnitId;
+}
+
+/**
+ * Resolves geographyUnitId -> name for every VILLAGE-level unit, via
+ * auth-service's existing `GET /geography-units?geoType=VILLAGE` (no
+ * filter-by-id support, and no new auth-service endpoint needed — that
+ * route already returns every unit of a given geoType in one call). Used to
+ * enrich `GET /beneficiaries` rows with a display-ready villageName, since
+ * beneficiary_cases/pii stores only the bare villageId (no cross-service
+ * joins, per this service's forklift rule).
+ *
+ * A villageId not found in the response (stale/since-deleted village) maps
+ * to `undefined` in the returned Map — not an error, since the beneficiary
+ * case itself is still valid data; the caller decides how to render a
+ * missing name (see beneficiary.service.ts's enrichListPage).
+ */
+export async function resolveVillageNames(
+  authorizationHeader: string,
+): Promise<Map<string, string>> {
+  let res: Response;
+  try {
+    res = await fetch(`${AUTH_SERVICE_BASE_URL}/api/v1/geography-units?geoType=VILLAGE`, {
+      headers: { Authorization: authorizationHeader },
+    });
+  } catch {
+    throw badGateway('Unable to resolve villages — the auth service is unreachable.');
+  }
+
+  if (!res.ok) {
+    throw badGateway('Unable to resolve villages — the auth service returned an error.');
+  }
+
+  const body = (await res.json()) as { data: GeographyUnit[] };
+  return new Map(body.data.map((v) => [v.geographyUnitId, v.name]));
 }

@@ -20,9 +20,14 @@ import { computeBmi, withDecryptedName } from './beneficiary.mapper';
 import type { BeneficiaryListFilters, BeneficiaryRepository } from './beneficiary.repository';
 import type { CreateBeneficiaryInput } from './dto/create-beneficiary.dto';
 import type { UpsertSocioDemographicsInput } from './dto/upsert-socio-demographics.dto';
-import { resolveHealthBlockIdFromPhc } from '../geography/geography.client';
+import { resolveHealthBlockIdFromPhc, resolveVillageNames } from '../geography/geography.client';
 import { resolveLookupIdsByValueCode, resolveLookupValues } from '../lookups/lookup.client';
-import { listSakhiIdsForSupervisor } from '../sakhi/sakhi.client';
+import {
+  getSakhiName,
+  listSakhiIdsForSupervisor,
+  listSakhiNamesForSupervisor,
+} from '../sakhi/sakhi.client';
+import { resolveProjectNames } from '../projects/project.client';
 
 /**
  * Maps each socioDemographics *LookupId field to the lookup_categories
@@ -98,6 +103,63 @@ async function assertCallerCanTouchCase(
   }
 }
 
+/**
+ * Enriches a page of `GET /beneficiaries` rows with display-ready
+ * sakhiName/projectName/villageName — beneficiary_cases/pii stores only the
+ * bare ids (no cross-service joins, per this service's forklift rule), but
+ * the Supervisor-monitoring/Manager-listing UI needs names without a
+ * follow-up call per row.
+ *
+ * sakhiName is resolved from `supervisorRoster` when the caller already
+ * fetched one for scoping (SUPERVISOR path in list()) — no extra round-trip
+ * in the common case. Otherwise (MANAGER/ADMIN, or any sakhiId missing from
+ * a passed roster) each distinct sakhiId not already covered is resolved
+ * with a deduped per-id `getSakhiName` fallback call, capped at the page's
+ * unique Sakhi count. projectName/villageName always come from one
+ * dedicated list call each (see resolveProjectNames/resolveVillageNames) —
+ * both are small, mostly-static datasets with no filter-by-id support.
+ *
+ * A name that can't be resolved (stale/deleted Sakhi, project, or village)
+ * is `null`, never a failed request — the beneficiary case itself is still
+ * valid data. An empty page skips every lookup call entirely.
+ */
+async function enrichListPage(
+  items: Record<string, unknown>[],
+  authorizationHeader: string,
+  supervisorRoster?: Map<string, string>,
+): Promise<Record<string, unknown>[]> {
+  if (items.length === 0) return [];
+
+  const sakhiIdOf = (item: Record<string, unknown>) => item.sakhiId as string;
+  const projectIdOf = (item: Record<string, unknown>) => item.projectId as string;
+  const villageIdOf = (item: Record<string, unknown>) =>
+    (item.pii as { villageId: string | null }).villageId;
+
+  const uncoveredSakhiIds = [
+    ...new Set(items.map(sakhiIdOf).filter((id) => !supervisorRoster?.has(id))),
+  ];
+
+  const [projectNames, villageNames, fallbackSakhiNames] = await Promise.all([
+    resolveProjectNames(authorizationHeader),
+    resolveVillageNames(authorizationHeader),
+    Promise.all(uncoveredSakhiIds.map((id) => getSakhiName(id, authorizationHeader))),
+  ]);
+  const sakhiNameById = new Map<string, string | null>([
+    ...(supervisorRoster ?? []),
+    ...uncoveredSakhiIds.map((id, i) => [id, fallbackSakhiNames[i]] as const),
+  ]);
+
+  return items.map((item) => {
+    const villageId = villageIdOf(item);
+    return {
+      ...item,
+      sakhiName: sakhiNameById.get(sakhiIdOf(item)) ?? null,
+      projectName: projectNames.get(projectIdOf(item)) ?? null,
+      villageName: villageId ? (villageNames.get(villageId) ?? null) : null,
+    };
+  });
+}
+
 /** Public list-query params — see ListBeneficiariesQuery in the DTO for validation. */
 export interface ListBeneficiariesQuery {
   projectId?: string;
@@ -166,6 +228,9 @@ export class BeneficiaryService {
       limit: query.limit,
     };
 
+    let supervisorProjectId: string | undefined;
+    let supervisorId: string | undefined;
+
     if (caller.roles.includes('SAKHI')) {
       filters.sakhiId = caller.id;
     } else if (caller.roles.includes('SUPERVISOR')) {
@@ -188,6 +253,8 @@ export class BeneficiaryService {
       } else {
         filters.sakhiIds = roster;
       }
+      supervisorProjectId = caller.projectId;
+      supervisorId = caller.id;
     } else if (query.sakhiId) {
       // MANAGER/ADMIN: unscoped by default, but an explicit sakhiId still
       // narrows the list — no roster to validate against.
@@ -195,7 +262,17 @@ export class BeneficiaryService {
     }
 
     const page = await this.repository.findMany(filters);
-    return { items: page.items.map(withDecryptedName), nextCursor: page.nextCursor };
+    const decrypted = page.items.map(withDecryptedName);
+    // Reuses the roster call already made above for scoping, resolved a
+    // second time for displayName instead of caching the first response —
+    // simpler than threading an extra return value through every branch
+    // above, and this call only happens for the SUPERVISOR path.
+    const supervisorRoster =
+      supervisorProjectId && supervisorId
+        ? await listSakhiNamesForSupervisor(supervisorProjectId, supervisorId, authorizationHeader)
+        : undefined;
+    const enriched = await enrichListPage(decrypted, authorizationHeader, supervisorRoster);
+    return { items: enriched, nextCursor: page.nextCursor };
   }
 
   async getById(id: string, authorizationHeader: string) {

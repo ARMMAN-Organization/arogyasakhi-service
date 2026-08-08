@@ -1,4 +1,13 @@
-import { resolveHealthBlockIdFromPhc } from './geography.client';
+import { resolveHealthBlockIdFromPhc, resolveVillageNames } from './geography.client';
+
+/** Builds a fetch mock Response for a list of geography units. */
+function listResponse(data: Record<string, unknown>[]) {
+  return {
+    ok: true,
+    status: 200,
+    json: () => Promise.resolve({ success: true, data }),
+  };
+}
 
 /** Builds a fetch mock Response for one geography unit. */
 function unitResponse(data: Record<string, unknown>) {
@@ -134,5 +143,68 @@ describe('resolveHealthBlockIdFromPhc', () => {
     await expect(resolveHealthBlockIdFromPhc('phc-1', 'Bearer test-token')).rejects.toMatchObject({
       status: 422,
     });
+  });
+});
+
+describe('resolveVillageNames', () => {
+  const originalFetch = global.fetch;
+  const fetchMock = jest.fn();
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    global.fetch = fetchMock as unknown as typeof fetch;
+  });
+
+  afterAll(() => {
+    global.fetch = originalFetch;
+  });
+
+  it('returns a geographyUnitId -> name map for every VILLAGE unit', async () => {
+    fetchMock.mockResolvedValue(
+      listResponse([
+        { geographyUnitId: 'village-1', name: 'Sample Village', geoType: 'VILLAGE' },
+        { geographyUnitId: 'village-2', name: 'Other Village', geoType: 'VILLAGE' },
+      ]),
+    );
+
+    const result = await resolveVillageNames('Bearer test-token');
+
+    expect(result).toEqual(
+      new Map([
+        ['village-1', 'Sample Village'],
+        ['village-2', 'Other Village'],
+      ]),
+    );
+  });
+
+  it('a villageId absent from the response is simply absent from the map', async () => {
+    fetchMock.mockResolvedValue(listResponse([]));
+
+    const result = await resolveVillageNames('Bearer test-token');
+
+    expect(result.get('unknown-village')).toBeUndefined();
+  });
+
+  it('throws 502 when the auth-service call rejects (network error/timeout)', async () => {
+    fetchMock.mockRejectedValue(new Error('ECONNREFUSED'));
+
+    await expect(resolveVillageNames('Bearer test-token')).rejects.toMatchObject({ status: 502 });
+  });
+
+  it('throws 502 when the auth-service call fails with a non-2xx response', async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 500 });
+
+    await expect(resolveVillageNames('Bearer test-token')).rejects.toMatchObject({ status: 502 });
+  });
+
+  it('filters by geoType=VILLAGE', async () => {
+    fetchMock.mockResolvedValue(listResponse([]));
+
+    await resolveVillageNames('Bearer test-token');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('geoType=VILLAGE'),
+      expect.objectContaining({ headers: { Authorization: 'Bearer test-token' } }),
+    );
   });
 });

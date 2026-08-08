@@ -176,10 +176,20 @@ const beneficiaryCaseDetailSchema = beneficiaryCaseSchema.extend({
 // BMI, or birthdate) — the Supervisor app's list UI needs these without a
 // follow-up detail call — but not the full detail-view's consent/risk/status
 // history, which only the single-case detail endpoint returns.
+//
+// sakhiName/projectName/villageName are resolved server-side from
+// auth-service (see BeneficiaryService.list's enrichListPage) since
+// beneficiary_cases/pii stores only the bare ids — the Supervisor
+// monitoring / Manager listing UI needs display names without a per-row
+// follow-up call. Nullable: a stale/deleted Sakhi, project, or village
+// resolves to null rather than failing the whole list response.
 const beneficiaryListItemSchema = beneficiaryCaseSchema.extend({
   pii: piiResponseSchema,
   motherCaseDetails: motherCaseDetailsSchema.nullable(),
   childCaseDetails: childCaseDetailsSchema.nullable(),
+  sakhiName: z.string().nullable().openapi({ example: 'Priya Sharma' }),
+  projectName: z.string().nullable().openapi({ example: 'GEP 2026-27' }),
+  villageName: z.string().nullable().openapi({ example: 'Sample Village' }),
 });
 
 const beneficiaryListPageSchema = z.object({
@@ -220,7 +230,9 @@ export function createBeneficiaryRouter(service: BeneficiaryService) {
         'nextCursor back as `cursor` to fetch the next page. A SAKHI caller is always scoped ' +
         'to their own cases regardless of sakhiId; a SUPERVISOR is scoped to their own Sakhi ' +
         'roster and may narrow further to one sakhiId within it (403 if not in their roster); ' +
-        'MANAGER/ADMIN are unscoped.',
+        'MANAGER/ADMIN are unscoped. Each row includes sakhiName/projectName/villageName, ' +
+        'resolved server-side for display (null if the referenced Sakhi/project/village is ' +
+        'stale or unresolvable).',
       tags: ['Beneficiaries'],
       responses: {
         200: {
