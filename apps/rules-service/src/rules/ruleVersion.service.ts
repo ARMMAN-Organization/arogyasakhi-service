@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto';
-import { conflict, notFound } from '@armman/service-commons';
+import { conflict, notFound, unprocessable } from '@armman/service-commons';
 import type { RuleVersionRepository } from './ruleVersion.repository';
 import type { PublishRuleVersionInput } from './dto/publish-ruleVersion.dto';
+import type { EvaluateRuleSetInput } from './dto/evaluate-ruleSet.dto';
+import { evaluateRulePack } from './ruleSet.evaluator';
 
 /** Prisma unique-constraint violation code (ruleSetId + versionNo). */
 const PRISMA_UNIQUE_CONSTRAINT_CODE = 'P2002';
@@ -59,6 +61,29 @@ export class RuleVersionService {
     const version = await this.repository.findPublishedBySetId(ruleSetId);
     if (!version) throw notFound('No published rule pack version found for this rule set.');
     return toApiRuleVersion(version as unknown as Record<string, unknown>);
+  }
+
+  /**
+   * Executes the rule set's currently-published gorules decision graph
+   * against the caller-supplied answers — the "Central GoRules execution"
+   * this service's own purpose statement (package.json/.claude/CLAUDE.md)
+   * describes, previously unimplemented (this service only stored rule
+   * packs opaquely; nothing interpreted rulesJson until now).
+   *
+   * 404 if the set has no published version — never silently evaluates
+   * against a DRAFT (an unreviewed rule pack must not affect real risk
+   * grading). Returns the published version's own id as `ruleVersionId`
+   * alongside the results, so the caller (risk-referral-service) can record
+   * which rule version produced a given RiskAssessment.
+   */
+  async evaluate(ruleSetId: string, dto: EvaluateRuleSetInput) {
+    const version = await this.repository.findPublishedBySetId(ruleSetId);
+    if (!version) {
+      throw unprocessable('No published rule pack version found for this rule set.');
+    }
+
+    const evaluation = await evaluateRulePack(version.rulesJson, dto.answers);
+    return { ruleVersionId: version.id, ...evaluation };
   }
 
   /**
