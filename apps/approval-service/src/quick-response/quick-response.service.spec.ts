@@ -60,6 +60,7 @@ describe('QuickResponseService', () => {
   const repository = {
     findMany: jest.fn(),
     findById: jest.fn(),
+    markDecided: jest.fn(),
   } as unknown as jest.Mocked<QuickResponseRepository>;
   const lookupClient = {
     resolveApprovalStatusId: jest.fn(),
@@ -84,9 +85,17 @@ describe('QuickResponseService', () => {
   const authHeader = 'Bearer token';
   let consoleErrorSpy: jest.SpyInstance;
 
+  const DECIDED_BY_USER_ID = '55555555-5555-5555-5555-555555555555';
+
   beforeEach(() => {
     jest.resetAllMocks();
     consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    // Default so every decide() test's post-side-effect markDecided call
+    // resolves a real lookup id rather than hitting the "no lookup value
+    // found" log branch — tests asserting list()'s own filtering override
+    // this per-call as needed.
+    lookupClient.resolveApprovalStatusId.mockResolvedValue('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+    repository.markDecided.mockResolvedValue(true);
     service = new QuickResponseService(
       repository,
       lookupClient,
@@ -169,6 +178,7 @@ describe('QuickResponseService', () => {
       const result = await service.decide(
         '66666666-6666-6666-6666-666666666666',
         { cardSource: 'escalation_events', decision: 'OKAY' },
+        DECIDED_BY_USER_ID,
         authHeader,
       );
       expect(result).toMatchObject({ decision: 'OKAY', acknowledged: true });
@@ -181,6 +191,7 @@ describe('QuickResponseService', () => {
         service.decide(
           '66666666-6666-6666-6666-666666666666',
           { cardSource: 'escalation_events', decision: 'OKAY' },
+          DECIDED_BY_USER_ID,
           authHeader,
         ),
       ).rejects.toMatchObject({ status: 404 });
@@ -193,6 +204,7 @@ describe('QuickResponseService', () => {
         service.decide(
           '66666666-6666-6666-6666-666666666666',
           { cardSource: 'escalation_events', decision: 'APPROVE' },
+          DECIDED_BY_USER_ID,
           authHeader,
         ),
       ).rejects.toMatchObject({ status: 501 });
@@ -211,6 +223,7 @@ describe('QuickResponseService', () => {
       const result = await service.decide(
         '11111111-1111-1111-1111-111111111111',
         { cardSource: 'approval_requests', decision: 'APPROVE' },
+        DECIDED_BY_USER_ID,
         authHeader,
       );
 
@@ -235,6 +248,7 @@ describe('QuickResponseService', () => {
       const result = await service.decide(
         '11111111-1111-1111-1111-111111111111',
         { cardSource: 'approval_requests', decision: 'REJECT' },
+        DECIDED_BY_USER_ID,
         authHeader,
       );
       expect(result.decision).toBe('REJECT');
@@ -246,6 +260,7 @@ describe('QuickResponseService', () => {
         service.decide(
           'unknown-id',
           { cardSource: 'approval_requests', decision: 'APPROVE' },
+          DECIDED_BY_USER_ID,
           authHeader,
         ),
       ).rejects.toMatchObject({ status: 404 });
@@ -260,6 +275,7 @@ describe('QuickResponseService', () => {
         service.decide(
           '11111111-1111-1111-1111-111111111111',
           { cardSource: 'approval_requests', decision: 'APPROVE' },
+          DECIDED_BY_USER_ID,
           authHeader,
         ),
       ).rejects.toMatchObject({ status: 409 });
@@ -271,6 +287,7 @@ describe('QuickResponseService', () => {
         service.decide(
           '11111111-1111-1111-1111-111111111111',
           { cardSource: 'approval_requests', decision: 'OKAY' },
+          DECIDED_BY_USER_ID,
           authHeader,
         ),
       ).rejects.toMatchObject({ status: 400 });
@@ -299,6 +316,7 @@ describe('QuickResponseService', () => {
       const result = await service.decide(
         card.id as string,
         { cardSource: 'approval_requests', decision: 'APPROVE' },
+        DECIDED_BY_USER_ID,
         authHeader,
       );
 
@@ -320,6 +338,7 @@ describe('QuickResponseService', () => {
       const result = await service.decide(
         card.id as string,
         { cardSource: 'approval_requests', decision: 'REJECT' },
+        DECIDED_BY_USER_ID,
         authHeader,
       );
 
@@ -336,6 +355,7 @@ describe('QuickResponseService', () => {
         service.decide(
           card.id as string,
           { cardSource: 'approval_requests', decision: 'OKAY' },
+          DECIDED_BY_USER_ID,
           authHeader,
         ),
       ).rejects.toMatchObject({ status: 400 });
@@ -353,6 +373,7 @@ describe('QuickResponseService', () => {
         service.decide(
           card.id as string,
           { cardSource: 'approval_requests', decision: 'APPROVE' },
+          DECIDED_BY_USER_ID,
           authHeader,
         ),
       ).rejects.toMatchObject({ status: 409 });
@@ -373,6 +394,7 @@ describe('QuickResponseService', () => {
       const result = await service.decide(
         card.id as string,
         { cardSource: 'approval_requests', decision: 'APPROVE' },
+        DECIDED_BY_USER_ID,
         authHeader,
       );
       expect(result.decision).toBe('APPROVE');
@@ -434,6 +456,7 @@ describe('QuickResponseService', () => {
       const result = await service.decide(
         card.id as string,
         { cardSource: 'approval_requests', decision: 'APPROVE' },
+        DECIDED_BY_USER_ID,
         authHeader,
       );
 
@@ -458,6 +481,7 @@ describe('QuickResponseService', () => {
       const result = await service.decide(
         card.id as string,
         { cardSource: 'approval_requests', decision: 'REJECT' },
+        DECIDED_BY_USER_ID,
         authHeader,
       );
       expect(closureClient.decide).toHaveBeenCalledWith(
@@ -477,6 +501,7 @@ describe('QuickResponseService', () => {
         service.decide(
           card.id as string,
           { cardSource: 'approval_requests', decision: 'APPROVE' },
+          DECIDED_BY_USER_ID,
           authHeader,
         ),
       ).rejects.toMatchObject({ status: 500 });
@@ -491,6 +516,7 @@ describe('QuickResponseService', () => {
         service.decide(
           card.id as string,
           { cardSource: 'approval_requests', decision: 'OKAY' },
+          DECIDED_BY_USER_ID,
           authHeader,
         ),
       ).rejects.toMatchObject({ status: 400 });
@@ -508,6 +534,7 @@ describe('QuickResponseService', () => {
         service.decide(
           card.id as string,
           { cardSource: 'approval_requests', decision: 'APPROVE' },
+          DECIDED_BY_USER_ID,
           authHeader,
         ),
       ).rejects.toMatchObject({ status: 409 });
@@ -536,6 +563,7 @@ describe('QuickResponseService', () => {
       const result = await service.decide(
         card.id as string,
         { cardSource: 'approval_requests', decision: 'APPROVE' },
+        DECIDED_BY_USER_ID,
         authHeader,
       );
 
@@ -562,6 +590,7 @@ describe('QuickResponseService', () => {
       const result = await service.decide(
         card.id as string,
         { cardSource: 'approval_requests', decision: 'REJECT' },
+        DECIDED_BY_USER_ID,
         authHeader,
       );
       expect(referralClient.decide).toHaveBeenCalledWith(card.referralId, 'REFILL', authHeader);
@@ -576,6 +605,7 @@ describe('QuickResponseService', () => {
         service.decide(
           card.id as string,
           { cardSource: 'approval_requests', decision: 'APPROVE' },
+          DECIDED_BY_USER_ID,
           authHeader,
         ),
       ).rejects.toMatchObject({ status: 500 });
@@ -590,6 +620,7 @@ describe('QuickResponseService', () => {
         service.decide(
           card.id as string,
           { cardSource: 'approval_requests', decision: 'OKAY' },
+          DECIDED_BY_USER_ID,
           authHeader,
         ),
       ).rejects.toMatchObject({ status: 400 });
@@ -607,6 +638,7 @@ describe('QuickResponseService', () => {
         service.decide(
           card.id as string,
           { cardSource: 'approval_requests', decision: 'APPROVE' },
+          DECIDED_BY_USER_ID,
           authHeader,
         ),
       ).rejects.toMatchObject({ status: 409 });
@@ -627,6 +659,7 @@ describe('QuickResponseService', () => {
       const result = await service.decide(
         card.id as string,
         { cardSource: 'approval_requests', decision: 'APPROVE' },
+        DECIDED_BY_USER_ID,
         authHeader,
       );
       expect(result.decision).toBe('APPROVE');
@@ -660,6 +693,7 @@ describe('QuickResponseService', () => {
       const result = await service.decide(
         card.id as string,
         { cardSource: 'approval_requests', decision: 'APPROVE' },
+        DECIDED_BY_USER_ID,
         authHeader,
       );
 
@@ -687,6 +721,7 @@ describe('QuickResponseService', () => {
       const result = await service.decide(
         card.id as string,
         { cardSource: 'approval_requests', decision: 'REJECT' },
+        DECIDED_BY_USER_ID,
         authHeader,
       );
 
@@ -704,6 +739,7 @@ describe('QuickResponseService', () => {
         service.decide(
           card.id as string,
           { cardSource: 'approval_requests', decision: 'APPROVE' },
+          DECIDED_BY_USER_ID,
           authHeader,
         ),
       ).rejects.toMatchObject({ status: 500 });
@@ -718,6 +754,7 @@ describe('QuickResponseService', () => {
         service.decide(
           card.id as string,
           { cardSource: 'approval_requests', decision: 'OKAY' },
+          DECIDED_BY_USER_ID,
           authHeader,
         ),
       ).rejects.toMatchObject({ status: 400 });
@@ -734,6 +771,7 @@ describe('QuickResponseService', () => {
         service.decide(
           card.id as string,
           { cardSource: 'approval_requests', decision: 'APPROVE' },
+          DECIDED_BY_USER_ID,
           authHeader,
         ),
       ).rejects.toMatchObject({ status: 409 });
@@ -742,7 +780,7 @@ describe('QuickResponseService', () => {
       expect(notificationClient.notify).not.toHaveBeenCalled();
     });
 
-    it('propagates a "no active rate" failure from the incentive trigger (not tolerated)', async () => {
+    it('does not fail the request when the incentive trigger fails after the referral is already COMPLETED', async () => {
       const card = accompaniedReferralRequest();
       repository.findById.mockResolvedValue(card);
       referralClient.decide.mockResolvedValue({
@@ -758,14 +796,18 @@ describe('QuickResponseService', () => {
         Object.assign(new Error('No active incentive rate'), { status: 404 }),
       );
 
-      await expect(
-        service.decide(
-          card.id as string,
-          { cardSource: 'approval_requests', decision: 'APPROVE' },
-          authHeader,
-        ),
-      ).rejects.toMatchObject({ status: 404 });
-      expect(notificationClient.notify).not.toHaveBeenCalled();
+      const result = await service.decide(
+        card.id as string,
+        { cardSource: 'approval_requests', decision: 'APPROVE' },
+        DECIDED_BY_USER_ID,
+        authHeader,
+      );
+
+      // The referral decision (already committed, unretryable) must not be
+      // undone by a downstream incentive failure — the request still
+      // succeeds and the Sakhi is still notified.
+      expect(result.decision).toBe('APPROVE');
+      expect(notificationClient.notify).toHaveBeenCalled();
     });
 
     it('404s when the linked beneficiary cannot be found', async () => {
@@ -782,6 +824,7 @@ describe('QuickResponseService', () => {
         service.decide(
           card.id as string,
           { cardSource: 'approval_requests', decision: 'APPROVE' },
+          DECIDED_BY_USER_ID,
           authHeader,
         ),
       ).rejects.toMatchObject({ status: 404 });
@@ -807,6 +850,7 @@ describe('QuickResponseService', () => {
       const result = await service.decide(
         card.id as string,
         { cardSource: 'approval_requests', decision: 'APPROVE' },
+        DECIDED_BY_USER_ID,
         authHeader,
       );
       expect(result.decision).toBe('APPROVE');
@@ -835,6 +879,7 @@ describe('QuickResponseService', () => {
       const result = await service.decide(
         card.id as string,
         { cardSource: 'approval_requests', decision: 'APPROVE' },
+        DECIDED_BY_USER_ID,
         authHeader,
       );
 
@@ -860,6 +905,7 @@ describe('QuickResponseService', () => {
       const result = await service.decide(
         card.id as string,
         { cardSource: 'approval_requests', decision: 'REJECT' },
+        DECIDED_BY_USER_ID,
         authHeader,
       );
 
@@ -876,6 +922,7 @@ describe('QuickResponseService', () => {
         service.decide(
           card.id as string,
           { cardSource: 'approval_requests', decision: 'APPROVE' },
+          DECIDED_BY_USER_ID,
           authHeader,
         ),
       ).rejects.toMatchObject({ status: 422 });
@@ -890,6 +937,7 @@ describe('QuickResponseService', () => {
         service.decide(
           card.id as string,
           { cardSource: 'approval_requests', decision: 'OKAY' },
+          DECIDED_BY_USER_ID,
           authHeader,
         ),
       ).rejects.toMatchObject({ status: 400 });
@@ -906,6 +954,7 @@ describe('QuickResponseService', () => {
         service.decide(
           card.id as string,
           { cardSource: 'approval_requests', decision: 'APPROVE' },
+          DECIDED_BY_USER_ID,
           authHeader,
         ),
       ).rejects.toMatchObject({ status: 502 });
@@ -923,10 +972,86 @@ describe('QuickResponseService', () => {
       const result = await service.decide(
         card.id as string,
         { cardSource: 'approval_requests', decision: 'APPROVE' },
+        DECIDED_BY_USER_ID,
         authHeader,
       );
       expect(result.decision).toBe('APPROVE');
       expect(consoleErrorSpy).toHaveBeenCalled();
+    });
+
+    it('marks the card decided (decisionStatusLookupId, decidedByUserId) after a successful approve', async () => {
+      const card = lmpChangeRequest();
+      repository.findById.mockResolvedValue(card);
+      beneficiaryClient.applyLmpChange.mockResolvedValue({ id: card.beneficiaryId as string });
+
+      await service.decide(
+        card.id as string,
+        { cardSource: 'approval_requests', decision: 'APPROVE', decisionNotes: 'Looks right' },
+        DECIDED_BY_USER_ID,
+        authHeader,
+      );
+
+      expect(repository.markDecided).toHaveBeenCalledWith(
+        card.id,
+        'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        DECIDED_BY_USER_ID,
+        'Looks right',
+        undefined,
+      );
+    });
+
+    it('409s on re-approving an already-decided LMP_CHANGE card — the core bug this guard closes', async () => {
+      const card = lmpChangeRequest({ decidedAt: new Date('2026-08-05T12:00:00.000Z') });
+      repository.findById.mockResolvedValue(card);
+
+      await expect(
+        service.decide(
+          card.id as string,
+          { cardSource: 'approval_requests', decision: 'APPROVE' },
+          DECIDED_BY_USER_ID,
+          authHeader,
+        ),
+      ).rejects.toMatchObject({ status: 409 });
+      // The LMP write and Sakhi notification must never re-run on a re-approve.
+      expect(beneficiaryClient.applyLmpChange).not.toHaveBeenCalled();
+      expect(notificationClient.notify).not.toHaveBeenCalled();
+    });
+
+    it('does not fail the request when markDecided fails after the LMP change already applied', async () => {
+      const card = lmpChangeRequest();
+      repository.findById.mockResolvedValue(card);
+      beneficiaryClient.applyLmpChange.mockResolvedValue({ id: card.beneficiaryId as string });
+      repository.markDecided.mockRejectedValue(new Error('db down'));
+
+      const result = await service.decide(
+        card.id as string,
+        { cardSource: 'approval_requests', decision: 'APPROVE' },
+        DECIDED_BY_USER_ID,
+        authHeader,
+      );
+
+      expect(result.decision).toBe('APPROVE');
+      expect(consoleErrorSpy).toHaveBeenCalled();
+    });
+  });
+
+  describe('decide — already-decided guard applies to every approval_requests card type', () => {
+    it('409s on a REOPEN card that was already decided', async () => {
+      const card = approvalRequest({
+        requestType: 'REOPEN',
+        decidedAt: new Date('2026-08-05T12:00:00.000Z'),
+      });
+      repository.findById.mockResolvedValue(card);
+
+      await expect(
+        service.decide(
+          card.id as string,
+          { cardSource: 'approval_requests', decision: 'APPROVE' },
+          DECIDED_BY_USER_ID,
+          authHeader,
+        ),
+      ).rejects.toMatchObject({ status: 409 });
+      expect(reopenRequestClient.decide).not.toHaveBeenCalled();
     });
   });
 });

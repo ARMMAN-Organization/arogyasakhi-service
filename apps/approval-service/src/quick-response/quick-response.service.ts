@@ -1,4 +1,4 @@
-import { badRequest, notFound, unprocessable, HttpError } from '@armman/service-commons';
+import { badRequest, conflict, notFound, unprocessable, HttpError } from '@armman/service-commons';
 import type { QuickResponseRepository } from './quick-response.repository';
 import type { LookupClient } from './lookup.client';
 import type { EscalationClient, EscalationCard } from './escalation.client';
@@ -150,11 +150,16 @@ export class QuickResponseService {
    * write endpoint in a service that doesn't have one yet, so they respond
    * 501 rather than silently no-op or guess at undefined behavior.
    */
-  async decide(cardId: string, dto: DecideQuickResponseInput, authorizationHeader: string) {
+  async decide(
+    cardId: string,
+    dto: DecideQuickResponseInput,
+    decidedByUserId: string,
+    authorizationHeader: string,
+  ) {
     if (dto.cardSource === 'escalation_events') {
       return this.decideEscalationCard(cardId, dto, authorizationHeader);
     }
-    return this.decideApprovalRequestCard(cardId, dto, authorizationHeader);
+    return this.decideApprovalRequestCard(cardId, dto, decidedByUserId, authorizationHeader);
   }
 
   private async decideEscalationCard(
@@ -186,65 +191,109 @@ export class QuickResponseService {
   private async decideApprovalRequestCard(
     cardId: string,
     dto: DecideQuickResponseInput,
+    decidedByUserId: string,
     authorizationHeader: string,
   ) {
     const existing = await this.repository.findById(cardId);
     if (!existing) throw notFound('Quick Response card not found.');
 
+    // Only LMP_CHANGE has no downstream state of its own to lean on for
+    // idempotency (unlike CLOSURE_REVIEW/REFERRAL_INCOMPLETE/ACCOMPANIED_
+    // REFERRAL/REOPEN, each guarded by the target service's own
+    // PENDING-only status check) — so re-approving an already-decided
+    // LMP_CHANGE card silently re-applied the LMP/EDD write and re-notified
+    // the Sakhi, contradicting this endpoint's documented "409: Card
+    // already decided" contract. Checked here, once, for every card type
+    // rather than duplicated per handler.
+    if (existing.decidedAt) {
+      throw conflict('This Quick Response card has already been decided.');
+    }
+
+    let result: Record<string, unknown>;
     if (existing.requestType === 'LMP_CHANGE') {
-      return this.decideLmpChangeCard(cardId, existing, dto, authorizationHeader);
-    }
+      result = await this.decideLmpChangeCard(cardId, existing, dto, authorizationHeader);
+    } else if (existing.requestType === 'CLOSURE_REVIEW') {
+      result = await this.decideClosureReviewCard(cardId, existing, dto, authorizationHeader);
+    } else if (existing.requestType === 'REFERRAL_INCOMPLETE') {
+      result = await this.decideReferralIncompleteCard(cardId, existing, dto, authorizationHeader);
+    } else if (existing.requestType === 'ACCOMPANIED_REFERRAL') {
+      result = await this.decideAccompaniedReferralCard(cardId, existing, dto, authorizationHeader);
+    } else if (existing.requestType === 'DATA_RESTORE') {
+      result = await this.decideDataRestoreCard(cardId, existing, dto, authorizationHeader);
+    } else if (existing.requestType === 'REOPEN') {
+      if (dto.decision !== 'APPROVE' && dto.decision !== 'REJECT') {
+        throw badRequest('decision: Must be APPROVE or REJECT for a REOPEN card.');
+      }
+      if (!existing.reopenRequestId) {
+        // Data integrity issue, not a client error — a REOPEN
+        // approval_requests row must always carry the reopen_requests id it
+        // originated from.
+        throw new HttpError(500, 'This REOPEN card has no linked reopen request.');
+      }
 
-    if (existing.requestType === 'CLOSURE_REVIEW') {
-      return this.decideClosureReviewCard(cardId, existing, dto, authorizationHeader);
-    }
+      // The audit_log entry and Sakhi notification are written by
+      // closure-reopen-service's own decide flow, not here — that's the only
+      // place a reopen decision is actually persisted, so the audit trail
+      // can't be bypassed by calling that endpoint directly instead of through
+      // Quick Response.
+      const decided = await this.reopenRequestClient.decide(
+        existing.reopenRequestId,
+        dto.decision === 'APPROVE' ? 'APPROVED' : 'REJECTED',
+        dto.decisionReasonCodeLookupId,
+        dto.decisionNotes,
+        authorizationHeader,
+      );
 
-    if (existing.requestType === 'REFERRAL_INCOMPLETE') {
-      return this.decideReferralIncompleteCard(cardId, existing, dto, authorizationHeader);
-    }
-
-    if (existing.requestType === 'ACCOMPANIED_REFERRAL') {
-      return this.decideAccompaniedReferralCard(cardId, existing, dto, authorizationHeader);
-    }
-
-    if (existing.requestType === 'DATA_RESTORE') {
-      return this.decideDataRestoreCard(cardId, existing, dto, authorizationHeader);
-    }
-
-    if (existing.requestType !== 'REOPEN') {
+      result = {
+        cardId,
+        cardSource: 'approval_requests' as const,
+        decision: dto.decision,
+        reopenRequest: decided,
+      };
+    } else {
       throw new HttpError(
         501,
         `Decisions on "${existing.requestType}" cards are not yet implemented.`,
       );
     }
-    if (dto.decision !== 'APPROVE' && dto.decision !== 'REJECT') {
-      throw badRequest('decision: Must be APPROVE or REJECT for a REOPEN card.');
-    }
-    if (!existing.reopenRequestId) {
-      // Data integrity issue, not a client error — a REOPEN approval_requests
-      // row must always carry the reopen_requests id it originated from.
-      throw new HttpError(500, 'This REOPEN card has no linked reopen request.');
+
+    // Marked decided only after the real side effect above has already
+    // succeeded — a failure to persist this marker must not be reported as
+    // if the decision itself failed (log-and-continue, like every other
+    // post-commit call in this method), but it also must never run before
+    // the side effect, or a card could be marked decided while its actual
+    // effect never happened.
+    try {
+      // Every approval_requests decision reaching this point is APPROVE or
+      // REJECT — the OKAY decision only exists on the escalation_events
+      // branch, which returns earlier in decide() and never reaches here.
+      const decisionStatusLookupId = await this.lookupClient.resolveApprovalStatusId(
+        dto.decision === 'APPROVE' ? 'APPROVED' : 'REJECTED',
+        authorizationHeader,
+      );
+      if (decisionStatusLookupId) {
+        await this.repository.markDecided(
+          cardId,
+          decisionStatusLookupId,
+          decidedByUserId,
+          dto.decisionNotes,
+          dto.decisionReasonCodeLookupId,
+        );
+      } else {
+        console.error(
+          `Quick Response card ${cardId} was decided (${dto.decision}) but no ` +
+            `${dto.decision === 'APPROVE' ? 'APPROVED' : 'REJECTED'} APPROVAL_STATUS lookup ` +
+            'value was found — the card cannot be marked decided and remains re-decidable.',
+        );
+      }
+    } catch (err) {
+      console.error(
+        `Quick Response card ${cardId} was decided (${dto.decision}) but marking it decided failed:`,
+        err,
+      );
     }
 
-    // The audit_log entry and Sakhi notification are written by
-    // closure-reopen-service's own decide flow, not here — that's the only
-    // place a reopen decision is actually persisted, so the audit trail
-    // can't be bypassed by calling that endpoint directly instead of through
-    // Quick Response.
-    const decided = await this.reopenRequestClient.decide(
-      existing.reopenRequestId,
-      dto.decision === 'APPROVE' ? 'APPROVED' : 'REJECTED',
-      dto.decisionReasonCodeLookupId,
-      dto.decisionNotes,
-      authorizationHeader,
-    );
-
-    return {
-      cardId,
-      cardSource: 'approval_requests' as const,
-      decision: dto.decision,
-      reopenRequest: decided,
-    };
+    return result;
   }
 
   /**
@@ -411,11 +460,22 @@ export class QuickResponseService {
    * Decides an ACCOMPANIED_REFERRAL card (FR-SV-4.9). Approve marks the
    * referral Completed, then resolves the assigned Sakhi (via the referral's
    * beneficiary — neither approval_requests nor referrals carries a sakhiId
-   * column) and triggers the incentive. The referral decision and incentive
-   * trigger are NOT tolerated — a Supervisor approving this card needs both
-   * to actually happen, not silently fail while looking successful. Reject
-   * makes no referral-side call at all (the referral stays Pending, per
-   * spec) and grants no incentive. Either way the Sakhi is notified,
+   * column) and triggers the incentive. The referral decision itself is NOT
+   * tolerated — a Supervisor approving this card needs the referral to
+   * actually complete, not silently fail while looking successful.
+   *
+   * The incentive trigger, unlike the referral decision, IS best-effort: by
+   * the time it runs, risk-referral-service has already committed the
+   * referral to COMPLETED — a one-shot, PENDING_FOLLOWUP-only transition
+   * with no way back. If the incentive call were allowed to fail the whole
+   * request, there would be no way to retry just this step (any retry
+   * immediately 409s on the already-terminal referral), permanently
+   * dropping a payout instead of just needing a manual follow-up. Logged,
+   * not thrown — same log-and-continue shape as the Sakhi notification
+   * below, not a "this must succeed" call like the referral decision above.
+   *
+   * Reject makes no referral-side call at all (the referral stays Pending,
+   * per spec) and grants no incentive. Either way the Sakhi is notified,
    * best-effort.
    */
   private async decideAccompaniedReferralCard(
@@ -451,11 +511,20 @@ export class QuickResponseService {
       if (!beneficiary) {
         throw notFound('The beneficiary linked to this referral was not found.');
       }
-      await this.incentiveClient.triggerAccompaniedReferral(
-        beneficiary.sakhiId,
-        existing.referralId,
-        authorizationHeader,
-      );
+      try {
+        await this.incentiveClient.triggerAccompaniedReferral(
+          beneficiary.sakhiId,
+          existing.referralId,
+          authorizationHeader,
+        );
+      } catch (err) {
+        console.error(
+          `ACCOMPANIED_REFERRAL card ${cardId} was approved and the referral marked COMPLETED, ` +
+            `but the incentive trigger failed (referral cannot be re-decided to retry — ` +
+            `needs manual follow-up):`,
+          err,
+        );
+      }
     }
 
     try {
