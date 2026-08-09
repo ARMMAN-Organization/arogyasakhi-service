@@ -496,7 +496,7 @@ export function createBeneficiaryRouter(service: BeneficiaryService) {
           description: 'Risk condition summary upserted',
           schema: envelope(riskConditionSummarySchema),
         },
-        400: errorResponse(400, { message: 'gradeRank: Required' }),
+        400: errorResponse(400, { message: 'riskConditionId: Invalid uuid' }),
         401: errorResponse(401),
         403: errorResponse(403, { message: 'This beneficiary case is outside your own roster.' }),
         404: errorResponse(404, { message: 'Beneficiary case not found.' }),

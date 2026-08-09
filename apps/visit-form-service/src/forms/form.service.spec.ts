@@ -2,9 +2,11 @@ import { FormService } from './form.service';
 import type { FormRepository } from './form.repository';
 import * as geographyClient from '../geography/geography.client';
 import { syncSocioDemographics } from '../beneficiaries/socio-demographics.client';
+import { syncHealthHistory } from '../beneficiaries/health-history.client';
 
 jest.mock('../geography/geography.client');
 jest.mock('../beneficiaries/socio-demographics.client');
+jest.mock('../beneficiaries/health-history.client');
 
 describe('FormService', () => {
   const repository = {
@@ -589,6 +591,89 @@ describe('FormService', () => {
       );
 
       expect(jest.mocked(syncSocioDemographics)).not.toHaveBeenCalled();
+    });
+
+    it('syncs self-reported health history to beneficiary-service for MOTHER_REGISTRATION', async () => {
+      repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+      repository.findVersionById.mockResolvedValue(publishedVersion as never);
+      repository.createSubmission.mockResolvedValue({ id: 'sub-1' } as never);
+      const formData = {
+        phone_owner: 'SELF',
+        have_you_ever_been_diagnosed_with_or_treated_for_any_of_the_following_medical_conditions: [
+          'hypertension_high_bp',
+        ],
+      };
+
+      await service.createSubmission(
+        'MOTHER_REGISTRATION',
+        {
+          formVersionId: 'version-1',
+          beneficiaryId: 'b1',
+          localSubmissionUuid: 'uuid-1',
+          formData,
+        },
+        'u1',
+        'Bearer test-token',
+      );
+
+      expect(jest.mocked(syncHealthHistory)).toHaveBeenCalledWith(
+        'b1',
+        formData,
+        'Bearer test-token',
+      );
+    });
+
+    it('does not sync health history for a non-MOTHER_REGISTRATION form', async () => {
+      repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+      repository.findVersionById.mockResolvedValue({
+        ...publishedVersion,
+        formDefinition: { formCode: 'CHILD_REGISTRATION' },
+      } as never);
+      repository.createSubmission.mockResolvedValue({ id: 'sub-1' } as never);
+
+      await service.createSubmission(
+        'CHILD_REGISTRATION',
+        {
+          formVersionId: 'version-1',
+          beneficiaryId: 'b1',
+          localSubmissionUuid: 'uuid-1',
+          formData: { phone_owner: 'SELF' },
+        },
+        'u1',
+        'Bearer test-token',
+      );
+
+      expect(jest.mocked(syncHealthHistory)).not.toHaveBeenCalled();
+    });
+
+    it('syncs both socio-demographics and health history for the same MOTHER_REGISTRATION submission', async () => {
+      repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+      repository.findVersionById.mockResolvedValue(publishedVersion as never);
+      repository.createSubmission.mockResolvedValue({ id: 'sub-1' } as never);
+      const formData = { phone_owner: 'SELF', what_is_your_religion: 'hindu' };
+
+      await service.createSubmission(
+        'MOTHER_REGISTRATION',
+        {
+          formVersionId: 'version-1',
+          beneficiaryId: 'b1',
+          localSubmissionUuid: 'uuid-1',
+          formData,
+        },
+        'u1',
+        'Bearer test-token',
+      );
+
+      expect(jest.mocked(syncSocioDemographics)).toHaveBeenCalledWith(
+        'b1',
+        formData,
+        'Bearer test-token',
+      );
+      expect(jest.mocked(syncHealthHistory)).toHaveBeenCalledWith(
+        'b1',
+        formData,
+        'Bearer test-token',
+      );
     });
 
     it('decomposes formData into typed form_answers and passes them to the repository', () => {

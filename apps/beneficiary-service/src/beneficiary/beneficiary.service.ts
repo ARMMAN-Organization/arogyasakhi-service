@@ -407,8 +407,8 @@ export class BeneficiaryService {
     return this.repository.upsertRiskConditionSummary(beneficiaryId, {
       riskConditionId: dto.riskConditionId,
       phase: dto.phase,
-      grade: dto.grade,
-      gradeRank: dto.gradeRank,
+      grade: dto.grade ?? null,
+      gradeRank: dto.gradeRank ?? null,
       // Untyped external JSON crossing into Prisma's InputJsonValue at this
       // one boundary — the zod schema (z.record) already guarantees a plain
       // JSON-serializable object.
