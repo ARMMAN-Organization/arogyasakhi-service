@@ -123,8 +123,8 @@ export interface SocioDemographicsCreateData {
 export interface UpsertRiskConditionSummaryData {
   riskConditionId: string;
   phase: string;
-  grade: string;
-  gradeRank: number;
+  grade: string | null;
+  gradeRank: number | null;
   observedValueJson: Prisma.InputJsonValue | null;
   visitId: string | null;
   submissionId: string | null;

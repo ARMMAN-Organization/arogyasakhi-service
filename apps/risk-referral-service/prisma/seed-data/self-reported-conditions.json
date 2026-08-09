@@ -1,0 +1,31 @@
+[
+  { "conditionCode": "HYPERTENSION_HIGH_BP", "conditionName": "Hypertension (High BP)" },
+  {
+    "conditionCode": "DIABETES_PRE_GESTATIONAL",
+    "conditionName": "Diabetes (Pre-gestational / diagnosed before pregnancy)"
+  },
+  {
+    "conditionCode": "GESTATIONAL_DIABETES",
+    "conditionName": "Gestational diabetes (in previous pregnancy)"
+  },
+  { "conditionCode": "THYROID_DISORDER", "conditionName": "Thyroid disorder" },
+  { "conditionCode": "HEART_DISEASE", "conditionName": "Heart disease" },
+  { "conditionCode": "EPILEPSY_SEIZURE_DISORDER", "conditionName": "Epilepsy / Seizure disorder" },
+  {
+    "conditionCode": "ASTHMA_CHRONIC_RESPIRATORY",
+    "conditionName": "Asthma / Chronic respiratory disease"
+  },
+  { "conditionCode": "KIDNEY_DISEASE", "conditionName": "Kidney disease" },
+  { "conditionCode": "THALASSEMIA", "conditionName": "Thalassemia" },
+  { "conditionCode": "LIVER_DISEASE", "conditionName": "Liver disease" },
+  { "conditionCode": "ANEMIA_SEVERE_RECURRENT", "conditionName": "Anemia (severe / recurrent)" },
+  { "conditionCode": "TUBERCULOSIS", "conditionName": "Tuberculosis (current or past)" },
+  { "conditionCode": "HIV_AIDS", "conditionName": "HIV / AIDS" },
+  { "conditionCode": "HEPATITIS_B", "conditionName": "Hepatitis B" },
+  {
+    "conditionCode": "MENTAL_HEALTH_CONDITION",
+    "conditionName": "Mental health condition (e.g., depression, anxiety)"
+  },
+  { "conditionCode": "SICKLE_CELL_DISEASE", "conditionName": "Sickle Cell Disease (SCD)" },
+  { "conditionCode": "SICKLE_CELL_TRAIT", "conditionName": "Sickle Cell Trait (SCT)/Carrier" }
+]

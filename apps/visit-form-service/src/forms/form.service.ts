@@ -12,6 +12,7 @@ import {
 } from './form.mapper';
 import { validateSubmission } from './form-validation';
 import { syncSocioDemographics } from '../beneficiaries/socio-demographics.client';
+import { syncHealthHistory } from '../beneficiaries/health-history.client';
 import { getAncestorChain } from '../geography/geography.client';
 import { triggerRiskAssessment } from '../risk-assessments/riskAssessment.client';
 
@@ -193,6 +194,7 @@ export class FormService {
     // after the submission is durably saved — see syncSocioDemographics.
     if (formCode === 'MOTHER_REGISTRATION') {
       await syncSocioDemographics(dto.beneficiaryId, dto.formData, authorizationHeader);
+      await syncHealthHistory(dto.beneficiaryId, dto.formData, authorizationHeader);
     }
 
     // Triggers the risk-grading pipeline for every visit-linked submission

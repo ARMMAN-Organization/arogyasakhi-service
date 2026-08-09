@@ -204,9 +204,15 @@ export class BeneficiaryRepository {
       },
     });
 
+    // A null grade means this is a self-reported, ungraded entry (e.g.
+    // enrollment-time diagnosed conditions/sickle cell status) rather than a
+    // rule-engine evaluation — always at-risk (a reported condition is
+    // inherently a risk signal) and never grade-ranked against the existing
+    // row, since there is no rank to compare.
     const isEverAtRisk = data.grade !== 'NORMAL' || (existing?.everAtRiskFlag ?? false);
     const outranksEverHighest =
-      existing?.everHighestGradeRank == null || data.gradeRank > existing.everHighestGradeRank;
+      data.gradeRank !== null &&
+      (existing?.everHighestGradeRank == null || data.gradeRank > existing.everHighestGradeRank);
 
     return this.prisma.beneficiaryRiskConditionSummary.upsert({
       where: {
@@ -233,7 +239,7 @@ export class BeneficiaryRepository {
         everHighestVisitId: data.visitId,
         everHighestSubmissionId: data.submissionId,
         everHighestAssessedAt: data.assessedAt,
-        everAtRiskFlag: data.grade !== 'NORMAL',
+        everAtRiskFlag: isEverAtRisk,
         currentReferralTriggerFlag: data.isReferralTrigger,
         currentHrVisitTriggerFlag: data.isHrVisitTrigger,
         sourceRuleVersionId: data.ruleVersionId,

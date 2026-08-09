@@ -1413,5 +1413,32 @@ describe('BeneficiaryService', () => {
         }),
       );
     });
+
+    it('passes through null grade/gradeRank unchanged for an ungraded, self-reported entry', async () => {
+      repository.findById.mockResolvedValue({ id: 'ben-1', sakhiId: CALLER_ID } as never);
+      repository.upsertRiskConditionSummary.mockResolvedValue({} as never);
+
+      await service.upsertRiskConditionSummary(
+        'ben-1',
+        {
+          riskConditionId: RISK_CONDITION_ID,
+          phase: 'REGISTRATION',
+          assessedAt: new Date('2026-01-01'),
+          isReferralTrigger: false,
+          isHrVisitTrigger: false,
+        },
+        caller({ id: CALLER_ID, roles: ['SAKHI'] }),
+        AUTH_HEADER,
+      );
+
+      expect(repository.upsertRiskConditionSummary).toHaveBeenCalledWith(
+        'ben-1',
+        expect.objectContaining({
+          riskConditionId: RISK_CONDITION_ID,
+          grade: null,
+          gradeRank: null,
+        }),
+      );
+    });
   });
 });
