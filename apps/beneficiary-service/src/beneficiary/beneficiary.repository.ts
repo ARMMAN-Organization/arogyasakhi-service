@@ -209,8 +209,7 @@ export class BeneficiaryRepository {
     // rule-engine evaluation — always at-risk (a reported condition is
     // inherently a risk signal) and never grade-ranked against the existing
     // row, since there is no rank to compare.
-    const isEverAtRisk =
-      data.grade === null || data.grade !== 'NORMAL' || (existing?.everAtRiskFlag ?? false);
+    const isEverAtRisk = data.grade !== 'NORMAL' || (existing?.everAtRiskFlag ?? false);
     const outranksEverHighest =
       data.gradeRank !== null &&
       (existing?.everHighestGradeRank == null || data.gradeRank > existing.everHighestGradeRank);
