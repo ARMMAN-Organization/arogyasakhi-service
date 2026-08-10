@@ -28,7 +28,7 @@
     "db:migrate": "npm run migrate",
     "seed": "node tools/prisma-seed-foreach.js",
     "db:seed": "npm run seed",
-    "serve:all": "nx run-many -t build --projects=service-commons,core && nx run-many -t serve --all --parallel=16",
+    "serve:all": "nx run-many -t build --projects=service-commons,core && NODE_OPTIONS=--no-deprecation nx run-many -t serve --all --parallel=16",
     "postinstall": "npm run db:generate",
     "prepare": "husky"
   },
