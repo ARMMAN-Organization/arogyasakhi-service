@@ -1,12 +1,14 @@
-import type { DocumentedRouter } from '@armman/service-commons';
+import { createDocumentedRouter, type DocumentedRouter } from '../app.module';
 import type { PrismaService } from '../prisma/prisma.service';
 import { VisitScheduleRepository } from './visitSchedule.repository';
 import { VisitScheduleService } from './visitSchedule.service';
-import { createVisitScheduleRouter } from './visitSchedule.controller';
+import { registerVisitScheduleRoutes } from './visitSchedule.routes';
 
-/** Composition root for the visit-schedules feature: wires repository → service → router. */
+/** Composition root for the visit-schedules feature: wires repository → service → routes. */
 export function createVisitScheduleModule(prisma: PrismaService): DocumentedRouter {
   const repository = new VisitScheduleRepository(prisma);
   const service = new VisitScheduleService(repository);
-  return createVisitScheduleRouter(service);
+  const doc = createDocumentedRouter();
+  registerVisitScheduleRoutes(doc, service);
+  return doc;
 }
