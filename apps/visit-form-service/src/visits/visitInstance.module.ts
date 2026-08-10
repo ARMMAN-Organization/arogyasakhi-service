@@ -1,15 +1,17 @@
-import type { DocumentedRouter } from '@armman/service-commons';
+import { createDocumentedRouter, type DocumentedRouter } from '../app.module';
 import type { PrismaService } from '../prisma/prisma.service';
 import { VisitInstanceRepository } from './visitInstance.repository';
 import { VisitInstanceService } from './visitInstance.service';
-import { createVisitInstanceRouter } from './visitInstance.controller';
+import { registerVisitInstanceRoutes } from './visitInstance.routes';
 
 /**
- * Composition root for the visits feature: wires repository → service → router.
+ * Composition root for the visits feature: wires repository → service → routes.
  * Replaces the former NestJS module + DI container.
  */
 export function createVisitInstanceModule(prisma: PrismaService): DocumentedRouter {
   const repository = new VisitInstanceRepository(prisma);
   const service = new VisitInstanceService(repository);
-  return createVisitInstanceRouter(service);
+  const doc = createDocumentedRouter();
+  registerVisitInstanceRoutes(doc, service);
+  return doc;
 }
