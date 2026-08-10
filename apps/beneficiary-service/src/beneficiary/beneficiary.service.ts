@@ -452,10 +452,13 @@ export class BeneficiaryService {
    * ownership check — only for use by callers that have already verified
    * (or, per their own route's role gate, can't reach a case outside their
    * own scope) that the requester may see this record: getById (after its
-   * own check above) and the post-mutation re-fetches in
-   * upsertSocioDemographics/applyLmpChange/reactivateCase (each of which
-   * already ran assertCallerCanTouchCase/the SAKHI-ownership check before
-   * reaching this point). Never call this directly from a route handler.
+   * own check above) and the post-mutation re-fetches in applyLmpChange/
+   * reactivateCase (each of which already ran assertCallerCanTouchCase
+   * before reaching this point). upsertSocioDemographics also calls this,
+   * but takes no caller and runs no ownership check of its own — a known,
+   * separately-tracked gap (see PATCH /beneficiaries/:id/socio-demographics
+   * in the PR description), not something this helper covers for it. Never
+   * call this directly from a route handler.
    */
   private async projectCase(
     id: string,

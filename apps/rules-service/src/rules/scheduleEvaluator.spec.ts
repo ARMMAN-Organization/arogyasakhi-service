@@ -304,24 +304,24 @@ describe('evaluateSchedulePack', () => {
       expect(result.cadence19to24MonthsEveryNMonths).toBe(1);
     });
 
-    it('RECENTLY_RECOVERED: HR detected earlier, last 3 not normal -> monthly 13-18m, every 2 months 19-24m', async () => {
+    it('RECENTLY_RECOVERED: HR was present historically but last 3 visits normal -> monthly 13-18m, every 2 months 19-24m', async () => {
       const result = await evaluateSchedulePack('CCV', ccvRulesJson, {
         ...baseInput,
         hrEverDetectedIn0to12m: true,
         mostRecentIncVisitHrType: 'NONE',
-        last3IncVisitsNormal: false,
+        last3IncVisitsNormal: true,
       });
       expect(result.riskState).toBe('RECENTLY_RECOVERED');
       expect(result.cadence13to18MonthsEveryNMonths).toBe(1);
       expect(result.cadence19to24MonthsEveryNMonths).toBe(2);
     });
 
-    it('STABLE_LOW_RISK: HR was present historically but last 3 visits normal -> every 2 months, both sub-periods', async () => {
+    it('STABLE_LOW_RISK: HR detected earlier, last 3 not normal (undefined by Appendix A.5, falls through to Stable Low Risk cadence) -> every 2 months, both sub-periods', async () => {
       const result = await evaluateSchedulePack('CCV', ccvRulesJson, {
         ...baseInput,
         hrEverDetectedIn0to12m: true,
         mostRecentIncVisitHrType: 'NONE',
-        last3IncVisitsNormal: true,
+        last3IncVisitsNormal: false,
       });
       expect(result.riskState).toBe('STABLE_LOW_RISK');
       expect(result.cadence13to18MonthsEveryNMonths).toBe(2);

@@ -35,8 +35,12 @@ export async function evaluateSchedulePack(
   const engine = new ZenEngine();
   const content = new ZenDecisionContent(rulesJson as object);
   const decision = engine.createDecision(content);
-  const response = await decision.evaluate(input);
-  engine.dispose();
+  let response;
+  try {
+    response = await decision.evaluate(input);
+  } finally {
+    engine.dispose();
+  }
 
   const result = response.result;
   if (typeof result !== 'object' || result === null) {

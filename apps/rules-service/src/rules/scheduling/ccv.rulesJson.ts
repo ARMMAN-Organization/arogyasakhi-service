@@ -65,14 +65,27 @@ const handler = (input, { dayjs }) => {
     riskState = 'CURRENTLY_HR_OTHER';
     cadence13to18MonthsEveryNMonths = 1;
     cadence19to24MonthsEveryNMonths = 1;
-  } else if (!last3IncVisitsNormal) {
-    // HR was detected historically, and the last 3 visits are still not
-    // all-normal, but the most recent visit itself is not HR - treat as
-    // Recently Recovered per Appendix A.5's "Last 3 INC visits were at risk".
+  } else if (last3IncVisitsNormal) {
+    // HR was detected earlier (this branch only reached when
+    // hrEverDetectedIn0to12m is true), the last 3 INC visits are normal, and
+    // the most recent visit itself is not HR - Recently Recovered per
+    // Appendix A.5 (SRS lines 1557-1559: "HR detected earlier but last 3
+    // INC visits normal"), matching this file's own top-of-file docstring.
+    // (Appendix A.5's line 355 summary table states this state's condition
+    // the other way around - contradicts its own line 1557-1559 table; the
+    // latter is treated as authoritative here.)
     riskState = 'RECENTLY_RECOVERED';
     cadence13to18MonthsEveryNMonths = 1;
     cadence19to24MonthsEveryNMonths = 2;
   } else {
+    // GAP: HR was detected earlier, the most recent visit itself is not HR,
+    // but the last 3 INC visits are still not all normal. Appendix A.5's
+    // five-state model (SRS lines 350-356 / 1557-1559) does not define a
+    // distinct condition for this combination - both named non-HR states
+    // (Recently Recovered, Stable Low Risk) require last3IncVisitsNormal to
+    // be true. Falling through to Stable Low Risk's cadence here is
+    // provisional pending SRS/product clarification (flagged in PR #129
+    // review) - do not treat this as validated clinical behaviour.
     riskState = 'STABLE_LOW_RISK';
     cadence13to18MonthsEveryNMonths = 2;
     cadence19to24MonthsEveryNMonths = 2;

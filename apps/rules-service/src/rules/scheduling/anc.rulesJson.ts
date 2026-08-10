@@ -10,6 +10,16 @@
  * ANC visits (FR-S-3.7/BR-04/G.3) — that is a DB-state mutation the calling
  * service performs; this pack only reports `deliveryFormFiledByEddPlus7`
  * so the caller knows whether the Post-EDD visit applies.
+ *
+ * This pack takes no "today" input, so `deliveryFormFiledByEddPlus7: false`
+ * (and the accompanying `postEddVisit`) is returned identically whether the
+ * delivery form is unfiled because EDD+7 has genuinely passed, or because
+ * the woman is still mid-pregnancy, months from her EDD, and simply hasn't
+ * delivered yet. Both cases have `deliveryFormFiledDate: null` and are
+ * indistinguishable from this function's inputs alone. The caller MUST
+ * independently check that the real calendar date has passed EDD+7 before
+ * treating `postEddVisit` as due — this pack's output is a candidate visit,
+ * not a decision that it applies yet.
  */
 export const ancRulesJson = {
   contentType: 'application/vnd.gorules.decision',

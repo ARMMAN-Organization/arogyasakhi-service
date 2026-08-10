@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { conflict, notFound } from '@armman/service-commons';
+import { badRequest, conflict, notFound } from '@armman/service-commons';
 import type { RuleVersionRepository } from './ruleVersion.repository';
 import type { PublishRuleVersionInput } from './dto/publish-ruleVersion.dto';
 import type { EvaluateRuleSetInput } from './dto/evaluate-ruleSet.dto';
@@ -84,6 +84,9 @@ export class RuleVersionService {
   async evaluate(ruleSetId: string, dto: EvaluateRuleSetInput) {
     const set = await this.repository.findSetById(ruleSetId);
     if (!set) throw notFound('Rule set not found.');
+    if (set.ruleCategory !== 'RISK') {
+      throw badRequest(`This rule set is ${set.ruleCategory}, not RISK — cannot evaluate it here.`);
+    }
 
     const version = await this.repository.findPublishedBySetId(ruleSetId);
     if (!version) {
@@ -105,6 +108,11 @@ export class RuleVersionService {
   async evaluateSchedule(ruleSetId: string, dto: EvaluateScheduleInput) {
     const set = await this.repository.findSetById(ruleSetId);
     if (!set) throw notFound('Rule set not found.');
+    if (set.ruleCategory !== 'SCHEDULE') {
+      throw badRequest(
+        `This rule set is ${set.ruleCategory}, not SCHEDULE — cannot evaluate it here.`,
+      );
+    }
 
     const version = await this.repository.findPublishedBySetId(ruleSetId);
     if (!version) {
