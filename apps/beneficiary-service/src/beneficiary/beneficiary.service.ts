@@ -422,8 +422,47 @@ export class BeneficiaryService {
     });
   }
 
-  async getById(id: string, authorizationHeader: string) {
+  /**
+   * Gated by requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER') at the route —
+   * same as upsertRiskConditionSummary, assertCallerCanTouchCase alone
+   * doesn't cover this route since it only scopes SUPERVISOR callers,
+   * early-returning for everyone else. A SAKHI reaching this method must be
+   * checked explicitly against the case's own sakhiId, or any authenticated
+   * Sakhi could fetch any beneficiary's full profile by id regardless of
+   * whose case it is (ADMIN is not in this route's role list, so MANAGER is
+   * the only unrestricted caller here).
+   */
+  async getById(id: string, caller: AuthenticatedUser, authorizationHeader: string) {
     const found = await this.repository.findById(id);
+    if (!found) throw notFound('Beneficiary case not found.');
+
+    if (caller.roles.includes('SAKHI')) {
+      if (found.sakhiId !== caller.id) {
+        throw forbidden('This beneficiary case is outside your own roster.');
+      }
+    } else {
+      await assertCallerCanTouchCase(found.sakhiId, caller, authorizationHeader);
+    }
+
+    return this.projectCase(id, authorizationHeader, found);
+  }
+
+  /**
+   * Decrypts/enriches a case row for the response envelope, without any
+   * ownership check — only for use by callers that have already verified
+   * (or, per their own route's role gate, can't reach a case outside their
+   * own scope) that the requester may see this record: getById (after its
+   * own check above) and the post-mutation re-fetches in
+   * upsertSocioDemographics/applyLmpChange/reactivateCase (each of which
+   * already ran assertCallerCanTouchCase/the SAKHI-ownership check before
+   * reaching this point). Never call this directly from a route handler.
+   */
+  private async projectCase(
+    id: string,
+    authorizationHeader: string,
+    prefetched?: Awaited<ReturnType<BeneficiaryRepository['findById']>>,
+  ) {
+    const found = prefetched ?? (await this.repository.findById(id));
     if (!found) throw notFound('Beneficiary case not found.');
     const projected = withDecryptedName(found);
     return withResolvedSocioDemographics(projected, authorizationHeader);
@@ -493,7 +532,7 @@ export class BeneficiaryService {
     if (dto.childrenUnder5Count !== undefined) data.childrenUnder5Count = dto.childrenUnder5Count;
 
     await this.repository.upsertSocioDemographics(beneficiaryId, data);
-    return this.getById(beneficiaryId, authorizationHeader);
+    return this.projectCase(beneficiaryId, authorizationHeader);
   }
 
   /**
@@ -527,7 +566,7 @@ export class BeneficiaryService {
     const eddDate = addDays(lmpDate, GESTATION_DAYS);
     const updated = await this.repository.updateMotherLmp(beneficiaryId, lmpDate, eddDate);
     if (!updated) throw notFound('Beneficiary case not found.');
-    return this.getById(beneficiaryId, authorizationHeader);
+    return this.projectCase(beneficiaryId, authorizationHeader);
   }
 
   /**
@@ -562,7 +601,7 @@ export class BeneficiaryService {
       throw conflict(`Cannot reactivate a case with status ${existing.currentStatus}.`);
     }
 
-    return this.getById(beneficiaryId, authorizationHeader);
+    return this.projectCase(beneficiaryId, authorizationHeader);
   }
 
   /**

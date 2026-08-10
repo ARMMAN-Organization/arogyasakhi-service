@@ -363,9 +363,10 @@ export function createBeneficiaryRouter(service: BeneficiaryService) {
     requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER'),
     validate(idParamsSchema, 'params'),
     asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
       const authorizationHeader = req.header('authorization');
       if (!authorizationHeader) return next(unauthorized());
-      res.json(ok(await service.getById(req.params.id, authorizationHeader)));
+      res.json(ok(await service.getById(req.params.id, req.user, authorizationHeader)));
     }),
   );
 
