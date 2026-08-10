@@ -1,15 +1,17 @@
-import type { DocumentedRouter } from '@armman/service-commons';
+import { createDocumentedRouter, type DocumentedRouter } from '../app.module';
 import type { PrismaService } from '../prisma/prisma.service';
 import { SyncBatchRepository } from './syncBatch.repository';
 import { SyncBatchService } from './syncBatch.service';
-import { createSyncBatchRouter } from './syncBatch.controller';
+import { registerSyncBatchRoutes } from './syncBatch.routes';
 
 /**
- * Composition root for the sync-batch feature: wires repository → service → router.
+ * Composition root for the sync-batch feature: wires repository → service → routes.
  * Replaces the former NestJS module + DI container.
  */
 export function createSyncBatchModule(prisma: PrismaService): DocumentedRouter {
   const repository = new SyncBatchRepository(prisma);
   const service = new SyncBatchService(repository);
-  return createSyncBatchRouter(service);
+  const doc = createDocumentedRouter();
+  registerSyncBatchRoutes(doc, service);
+  return doc;
 }
