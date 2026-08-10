@@ -1,15 +1,17 @@
-import type { DocumentedRouter } from '@armman/service-commons';
+import { createDocumentedRouter, type DocumentedRouter } from '../app.module';
 import type { PrismaService } from '../prisma/prisma.service';
 import { MediaAssetRepository } from './mediaAsset.repository';
 import { MediaAssetService } from './mediaAsset.service';
-import { createMediaAssetRouter } from './mediaAsset.controller';
+import { registerMediaAssetRoutes } from './mediaAsset.routes';
 
 /**
- * Composition root for the media feature: wires repository → service → router.
+ * Composition root for the media feature: wires repository → service → routes.
  * Replaces the former NestJS module + DI container.
  */
 export function createMediaAssetModule(prisma: PrismaService): DocumentedRouter {
   const repository = new MediaAssetRepository(prisma);
   const service = new MediaAssetService(repository);
-  return createMediaAssetRouter(service);
+  const doc = createDocumentedRouter();
+  registerMediaAssetRoutes(doc, service);
+  return doc;
 }
