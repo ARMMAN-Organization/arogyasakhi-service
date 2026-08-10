@@ -1,15 +1,17 @@
-import type { DocumentedRouter } from '@armman/service-commons';
+import { createDocumentedRouter, type DocumentedRouter } from '../app.module';
 import type { PrismaService } from '../prisma/prisma.service';
 import { ApprovalRequestRepository } from './approvalRequest.repository';
 import { ApprovalRequestService } from './approvalRequest.service';
-import { createApprovalRequestRouter } from './approvalRequest.controller';
+import { registerApprovalRequestRoutes } from './approvalRequest.routes';
 
 /**
  * Composition root for the approvals feature: wires repository → service →
- * router. Replaces the former NestJS module + DI container.
+ * routes. Replaces the former NestJS module + DI container.
  */
 export function createApprovalRequestModule(prisma: PrismaService): DocumentedRouter {
   const repository = new ApprovalRequestRepository(prisma);
   const service = new ApprovalRequestService(repository);
-  return createApprovalRequestRouter(service);
+  const doc = createDocumentedRouter();
+  registerApprovalRequestRoutes(doc, service);
+  return doc;
 }
