@@ -1,12 +1,15 @@
-import type { DocumentedRouter, TokenSigner } from '@armman/service-commons';
+import type { TokenSigner } from '@armman/service-commons';
+import { createDocumentedRouter, type DocumentedRouter } from '../app.module';
 import type { PrismaService } from '../prisma/prisma.service';
 import { LookupRepository } from './lookup.repository';
 import { LookupService } from './lookup.service';
-import { createLookupRouter } from './lookup.controller';
+import { registerLookupRoutes } from './lookup.routes';
 
-/** Composition root for the lookup feature: wires repository → service → router. */
+/** Composition root for the lookup feature: wires repository → service → routes. */
 export function createLookupModule(prisma: PrismaService, signer: TokenSigner): DocumentedRouter {
   const repository = new LookupRepository(prisma);
   const service = new LookupService(repository);
-  return createLookupRouter(service, signer);
+  const doc = createDocumentedRouter();
+  registerLookupRoutes(doc, service, signer);
+  return doc;
 }

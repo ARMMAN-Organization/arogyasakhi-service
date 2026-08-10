@@ -1,12 +1,15 @@
-import type { DocumentedRouter, TokenSigner } from '@armman/service-commons';
+import type { TokenSigner } from '@armman/service-commons';
+import { createDocumentedRouter, type DocumentedRouter } from '../app.module';
 import type { PrismaService } from '../prisma/prisma.service';
 import { SakhiRepository } from './sakhi.repository';
 import { SakhiService } from './sakhi.service';
-import { createSakhiRouter } from './sakhi.controller';
+import { registerSakhiRoutes } from './sakhi.routes';
 
-/** Composition root for the Sakhi-read feature: wires repository → service → router. */
+/** Composition root for the Sakhi-read feature: wires repository → service → routes. */
 export function createSakhiModule(prisma: PrismaService, signer: TokenSigner): DocumentedRouter {
   const repository = new SakhiRepository(prisma);
   const service = new SakhiService(repository);
-  return createSakhiRouter(service, signer);
+  const doc = createDocumentedRouter();
+  registerSakhiRoutes(doc, service, signer);
+  return doc;
 }

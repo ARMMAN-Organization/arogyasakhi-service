@@ -1,11 +1,11 @@
-import type { DocumentedRouter } from '@armman/service-commons';
 import type { TokenSigner } from '@armman/service-commons';
+import { createDocumentedRouter, type DocumentedRouter } from '../app.module';
 import type { PrismaService } from '../prisma/prisma.service';
 import { AuthRepository } from './auth.repository';
 import { AuthService } from './auth.service';
-import { createAuthRouter } from './auth.controller';
+import { registerAuthRoutes } from './auth.routes';
 
-/** Composition root for the auth feature: wires repository → service → router. */
+/** Composition root for the auth feature: wires repository → service → routes. */
 export function createAuthModule(
   prisma: PrismaService,
   signer: TokenSigner,
@@ -14,5 +14,7 @@ export function createAuthModule(
 ): DocumentedRouter {
   const repository = new AuthRepository(prisma);
   const service = new AuthService(repository, signer, accessTokenTtl, refreshTokenTtl);
-  return createAuthRouter(service, signer);
+  const doc = createDocumentedRouter();
+  registerAuthRoutes(doc, service, signer);
+  return doc;
 }
