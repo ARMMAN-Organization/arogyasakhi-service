@@ -3,6 +3,8 @@ import { z } from 'zod';
 import type { RuleVersionService } from './ruleVersion.service';
 import { publishRuleVersionSchema } from './dto/publish-ruleVersion.dto';
 import { evaluateRuleSetSchema } from './dto/evaluate-ruleSet.dto';
+import { evaluateScheduleSchema } from './dto/evaluate-schedule.dto';
+import { SCHEDULE_KINDS } from './scheduleEvaluator';
 import {
   asyncHandler,
   createDocumentedRouter,
@@ -83,6 +85,25 @@ const evaluateResponseSchema = z.object({
     .openapi({ example: 'HIGH' }),
   conditions: z.array(riskEvaluationResultSchema),
 });
+
+const evaluateScheduleRequestSchema = evaluateScheduleSchema.extend({
+  // zod-to-openapi can't introspect the recursive z.lazy() input type on its
+  // own — same short-circuit as rulesJson/answers above.
+  input: evaluateScheduleSchema.shape.input.openapi({
+    type: 'object',
+    example: { registrationDate: '2026-01-01', edd: '2026-10-08' },
+  }),
+});
+
+const scheduleEvaluateResponseSchema = z
+  .object({ ruleVersionId: z.string().uuid() })
+  .catchall(z.unknown())
+  .openapi({
+    description:
+      "ruleVersionId plus the schedule pack's own output fields, shaped per scheduleKind " +
+      '(visits[]/totalRegularVisits for ANC, visits[]/riskState for CCV, etc. — see ' +
+      'scheduleEvaluator.ts for the exact contract per scheduleKind).',
+  });
 
 const apiErrorSchema = z.object({
   success: z.literal(false),
@@ -199,6 +220,39 @@ export function createRuleVersionRouter(service: RuleVersionService) {
     validateBody(evaluateRuleSetRequestSchema),
     asyncHandler(async (req, res) => {
       res.json(ok(await service.evaluate(req.params.setId, req.body)));
+    }),
+  );
+
+  doc.post(
+    '/rules/:setId/evaluate-schedule',
+    {
+      summary:
+        "Evaluate the rule set's currently-published gorules SCHEDULE decision graph " +
+        `(scheduleKind one of ${SCHEDULE_KINDS.join(', ')} — SRS §3A.2.3, Appendix A/B/G) ` +
+        'against caller-supplied input. Never evaluates against a DRAFT version.',
+      tags: ['Rules'],
+      params: setIdParamsSchema,
+      responses: {
+        200: {
+          description: 'Schedule evaluation result',
+          schema: envelope(scheduleEvaluateResponseSchema),
+        },
+        400: { description: 'Malformed input or decision-graph output', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+        404: {
+          description: 'Rule set not found, or it has no published version',
+          schema: apiErrorSchema,
+        },
+        500: { description: 'Server error', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI'),
+    validate(setIdParamsSchema, 'params'),
+    validateBody(evaluateScheduleRequestSchema),
+    asyncHandler(async (req, res) => {
+      res.json(ok(await service.evaluateSchedule(req.params.setId, req.body)));
     }),
   );
 

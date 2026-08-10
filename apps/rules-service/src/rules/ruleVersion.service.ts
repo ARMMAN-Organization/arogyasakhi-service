@@ -3,7 +3,9 @@ import { conflict, notFound } from '@armman/service-commons';
 import type { RuleVersionRepository } from './ruleVersion.repository';
 import type { PublishRuleVersionInput } from './dto/publish-ruleVersion.dto';
 import type { EvaluateRuleSetInput } from './dto/evaluate-ruleSet.dto';
+import type { EvaluateScheduleInput } from './dto/evaluate-schedule.dto';
 import { evaluateRulePack } from './ruleSet.evaluator';
+import { evaluateSchedulePack } from './scheduleEvaluator';
 
 /** Prisma unique-constraint violation code (ruleSetId + versionNo). */
 const PRISMA_UNIQUE_CONSTRAINT_CODE = 'P2002';
@@ -89,6 +91,27 @@ export class RuleVersionService {
     }
 
     const evaluation = await evaluateRulePack(version.rulesJson, dto.answers);
+    return { ruleVersionId: version.id, ...evaluation };
+  }
+
+  /**
+   * Executes the rule set's currently-published gorules decision graph as a
+   * SCHEDULE-category pack (ANC/PP/NN/INC/CCV/HR/DELIVERY per SRS §3A.2.3,
+   * Appendix A/B/G) — same 404-on-missing-set/missing-published-version
+   * guard as evaluate(), but validates the output against the shape
+   * scheduleEvaluator.ts expects for the caller-supplied scheduleKind
+   * rather than the RISK-only {overallRiskCategory, conditions} contract.
+   */
+  async evaluateSchedule(ruleSetId: string, dto: EvaluateScheduleInput) {
+    const set = await this.repository.findSetById(ruleSetId);
+    if (!set) throw notFound('Rule set not found.');
+
+    const version = await this.repository.findPublishedBySetId(ruleSetId);
+    if (!version) {
+      throw notFound('No published rule pack version found for this rule set.');
+    }
+
+    const evaluation = await evaluateSchedulePack(dto.scheduleKind, version.rulesJson, dto.input);
     return { ruleVersionId: version.id, ...evaluation };
   }
 
