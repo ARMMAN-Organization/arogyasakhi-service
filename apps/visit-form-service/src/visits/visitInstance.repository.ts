@@ -2,12 +2,80 @@ import type { PrismaService } from '../prisma/prisma.service';
 import type { CreateVisitInstanceInput } from './dto/create-visitInstance.dto';
 import type { UpdateVisitInstanceInput } from './dto/update-visitInstance.dto';
 
+interface ListCursor {
+  updatedAt: string;
+  id: string;
+}
+
+/** Encodes a row's sort key as an opaque pagination cursor. */
+function encodeCursor(row: { updatedAt: Date; id: string }): string {
+  const cursor: ListCursor = { updatedAt: row.updatedAt.toISOString(), id: row.id };
+  return Buffer.from(JSON.stringify(cursor)).toString('base64url');
+}
+
+/** Decodes a cursor produced by encodeCursor; returns null on any malformed input. */
+function decodeCursor(cursor: string): ListCursor | null {
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
+    if (typeof parsed?.updatedAt === 'string' && typeof parsed?.id === 'string') {
+      return parsed as ListCursor;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export interface ListVisitInstancesFilters {
+  beneficiaryId?: string;
+  sakhiId?: string;
+  sakhiIds?: string[];
+  statusLookupValueId?: string;
+  updatedAfter?: string;
+  cursor?: string;
+  limit: number;
+}
+
 /** Data access for visit instances. Owns only this service's `visit_instances` table. */
 export class VisitInstanceRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  findMany() {
-    return this.prisma.visitInstance.findMany({ orderBy: { createdAt: 'desc' }, take: 50 });
+  /**
+   * Keyset-paginated list/sync-pull, role-scoped by the caller-resolved
+   * sakhiId/sakhiIds (see visitInstance.service.ts's list()) — same cursor
+   * pattern as visitSchedule.repository.ts's findMany (sort key
+   * (updatedAt desc, id desc), base64url cursor, limit+1 fetch).
+   */
+  async findMany(filters: ListVisitInstancesFilters) {
+    const where: NonNullable<Parameters<typeof this.prisma.visitInstance.findMany>[0]>['where'] = {
+      isDeleted: false,
+    };
+    if (filters.beneficiaryId) where.beneficiaryId = filters.beneficiaryId;
+    if (filters.sakhiId) where.sakhiId = filters.sakhiId;
+    if (filters.sakhiIds) where.sakhiId = { in: filters.sakhiIds };
+    if (filters.statusLookupValueId) where.statusLookupValueId = filters.statusLookupValueId;
+    if (filters.updatedAfter) where.updatedAt = { gt: new Date(filters.updatedAfter) };
+
+    const decodedCursor = filters.cursor ? decodeCursor(filters.cursor) : null;
+
+    const rows = await this.prisma.visitInstance.findMany({
+      where: decodedCursor
+        ? {
+            ...where,
+            OR: [
+              { updatedAt: { lt: new Date(decodedCursor.updatedAt) } },
+              { updatedAt: new Date(decodedCursor.updatedAt), id: { lt: decodedCursor.id } },
+            ],
+          }
+        : where,
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+      take: filters.limit + 1,
+    });
+
+    const hasMore = rows.length > filters.limit;
+    const items = hasMore ? rows.slice(0, filters.limit) : rows;
+    const lastItem = items[items.length - 1];
+    return { items, nextCursor: hasMore && lastItem ? encodeCursor(lastItem) : null };
   }
 
   findByLocalVisitUuid(localVisitUuid: string) {

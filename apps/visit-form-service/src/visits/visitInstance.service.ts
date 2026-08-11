@@ -3,6 +3,7 @@ import type { VisitInstanceRepository } from './visitInstance.repository';
 import type { CreateVisitInstanceInput } from './dto/create-visitInstance.dto';
 import type { UpdateVisitInstanceInput } from './dto/update-visitInstance.dto';
 import type { VisitSummaryQueryInput } from './dto/visit-summary-query.dto';
+import type { ListVisitInstancesQuery } from './dto/list-visit-instances.dto';
 import { findSakhiById, listSakhiIdsForSupervisor } from '../sakhis/sakhi.client';
 import { resolveVisitStatusCode, resolveVisitStatusCodes } from '../lookups/lookup.client';
 
@@ -22,8 +23,27 @@ function isPrivileged(caller: CallerIdentity): boolean {
 export class VisitInstanceService {
   constructor(private readonly repository: VisitInstanceRepository) {}
 
-  list() {
-    return this.repository.findMany();
+  /**
+   * List/sync-pull, role-scoped exactly like getVisitSummary (see
+   * resolveSakhiScope): SAKHI forced to her own sakhiId, SUPERVISOR to her
+   * roster (or one validated member), MANAGER/ADMIN unscoped unless sakhiId
+   * is explicitly given.
+   */
+  async list(query: ListVisitInstancesQuery, caller: CallerIdentity, authorizationHeader: string) {
+    const { sakhiId, sakhiIds } = await this.resolveSakhiScope(
+      caller,
+      query.sakhiId,
+      authorizationHeader,
+    );
+    return this.repository.findMany({
+      beneficiaryId: query.beneficiaryId,
+      sakhiId,
+      sakhiIds,
+      statusLookupValueId: query.statusLookupValueId,
+      updatedAfter: query.updatedAfter,
+      cursor: query.cursor,
+      limit: query.limit,
+    });
   }
 
   /**
@@ -131,36 +151,11 @@ export class VisitInstanceService {
       throw badRequest('fromDate must be on or before toDate.');
     }
 
-    let sakhiId: string | undefined;
-    let sakhiIds: string[] | undefined;
-
-    if (caller.roles.includes('SAKHI')) {
-      sakhiId = caller.id;
-    } else if (!isPrivileged(caller)) {
-      // SUPERVISOR
-      if (!caller.projectId) {
-        throw forbidden('Supervisor caller has no project scope.');
-      }
-      if (query.sakhiId) {
-        const roster = await listSakhiIdsForSupervisor(
-          caller.projectId,
-          caller.id,
-          authorizationHeader,
-        );
-        if (!roster.includes(query.sakhiId)) {
-          throw forbidden("sakhiId is not in this Supervisor's roster.");
-        }
-        sakhiId = query.sakhiId;
-      } else {
-        sakhiIds = await listSakhiIdsForSupervisor(
-          caller.projectId,
-          caller.id,
-          authorizationHeader,
-        );
-      }
-    } else if (query.sakhiId) {
-      sakhiId = query.sakhiId;
-    }
+    const { sakhiId, sakhiIds } = await this.resolveSakhiScope(
+      caller,
+      query.sakhiId,
+      authorizationHeader,
+    );
 
     const [grouped, statusCodes] = await Promise.all([
       this.repository.countByStatus({
@@ -183,5 +178,46 @@ export class VisitInstanceService {
     }
 
     return { total, byStatus };
+  }
+
+  /**
+   * Shared role-scoping for every sakhiId-filterable operation in this
+   * service (list, getVisitSummary): SAKHI is forced to her own sakhiId
+   * regardless of `requestedSakhiId`; SUPERVISOR narrows to one validated
+   * roster member or defaults to her full roster; MANAGER/ADMIN unscoped
+   * unless `requestedSakhiId` is explicitly given.
+   */
+  private async resolveSakhiScope(
+    caller: CallerIdentity,
+    requestedSakhiId: string | undefined,
+    authorizationHeader: string,
+  ): Promise<{ sakhiId?: string; sakhiIds?: string[] }> {
+    if (caller.roles.includes('SAKHI')) {
+      return { sakhiId: caller.id };
+    }
+    if (!isPrivileged(caller)) {
+      // SUPERVISOR
+      if (!caller.projectId) {
+        throw forbidden('Supervisor caller has no project scope.');
+      }
+      if (requestedSakhiId) {
+        const roster = await listSakhiIdsForSupervisor(
+          caller.projectId,
+          caller.id,
+          authorizationHeader,
+        );
+        if (!roster.includes(requestedSakhiId)) {
+          throw forbidden("sakhiId is not in this Supervisor's roster.");
+        }
+        return { sakhiId: requestedSakhiId };
+      }
+      const sakhiIds = await listSakhiIdsForSupervisor(
+        caller.projectId,
+        caller.id,
+        authorizationHeader,
+      );
+      return { sakhiIds };
+    }
+    return requestedSakhiId ? { sakhiId: requestedSakhiId } : {};
   }
 }

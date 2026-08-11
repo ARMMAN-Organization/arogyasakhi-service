@@ -1,6 +1,7 @@
 import { VisitInstanceService } from './visitInstance.service';
 import type { VisitInstanceRepository } from './visitInstance.repository';
 import type { CreateVisitInstanceInput } from './dto/create-visitInstance.dto';
+import type { ListVisitInstancesQuery } from './dto/list-visit-instances.dto';
 import { findSakhiById, listSakhiIdsForSupervisor } from '../sakhis/sakhi.client';
 import { resolveVisitStatusCode, resolveVisitStatusCodes } from '../lookups/lookup.client';
 
@@ -35,12 +36,6 @@ describe('VisitInstanceService', () => {
     service = new VisitInstanceService(repository);
   });
 
-  it('lists via repository', async () => {
-    repository.findMany.mockResolvedValue([]);
-    await expect(service.list()).resolves.toEqual([]);
-    expect(repository.findMany).toHaveBeenCalledTimes(1);
-  });
-
   const sampleRow = {
     id: '1',
     scheduleId: '11111111-1111-1111-1111-111111111111',
@@ -64,12 +59,6 @@ describe('VisitInstanceService', () => {
     isDeleted: false,
     deletedAt: null,
   };
-
-  it('returns the repository list unchanged', async () => {
-    const rows = [sampleRow];
-    repository.findMany.mockResolvedValue(rows);
-    await expect(service.list()).resolves.toBe(rows);
-  });
 
   const dto: CreateVisitInstanceInput = {
     scheduleId: '11111111-1111-1111-1111-111111111111',
@@ -111,6 +100,137 @@ describe('VisitInstanceService', () => {
     repository.create.mockRejectedValue(new Error('db down'));
 
     await expect(service.create(dto)).rejects.toThrow('db down');
+  });
+
+  describe('list', () => {
+    const baseQuery: ListVisitInstancesQuery = { limit: 50 };
+
+    it('forces a SAKHI caller to her own sakhiId, ignoring any sakhiId param', async () => {
+      repository.findMany.mockResolvedValue({ items: [], nextCursor: null });
+
+      await service.list(
+        { ...baseQuery, sakhiId: 'someone-else' },
+        { id: 'sakhi-1', roles: ['SAKHI'] },
+        AUTH_HEADER,
+      );
+
+      expect(repository.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ sakhiId: 'sakhi-1' }),
+      );
+    });
+
+    it('scopes a SUPERVISOR with no sakhiId param to her full roster', async () => {
+      listSakhiIdsForSupervisorMock.mockResolvedValue(['sakhi-a', 'sakhi-b']);
+      repository.findMany.mockResolvedValue({ items: [], nextCursor: null });
+
+      await service.list(
+        baseQuery,
+        { id: 'supervisor-1', roles: ['SUPERVISOR'], projectId: 'p1' },
+        AUTH_HEADER,
+      );
+
+      expect(repository.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ sakhiIds: ['sakhi-a', 'sakhi-b'] }),
+      );
+    });
+
+    it('scopes a SUPERVISOR with a valid sakhiId param to that one Sakhi', async () => {
+      listSakhiIdsForSupervisorMock.mockResolvedValue(['sakhi-a', 'sakhi-b']);
+      repository.findMany.mockResolvedValue({ items: [], nextCursor: null });
+
+      await service.list(
+        { ...baseQuery, sakhiId: 'sakhi-a' },
+        { id: 'supervisor-1', roles: ['SUPERVISOR'], projectId: 'p1' },
+        AUTH_HEADER,
+      );
+
+      expect(repository.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ sakhiId: 'sakhi-a' }),
+      );
+    });
+
+    it('rejects a SUPERVISOR whose sakhiId param is not in her roster', async () => {
+      listSakhiIdsForSupervisorMock.mockResolvedValue(['sakhi-a']);
+
+      await expect(
+        service.list(
+          { ...baseQuery, sakhiId: 'sakhi-z' },
+          { id: 'supervisor-1', roles: ['SUPERVISOR'], projectId: 'p1' },
+          AUTH_HEADER,
+        ),
+      ).rejects.toThrow("sakhiId is not in this Supervisor's roster.");
+      expect(repository.findMany).not.toHaveBeenCalled();
+    });
+
+    it('rejects a SUPERVISOR caller with no project scope', async () => {
+      await expect(
+        service.list(
+          baseQuery,
+          { id: 'supervisor-1', roles: ['SUPERVISOR'], projectId: null },
+          AUTH_HEADER,
+        ),
+      ).rejects.toThrow('Supervisor caller has no project scope.');
+      expect(repository.findMany).not.toHaveBeenCalled();
+    });
+
+    it('leaves a MANAGER caller fully unscoped when no sakhiId is given', async () => {
+      repository.findMany.mockResolvedValue({ items: [], nextCursor: null });
+
+      await service.list(baseQuery, { id: 'manager-1', roles: ['MANAGER'] }, AUTH_HEADER);
+
+      expect(repository.findMany).toHaveBeenCalledWith(
+        expect.not.objectContaining({ sakhiId: expect.anything(), sakhiIds: expect.anything() }),
+      );
+    });
+
+    it('lets a MANAGER caller narrow to one sakhiId', async () => {
+      repository.findMany.mockResolvedValue({ items: [], nextCursor: null });
+
+      await service.list(
+        { ...baseQuery, sakhiId: 'sakhi-x' },
+        { id: 'manager-1', roles: ['MANAGER'] },
+        AUTH_HEADER,
+      );
+
+      expect(repository.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ sakhiId: 'sakhi-x' }),
+      );
+    });
+
+    it('passes beneficiaryId/statusLookupValueId/updatedAfter/cursor/limit through to the repository', async () => {
+      repository.findMany.mockResolvedValue({ items: [], nextCursor: null });
+
+      await service.list(
+        {
+          beneficiaryId: 'ben-1',
+          statusLookupValueId: 'status-1',
+          updatedAfter: '2026-08-01T00:00:00.000Z',
+          cursor: 'abc',
+          limit: 20,
+        },
+        { id: 'manager-1', roles: ['MANAGER'] },
+        AUTH_HEADER,
+      );
+
+      expect(repository.findMany).toHaveBeenCalledWith({
+        beneficiaryId: 'ben-1',
+        sakhiId: undefined,
+        sakhiIds: undefined,
+        statusLookupValueId: 'status-1',
+        updatedAfter: '2026-08-01T00:00:00.000Z',
+        cursor: 'abc',
+        limit: 20,
+      });
+    });
+
+    it('returns the repository page unchanged', async () => {
+      const page = { items: [sampleRow], nextCursor: 'next-cursor' };
+      repository.findMany.mockResolvedValue(page as never);
+
+      await expect(
+        service.list(baseQuery, { id: 'manager-1', roles: ['MANAGER'] }, AUTH_HEADER),
+      ).resolves.toBe(page);
+    });
   });
 
   describe('updateStatus', () => {

@@ -3,10 +3,12 @@ import type { FormRepository } from './form.repository';
 import * as geographyClient from '../geography/geography.client';
 import { syncSocioDemographics } from '../beneficiaries/socio-demographics.client';
 import { syncHealthHistory } from '../beneficiaries/health-history.client';
+import { fetchPublishedRuleSet } from '../rules/ruleVersion.client';
 
 jest.mock('../geography/geography.client');
 jest.mock('../beneficiaries/socio-demographics.client');
 jest.mock('../beneficiaries/health-history.client');
+jest.mock('../rules/ruleVersion.client');
 
 describe('FormService', () => {
   const repository = {
@@ -59,6 +61,44 @@ describe('FormService', () => {
       ).rejects.toThrow(/No published form version/);
     });
 
+    it('surfaces riskRuleSetId from the joined formDefinition', async () => {
+      repository.findActiveVersion.mockResolvedValue({
+        id: 'v1',
+        versionNo: 'v1',
+        status: 'PUBLISHED',
+        checksum: Buffer.from('x'),
+        formDefinition: { riskRuleSetId: 'set-1' },
+      } as never);
+
+      const result = await service.getActiveVersion(
+        'ANC_VISIT',
+        new Date(),
+        null,
+        'Bearer test-token',
+      );
+
+      expect(result).toMatchObject({ riskRuleSetId: 'set-1' });
+    });
+
+    it('defaults riskRuleSetId to null when the form has no risk rule set configured', async () => {
+      repository.findActiveVersion.mockResolvedValue({
+        id: 'v1',
+        versionNo: 'v1',
+        status: 'PUBLISHED',
+        checksum: Buffer.from('x'),
+        formDefinition: { riskRuleSetId: null },
+      } as never);
+
+      const result = await service.getActiveVersion(
+        'MOTHER_REGISTRATION',
+        new Date(),
+        null,
+        'Bearer test-token',
+      );
+
+      expect(result).toMatchObject({ riskRuleSetId: null });
+    });
+
     it("attaches the caller's geography chain when they have a geographyUnitId assigned", async () => {
       const version = {
         id: 'v1',
@@ -96,6 +136,69 @@ describe('FormService', () => {
     });
   });
 
+  describe('getActiveVersionRiskRules', () => {
+    it('resolves formCode -> riskRuleSetId -> rulesJson in one call', async () => {
+      repository.findActiveVersion.mockResolvedValue({
+        id: 'v1',
+        formDefinition: { riskRuleSetId: 'set-1' },
+      } as never);
+      jest.mocked(fetchPublishedRuleSet).mockResolvedValue({
+        id: 'ver-1',
+        ruleSetId: 'set-1',
+        versionNo: 'v2',
+        rulesJson: { rules: [] },
+        status: 'PUBLISHED',
+      });
+
+      const result = await service.getActiveVersionRiskRules(
+        'ANC_VISIT',
+        new Date(),
+        'Bearer test-token',
+      );
+
+      expect(fetchPublishedRuleSet).toHaveBeenCalledWith('set-1', 'Bearer test-token');
+      expect(result).toEqual({
+        ruleSetId: 'set-1',
+        ruleVersionId: 'ver-1',
+        versionNo: 'v2',
+        rulesJson: { rules: [] },
+      });
+    });
+
+    it('404s when the form has no active version', async () => {
+      repository.findActiveVersion.mockResolvedValue(null);
+
+      await expect(
+        service.getActiveVersionRiskRules('ANC_VISIT', new Date(), 'Bearer test-token'),
+      ).rejects.toMatchObject({ status: 404 });
+      expect(fetchPublishedRuleSet).not.toHaveBeenCalled();
+    });
+
+    it('404s when the form has no risk rule set configured', async () => {
+      repository.findActiveVersion.mockResolvedValue({
+        id: 'v1',
+        formDefinition: { riskRuleSetId: null },
+      } as never);
+
+      await expect(
+        service.getActiveVersionRiskRules('MOTHER_REGISTRATION', new Date(), 'Bearer test-token'),
+      ).rejects.toMatchObject({ status: 404 });
+      expect(fetchPublishedRuleSet).not.toHaveBeenCalled();
+    });
+
+    it('404s when the rule set has no published version', async () => {
+      repository.findActiveVersion.mockResolvedValue({
+        id: 'v1',
+        formDefinition: { riskRuleSetId: 'set-1' },
+      } as never);
+      jest.mocked(fetchPublishedRuleSet).mockResolvedValue(null);
+
+      await expect(
+        service.getActiveVersionRiskRules('ANC_VISIT', new Date(), 'Bearer test-token'),
+      ).rejects.toMatchObject({ status: 404 });
+    });
+  });
+
   describe('createDraft', () => {
     it('creates a draft with an auto-incremented version number', async () => {
       repository.findDefinitionByCode.mockResolvedValue({ id: 'def-1' } as never);
@@ -107,7 +210,7 @@ describe('FormService', () => {
       expect(repository.createDraft).toHaveBeenCalledWith(
         expect.objectContaining({ formDefinitionId: 'def-1', versionNo: 'v3', schemaJson: [] }),
       );
-      expect(result).toEqual({ id: 'draft-3', versionNo: 'v3' });
+      expect(result).toMatchObject({ id: 'draft-3', versionNo: 'v3' });
     });
 
     it('surfaces a concurrent version-number collision as a 409, not a 500', async () => {

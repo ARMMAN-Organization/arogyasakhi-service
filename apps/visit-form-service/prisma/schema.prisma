@@ -54,6 +54,10 @@ enum VisitScheduleStatus {
   COMPLETED
   SUPERSEDED
   CANCELLED
+  // Auto-set when all remaining open visits are lapsed on delivery-form
+  // submission (FR-S-3.7) or mother/child closure (FR-S-10.1/10.2) — a
+  // DB-only status, never chosen by a client.
+  LAPSED
 }
 
 enum FormEntityType {

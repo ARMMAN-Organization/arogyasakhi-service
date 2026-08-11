@@ -15,6 +15,9 @@ describe('VisitScheduleService', () => {
     findByBeneficiaryAndVisitCodes: jest.fn(),
     findById: jest.fn(),
     createAllOrNothing: jest.fn(),
+    lapseOpen: jest.fn(),
+    findMany: jest.fn(),
+    supersedeAnc: jest.fn(),
   } as unknown as jest.Mocked<VisitScheduleRepository>;
   let service: VisitScheduleService;
 
@@ -430,6 +433,245 @@ describe('VisitScheduleService', () => {
       await expect(service.createBulk(baseDto(), adminCaller, authHeader)).resolves.toMatchObject({
         beneficiaryId,
       });
+      expect(sakhiClient.findSakhiById).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('list', () => {
+    const baseQuery = { beneficiaryId, limit: 50 } as never;
+
+    it('returns the repository page unchanged', async () => {
+      repository.findMany.mockResolvedValue({
+        items: [{ id: 'sched-1' }],
+        nextCursor: null,
+      } as never);
+
+      const result = await service.list(baseQuery, sakhiCaller, authHeader);
+
+      expect(repository.findMany).toHaveBeenCalledWith(baseQuery);
+      expect(result).toEqual({ items: [{ id: 'sched-1' }], nextCursor: null });
+    });
+
+    it('404s when the beneficiary does not exist, never calling the repository', async () => {
+      (beneficiaryClient.findBeneficiaryById as jest.Mock).mockResolvedValue(null);
+
+      await expect(service.list(baseQuery, sakhiCaller, authHeader)).rejects.toMatchObject({
+        status: 404,
+      });
+      expect(repository.findMany).not.toHaveBeenCalled();
+    });
+
+    it('rejects a SAKHI who does not own the beneficiary', async () => {
+      const otherSakhiCaller = { id: 'someone-else', roles: ['SAKHI'] };
+
+      await expect(service.list(baseQuery, otherSakhiCaller, authHeader)).rejects.toMatchObject({
+        status: 403,
+      });
+      expect(repository.findMany).not.toHaveBeenCalled();
+    });
+
+    it('rejects a SUPERVISOR whose Sakhi is assigned to someone else', async () => {
+      await expect(
+        service.list(baseQuery, otherSupervisorCaller, authHeader),
+      ).rejects.toMatchObject({
+        status: 403,
+      });
+      expect(repository.findMany).not.toHaveBeenCalled();
+    });
+
+    it('allows a MANAGER regardless of assignment, without calling the Sakhi client', async () => {
+      repository.findMany.mockResolvedValue({ items: [], nextCursor: null } as never);
+
+      await expect(service.list(baseQuery, managerCaller, authHeader)).resolves.toEqual({
+        items: [],
+        nextCursor: null,
+      });
+      expect(sakhiClient.findSakhiById).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('lapseOpenSchedules', () => {
+    it('lapses every open schedule for the beneficiary and returns the count', async () => {
+      repository.lapseOpen.mockResolvedValue({ count: 3 });
+
+      const result = await service.lapseOpenSchedules(
+        beneficiaryId,
+        'DELIVERY_FORM_SUBMITTED',
+        sakhiCaller,
+        authHeader,
+      );
+
+      expect(repository.lapseOpen).toHaveBeenCalledWith(beneficiaryId, sakhiCaller.id);
+      expect(result).toEqual({ lapsedCount: 3 });
+    });
+
+    it('is idempotent — a beneficiary with no open schedules lapses zero rows without error', async () => {
+      repository.lapseOpen.mockResolvedValue({ count: 0 });
+
+      const result = await service.lapseOpenSchedules(
+        beneficiaryId,
+        'CLOSURE_FORM_SUBMITTED',
+        sakhiCaller,
+        authHeader,
+      );
+
+      expect(result).toEqual({ lapsedCount: 0 });
+    });
+
+    it('404s when the beneficiary does not exist, never calling the repository', async () => {
+      (beneficiaryClient.findBeneficiaryById as jest.Mock).mockResolvedValue(null);
+
+      await expect(
+        service.lapseOpenSchedules(
+          beneficiaryId,
+          'DELIVERY_FORM_SUBMITTED',
+          sakhiCaller,
+          authHeader,
+        ),
+      ).rejects.toMatchObject({ status: 404 });
+      expect(repository.lapseOpen).not.toHaveBeenCalled();
+    });
+
+    it('rejects a SAKHI who does not own the beneficiary', async () => {
+      const otherSakhiCaller = { id: 'someone-else', roles: ['SAKHI'] };
+
+      await expect(
+        service.lapseOpenSchedules(
+          beneficiaryId,
+          'DELIVERY_FORM_SUBMITTED',
+          otherSakhiCaller,
+          authHeader,
+        ),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(repository.lapseOpen).not.toHaveBeenCalled();
+    });
+
+    it('rejects a SUPERVISOR whose Sakhi is assigned to someone else', async () => {
+      await expect(
+        service.lapseOpenSchedules(
+          beneficiaryId,
+          'DELIVERY_FORM_SUBMITTED',
+          otherSupervisorCaller,
+          authHeader,
+        ),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(repository.lapseOpen).not.toHaveBeenCalled();
+    });
+
+    it('allows a MANAGER regardless of assignment, without calling the Sakhi client', async () => {
+      repository.lapseOpen.mockResolvedValue({ count: 1 });
+
+      await expect(
+        service.lapseOpenSchedules(
+          beneficiaryId,
+          'CLOSURE_FORM_SUBMITTED',
+          managerCaller,
+          authHeader,
+        ),
+      ).resolves.toEqual({ lapsedCount: 1 });
+      expect(sakhiClient.findSakhiById).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('regenerateAncSchedule', () => {
+    const registrationDate = '2026-08-11';
+    const edd = '2027-01-01';
+
+    it('supersedes old ANC rows, generates new ones via rules-service, and inserts them', async () => {
+      repository.supersedeAnc.mockResolvedValue({ count: 6 });
+      (ruleVersionClient.evaluateAncScheduleFull as jest.Mock).mockResolvedValue({
+        ruleVersionId,
+        scheduleRows: [
+          {
+            localScheduleUuid: 'anc-1',
+            visitCode: 'ANC1',
+            visitType: 'ANC',
+            sequenceNo: 1,
+            scheduledDate: registrationDate,
+            windowStartDate: registrationDate,
+            windowEndDate: '2026-08-16',
+            anchorType: 'REGISTRATION',
+            anchorVisitLocalUuid: null,
+          },
+        ],
+      });
+      repository.createAllOrNothing.mockResolvedValue([
+        { id: 'sched-new-1', localScheduleUuid: 'anc-1', status: 'GENERATED' },
+      ] as never);
+
+      const result = await service.regenerateAncSchedule(
+        beneficiaryId,
+        registrationDate,
+        edd,
+        supervisorCaller,
+        authHeader,
+      );
+
+      expect(repository.supersedeAnc).toHaveBeenCalledWith(beneficiaryId, supervisorCaller.id);
+      expect(ruleVersionClient.evaluateAncScheduleFull).toHaveBeenCalledWith(
+        registrationDate,
+        edd,
+        authHeader,
+      );
+      expect(repository.createAllOrNothing).toHaveBeenCalledWith(
+        expect.any(Array),
+        beneficiaryId,
+        ruleVersionId,
+        supervisorCaller.id,
+      );
+      expect(result).toEqual({
+        supersededCount: 6,
+        created: 1,
+        schedules: [{ localScheduleUuid: 'anc-1', scheduleId: 'sched-new-1', status: 'GENERATED' }],
+      });
+    });
+
+    it('404s when the beneficiary does not exist, never superseding or generating', async () => {
+      (beneficiaryClient.findBeneficiaryById as jest.Mock).mockResolvedValue(null);
+
+      await expect(
+        service.regenerateAncSchedule(
+          beneficiaryId,
+          registrationDate,
+          edd,
+          supervisorCaller,
+          authHeader,
+        ),
+      ).rejects.toMatchObject({ status: 404 });
+      expect(repository.supersedeAnc).not.toHaveBeenCalled();
+      expect(ruleVersionClient.evaluateAncScheduleFull).not.toHaveBeenCalled();
+    });
+
+    it('rejects a SUPERVISOR whose Sakhi is assigned to someone else', async () => {
+      await expect(
+        service.regenerateAncSchedule(
+          beneficiaryId,
+          registrationDate,
+          edd,
+          otherSupervisorCaller,
+          authHeader,
+        ),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(repository.supersedeAnc).not.toHaveBeenCalled();
+    });
+
+    it('allows a MANAGER regardless of assignment, without calling the Sakhi client', async () => {
+      repository.supersedeAnc.mockResolvedValue({ count: 0 });
+      (ruleVersionClient.evaluateAncScheduleFull as jest.Mock).mockResolvedValue({
+        ruleVersionId,
+        scheduleRows: [],
+      });
+      repository.createAllOrNothing.mockResolvedValue([]);
+
+      await expect(
+        service.regenerateAncSchedule(
+          beneficiaryId,
+          registrationDate,
+          edd,
+          managerCaller,
+          authHeader,
+        ),
+      ).resolves.toEqual({ supersededCount: 0, created: 0, schedules: [] });
       expect(sakhiClient.findSakhiById).not.toHaveBeenCalled();
     });
   });

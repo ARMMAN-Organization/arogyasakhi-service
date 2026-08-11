@@ -4,6 +4,7 @@ import type { VisitInstanceService } from './visitInstance.service';
 import { createVisitInstanceSchema } from './dto/create-visitInstance.dto';
 import { updateVisitInstanceSchema } from './dto/update-visitInstance.dto';
 import { visitSummaryQuerySchema } from './dto/visit-summary-query.dto';
+import { listVisitInstancesQuerySchema } from './dto/list-visit-instances.dto';
 import {
   asyncHandler,
   createDocumentedRouter,
@@ -74,6 +75,13 @@ const visitSummarySchema = z.object({
   byStatus: z.record(z.string(), z.number().int()),
 });
 
+const visitInstanceListPageSchema = z.object({
+  items: z.array(visitInstanceSchema),
+  nextCursor: z.string().nullable().openapi({
+    description: 'Pass back as `cursor` to fetch the next page; null when this is the last page.',
+  }),
+});
+
 function envelope<T extends z.ZodTypeAny>(data: T) {
   return z.object({ success: z.literal(true), message: z.string(), data });
 }
@@ -92,19 +100,33 @@ export function createVisitInstanceRouter(service: VisitInstanceService) {
   doc.get(
     '/visits',
     {
-      summary: 'List recent visit instances',
+      summary:
+        'List/sync-pull visit instances. Filters: beneficiaryId, statusLookupValueId, ' +
+        'updatedAfter (delta sync). Cursor-paginated via cursor/limit (default 50, max 100) — ' +
+        "pass the response's nextCursor back as `cursor` to fetch the next page. Same role-" +
+        'scoping as GET /visits/visit-summary: SAKHI sees only her own visits regardless of ' +
+        'sakhiId, SUPERVISOR is scoped to her roster (or one validated member via sakhiId), ' +
+        'MANAGER/ADMIN unscoped unless sakhiId is given.',
       tags: ['Visits'],
       responses: {
-        200: { description: 'Visit instances', schema: envelope(z.array(visitInstanceSchema)) },
+        200: {
+          description: 'Visit instances retrieved',
+          schema: envelope(visitInstanceListPageSchema),
+        },
         401: errorResponse(401),
-        403: errorResponse(403),
+        403: errorResponse(403, { message: "sakhiId is not in this Supervisor's roster." }),
         500: errorResponse(500),
       },
     },
     trustGatewayIdentity,
-    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER'),
-    asyncHandler(async (_req, res) => {
-      res.json(ok(await service.list()));
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(listVisitInstancesQuerySchema, 'query'),
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const query = req.query as unknown as z.infer<typeof listVisitInstancesQuerySchema>;
+      res.json(ok(await service.list(query, req.user, authorizationHeader)));
     }),
   );
 

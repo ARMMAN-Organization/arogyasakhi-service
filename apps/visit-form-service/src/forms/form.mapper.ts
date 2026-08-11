@@ -20,6 +20,10 @@ export interface FormVersionRow {
   status: string;
   createdAt: Date;
   updatedAt: Date;
+  // Only present when the query joined formDefinition (see
+  // form.repository.ts's findActiveVersion) — undefined otherwise (e.g.
+  // createDraft/updateDraft/publish, which don't need it).
+  formDefinition?: { riskRuleSetId: string | null };
 }
 
 /**
@@ -27,7 +31,10 @@ export interface FormVersionRow {
  * exposes (matches formVersionSchema in form.controller.ts). Drops internal
  * columns — notably the binary `checksum`, plus createdByUserId/
  * updatedByUserId/isDeleted/deletedAt — so they never leak into a response
- * even though the Prisma row carries them.
+ * even though the Prisma row carries them. Surfaces riskRuleSetId (via the
+ * joined formDefinition) so a client can resolve formCode -> rule set ->
+ * rulesJson in one call to GET /forms/:formCode/active-version, instead of
+ * a separate lookup against form_definitions.
  */
 export function toApiFormVersion<T extends FormVersionRow>(v: T) {
   return {
@@ -42,6 +49,7 @@ export function toApiFormVersion<T extends FormVersionRow>(v: T) {
     status: v.status,
     createdAt: v.createdAt,
     updatedAt: v.updatedAt,
+    riskRuleSetId: v.formDefinition?.riskRuleSetId ?? null,
   };
 }
 

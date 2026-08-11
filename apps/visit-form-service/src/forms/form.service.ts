@@ -15,6 +15,7 @@ import { syncSocioDemographics } from '../beneficiaries/socio-demographics.clien
 import { syncHealthHistory } from '../beneficiaries/health-history.client';
 import { getAncestorChain } from '../geography/geography.client';
 import { triggerRiskAssessment } from '../risk-assessments/riskAssessment.client';
+import { fetchPublishedRuleSet } from '../rules/ruleVersion.client';
 
 /**
  * Business logic for the dynamic-forms feature: fetching the active version,
@@ -53,6 +54,36 @@ export class FormService {
       name: unit.name,
     }));
     return { ...apiVersion, geography };
+  }
+
+  /**
+   * Resolves a form's configured RISK rule set in one call — formCode ->
+   * riskRuleSetId (this service's own form_definitions) -> rulesJson
+   * (rules-service's currently-published version for that set). The
+   * production consumer is a client caching rulesJson to evaluate HR
+   * conditions offline (FR-S-5.1), avoiding a separate lookup against
+   * form_definitions to discover the rule set id first.
+   */
+  async getActiveVersionRiskRules(formCode: string, asOf: Date, authorizationHeader: string) {
+    const version = await this.repository.findActiveVersion(formCode, asOf);
+    if (!version) throw notFound(`No published form version found for form code "${formCode}".`);
+
+    const riskRuleSetId = version.formDefinition?.riskRuleSetId ?? null;
+    if (!riskRuleSetId) {
+      throw notFound(`Form code "${formCode}" has no risk rule set configured.`);
+    }
+
+    const ruleSet = await fetchPublishedRuleSet(riskRuleSetId, authorizationHeader);
+    if (!ruleSet) {
+      throw notFound("No published rule pack version found for this form's risk rule set.");
+    }
+
+    return {
+      ruleSetId: riskRuleSetId,
+      ruleVersionId: ruleSet.id,
+      versionNo: ruleSet.versionNo,
+      rulesJson: ruleSet.rulesJson,
+    };
   }
 
   async createDraft(formCode: string, dto: CreateDraftVersionInput) {

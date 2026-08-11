@@ -53,6 +53,7 @@ export class FormRepository {
         OR: [{ effectiveTo: null }, { effectiveTo: { gt: asOf } }],
       },
       orderBy: { effectiveFrom: 'desc' },
+      include: { formDefinition: true },
     });
   }
 

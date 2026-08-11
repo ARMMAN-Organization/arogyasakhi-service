@@ -39,6 +39,11 @@ export const formVersionSchema = z.object({
   status: z.enum(['DRAFT', 'PUBLISHED', 'RETIRED']).openapi({ example: 'PUBLISHED' }),
   createdAt: z.string().datetime().openapi({ example: '2026-07-20T00:00:00.000Z' }),
   updatedAt: z.string().datetime().openapi({ example: '2026-07-20T00:00:00.000Z' }),
+  // The form definition's configured RISK rule set, if any — lets a client
+  // resolve formCode -> rule set -> rulesJson in one call instead of a
+  // separate lookup. Null for forms with no risk evaluation configured
+  // (e.g. SUPERVISOR/SYSTEM entityType forms).
+  riskRuleSetId: z.string().uuid().nullable().openapi({ example: null }),
   // The calling Sakhi's full geography chain (state/district/block/PHC/
   // sub-centre/village/pada), ordered from her assigned unit up to STATE.
   // Omitted entirely when the caller has no geographyUnitId assigned.

@@ -3,6 +3,31 @@ import type {
   VisitCodeType,
   AnchorType,
 } from '../../../../node_modules/.prisma/client-visit-form-service';
+import type { ListVisitSchedulesQuery } from './dto/list-visit-schedules.dto';
+
+interface ListCursor {
+  updatedAt: string;
+  id: string;
+}
+
+/** Encodes a row's sort key as an opaque pagination cursor. */
+function encodeCursor(row: { updatedAt: Date; id: string }): string {
+  const cursor: ListCursor = { updatedAt: row.updatedAt.toISOString(), id: row.id };
+  return Buffer.from(JSON.stringify(cursor)).toString('base64url');
+}
+
+/** Decodes a cursor produced by encodeCursor; returns null on any malformed input. */
+function decodeCursor(cursor: string): ListCursor | null {
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
+    if (typeof parsed?.updatedAt === 'string' && typeof parsed?.id === 'string') {
+      return parsed as ListCursor;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 export interface NewScheduleRow {
   localScheduleUuid: string;
@@ -56,6 +81,74 @@ export class VisitScheduleRepository {
 
   findById(id: string) {
     return this.prisma.visitSchedule.findFirst({ where: { id, isDeleted: false } });
+  }
+
+  /**
+   * Keyset-paginated list/sync-pull for one beneficiary's schedule — same
+   * cursor pattern as beneficiary-service's GET /beneficiaries (sort key
+   * (updatedAt desc, id desc), base64url cursor, limit+1 fetch to detect
+   * hasMore without a separate COUNT query).
+   */
+  async findMany(query: ListVisitSchedulesQuery) {
+    const where: NonNullable<Parameters<typeof this.prisma.visitSchedule.findMany>[0]>['where'] = {
+      beneficiaryId: query.beneficiaryId,
+      isDeleted: false,
+    };
+    if (query.status) where.status = query.status;
+    if (query.updatedAfter) where.updatedAt = { gt: new Date(query.updatedAfter) };
+
+    const decodedCursor = query.cursor ? decodeCursor(query.cursor) : null;
+
+    const rows = await this.prisma.visitSchedule.findMany({
+      where: decodedCursor
+        ? {
+            ...where,
+            OR: [
+              { updatedAt: { lt: new Date(decodedCursor.updatedAt) } },
+              { updatedAt: new Date(decodedCursor.updatedAt), id: { lt: decodedCursor.id } },
+            ],
+          }
+        : where,
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+      take: query.limit + 1,
+    });
+
+    const hasMore = rows.length > query.limit;
+    const items = hasMore ? rows.slice(0, query.limit) : rows;
+    const lastItem = items[items.length - 1];
+    return { items, nextCursor: hasMore && lastItem ? encodeCursor(lastItem) : null };
+  }
+
+  /**
+   * Bulk-transitions every OPEN/GENERATED schedule for a beneficiary to
+   * LAPSED (FR-S-3.7, FR-S-10.1/10.2) — idempotent: a beneficiary with no
+   * open schedules simply updates zero rows, not an error.
+   */
+  lapseOpen(beneficiaryId: string, updatedByUserId: string) {
+    return this.prisma.visitSchedule.updateMany({
+      where: { beneficiaryId, status: { in: ['OPEN', 'GENERATED'] }, isDeleted: false },
+      data: { status: 'LAPSED', updatedByUserId },
+    });
+  }
+
+  /**
+   * Bulk-transitions every OPEN/GENERATED ANC-family schedule for a
+   * beneficiary to SUPERSEDED — the ANC visit-count formula depends on EDD,
+   * so an approved LMP/EDD change (FR-SV-4.2) invalidates the beneficiary's
+   * existing ANC schedule, not just future visits. PP/NN/INC/CCV rows are
+   * untouched — those formulas don't depend on LMP/EDD. Idempotent: a
+   * beneficiary with no open ANC schedules simply updates zero rows.
+   */
+  supersedeAnc(beneficiaryId: string, updatedByUserId: string) {
+    return this.prisma.visitSchedule.updateMany({
+      where: {
+        beneficiaryId,
+        visitType: { in: ['ANC', 'ANC_HR', 'ANC_POST_EDD'] },
+        status: { in: ['OPEN', 'GENERATED'] },
+        isDeleted: false,
+      },
+      data: { status: 'SUPERSEDED', updatedByUserId },
+    });
   }
 
   /**

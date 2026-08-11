@@ -32,6 +32,13 @@ const activeVersionQuerySchema = z
   .object({ asOf: z.coerce.date().optional().openapi({ example: '2026-07-20T00:00:00.000Z' }) })
   .strict();
 
+const riskRulesSchema = z.object({
+  ruleSetId: z.string().uuid(),
+  ruleVersionId: z.string().uuid(),
+  versionNo: z.string().openapi({ example: 'v1' }),
+  rulesJson: z.unknown(),
+});
+
 // Request DTOs annotated with examples for Swagger UI; validation behavior is
 // unchanged (`.openapi()` only attaches documentation metadata).
 const createDraftVersionRequestSchema = createDraftVersionSchema.extend({
@@ -107,6 +114,46 @@ export function createFormRouter(service: FormService) {
         authorizationHeader,
       );
       res.json(ok(version));
+    }),
+  );
+
+  doc.get(
+    '/forms/:formCode/active-version/risk-rules',
+    {
+      summary:
+        "Resolves a form's configured RISK rule set in one call: formCode -> riskRuleSetId " +
+        "-> rulesJson (via rules-service's currently-published version for that set). Lets a " +
+        'client cache rulesJson for offline HR evaluation (FR-S-5.1) without a separate ' +
+        'lookup to discover the rule set id first.',
+      tags: ['Forms'],
+      params: formCodeParamsSchema,
+      query: activeVersionQuerySchema,
+      responses: {
+        200: { description: 'Risk rule set for this form', schema: envelope(riskRulesSchema) },
+        400: errorResponse(400, { message: 'asOf: Invalid date' }),
+        401: errorResponse(401),
+        404: errorResponse(404, {
+          message: 'Form code "ANC_VISIT" has no risk rule set configured.',
+        }),
+        500: errorResponse(500),
+      },
+    },
+    trustGatewayIdentity,
+    validate(formCodeParamsSchema, 'params'),
+    validate(activeVersionQuerySchema, 'query'),
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+
+      const { formCode } = req.params as unknown as { formCode: string };
+      const { asOf } = req.query as unknown as { asOf?: Date };
+      const result = await service.getActiveVersionRiskRules(
+        formCode,
+        asOf ?? new Date(),
+        authorizationHeader,
+      );
+      res.json(ok(result));
     }),
   );
 

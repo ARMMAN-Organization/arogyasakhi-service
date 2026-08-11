@@ -6,6 +6,8 @@ import {
   createVisitScheduleBulkSchema,
   MAX_BULK_SCHEDULE_ROWS,
 } from './dto/create-visit-schedule-bulk.dto';
+import { listVisitSchedulesQuerySchema } from './dto/list-visit-schedules.dto';
+import { regenerateAncScheduleSchema } from './dto/regenerate-anc-schedule.dto';
 import {
   asyncHandler,
   createDocumentedRouter,
@@ -15,6 +17,7 @@ import {
   requireRoles,
   trustGatewayIdentity,
   unauthorized,
+  validate,
   validateBody,
 } from '../app.module';
 
@@ -30,6 +33,36 @@ const bulkResultSchema = z.object({
   beneficiaryId: z.string().uuid(),
   created: z.number().int(),
   alreadyExisted: z.number().int(),
+  schedules: z.array(createdScheduleSchema),
+});
+
+const visitScheduleRowSchema = z.object({
+  id: z.string().uuid(),
+  localScheduleUuid: z.string(),
+  beneficiaryId: z.string().uuid(),
+  visitCode: z.string().openapi({ example: 'ANC1' }),
+  visitType: z.string().openapi({ example: 'ANC' }),
+  sequenceNo: z.number().int().nullable(),
+  scheduledDate: z.string().datetime().openapi({ example: '2026-08-11T00:00:00.000Z' }),
+  windowStartDate: z.string().datetime(),
+  windowEndDate: z.string().datetime(),
+  anchorType: z.string().openapi({ example: 'REGISTRATION' }),
+  anchorVisitId: z.string().uuid().nullable(),
+  generatedByRuleVersionId: z.string().uuid(),
+  status: z.string().openapi({ example: 'OPEN' }),
+  updatedAt: z.string().datetime(),
+});
+
+const visitScheduleListPageSchema = z.object({
+  items: z.array(visitScheduleRowSchema),
+  nextCursor: z.string().nullable().openapi({
+    description: 'Pass back as `cursor` to fetch the next page; null when this is the last page.',
+  }),
+});
+
+const regenerateAncResultSchema = z.object({
+  supersededCount: z.number().int(),
+  created: z.number().int(),
   schedules: z.array(createdScheduleSchema),
 });
 
@@ -98,6 +131,80 @@ export function createVisitScheduleRouter(service: VisitScheduleService) {
       const authorizationHeader = req.header('authorization') ?? '';
       const result = await service.createBulk(req.body, req.user, authorizationHeader);
       res.status(201).json(ok(result));
+    }),
+  );
+
+  doc.get(
+    '/visit-schedules',
+    {
+      summary:
+        "List/sync-pull a beneficiary's visit schedule (always beneficiary-scoped). " +
+        'Filters: status, updatedAfter (delta sync). Cursor-paginated via cursor/limit ' +
+        "(default 50, max 100) — pass the response's nextCursor back as `cursor` to fetch " +
+        'the next page.',
+      tags: ['Visit Schedules'],
+      responses: {
+        200: {
+          description: 'Visit schedules retrieved',
+          schema: envelope(visitScheduleListPageSchema),
+        },
+        400: errorResponse(400, { message: 'beneficiaryId: Required' }),
+        401: errorResponse(401),
+        403: errorResponse(403, { message: 'You do not have access to this beneficiary.' }),
+        404: errorResponse(404, { message: 'Beneficiary case not found.' }),
+        500: errorResponse(500),
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(listVisitSchedulesQuerySchema, 'query'),
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization') ?? '';
+      const query = req.query as unknown as z.infer<typeof listVisitSchedulesQuerySchema>;
+      const result = await service.list(query, req.user, authorizationHeader);
+      res.json(ok(result));
+    }),
+  );
+
+  doc.post(
+    '/visit-schedules/regenerate-anc',
+    {
+      summary:
+        "Regenerates a beneficiary's ANC schedule after a Supervisor-approved LMP/EDD change " +
+        '(FR-SV-4.2) — the only sanctioned schedule-regeneration trigger. Supersedes every ' +
+        'currently open ANC-family row before inserting the new ones. Server-to-server ' +
+        'only — the production caller is beneficiary-service, not a Sakhi-initiated request.',
+      tags: ['Visit Schedules'],
+      responses: {
+        200: { description: 'Schedule regenerated', schema: envelope(regenerateAncResultSchema) },
+        400: errorResponse(400, {
+          message: 'registrationDate: must be a date-only string (YYYY-MM-DD)',
+        }),
+        401: errorResponse(401),
+        403: errorResponse(403, { message: 'You do not have access to this beneficiary.' }),
+        404: errorResponse(404, { message: 'Beneficiary case not found.' }),
+        500: errorResponse(500),
+        502: errorResponse(502, {
+          message: 'Unable to generate the ANC schedule — rules-service returned an error.',
+        }),
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validateBody(regenerateAncScheduleSchema),
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization') ?? '';
+      const { beneficiaryId, registrationDate, edd } = req.body;
+      const result = await service.regenerateAncSchedule(
+        beneficiaryId,
+        registrationDate,
+        edd,
+        req.user,
+        authorizationHeader,
+      );
+      res.json(ok(result));
     }),
   );
 
