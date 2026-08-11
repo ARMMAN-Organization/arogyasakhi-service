@@ -84,6 +84,48 @@ const evaluateResponseSchema = z.object({
   conditions: z.array(riskEvaluationResultSchema),
 });
 
+const scheduleRowSchema = z.object({
+  localScheduleUuid: z.string(),
+  visitCode: z.string().openapi({ example: 'ANC1' }),
+  visitType: z.enum([
+    'ANC',
+    'ANC_HR',
+    'ANC_POST_EDD',
+    'DELIVERY',
+    'PP',
+    'NN',
+    'INC',
+    'INC_HR',
+    'CCV',
+    'CCV_HR',
+  ]),
+  sequenceNo: z.number().int(),
+  scheduledDate: z.string().openapi({ example: '2026-08-11' }),
+  windowStartDate: z.string().openapi({ example: '2026-08-11' }),
+  windowEndDate: z.string().openapi({ example: '2026-08-16' }),
+  anchorType: z.enum([
+    'REGISTRATION',
+    'LMP',
+    'EDD',
+    'DELIVERY_DATE',
+    'DOB',
+    'ACTUAL_VISIT',
+    'CCV_TRANSITION',
+  ]),
+  anchorVisitLocalUuid: z.string().nullable(),
+});
+
+const evaluateScheduleResponseSchema = z.object({
+  ruleVersionId: z.string().uuid(),
+  scheduleRows: z.array(scheduleRowSchema),
+});
+
+const evaluateEscalationResponseSchema = z.object({
+  ruleVersionId: z.string().uuid(),
+  shouldEscalate: z.boolean(),
+  reasonCode: z.string().openapi({ example: 'ANC_TWO_CONSECUTIVE_MISSED' }),
+});
+
 const apiErrorSchema = z.object({
   success: z.literal(false),
   message: z.string(),
@@ -199,6 +241,77 @@ export function createRuleVersionRouter(service: RuleVersionService) {
     validateBody(evaluateRuleSetRequestSchema),
     asyncHandler(async (req, res) => {
       res.json(ok(await service.evaluate(req.params.setId, req.body)));
+    }),
+  );
+
+  doc.post(
+    '/rules/:setId/evaluate-schedule',
+    {
+      summary:
+        "Evaluate a SCHEDULE rule set's currently-published gorules decision graph for one " +
+        'candidate visit (visit family + visit index + anchor context) and return the ' +
+        'generated schedule row(s). 400 if the rule set is not category SCHEDULE.',
+      tags: ['Rules'],
+      params: setIdParamsSchema,
+      responses: {
+        200: {
+          description: 'Generated schedule rows',
+          schema: envelope(evaluateScheduleResponseSchema),
+        },
+        400: {
+          description: 'Malformed answers, decision-graph output, or wrong rule category',
+          schema: apiErrorSchema,
+        },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+        404: {
+          description: 'Rule set not found, or it has no published version',
+          schema: apiErrorSchema,
+        },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI'),
+    validate(setIdParamsSchema, 'params'),
+    validateBody(evaluateRuleSetRequestSchema),
+    asyncHandler(async (req, res) => {
+      res.json(ok(await service.evaluateSchedule(req.params.setId, req.body)));
+    }),
+  );
+
+  doc.post(
+    '/rules/:setId/evaluate-escalation',
+    {
+      summary:
+        "Evaluate an ESCALATION rule set's currently-published gorules decision graph for one " +
+        'missed-visit check (visit family, consecutive-missed count, whether it is an HR ' +
+        'visit) and return whether Supervisor escalation should trigger. 400 if the rule set ' +
+        'is not category ESCALATION.',
+      tags: ['Rules'],
+      params: setIdParamsSchema,
+      responses: {
+        200: {
+          description: 'Escalation decision',
+          schema: envelope(evaluateEscalationResponseSchema),
+        },
+        400: {
+          description: 'Malformed answers, decision-graph output, or wrong rule category',
+          schema: apiErrorSchema,
+        },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+        404: {
+          description: 'Rule set not found, or it has no published version',
+          schema: apiErrorSchema,
+        },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI'),
+    validate(setIdParamsSchema, 'params'),
+    validateBody(evaluateRuleSetRequestSchema),
+    asyncHandler(async (req, res) => {
+      res.json(ok(await service.evaluateEscalation(req.params.setId, req.body)));
     }),
   );
 

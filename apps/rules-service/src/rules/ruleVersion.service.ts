@@ -1,9 +1,13 @@
 import { createHash } from 'node:crypto';
-import { conflict, notFound } from '@armman/service-commons';
+import { badRequest, conflict, notFound } from '@armman/service-commons';
 import type { RuleVersionRepository } from './ruleVersion.repository';
 import type { PublishRuleVersionInput } from './dto/publish-ruleVersion.dto';
 import type { EvaluateRuleSetInput } from './dto/evaluate-ruleSet.dto';
-import { evaluateRulePack } from './ruleSet.evaluator';
+import {
+  evaluateEscalationRulePack,
+  evaluateRulePack,
+  evaluateScheduleRulePack,
+} from './ruleSet.evaluator';
 
 /** Prisma unique-constraint violation code (ruleSetId + versionNo). */
 const PRISMA_UNIQUE_CONSTRAINT_CODE = 'P2002';
@@ -80,16 +84,51 @@ export class RuleVersionService {
    * version produced a given RiskAssessment.
    */
   async evaluate(ruleSetId: string, dto: EvaluateRuleSetInput) {
+    const version = await this.getPublishedForCategory(ruleSetId, 'RISK');
+    const evaluation = await evaluateRulePack(version.rulesJson, dto.answers);
+    return { ruleVersionId: version.id, ...evaluation };
+  }
+
+  /**
+   * Evaluates a SCHEDULE rule set's decision graph, e.g. one candidate visit
+   * (ANC/PP/NN/INC/CCV) at a time — see scheduleOrchestrator.ts for the
+   * per-visit-index loop that drives this. Rejects a non-SCHEDULE rule set
+   * up front (see getPublishedForCategory) rather than letting a category
+   * mismatch surface as a confusing shape-validation error from the wrong
+   * graph type.
+   */
+  async evaluateSchedule(ruleSetId: string, dto: EvaluateRuleSetInput) {
+    const version = await this.getPublishedForCategory(ruleSetId, 'SCHEDULE');
+    const evaluation = await evaluateScheduleRulePack(version.rulesJson, dto.answers);
+    return { ruleVersionId: version.id, ...evaluation };
+  }
+
+  /** Evaluates an ESCALATION rule set's decision graph for one missed-visit check. */
+  async evaluateEscalation(ruleSetId: string, dto: EvaluateRuleSetInput) {
+    const version = await this.getPublishedForCategory(ruleSetId, 'ESCALATION');
+    const evaluation = await evaluateEscalationRulePack(version.rulesJson, dto.answers);
+    return { ruleVersionId: version.id, ...evaluation };
+  }
+
+  /**
+   * Shared 404/404/400 sequence for the three evaluate* methods above: unknown
+   * set, set with no published version, or a published version whose rule set
+   * is the wrong category for the endpoint being called.
+   */
+  private async getPublishedForCategory(ruleSetId: string, expectedCategory: string) {
     const set = await this.repository.findSetById(ruleSetId);
     if (!set) throw notFound('Rule set not found.');
+    if (set.ruleCategory !== expectedCategory) {
+      throw badRequest(
+        `Rule set ${ruleSetId} is category ${set.ruleCategory}, not ${expectedCategory}.`,
+      );
+    }
 
     const version = await this.repository.findPublishedBySetId(ruleSetId);
     if (!version) {
       throw notFound('No published rule pack version found for this rule set.');
     }
-
-    const evaluation = await evaluateRulePack(version.rulesJson, dto.answers);
-    return { ruleVersionId: version.id, ...evaluation };
+    return version;
   }
 
   /**

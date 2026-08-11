@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 import { PrismaClient } from '../../../node_modules/.prisma/client-rules-service';
+import { COMBINED_SCHEDULE_DECISION_GRAPH } from '../src/rules/graphs/combinedSchedule.graph';
+import { ESCALATION_DECISION_GRAPH } from '../src/rules/graphs/escalation.graph';
 
 const prisma = new PrismaClient();
 
@@ -11,11 +13,18 @@ const SCHEDULE_RULE_SET_ID = '11111111-1111-4111-8111-111111111111';
 const SCHEDULE_RULE_VERSION_ID = '22222222-2222-4222-8222-222222222222';
 const SCHEDULE_RULE_VERSION_NO = 'v1-hardcoded';
 
+// New rule set — nothing hardcodes this yet (no existing consumer wires up
+// escalation evaluation in production flow); a fresh id is fine here.
+const ESCALATION_RULE_SET_ID = '33333333-3333-4333-8333-333333333333';
+const ESCALATION_RULE_VERSION_ID = '44444444-4444-4444-8444-444444444444';
+const ESCALATION_RULE_VERSION_NO = 'v1';
+
 /**
  * Seeds the SCHEDULE rule set + its v1-hardcoded published version, so
  * VisitSchedule.generatedByRuleVersionId (NOT NULL, no default) has a real
- * row to reference for M2 — actual scheduling rules live in the Kotlin app's
- * HardcodedRuleSource today and move to GoRules packages in M3 (CR-032).
+ * row to reference. rulesJson is now the real ANC/PP/NN/INC/CCV decision
+ * graph (SRS v3.0 §3A.2.3, CR-032) — previously a placeholder note pointing
+ * at the mobile app's HardcodedRuleSource.
  */
 async function seedScheduleRuleVersion(): Promise<void> {
   // update: {} is deliberate on both upserts — this only ever creates the row
@@ -38,9 +47,7 @@ async function seedScheduleRuleVersion(): Promise<void> {
     update: {},
   });
 
-  const rulesJson = {
-    note: 'Rules implemented in sakhi-mobile-app HardcodedRuleSource. Replaced by GoRules packages in M3 (CR-032).',
-  };
+  const rulesJson = COMBINED_SCHEDULE_DECISION_GRAPH;
 
   await prisma.ruleVersion.upsert({
     where: { id: SCHEDULE_RULE_VERSION_ID },
@@ -48,7 +55,43 @@ async function seedScheduleRuleVersion(): Promise<void> {
       id: SCHEDULE_RULE_VERSION_ID,
       ruleSetId: SCHEDULE_RULE_SET_ID,
       versionNo: SCHEDULE_RULE_VERSION_NO,
-      rulesJson,
+      rulesJson: rulesJson as never,
+      effectiveFrom: new Date('2026-08-01'),
+      checksum: createHash('sha256').update(JSON.stringify(rulesJson)).digest(),
+      status: 'PUBLISHED',
+    },
+    update: {},
+  });
+}
+
+/**
+ * Seeds the ESCALATION rule set + its v1 published version — the
+ * consolidated Supervisor-escalation thresholds (SRS v3.0 §3A.2.3
+ * FR-S-3.5/3.6 and the PP/NN/INC/CCV miss rules). Same create-only upsert
+ * pattern as seedScheduleRuleVersion: re-running the seed never mutates an
+ * existing row.
+ */
+async function seedEscalationRuleVersion(): Promise<void> {
+  await prisma.ruleSet.upsert({
+    where: { id: ESCALATION_RULE_SET_ID },
+    create: {
+      id: ESCALATION_RULE_SET_ID,
+      ruleCategory: 'ESCALATION',
+      ruleSetName: 'Arogya Sakhi Visit Miss Escalation',
+      status: 'ACTIVE',
+    },
+    update: {},
+  });
+
+  const rulesJson = ESCALATION_DECISION_GRAPH;
+
+  await prisma.ruleVersion.upsert({
+    where: { id: ESCALATION_RULE_VERSION_ID },
+    create: {
+      id: ESCALATION_RULE_VERSION_ID,
+      ruleSetId: ESCALATION_RULE_SET_ID,
+      versionNo: ESCALATION_RULE_VERSION_NO,
+      rulesJson: rulesJson as never,
       effectiveFrom: new Date('2026-08-01'),
       checksum: createHash('sha256').update(JSON.stringify(rulesJson)).digest(),
       status: 'PUBLISHED',
@@ -59,7 +102,9 @@ async function seedScheduleRuleVersion(): Promise<void> {
 
 async function main(): Promise<void> {
   await seedScheduleRuleVersion();
+  await seedEscalationRuleVersion();
   console.log(`Seeded SCHEDULE rule version: ${SCHEDULE_RULE_VERSION_ID}`);
+  console.log(`Seeded ESCALATION rule version: ${ESCALATION_RULE_VERSION_ID}`);
 }
 
 main()
