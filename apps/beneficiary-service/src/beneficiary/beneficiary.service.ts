@@ -31,6 +31,7 @@ import {
   listSakhiNamesForSupervisor,
 } from '../sakhi/sakhi.client';
 import { resolveProjectNames } from '../projects/project.client';
+import { regenerateAncSchedule } from '../visit-schedules/scheduleRegeneration.client';
 
 /**
  * Maps each socioDemographics *LookupId field to the lookup_categories
@@ -83,6 +84,11 @@ async function withResolvedSocioDemographics<T extends Record<string, unknown>>(
 }
 
 const GESTATION_DAYS = 280;
+
+/** Formats a Date as a date-only YYYY-MM-DD string, for cross-service calls expecting that shape. */
+function toDateOnly(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
 
 /**
  * Enforces the same scoping `list()` applies to reads on a single-case
@@ -502,12 +508,16 @@ export class BeneficiaryService {
    * never drift out of sync. Called server-to-server by approval-service
    * once a Supervisor approves an LMP_CHANGE Quick Response card.
    *
-   * Deliberately does not regenerate the ANC visit schedule — schedules are
-   * generated offline on the Sakhi's device (FR-S-2.2) and uploaded via
-   * visit-form-service's POST /visit-schedules/bulk; this service owns no
-   * schedule-generation logic to trigger. Re-syncing/regenerating the
-   * schedule after an LMP change is the Sakhi app's responsibility, not
-   * this endpoint's — a known, accepted gap, not an oversight.
+   * Also triggers ANC schedule regeneration in visit-form-service — the
+   * ANC visit-count formula depends on EDD, so an approved LMP/EDD change
+   * invalidates the beneficiary's existing ANC schedule (SRS §3A.2.3: "The
+   * only trigger for schedule regeneration is an approved LMP/EDD change by
+   * the Supervisor"). registrationDate is passed UNCHANGED — ANC1 anchors
+   * to registration, not LMP (FR-S-3.2); only the EDD-driven formula
+   * changes. Best-effort, matching this codebase's convention for
+   * cross-service side-effects (pushRiskConditionSummary et al.): the
+   * LMP/EDD write itself must succeed regardless of whether regeneration
+   * does.
    *
    * A SUPERVISOR caller may only apply this to a case in their own Sakhi
    * roster (same scoping as list()) — this endpoint is reachable by a human
@@ -527,6 +537,22 @@ export class BeneficiaryService {
     const eddDate = addDays(lmpDate, GESTATION_DAYS);
     const updated = await this.repository.updateMotherLmp(beneficiaryId, lmpDate, eddDate);
     if (!updated) throw notFound('Beneficiary case not found.');
+
+    const result = await regenerateAncSchedule(
+      beneficiaryId,
+      toDateOnly(existing.registrationDate),
+      toDateOnly(eddDate),
+      authorizationHeader,
+    );
+    if (!result.ok) {
+      // Matches riskAssessment.service.ts's console.error precedent for a
+      // best-effort side-call failure — no shared structured logger is
+      // threaded into this service layer today.
+      console.error(
+        `Failed to regenerate ANC schedule for beneficiary ${beneficiaryId}: ${result.error}`,
+      );
+    }
+
     return this.getById(beneficiaryId, authorizationHeader);
   }
 

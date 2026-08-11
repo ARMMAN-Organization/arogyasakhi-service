@@ -11,11 +11,13 @@ import {
   listSakhiNamesForSupervisor,
 } from '../sakhi/sakhi.client';
 import { resolveProjectNames } from '../projects/project.client';
+import { regenerateAncSchedule } from '../visit-schedules/scheduleRegeneration.client';
 
 jest.mock('../geography/geography.client');
 jest.mock('../lookups/lookup.client');
 jest.mock('../sakhi/sakhi.client');
 jest.mock('../projects/project.client');
+jest.mock('../visit-schedules/scheduleRegeneration.client');
 
 describe('BeneficiaryService', () => {
   const originalEnv = { ...process.env };
@@ -42,6 +44,7 @@ describe('BeneficiaryService', () => {
   const getSakhiNameMock = jest.mocked(getSakhiName);
   const resolveVillageNamesMock = jest.mocked(resolveVillageNames);
   const resolveProjectNamesMock = jest.mocked(resolveProjectNames);
+  const regenerateAncScheduleMock = jest.mocked(regenerateAncSchedule);
 
   function caller(overrides: Partial<AuthenticatedUser> = {}): AuthenticatedUser {
     return {
@@ -117,6 +120,7 @@ describe('BeneficiaryService', () => {
     resolveVillageNamesMock.mockResolvedValue(new Map());
     getSakhiNameMock.mockResolvedValue(null);
     listSakhiNamesForSupervisorMock.mockResolvedValue(new Map());
+    regenerateAncScheduleMock.mockResolvedValue({ ok: true });
     service = new BeneficiaryService(repository);
   });
 
@@ -132,6 +136,7 @@ describe('BeneficiaryService', () => {
       return {
         id: beneficiaryId,
         sakhiId,
+        registrationDate: new Date('2026-06-01'),
         pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
         ...overrides,
       };
@@ -153,6 +158,40 @@ describe('BeneficiaryService', () => {
         new Date('2026-06-15'),
         new Date('2027-03-22'),
       );
+    });
+
+    it('regenerates the ANC schedule with the ORIGINAL registrationDate and the new eddDate', async () => {
+      repository.findById.mockResolvedValue(caseRow() as never);
+      repository.updateMotherLmp.mockResolvedValue(true);
+
+      await service.applyLmpChange(
+        beneficiaryId,
+        new Date('2026-06-15'),
+        caller({ roles: ['ADMIN'] }),
+        AUTH_HEADER,
+      );
+
+      expect(regenerateAncScheduleMock).toHaveBeenCalledWith(
+        beneficiaryId,
+        '2026-06-01',
+        '2027-03-22',
+        AUTH_HEADER,
+      );
+    });
+
+    it('does not fail the LMP change when schedule regeneration fails (best-effort)', async () => {
+      repository.findById.mockResolvedValue(caseRow() as never);
+      repository.updateMotherLmp.mockResolvedValue(true);
+      regenerateAncScheduleMock.mockResolvedValue({ ok: false, error: 'visit-form-service down' });
+
+      await expect(
+        service.applyLmpChange(
+          beneficiaryId,
+          new Date('2026-06-15'),
+          caller({ roles: ['ADMIN'] }),
+          AUTH_HEADER,
+        ),
+      ).resolves.toMatchObject({ id: beneficiaryId });
     });
 
     it('returns the updated case via getById', async () => {
