@@ -1,8 +1,10 @@
 import { RuleVersionService } from './ruleVersion.service';
 import type { RuleVersionRepository } from './ruleVersion.repository';
 import { evaluateRulePack } from './ruleSet.evaluator';
+import { evaluateSchedulePack } from './scheduleEvaluator';
 
 jest.mock('./ruleSet.evaluator');
+jest.mock('./scheduleEvaluator');
 
 describe('RuleVersionService', () => {
   const repository = {
@@ -13,6 +15,7 @@ describe('RuleVersionService', () => {
   } as unknown as jest.Mocked<RuleVersionRepository>;
   let service: RuleVersionService;
   const evaluateRulePackMock = jest.mocked(evaluateRulePack);
+  const evaluateSchedulePackMock = jest.mocked(evaluateSchedulePack);
 
   beforeEach(() => {
     jest.resetAllMocks();
@@ -151,7 +154,7 @@ describe('RuleVersionService', () => {
 
   describe('evaluate', () => {
     it('evaluates against the published version and returns ruleVersionId alongside the results', async () => {
-      repository.findSetById.mockResolvedValue({ id: setId } as never);
+      repository.findSetById.mockResolvedValue({ id: setId, ruleCategory: 'RISK' } as never);
       repository.findPublishedBySetId.mockResolvedValue({
         id: 'ver-1',
         ruleSetId: setId,
@@ -204,7 +207,7 @@ describe('RuleVersionService', () => {
     });
 
     it('404s when the rule set exists but has no published version, never evaluating', async () => {
-      repository.findSetById.mockResolvedValue({ id: setId } as never);
+      repository.findSetById.mockResolvedValue({ id: setId, ruleCategory: 'RISK' } as never);
       repository.findPublishedBySetId.mockResolvedValue(null);
 
       await expect(service.evaluate(setId, { answers: {} })).rejects.toMatchObject({
@@ -215,7 +218,7 @@ describe('RuleVersionService', () => {
     });
 
     it('propagates evaluateRulePack errors (e.g. malformed decision-graph output) unchanged', async () => {
-      repository.findSetById.mockResolvedValue({ id: setId } as never);
+      repository.findSetById.mockResolvedValue({ id: setId, ruleCategory: 'RISK' } as never);
       repository.findPublishedBySetId.mockResolvedValue({
         id: 'ver-1',
         ruleSetId: setId,
@@ -225,6 +228,73 @@ describe('RuleVersionService', () => {
       evaluateRulePackMock.mockRejectedValue(badRequestError);
 
       await expect(service.evaluate(setId, { answers: {} })).rejects.toBe(badRequestError);
+    });
+
+    it('400s when the rule set is not RISK category, never evaluating', async () => {
+      repository.findSetById.mockResolvedValue({ id: setId, ruleCategory: 'SCHEDULE' } as never);
+
+      await expect(service.evaluate(setId, { answers: {} })).rejects.toMatchObject({
+        status: 400,
+      });
+      expect(repository.findPublishedBySetId).not.toHaveBeenCalled();
+      expect(evaluateRulePackMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('evaluateSchedule', () => {
+    it('evaluates against the published version and returns ruleVersionId alongside the results', async () => {
+      repository.findSetById.mockResolvedValue({ id: setId, ruleCategory: 'SCHEDULE' } as never);
+      repository.findPublishedBySetId.mockResolvedValue({
+        id: 'ver-1',
+        ruleSetId: setId,
+        rulesJson: { rules: [] },
+      } as never);
+      evaluateSchedulePackMock.mockResolvedValue({ visits: [] });
+
+      const result = await service.evaluateSchedule(setId, {
+        scheduleKind: 'ANC',
+        input: { registrationDate: '2026-01-01' },
+      });
+
+      expect(evaluateSchedulePackMock).toHaveBeenCalledWith(
+        'ANC',
+        { rules: [] },
+        { registrationDate: '2026-01-01' },
+      );
+      expect(result).toEqual({ ruleVersionId: 'ver-1', visits: [] });
+    });
+
+    it('404s when the rule set itself does not exist, never checking for a published version', async () => {
+      repository.findSetById.mockResolvedValue(null);
+
+      await expect(
+        service.evaluateSchedule(setId, { scheduleKind: 'ANC', input: {} }),
+      ).rejects.toMatchObject({ status: 404, message: 'Rule set not found.' });
+      expect(repository.findPublishedBySetId).not.toHaveBeenCalled();
+      expect(evaluateSchedulePackMock).not.toHaveBeenCalled();
+    });
+
+    it('400s when the rule set is not SCHEDULE category, never evaluating', async () => {
+      repository.findSetById.mockResolvedValue({ id: setId, ruleCategory: 'RISK' } as never);
+
+      await expect(
+        service.evaluateSchedule(setId, { scheduleKind: 'ANC', input: {} }),
+      ).rejects.toMatchObject({ status: 400 });
+      expect(repository.findPublishedBySetId).not.toHaveBeenCalled();
+      expect(evaluateSchedulePackMock).not.toHaveBeenCalled();
+    });
+
+    it('404s when the rule set exists but has no published version, never evaluating', async () => {
+      repository.findSetById.mockResolvedValue({ id: setId, ruleCategory: 'SCHEDULE' } as never);
+      repository.findPublishedBySetId.mockResolvedValue(null);
+
+      await expect(
+        service.evaluateSchedule(setId, { scheduleKind: 'ANC', input: {} }),
+      ).rejects.toMatchObject({
+        status: 404,
+        message: 'No published rule pack version found for this rule set.',
+      });
+      expect(evaluateSchedulePackMock).not.toHaveBeenCalled();
     });
   });
 });

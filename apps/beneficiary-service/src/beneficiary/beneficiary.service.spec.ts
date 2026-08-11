@@ -734,7 +734,7 @@ describe('BeneficiaryService', () => {
       };
       repository.findById.mockResolvedValue(found as never);
 
-      const result = await service.getById('x', AUTH_HEADER);
+      const result = await service.getById('x', caller({ roles: ['ADMIN'] }), AUTH_HEADER);
 
       expect(result.riskConditionSummaries).toEqual(found.riskConditionSummaries);
       expect(result.statusHistory).toEqual(found.statusHistory);
@@ -744,7 +744,7 @@ describe('BeneficiaryService', () => {
       const found = { id: 'x', pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') } };
       repository.findById.mockResolvedValue(found as never);
 
-      const result = await service.getById('x', AUTH_HEADER);
+      const result = await service.getById('x', caller({ roles: ['ADMIN'] }), AUTH_HEADER);
 
       expect(result).toEqual(
         expect.objectContaining({
@@ -756,7 +756,80 @@ describe('BeneficiaryService', () => {
 
     it('throws 404 when the case is not found', async () => {
       repository.findById.mockResolvedValue(null);
-      await expect(service.getById('missing', AUTH_HEADER)).rejects.toMatchObject({ status: 404 });
+      await expect(
+        service.getById('missing', caller({ roles: ['ADMIN'] }), AUTH_HEADER),
+      ).rejects.toMatchObject({ status: 404 });
+    });
+
+    it('403s when a SAKHI requests a beneficiary that is not their own', async () => {
+      const found = {
+        id: 'x',
+        sakhiId: 'someone-elses-sakhi-id',
+        pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
+      };
+      repository.findById.mockResolvedValue(found as never);
+
+      await expect(
+        service.getById('x', caller({ roles: ['SAKHI'], id: CALLER_ID }), AUTH_HEADER),
+      ).rejects.toMatchObject({ status: 403 });
+    });
+
+    it('allows a SAKHI to fetch their own beneficiary', async () => {
+      const found = {
+        id: 'x',
+        sakhiId: CALLER_ID,
+        pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
+      };
+      repository.findById.mockResolvedValue(found as never);
+
+      const result = await service.getById(
+        'x',
+        caller({ roles: ['SAKHI'], id: CALLER_ID }),
+        AUTH_HEADER,
+      );
+
+      expect(result.id).toBe('x');
+    });
+
+    it("403s when a SUPERVISOR's roster does not include the beneficiary's Sakhi", async () => {
+      const found = {
+        id: 'x',
+        sakhiId: 'not-in-roster',
+        pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
+      };
+      repository.findById.mockResolvedValue(found as never);
+      listSakhiIdsForSupervisorMock.mockResolvedValue(['some-other-sakhi']);
+
+      await expect(
+        service.getById('x', caller({ roles: ['SUPERVISOR'] }), AUTH_HEADER),
+      ).rejects.toMatchObject({ status: 403 });
+    });
+
+    it('allows a SUPERVISOR to fetch a beneficiary in their own roster', async () => {
+      const found = {
+        id: 'x',
+        sakhiId: 'roster-sakhi',
+        pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
+      };
+      repository.findById.mockResolvedValue(found as never);
+      listSakhiIdsForSupervisorMock.mockResolvedValue(['roster-sakhi']);
+
+      const result = await service.getById('x', caller({ roles: ['SUPERVISOR'] }), AUTH_HEADER);
+
+      expect(result.id).toBe('x');
+    });
+
+    it('allows a MANAGER/ADMIN caller unrestricted', async () => {
+      const found = {
+        id: 'x',
+        sakhiId: 'anyones',
+        pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
+      };
+      repository.findById.mockResolvedValue(found as never);
+
+      const result = await service.getById('x', caller({ roles: ['ADMIN'] }), AUTH_HEADER);
+
+      expect(result.id).toBe('x');
     });
 
     it('passes through socioDemographics from the repository', async () => {
@@ -767,7 +840,7 @@ describe('BeneficiaryService', () => {
       };
       repository.findById.mockResolvedValue(found as never);
 
-      const result = await service.getById('x', AUTH_HEADER);
+      const result = await service.getById('x', caller({ roles: ['ADMIN'] }), AUTH_HEADER);
 
       expect(result.socioDemographics).toMatchObject({
         familyMembersCount: 4,
@@ -797,7 +870,7 @@ describe('BeneficiaryService', () => {
         socialCategoryLookupId: null,
       });
 
-      const result = await service.getById('x', AUTH_HEADER);
+      const result = await service.getById('x', caller({ roles: ['ADMIN'] }), AUTH_HEADER);
 
       expect(resolveLookupValuesMock).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -822,7 +895,7 @@ describe('BeneficiaryService', () => {
       };
       repository.findById.mockResolvedValue(found as never);
 
-      const result = await service.getById('x', AUTH_HEADER);
+      const result = await service.getById('x', caller({ roles: ['ADMIN'] }), AUTH_HEADER);
 
       expect(resolveLookupValuesMock).not.toHaveBeenCalled();
       expect(result.socioDemographics).toBeNull();
@@ -836,7 +909,7 @@ describe('BeneficiaryService', () => {
       };
       repository.findById.mockResolvedValue(found as never);
 
-      const result = await service.getById('x', AUTH_HEADER);
+      const result = await service.getById('x', caller({ roles: ['ADMIN'] }), AUTH_HEADER);
 
       expect(result.socioDemographics).toBeNull();
     });
