@@ -8,7 +8,7 @@
     "libs/*"
   ],
   "engines": {
-    "node": ">=20.11.0",
+    "node": "24.18.0",
     "npm": ">=10.0.0"
   },
   "scripts": {
@@ -42,7 +42,7 @@
     "@nx/js": "^19.5.0",
     "@nx/webpack": "^19.8.14",
     "@types/jest": "^29.5.12",
-    "@types/node": "^20.14.0",
+    "@types/node": "^24.13.0",
     "babel-jest": "^29.7.0",
     "eslint": "^9.9.0",
     "husky": "^9.1.4",
