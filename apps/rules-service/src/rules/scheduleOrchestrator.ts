@@ -16,6 +16,9 @@ import { evaluateScheduleRulePack, runDecisionGraph, type ScheduleRow } from './
 
 const MAX_ANC_VISITS_SAFETY_CAP = 20;
 const MAX_INC_VISITS_SAFETY_CAP = 15;
+const MAX_CCV_VISITS_SAFETY_CAP = 12;
+
+const CCV_AGE_BAND_BOUNDARY_MONTHS = 18;
 
 /**
  * ANC schedule: visit count from the formula, ANC1, then ANC2..N chained
@@ -205,6 +208,89 @@ export async function generateIncHrVisit(
 }
 
 /**
+ * CCV schedule: RISK_STATE once (from the caller-supplied last-3-INC-visit
+ * flags) determines the 13-18m and 19-24m cadence, then CADENCE is chained
+ * from the INC-to-CCV transition point, switching cadence at the 18-month
+ * boundary, through the 24-month (DOB+730) exit point.
+ *
+ * Generates only up to 24m — the 25m CCV-HR extension (SRS: "if HR detected
+ * at the last CCV visit, journey extends") is NOT generated here, since
+ * whether the last visit had HR isn't known until that visit is actually
+ * conducted. That extension is handled the same way every other HR visit in
+ * this codebase is: on-demand, via generateCcvHrVisit, once a real visit's
+ * outcome triggers it.
+ */
+export async function generateCcvSchedule(
+  rulesJson: unknown,
+  input: {
+    dob: string;
+    transitionDate: string;
+    hadAnyHrInLast12m: boolean;
+    mostRecentHasSamOrDangerSign: boolean;
+    mostRecentHasOtherHr: boolean;
+    last3AllAtRisk: boolean;
+    last3AllNormalFullyImmunised: boolean;
+  },
+): Promise<ScheduleRow[]> {
+  const riskState = (await evaluateScheduleGraphMode(rulesJson, 'CCV', {
+    mode: 'RISK_STATE',
+    hadAnyHrInLast12m: input.hadAnyHrInLast12m,
+    mostRecentHasSamOrDangerSign: input.mostRecentHasSamOrDangerSign,
+    mostRecentHasOtherHr: input.mostRecentHasOtherHr,
+    last3AllAtRisk: input.last3AllAtRisk,
+    last3AllNormalFullyImmunised: input.last3AllNormalFullyImmunised,
+  })) as { riskState: string; cadence18mMonths: number; cadence24mMonths: number };
+
+  const exit = (await evaluateScheduleGraphMode(rulesJson, 'CCV', {
+    mode: 'EXIT',
+    dob: input.dob,
+    hrAtLastVisit: false,
+  })) as { exitDate: string };
+
+  const rows: ScheduleRow[] = [];
+  let previousScheduledDate = input.transitionDate;
+  let previousLocalUuid: string | null = null;
+  let ageInMonths = monthsBetween(input.dob, input.transitionDate);
+
+  for (let sequenceNo = 1; sequenceNo <= MAX_CCV_VISITS_SAFETY_CAP; sequenceNo += 1) {
+    const cadenceMonths =
+      ageInMonths <= CCV_AGE_BAND_BOUNDARY_MONTHS
+        ? riskState.cadence18mMonths
+        : riskState.cadence24mMonths;
+
+    const localScheduleUuid = randomUUID();
+    const result = await evaluateScheduleRulePack(rulesJson, {
+      visitFamily: 'CCV',
+      mode: 'CADENCE',
+      previousScheduledDate,
+      cadenceMonths,
+      sequenceNo,
+      localScheduleUuid,
+      anchorVisitLocalUuid: previousLocalUuid,
+    });
+
+    const row = result.scheduleRows[0];
+    if (!row || row.scheduledDate > exit.exitDate) break; // reached the 24-month exit point — stop
+
+    rows.push(row);
+    previousScheduledDate = row.scheduledDate;
+    previousLocalUuid = row.localScheduleUuid;
+    ageInMonths = monthsBetween(input.dob, row.scheduledDate);
+  }
+
+  return rows;
+}
+
+/** Whole calendar months between two YYYY-MM-DD dates (dob -> the given date). */
+function monthsBetween(dob: string, date: string): number {
+  const [dobYear, dobMonth, dobDay] = dob.split('-').map(Number);
+  const [dateYear, dateMonth, dateDay] = date.split('-').map(Number);
+  let months = (dateYear - dobYear) * 12 + (dateMonth - dobMonth);
+  if (dateDay < dobDay) months -= 1;
+  return months;
+}
+
+/**
  * CCV-HR: one on-demand call per detection — single-instance, no dedup
  * against past detections (SRS: a fresh HR visit generates every time,
  * even for a condition triggered before).
@@ -232,7 +318,7 @@ export async function generateCcvHrVisit(
  */
 function evaluateScheduleGraphMode(
   rulesJson: unknown,
-  visitFamily: 'ANC' | 'INC',
+  visitFamily: 'ANC' | 'INC' | 'CCV',
   rest: Record<string, unknown>,
 ): Promise<unknown> {
   return runDecisionGraph(rulesJson, { visitFamily, ...rest });

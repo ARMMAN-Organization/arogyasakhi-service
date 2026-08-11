@@ -3,11 +3,13 @@ import { badRequest, conflict, notFound } from '@armman/service-commons';
 import type { RuleVersionRepository } from './ruleVersion.repository';
 import type { PublishRuleVersionInput } from './dto/publish-ruleVersion.dto';
 import type { EvaluateRuleSetInput } from './dto/evaluate-ruleSet.dto';
+import type { EvaluateScheduleFullInput } from './dto/evaluate-schedule-full.dto';
 import {
   evaluateEscalationRulePack,
   evaluateRulePack,
   evaluateScheduleRulePack,
 } from './ruleSet.evaluator';
+import { generateAncSchedule } from './scheduleOrchestrator';
 
 /** Prisma unique-constraint violation code (ruleSetId + versionNo). */
 const PRISMA_UNIQUE_CONSTRAINT_CODE = 'P2002';
@@ -101,6 +103,19 @@ export class RuleVersionService {
     const version = await this.getPublishedForCategory(ruleSetId, 'SCHEDULE');
     const evaluation = await evaluateScheduleRulePack(version.rulesJson, dto.answers);
     return { ruleVersionId: version.id, ...evaluation };
+  }
+
+  /**
+   * The full ANC schedule (visit-count formula, ANC1, chained ANC2..N) in
+   * one call — the single production consumer that needs the whole
+   * sequence at once (LMP/EDD-change regeneration, see visit-form-service's
+   * regenerateAncSchedule), rather than looping per-visit-index the way the
+   * generic evaluate-schedule endpoint requires a caller to.
+   */
+  async evaluateScheduleFull(ruleSetId: string, dto: EvaluateScheduleFullInput) {
+    const version = await this.getPublishedForCategory(ruleSetId, 'SCHEDULE');
+    const scheduleRows = await generateAncSchedule(version.rulesJson, dto);
+    return { ruleVersionId: version.id, scheduleRows };
   }
 
   /** Evaluates an ESCALATION rule set's decision graph for one missed-visit check. */

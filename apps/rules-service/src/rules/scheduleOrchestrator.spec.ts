@@ -4,6 +4,7 @@ import {
   generateAncPostEddVisit,
   generateAncSchedule,
   generateCcvHrVisit,
+  generateCcvSchedule,
   generateIncHrVisit,
   generateIncSchedule,
   generateNnSchedule,
@@ -149,6 +150,87 @@ describe('scheduleOrchestrator', () => {
         triggeringVisitLocalUuid: 'inc2-uuid',
       });
       expect(rows[0]).toMatchObject({ visitCode: 'INC_HR', scheduledDate: '2026-03-16' });
+    });
+  });
+
+  describe('generateCcvSchedule', () => {
+    const baseInput = {
+      dob: '2026-01-01',
+      transitionDate: '2027-01-31', // ~13 months from DOB
+      hadAnyHrInLast12m: false,
+      mostRecentHasSamOrDangerSign: false,
+      mostRecentHasOtherHr: false,
+      last3AllAtRisk: false,
+      last3AllNormalFullyImmunised: false,
+    };
+
+    it('Never at HR: generates every 2 months in both bands, all rows CCV-typed', async () => {
+      const rows = await generateCcvSchedule(COMBINED_SCHEDULE_DECISION_GRAPH, baseInput);
+
+      expect(rows.length).toBeGreaterThan(1);
+      expect(rows.every((r) => r.visitType === 'CCV')).toBe(true);
+      expect(rows.every((r) => r.anchorType === 'CCV_TRANSITION')).toBe(true);
+      expect(rows[0]).toMatchObject({ visitCode: 'CCV1', sequenceNo: 1 });
+      expect(rows[1]).toMatchObject({ visitCode: 'CCV2', sequenceNo: 2 });
+      // Every-2-months cadence: second visit ~2 months after the first.
+      const first = new Date(rows[0].scheduledDate);
+      const second = new Date(rows[1].scheduledDate);
+      const gapDays = (second.getTime() - first.getTime()) / (1000 * 60 * 60 * 24);
+      expect(gapDays).toBeGreaterThan(55);
+      expect(gapDays).toBeLessThan(65);
+    });
+
+    it('Currently HR - SAM/Danger Sign: generates monthly in both bands', async () => {
+      const rows = await generateCcvSchedule(COMBINED_SCHEDULE_DECISION_GRAPH, {
+        ...baseInput,
+        hadAnyHrInLast12m: true,
+        mostRecentHasSamOrDangerSign: true,
+      });
+
+      const first = new Date(rows[0].scheduledDate);
+      const second = new Date(rows[1].scheduledDate);
+      const gapDays = (second.getTime() - first.getTime()) / (1000 * 60 * 60 * 24);
+      expect(gapDays).toBeGreaterThan(25);
+      expect(gapDays).toBeLessThan(35);
+    });
+
+    it('Recently Recovered: switches from monthly (13-18m) to every-2-months (19-24m) at the 18m boundary', async () => {
+      // Recently Recovered requires hadAnyHrInLast12m=true (had HR before,
+      // now recovered) AND last3AllAtRisk=true — hadAnyHrInLast12m=false
+      // alone matches NEVER_AT_HR first (hitPolicy 'first', row order in the
+      // decision table), regardless of last3AllAtRisk.
+      const rows = await generateCcvSchedule(COMBINED_SCHEDULE_DECISION_GRAPH, {
+        ...baseInput,
+        hadAnyHrInLast12m: true,
+        last3AllAtRisk: true,
+      });
+
+      const gapsInDays = rows.slice(1).map((row, i) => {
+        const prev = new Date(rows[i].scheduledDate).getTime();
+        const curr = new Date(row.scheduledDate).getTime();
+        return (curr - prev) / (1000 * 60 * 60 * 24);
+      });
+
+      // Early gaps (13-18m) should be ~1 month; later gaps (19-24m) ~2 months.
+      expect(gapsInDays[0]).toBeGreaterThan(25);
+      expect(gapsInDays[0]).toBeLessThan(35);
+      expect(gapsInDays[gapsInDays.length - 1]).toBeGreaterThan(55);
+      expect(gapsInDays[gapsInDays.length - 1]).toBeLessThan(65);
+    });
+
+    it('stops generating once the 24-month (DOB+730) exit point is reached', async () => {
+      const rows = await generateCcvSchedule(COMBINED_SCHEDULE_DECISION_GRAPH, baseInput);
+
+      const lastRow = rows[rows.length - 1];
+      const exitDate = new Date('2028-01-01'); // DOB + 730 days
+      expect(new Date(lastRow.scheduledDate).getTime()).toBeLessThanOrEqual(exitDate.getTime());
+    });
+
+    it('chains anchorVisitLocalUuid from each row to the previous one', async () => {
+      const rows = await generateCcvSchedule(COMBINED_SCHEDULE_DECISION_GRAPH, baseInput);
+
+      expect(rows[0].anchorVisitLocalUuid).toBeNull();
+      expect(rows[1].anchorVisitLocalUuid).toBe(rows[0].localScheduleUuid);
     });
   });
 

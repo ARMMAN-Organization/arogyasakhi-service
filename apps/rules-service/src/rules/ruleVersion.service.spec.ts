@@ -5,8 +5,10 @@ import {
   evaluateRulePack,
   evaluateScheduleRulePack,
 } from './ruleSet.evaluator';
+import { generateAncSchedule } from './scheduleOrchestrator';
 
 jest.mock('./ruleSet.evaluator');
+jest.mock('./scheduleOrchestrator');
 
 describe('RuleVersionService', () => {
   const repository = {
@@ -19,6 +21,7 @@ describe('RuleVersionService', () => {
   const evaluateRulePackMock = jest.mocked(evaluateRulePack);
   const evaluateScheduleRulePackMock = jest.mocked(evaluateScheduleRulePack);
   const evaluateEscalationRulePackMock = jest.mocked(evaluateEscalationRulePack);
+  const generateAncScheduleMock = jest.mocked(generateAncSchedule);
 
   beforeEach(() => {
     jest.resetAllMocks();
@@ -303,6 +306,66 @@ describe('RuleVersionService', () => {
         status: 404,
       });
       expect(evaluateScheduleRulePackMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('evaluateScheduleFull', () => {
+    const dto = { registrationDate: '2026-08-11', edd: '2027-01-01' };
+
+    it('returns the full ANC schedule alongside ruleVersionId', async () => {
+      repository.findSetById.mockResolvedValue({ id: setId, ruleCategory: 'SCHEDULE' } as never);
+      repository.findPublishedBySetId.mockResolvedValue({
+        id: 'ver-1',
+        ruleSetId: setId,
+        rulesJson: { rules: [] },
+      } as never);
+      generateAncScheduleMock.mockResolvedValue([
+        {
+          localScheduleUuid: 'anc-1',
+          visitCode: 'ANC1',
+          visitType: 'ANC',
+          sequenceNo: 1,
+          scheduledDate: '2026-08-11',
+          windowStartDate: '2026-08-11',
+          windowEndDate: '2026-08-16',
+          anchorType: 'REGISTRATION',
+          anchorVisitLocalUuid: null,
+        },
+      ]);
+
+      const result = await service.evaluateScheduleFull(setId, dto);
+
+      expect(generateAncScheduleMock).toHaveBeenCalledWith({ rules: [] }, dto);
+      expect(result.ruleVersionId).toBe('ver-1');
+      expect(result.scheduleRows).toHaveLength(1);
+    });
+
+    it('400s when the rule set is not category SCHEDULE, never generating', async () => {
+      repository.findSetById.mockResolvedValue({ id: setId, ruleCategory: 'RISK' } as never);
+
+      await expect(service.evaluateScheduleFull(setId, dto)).rejects.toMatchObject({
+        status: 400,
+      });
+      expect(generateAncScheduleMock).not.toHaveBeenCalled();
+    });
+
+    it('404s when the rule set does not exist', async () => {
+      repository.findSetById.mockResolvedValue(null);
+
+      await expect(service.evaluateScheduleFull(setId, dto)).rejects.toMatchObject({
+        status: 404,
+      });
+      expect(generateAncScheduleMock).not.toHaveBeenCalled();
+    });
+
+    it('404s when the rule set exists but has no published version', async () => {
+      repository.findSetById.mockResolvedValue({ id: setId, ruleCategory: 'SCHEDULE' } as never);
+      repository.findPublishedBySetId.mockResolvedValue(null);
+
+      await expect(service.evaluateScheduleFull(setId, dto)).rejects.toMatchObject({
+        status: 404,
+      });
+      expect(generateAncScheduleMock).not.toHaveBeenCalled();
     });
   });
 

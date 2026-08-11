@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { RuleVersionService } from './ruleVersion.service';
 import { publishRuleVersionSchema } from './dto/publish-ruleVersion.dto';
 import { evaluateRuleSetSchema } from './dto/evaluate-ruleSet.dto';
+import { evaluateScheduleFullSchema } from './dto/evaluate-schedule-full.dto';
 import {
   asyncHandler,
   createDocumentedRouter,
@@ -169,7 +170,12 @@ export function createRuleVersionRouter(service: RuleVersionService) {
   doc.get(
     '/admin/rules/:setId',
     {
-      summary: 'Get the current published rule pack version for a rule set',
+      summary:
+        'Get the current published rule pack version for a rule set, including its full ' +
+        "rulesJson. Open to any authenticated role (not just ADMIN) — a RISK rule set's " +
+        "rulesJson is exactly what a Sakhi's device needs to cache and evaluate HR " +
+        'conditions offline (FR-S-5.1); it is business configuration a form already depends ' +
+        'on, not admin-sensitive content.',
       tags: ['Rules'],
       params: setIdParamsSchema,
       responses: {
@@ -180,7 +186,7 @@ export function createRuleVersionRouter(service: RuleVersionService) {
       },
     },
     trustGatewayIdentity,
-    requireRoles('ADMIN'),
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
     validate(setIdParamsSchema, 'params'),
     asyncHandler(async (req, res) => {
       res.json(ok(await service.getPublished(req.params.setId)));
@@ -276,6 +282,42 @@ export function createRuleVersionRouter(service: RuleVersionService) {
     validateBody(evaluateRuleSetRequestSchema),
     asyncHandler(async (req, res) => {
       res.json(ok(await service.evaluateSchedule(req.params.setId, req.body)));
+    }),
+  );
+
+  doc.post(
+    '/rules/:setId/evaluate-schedule/anc-full',
+    {
+      summary:
+        'The full ANC schedule (visit-count formula, ANC1, chained ANC2..N) from a SCHEDULE ' +
+        "rule set's currently-published decision graph, in one call. Server-to-server only — " +
+        'the production caller is visit-form-service regenerating a schedule after a ' +
+        'Supervisor-approved LMP/EDD change (FR-SV-4.2), not a Sakhi-initiated request.',
+      tags: ['Rules'],
+      params: setIdParamsSchema,
+      responses: {
+        200: {
+          description: 'Generated ANC schedule rows',
+          schema: envelope(evaluateScheduleResponseSchema),
+        },
+        400: {
+          description: 'Malformed body or wrong rule category',
+          schema: apiErrorSchema,
+        },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+        404: {
+          description: 'Rule set not found, or it has no published version',
+          schema: apiErrorSchema,
+        },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(setIdParamsSchema, 'params'),
+    validateBody(evaluateScheduleFullSchema),
+    asyncHandler(async (req, res) => {
+      res.json(ok(await service.evaluateScheduleFull(req.params.setId, req.body)));
     }),
   );
 
