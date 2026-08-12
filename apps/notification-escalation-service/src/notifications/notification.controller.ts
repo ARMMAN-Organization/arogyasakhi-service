@@ -1,104 +1,22 @@
-import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
-import { z } from 'zod';
+import { asyncHandler, ok, unauthorized } from '../app.module';
 import type { NotificationService } from './notification.service';
-import { createNotificationSchema } from './dto/create-notification.dto';
-import {
-  asyncHandler,
-  createDocumentedRouter,
-  ok,
-  requireRoles,
-  trustGatewayIdentity,
-  unauthorized,
-  validateBody,
-} from '../app.module';
-
-extendZodWithOpenApi(z);
-
-const notificationSchema = z.object({
-  id: z.string().uuid(),
-  recipientUserId: z.string().openapi({ example: 'jane.sakhi' }),
-  notificationType: z.string().openapi({ example: 'MISSED_VISIT_ESCALATION' }),
-  title: z.string().openapi({ example: 'Visit overdue' }),
-  body: z.string().nullable(),
-  priority: z.number().int().openapi({ example: 5 }),
-  ctaType: z.string().nullable(),
-  linkedEntityType: z.string().nullable(),
-  linkedEntityId: z.string().nullable(),
-  status: z.string().openapi({ example: 'UNREAD' }),
-  readAt: z.string().datetime().nullable(),
-  dismissedAt: z.string().datetime().nullable(),
-  createdAt: z.string().datetime(),
-  updatedAt: z.string().datetime(),
-});
-
-const apiErrorSchema = z.object({
-  success: z.literal(false),
-  message: z.string(),
-  errorCode: z.string().openapi({ example: 'VALIDATION_ERROR' }),
-  details: z.record(z.unknown()).optional(),
-});
-
-function envelope<T extends z.ZodTypeAny>(data: T) {
-  return z.object({ success: z.literal(true), message: z.string(), data });
-}
 
 /**
- * Notification HTTP routes. Mounted under the global `api/v1` prefix.
- *
- * Uses `createDocumentedRouter()` so each route's OpenAPI entry is defined
- * in the same call as the Express route itself — the request body schema
- * is inferred from `validateBody` already in the middleware chain, so
- * `/docs.json` can never drift from what's actually mounted.
+ * Notification request handlers. Mounted under the global `api/v1` prefix
+ * by `notification.routes.ts`.
  */
-export function createNotificationRouter(service: NotificationService) {
-  const doc = createDocumentedRouter();
-
-  doc.get(
-    '/notifications',
-    {
-      summary: 'List recent notifications',
-      tags: ['Notifications'],
-      responses: {
-        200: { description: 'Notifications', schema: envelope(z.array(notificationSchema)) },
-        401: { description: 'Unauthenticated', schema: apiErrorSchema },
-        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
-      },
-    },
-    trustGatewayIdentity,
-    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER'),
-    asyncHandler(async (_req, res) => {
+export function createNotificationController(service: NotificationService) {
+  return {
+    list: asyncHandler(async (_req, res) => {
       res.json(ok(await service.list()));
     }),
-  );
 
-  doc.post(
-    '/notifications',
-    {
-      summary: 'Create a notification',
-      tags: ['Notifications'],
-      responses: {
-        201: { description: 'Notification created', schema: envelope(notificationSchema) },
-        400: { description: 'Validation error', schema: apiErrorSchema },
-        401: { description: 'Unauthenticated', schema: apiErrorSchema },
-        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
-      },
-    },
-    trustGatewayIdentity,
-    // ADMIN direct use, plus SUPERVISOR so approval-service can notify a
-    // Sakhi on the caller's behalf after a Quick Response decision (it
-    // forwards the deciding Supervisor's own Authorization header, same
-    // pattern supervisor-operations-service's SakhiClient uses — no
-    // separate service-to-service credential scheme in this codebase yet).
-    requireRoles('ADMIN', 'SUPERVISOR'),
-    validateBody(createNotificationSchema),
-    asyncHandler(async (req, res, next) => {
+    create: asyncHandler(async (req, res, next) => {
       if (!req.user) return next(unauthorized());
       const authorizationHeader = req.header('authorization');
       if (!authorizationHeader) return next(unauthorized());
       const created = await service.create(req.body, req.user, authorizationHeader);
       res.status(201).json(ok(created));
     }),
-  );
-
-  return doc;
+  };
 }
