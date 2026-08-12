@@ -1,11 +1,11 @@
-FROM node:20.11-alpine AS builder
+FROM node:24.18.0-alpine AS builder
 WORKDIR /workspace
 COPY . .
 RUN npm ci
 RUN npx prisma generate --schema apps/supervisor-operations-service/prisma/schema.prisma
 RUN npx nx build supervisor-operations-service
 
-FROM node:20.11-alpine AS runner
+FROM node:24.18.0-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=builder /workspace/dist/apps/supervisor-operations-service ./

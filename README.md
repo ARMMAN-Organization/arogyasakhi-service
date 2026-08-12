@@ -12,8 +12,9 @@ libs/   core · service-commons · api-contracts (shared, publishable)
 
 ## Prerequisites
 
-- **Node 20.11.0** — pinned in `.nvmrc`. With `nvm`: `nvm install && nvm use`.
-- **npm 10+** (ships with Node 20).
+- **Node 24.18.0** ("Krypton", Active LTS) — pinned in `.nvmrc`. With `nvm`:
+  `nvm install && nvm use`.
+- **npm 10+** (ships with Node 24).
 - **Docker** for local Postgres + Redis.
   - macOS without Docker Desktop: `brew install colima docker docker-compose`,
     then `colima start` once. After that `docker compose` works normally.
@@ -21,7 +22,7 @@ libs/   core · service-commons · api-contracts (shared, publishable)
 ## Getting started (clone → all services running)
 
 ```bash
-nvm install && nvm use        # Node 20.11.0 from .nvmrc
+nvm install && nvm use        # Node 24.18.0 from .nvmrc
 npm install                   # installs deps AND generates all Prisma clients (postinstall)
 cp .env.example .env          # local DB/Redis URLs (defaults match docker compose)
 docker compose up -d          # start Postgres + Redis
