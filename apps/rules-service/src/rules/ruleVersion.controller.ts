@@ -24,5 +24,9 @@ export function createRuleVersionController(service: RuleVersionService) {
     evaluate: asyncHandler(async (req, res) => {
       res.json(ok(await service.evaluate(req.params.setId, req.body)));
     }),
+
+    evaluateSchedule: asyncHandler(async (req, res) => {
+      res.json(ok(await service.evaluateSchedule(req.params.setId, req.body)));
+    }),
   };
 }
