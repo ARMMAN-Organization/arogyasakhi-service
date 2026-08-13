@@ -84,6 +84,7 @@ export class MediaAssetService {
       checksum: Buffer.from(head.etag, 'hex'),
       mimeType: head.mimeType,
       sizeBytes: BigInt(head.sizeBytes),
+      uploadedAt: new Date(),
     });
   }
 }

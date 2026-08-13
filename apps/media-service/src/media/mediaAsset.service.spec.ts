@@ -74,7 +74,6 @@ describe('MediaAssetService', () => {
       assetType: 'CONSENT_PHOTO',
       s3Key: 'media/consent_photo/abc-123',
       expectedSizeBytes: 204800,
-      uploadedAt: new Date('2026-07-31T00:00:00Z'),
       encryptedFlag: true,
     };
     const validEtag = 'd41d8cd98f00b204e9800998ecf8427e';
@@ -119,7 +118,7 @@ describe('MediaAssetService', () => {
       expect(mockHeadObject).toHaveBeenCalledWith('media/consent_photo/abc-123');
       expect(repository.create).toHaveBeenCalledWith({
         assetType: 'CONSENT_PHOTO',
-        uploadedAt: dto.uploadedAt,
+        uploadedAt: expect.any(Date),
         encryptedFlag: true,
         storageUri: 's3://test-bucket/media/consent_photo/abc-123',
         checksum: Buffer.from(validEtag, 'hex'),

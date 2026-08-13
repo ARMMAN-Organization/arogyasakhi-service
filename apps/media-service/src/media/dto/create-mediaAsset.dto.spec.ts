@@ -5,7 +5,6 @@ describe('createMediaAssetSchema', () => {
     assetType: 'OTHER' as const,
     s3Key: 'media/other/8f14e45f-ceea-467e-bd97-13a3f4d7747e',
     expectedSizeBytes: 204800,
-    uploadedAt: '2026-07-31T00:00:00Z',
   };
 
   it('accepts a valid payload with only the required fields', () => {
@@ -53,6 +52,14 @@ describe('createMediaAssetSchema', () => {
       storageUri: 's3://bucket/key',
       checksum: 'a'.repeat(64),
       mimeType: 'image/jpeg',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a client-supplied uploadedAt — the server sets this at finalize time', () => {
+    const result = createMediaAssetSchema.safeParse({
+      ...basePayload,
+      uploadedAt: '2026-07-31T00:00:00Z',
     });
     expect(result.success).toBe(false);
   });

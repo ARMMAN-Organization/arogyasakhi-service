@@ -71,6 +71,27 @@ const mediaAssetSchema = z.object({
   updatedAt: z.string().datetime(),
 });
 
+// Narrower than mediaAssetSchema above — matches mediaAsset.controller.ts's
+// toFinalizeResponse, which drops the always-null-unless-linked fields and
+// internal audit/soft-delete columns a caller finalizing an upload has no
+// use for. GET /media's list view keeps the full mediaAssetSchema shape.
+const mediaAssetFinalizeResponseSchema = z.object({
+  id: z.string().uuid(),
+  assetType: z.string().openapi({ example: 'CONSENT_PHOTO' }),
+  storageUri: z.string().openapi({ example: 's3://arogya-media/2026/07/consent-abc123.jpg' }),
+  mimeType: z.string().openapi({ example: 'image/jpeg' }),
+  sizeBytes: z.string().openapi({
+    description: 'File size in bytes (BigInt serialized as string).',
+    example: '204800',
+  }),
+  uploadedByUserId: z.string().uuid().nullable(),
+  uploadedAt: z.string().datetime().openapi({
+    description: 'Server-set to the moment finalize ran — not client-supplied.',
+  }),
+  encryptedFlag: z.boolean(),
+  createdAt: z.string().datetime(),
+});
+
 const apiErrorSchema = z.object({
   success: z.literal(false),
   message: z.string(),
@@ -138,7 +159,10 @@ export function registerMediaAssetRoutes(doc: DocumentedRouter, service: MediaAs
       tags: ['Media'],
       body: createMediaAssetDocSchema,
       responses: {
-        201: { description: 'Media asset created', schema: envelope(mediaAssetSchema) },
+        201: {
+          description: 'Media asset created',
+          schema: envelope(mediaAssetFinalizeResponseSchema),
+        },
         400: {
           description: 'Validation error, or the S3 object for this key was not found',
           schema: apiErrorSchema,

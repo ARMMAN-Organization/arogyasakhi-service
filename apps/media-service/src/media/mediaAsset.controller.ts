@@ -21,6 +21,41 @@ function toResponse(asset: MediaAsset) {
 }
 
 /**
+ * Narrower response for `POST /media`'s finalize step: drops the linkage
+ * fields (null on every asset unless the caller explicitly set one — noise
+ * when they're unset) and internal audit/soft-delete columns
+ * (createdByUserId/updatedByUserId/updatedAt/isDeleted/deletedAt) that a
+ * caller finalizing an upload has no use for. `GET /media`'s list view keeps
+ * the full row via `toResponse` above — this trim is specific to what the
+ * finalize response needs to hand back.
+ */
+function toFinalizeResponse(asset: MediaAsset) {
+  const {
+    id,
+    assetType,
+    storageUri,
+    checksum,
+    mimeType,
+    uploadedByUserId,
+    uploadedAt,
+    encryptedFlag,
+    createdAt,
+  } = asset;
+  return {
+    id,
+    assetType,
+    storageUri,
+    checksum,
+    mimeType,
+    sizeBytes: asset.sizeBytes.toString(),
+    uploadedByUserId,
+    uploadedAt,
+    encryptedFlag,
+    createdAt,
+  };
+}
+
+/**
  * Media asset request handlers. Mounted under the global `api/v1` prefix
  * by `mediaAsset.routes.ts`.
  */
@@ -36,7 +71,7 @@ export function createMediaAssetController(service: MediaAssetService) {
 
     create: asyncHandler(async (req, res) => {
       const created = await service.create(req.body);
-      res.status(201).json(ok(toResponse(created)));
+      res.status(201).json(ok(toFinalizeResponse(created)));
     }),
   };
 }

@@ -48,6 +48,11 @@ const s3KeySchema = z
  * now derives them itself from S3's `HeadObject` response for the `s3Key`
  * the client hands back (see `mediaAsset.service.ts`).
  *
+ * Also absent: `uploadedAt`. The server sets this to the moment finalize
+ * actually runs (matching `createdAt`) — a client-declared upload timestamp
+ * is just another value nothing verifies, and finalize time is already an
+ * accurate record of when the asset became known to this service.
+ *
  * `expectedSizeBytes` IS still client-supplied — it's the same value
  * originally declared to `POST /media/upload-url` (see
  * `create-upload-url.dto.ts`) — precisely so `create()` has something
@@ -62,7 +67,6 @@ export const createMediaAssetSchema = z
     s3Key: s3KeySchema,
     expectedSizeBytes: z.coerce.number().int().positive(),
     uploadedByUserId: z.string().uuid().optional(),
-    uploadedAt: z.coerce.date(),
     linkedEntityType: z.string().trim().min(1).max(80).optional(),
     linkedEntityId: z.string().uuid().optional(),
     encryptedFlag: z.boolean().default(true),
