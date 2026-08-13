@@ -7,6 +7,7 @@ import { incRulesJson } from '../src/rules/scheduling/inc.rulesJson';
 import { ccvRulesJson } from '../src/rules/scheduling/ccv.rulesJson';
 import { hrRulesJson } from '../src/rules/scheduling/hr.rulesJson';
 import { deliveryRulesJson } from '../src/rules/scheduling/delivery.rulesJson';
+import { escalationRulesJson } from '../src/rules/scheduling/escalation.rulesJson';
 
 const prisma = new PrismaClient();
 
@@ -102,6 +103,50 @@ async function seedSchedulingRulePacks(): Promise<void> {
   }
 }
 
+// Fixed UUID pair for the first (and currently only) ESCALATION rule pack
+// (SRS §3A.2.7 FR-S-7.1) — a distinct prefix ('44444444...') from the
+// SCHEDULE packs' '33333333...' family, since this is a different
+// RuleCategory, not another scheduling journey. Same upsert-once pattern:
+// `update: {}` on both upserts means this only ever creates the rows on a
+// fresh environment.
+const ESCALATION_RULE_PACKS = [
+  {
+    ruleSetId: '44444444-4444-4444-8444-444444444441',
+    ruleVersionId: '44444444-4444-4444-8444-444444444442',
+    ruleSetName: 'Arogya Sakhi Missed-Visit Escalation',
+    rulesJson: escalationRulesJson,
+  },
+] as const;
+
+async function seedEscalationRulePacks(): Promise<void> {
+  for (const pack of ESCALATION_RULE_PACKS) {
+    await prisma.ruleSet.upsert({
+      where: { id: pack.ruleSetId },
+      create: {
+        id: pack.ruleSetId,
+        ruleCategory: 'ESCALATION',
+        ruleSetName: pack.ruleSetName,
+        status: 'ACTIVE',
+      },
+      update: {},
+    });
+
+    await prisma.ruleVersion.upsert({
+      where: { id: pack.ruleVersionId },
+      create: {
+        id: pack.ruleVersionId,
+        ruleSetId: pack.ruleSetId,
+        versionNo: 'v1',
+        rulesJson: pack.rulesJson,
+        effectiveFrom: new Date('2026-08-10'),
+        checksum: createHash('sha256').update(JSON.stringify(pack.rulesJson)).digest(),
+        status: 'PUBLISHED',
+      },
+      update: {},
+    });
+  }
+}
+
 /**
  * Seeds the SCHEDULE rule set + its v1-hardcoded published version, so
  * VisitSchedule.generatedByRuleVersionId (NOT NULL, no default) has a real
@@ -156,6 +201,9 @@ async function main(): Promise<void> {
   console.log(
     `Seeded ${SCHEDULING_RULE_PACKS.length} scheduling rule packs (ANC/PP/NN/INC/CCV/HR/DELIVERY).`,
   );
+
+  await seedEscalationRulePacks();
+  console.log(`Seeded ${ESCALATION_RULE_PACKS.length} escalation rule pack(s).`);
 }
 
 main()

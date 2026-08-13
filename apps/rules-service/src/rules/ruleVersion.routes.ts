@@ -5,6 +5,7 @@ import { createRuleVersionController } from './ruleVersion.controller';
 import { publishRuleVersionSchema } from './dto/publish-ruleVersion.dto';
 import { evaluateRuleSetSchema } from './dto/evaluate-ruleSet.dto';
 import { evaluateScheduleSchema } from './dto/evaluate-schedule.dto';
+import { evaluateEscalationSchema } from './dto/evaluate-escalation.dto';
 import { SCHEDULE_KINDS } from './scheduleEvaluator';
 import {
   requireRoles,
@@ -101,6 +102,14 @@ const evaluateResponseSchema = z.object({
     .enum(['NORMAL', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'])
     .openapi({ example: 'HIGH' }),
   conditions: z.array(riskEvaluationResultSchema),
+});
+
+const evaluateEscalationRequestSchema = evaluateEscalationSchema;
+
+const escalationEvaluateResponseSchema = z.object({
+  ruleVersionId: z.string().uuid(),
+  shouldEscalate: z.boolean(),
+  reasonCode: z.string().openapi({ example: 'ANC_TWO_CONSECUTIVE_MISSED' }),
 });
 
 const apiErrorSchema = z.object({
@@ -240,5 +249,36 @@ export function registerRuleVersionRoutes(doc: DocumentedRouter, service: RuleVe
     validate(setIdParamsSchema, 'params'),
     validateBody(evaluateScheduleRequestSchema),
     controller.evaluateSchedule,
+  );
+
+  doc.post(
+    '/rules/:setId/evaluate-escalation',
+    {
+      summary:
+        "Evaluate the rule set's currently-published gorules ESCALATION decision graph " +
+        '(missed-visit escalation, SRS §3A.2.7 FR-S-7.1) against caller-supplied ' +
+        'visitFamily/isHrVisit/consecutiveMissedCount. Never evaluates against a DRAFT version.',
+      tags: ['Rules'],
+      params: setIdParamsSchema,
+      responses: {
+        200: {
+          description: 'Escalation evaluation result',
+          schema: envelope(escalationEvaluateResponseSchema),
+        },
+        400: { description: 'Malformed input or decision-graph output', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+        404: {
+          description: 'Rule set not found, or it has no published version',
+          schema: apiErrorSchema,
+        },
+        500: { description: 'Server error', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI'),
+    validate(setIdParamsSchema, 'params'),
+    validateBody(evaluateEscalationRequestSchema),
+    controller.evaluateEscalation,
   );
 }

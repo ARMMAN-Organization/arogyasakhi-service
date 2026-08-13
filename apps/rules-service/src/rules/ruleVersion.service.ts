@@ -4,8 +4,10 @@ import type { RuleVersionRepository } from './ruleVersion.repository';
 import type { PublishRuleVersionInput } from './dto/publish-ruleVersion.dto';
 import type { EvaluateRuleSetInput } from './dto/evaluate-ruleSet.dto';
 import type { EvaluateScheduleInput } from './dto/evaluate-schedule.dto';
+import type { EvaluateEscalationInput } from './dto/evaluate-escalation.dto';
 import { evaluateRulePack } from './ruleSet.evaluator';
 import { evaluateSchedulePack } from './scheduleEvaluator';
+import { evaluateEscalationPack } from './escalationEvaluator';
 
 /** Prisma unique-constraint violation code (ruleSetId + versionNo). */
 const PRISMA_UNIQUE_CONSTRAINT_CODE = 'P2002';
@@ -120,6 +122,32 @@ export class RuleVersionService {
     }
 
     const evaluation = await evaluateSchedulePack(dto.scheduleKind, version.rulesJson, dto.input);
+    return { ruleVersionId: version.id, ...evaluation };
+  }
+
+  /**
+   * Executes the rule set's currently-published gorules decision graph as an
+   * ESCALATION-category pack (SRS §3A.2.7 FR-S-7.1) — same 404-on-missing-
+   * set/missing-published-version guard as evaluate()/evaluateSchedule(),
+   * but validates the output against escalationEvaluator.ts's single fixed
+   * `{ shouldEscalate, reasonCode }` contract rather than a per-scheduleKind
+   * shape.
+   */
+  async evaluateEscalation(ruleSetId: string, dto: EvaluateEscalationInput) {
+    const set = await this.repository.findSetById(ruleSetId);
+    if (!set) throw notFound('Rule set not found.');
+    if (set.ruleCategory !== 'ESCALATION') {
+      throw badRequest(
+        `This rule set is ${set.ruleCategory}, not ESCALATION — cannot evaluate it here.`,
+      );
+    }
+
+    const version = await this.repository.findPublishedBySetId(ruleSetId);
+    if (!version) {
+      throw notFound('No published rule pack version found for this rule set.');
+    }
+
+    const evaluation = await evaluateEscalationPack(version.rulesJson, dto.input);
     return { ruleVersionId: version.id, ...evaluation };
   }
 

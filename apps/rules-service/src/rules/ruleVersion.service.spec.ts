@@ -2,9 +2,11 @@ import { RuleVersionService } from './ruleVersion.service';
 import type { RuleVersionRepository } from './ruleVersion.repository';
 import { evaluateRulePack } from './ruleSet.evaluator';
 import { evaluateSchedulePack } from './scheduleEvaluator';
+import { evaluateEscalationPack } from './escalationEvaluator';
 
 jest.mock('./ruleSet.evaluator');
 jest.mock('./scheduleEvaluator');
+jest.mock('./escalationEvaluator');
 
 describe('RuleVersionService', () => {
   const repository = {
@@ -16,6 +18,7 @@ describe('RuleVersionService', () => {
   let service: RuleVersionService;
   const evaluateRulePackMock = jest.mocked(evaluateRulePack);
   const evaluateSchedulePackMock = jest.mocked(evaluateSchedulePack);
+  const evaluateEscalationPackMock = jest.mocked(evaluateEscalationPack);
 
   beforeEach(() => {
     jest.resetAllMocks();
@@ -295,6 +298,74 @@ describe('RuleVersionService', () => {
         message: 'No published rule pack version found for this rule set.',
       });
       expect(evaluateSchedulePackMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('evaluateEscalation', () => {
+    it('evaluates against the published version and returns ruleVersionId alongside the results', async () => {
+      repository.findSetById.mockResolvedValue({ id: setId, ruleCategory: 'ESCALATION' } as never);
+      repository.findPublishedBySetId.mockResolvedValue({
+        id: 'ver-1',
+        ruleSetId: setId,
+        rulesJson: { rules: [] },
+      } as never);
+      evaluateEscalationPackMock.mockResolvedValue({
+        shouldEscalate: true,
+        reasonCode: 'ANC_TWO_CONSECUTIVE_MISSED',
+      });
+
+      const result = await service.evaluateEscalation(setId, {
+        input: { visitFamily: 'ANC', isHrVisit: false, consecutiveMissedCount: 2 },
+      });
+
+      expect(evaluateEscalationPackMock).toHaveBeenCalledWith(
+        { rules: [] },
+        { visitFamily: 'ANC', isHrVisit: false, consecutiveMissedCount: 2 },
+      );
+      expect(result).toEqual({
+        ruleVersionId: 'ver-1',
+        shouldEscalate: true,
+        reasonCode: 'ANC_TWO_CONSECUTIVE_MISSED',
+      });
+    });
+
+    it('400s when the rule set is not ESCALATION category, never evaluating', async () => {
+      repository.findSetById.mockResolvedValue({ id: setId, ruleCategory: 'SCHEDULE' } as never);
+
+      await expect(
+        service.evaluateEscalation(setId, {
+          input: { visitFamily: 'ANC', isHrVisit: false, consecutiveMissedCount: 1 },
+        }),
+      ).rejects.toMatchObject({ status: 400 });
+      expect(repository.findPublishedBySetId).not.toHaveBeenCalled();
+      expect(evaluateEscalationPackMock).not.toHaveBeenCalled();
+    });
+
+    it('404s when the rule set itself does not exist, never checking for a published version', async () => {
+      repository.findSetById.mockResolvedValue(null);
+
+      await expect(
+        service.evaluateEscalation(setId, {
+          input: { visitFamily: 'ANC', isHrVisit: false, consecutiveMissedCount: 1 },
+        }),
+      ).rejects.toMatchObject({ status: 404, message: 'Rule set not found.' });
+      expect(repository.findPublishedBySetId).not.toHaveBeenCalled();
+      expect(evaluateEscalationPackMock).not.toHaveBeenCalled();
+    });
+
+    it('404s when the rule set exists but has no published version, never evaluating', async () => {
+      repository.findSetById.mockResolvedValue({ id: setId, ruleCategory: 'ESCALATION' } as never);
+      repository.findPublishedBySetId.mockResolvedValue(null);
+
+      await expect(
+        service.evaluateEscalation(setId, {
+          input: { visitFamily: 'ANC', isHrVisit: false, consecutiveMissedCount: 1 },
+        }),
+      ).rejects.toMatchObject({
+        status: 404,
+        message: 'No published rule pack version found for this rule set.',
+      });
+      expect(evaluateEscalationPackMock).not.toHaveBeenCalled();
     });
   });
 });
