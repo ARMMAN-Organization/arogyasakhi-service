@@ -3,7 +3,7 @@ import { createMediaAssetSchema } from './create-mediaAsset.dto';
 describe('createMediaAssetSchema', () => {
   const basePayload = {
     assetType: 'OTHER' as const,
-    s3Key: 'other/8f14e45f-ceea-467e-bd97-13a3f4d7747e',
+    s3Key: 'media/other/8f14e45f-ceea-467e-bd97-13a3f4d7747e',
     expectedSizeBytes: 204800,
     uploadedAt: '2026-07-31T00:00:00Z',
   };
@@ -26,6 +26,19 @@ describe('createMediaAssetSchema', () => {
 
   it('rejects an empty s3Key', () => {
     const result = createMediaAssetSchema.safeParse({ ...basePayload, s3Key: '' });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects an s3Key not shaped like one generateObjectKey would produce', () => {
+    const result = createMediaAssetSchema.safeParse({
+      ...basePayload,
+      s3Key: '../../etc/passwd',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects an s3Key missing the trailing UUID segment', () => {
+    const result = createMediaAssetSchema.safeParse({ ...basePayload, s3Key: 'media/other' });
     expect(result.success).toBe(false);
   });
 

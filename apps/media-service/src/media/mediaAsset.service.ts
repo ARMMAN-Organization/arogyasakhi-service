@@ -44,6 +44,16 @@ export class MediaAssetService {
    * not just "something exists at this key."
    */
   async create(dto: CreateMediaAssetInput) {
+    // The key's own assetType segment (set by generateObjectKey at issue
+    // time) must match what this call declares — catches a caller finalizing
+    // a legitimately-issued key under a different assetType than it was
+    // requested for, without needing to track which caller was issued which
+    // key (PR #153 review: s3Key has no server-side caller binding today).
+    const keyAssetTypeSegment = dto.s3Key.split('/').at(-2);
+    if (keyAssetTypeSegment !== dto.assetType.toLowerCase()) {
+      throw badRequest('s3Key was not issued for this assetType.');
+    }
+
     const head = await headObject(dto.s3Key);
     if (!head.exists) {
       throw badRequest(

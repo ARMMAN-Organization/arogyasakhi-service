@@ -45,7 +45,7 @@ describe('MediaAssetService', () => {
         mimeType: 'image/jpeg',
         sizeBytes: 204800,
       };
-      mockGenerateObjectKey.mockReturnValue('consent_photo/abc-123');
+      mockGenerateObjectKey.mockReturnValue('media/consent_photo/abc-123');
       mockGetPresignedUploadUrl.mockResolvedValue({
         uploadUrl: 'https://signed.example.com/upload',
         expiresInSeconds: 900,
@@ -55,13 +55,13 @@ describe('MediaAssetService', () => {
 
       expect(mockGenerateObjectKey).toHaveBeenCalledWith('CONSENT_PHOTO');
       expect(mockGetPresignedUploadUrl).toHaveBeenCalledWith({
-        key: 'consent_photo/abc-123',
+        key: 'media/consent_photo/abc-123',
         mimeType: 'image/jpeg',
         sizeBytes: 204800,
       });
       expect(result).toEqual({
         uploadUrl: 'https://signed.example.com/upload',
-        s3Key: 'consent_photo/abc-123',
+        s3Key: 'media/consent_photo/abc-123',
         expiresInSeconds: 900,
         maxSizeBytes: 26214400,
       });
@@ -72,7 +72,7 @@ describe('MediaAssetService', () => {
   describe('create', () => {
     const dto: CreateMediaAssetInput = {
       assetType: 'CONSENT_PHOTO',
-      s3Key: 'consent_photo/abc-123',
+      s3Key: 'media/consent_photo/abc-123',
       expectedSizeBytes: 204800,
       uploadedAt: new Date('2026-07-31T00:00:00Z'),
       encryptedFlag: true,
@@ -82,7 +82,7 @@ describe('MediaAssetService', () => {
     const created: MediaAsset = {
       id: '1',
       assetType: 'CONSENT_PHOTO',
-      storageUri: 's3://test-bucket/consent_photo/abc-123',
+      storageUri: 's3://test-bucket/media/consent_photo/abc-123',
       checksum: Buffer.from(validEtag, 'hex'),
       mimeType: 'image/jpeg',
       sizeBytes: 204800n,
@@ -116,12 +116,12 @@ describe('MediaAssetService', () => {
 
       const result = await service.create(dto);
 
-      expect(mockHeadObject).toHaveBeenCalledWith('consent_photo/abc-123');
+      expect(mockHeadObject).toHaveBeenCalledWith('media/consent_photo/abc-123');
       expect(repository.create).toHaveBeenCalledWith({
         assetType: 'CONSENT_PHOTO',
         uploadedAt: dto.uploadedAt,
         encryptedFlag: true,
-        storageUri: 's3://test-bucket/consent_photo/abc-123',
+        storageUri: 's3://test-bucket/media/consent_photo/abc-123',
         checksum: Buffer.from(validEtag, 'hex'),
         mimeType: 'image/jpeg',
         sizeBytes: 204800n,
@@ -133,6 +133,14 @@ describe('MediaAssetService', () => {
       mockHeadObject.mockResolvedValue({ exists: false });
 
       await expect(service.create(dto)).rejects.toMatchObject({ status: 400 });
+      expect(repository.create).not.toHaveBeenCalled();
+    });
+
+    it('throws badRequest (400) when the s3Key was not issued for the declared assetType, without calling headObject', async () => {
+      const mismatched = { ...dto, s3Key: 'media/other/abc-123' };
+
+      await expect(service.create(mismatched)).rejects.toMatchObject({ status: 400 });
+      expect(mockHeadObject).not.toHaveBeenCalled();
       expect(repository.create).not.toHaveBeenCalled();
     });
 
