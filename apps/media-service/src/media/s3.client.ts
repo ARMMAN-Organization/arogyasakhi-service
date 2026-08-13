@@ -48,13 +48,14 @@ export async function getPresignedUploadUrl(input: {
 }
 
 /**
- * Produces a unique object key namespaced by asset type so the bucket stays
+ * Produces a unique object key under the configured top-level upload folder
+ * (`S3_UPLOAD_FOLDER`), then namespaced by asset type so the bucket stays
  * browsable/queryable by category. No file extension is appended — S3 does
  * not require one, and the authoritative content type already lives in the
  * `mime_type` DB column rather than being inferred from the key.
  */
 export function generateObjectKey(assetType: string): string {
-  return `${assetType.toLowerCase()}/${randomUUID()}`;
+  return `${appConfig.S3_UPLOAD_FOLDER}/${assetType.toLowerCase()}/${randomUUID()}`;
 }
 
 type HeadObjectResult =

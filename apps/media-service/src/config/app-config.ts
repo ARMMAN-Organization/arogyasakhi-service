@@ -17,6 +17,10 @@ const schema = z.object({
     ),
   PUBLIC_BASE_URLS: publicBaseUrlsSchema,
   S3_BUCKET_NAME: z.string().min(1),
+  // Top-level folder every uploaded object is namespaced under, ahead of the
+  // per-assetType sub-folder generateObjectKey adds (see s3.client.ts) — lets
+  // multiple environments/purposes share one bucket without key collisions.
+  S3_UPLOAD_FOLDER: z.string().min(1).default('media'),
   AWS_REGION: z.string().min(1).default('ap-south-1'),
   // Presigned PUT URL lifetime. Short-lived on purpose — an app that stalls
   // past this window must request a fresh URL rather than retry a stale one.

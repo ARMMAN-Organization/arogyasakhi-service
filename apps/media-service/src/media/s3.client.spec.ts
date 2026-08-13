@@ -1,6 +1,7 @@
 jest.mock('../config/app-config', () => ({
   appConfig: {
     S3_BUCKET_NAME: 'test-bucket',
+    S3_UPLOAD_FOLDER: 'media',
     AWS_REGION: 'ap-south-1',
     PRESIGNED_URL_EXPIRY_SECONDS: 900,
   },
@@ -60,10 +61,10 @@ describe('s3.client', () => {
   });
 
   describe('generateObjectKey', () => {
-    it('returns a key prefixed by the lowercased asset type containing a UUID', () => {
+    it('returns a key prefixed by the configured upload folder, then the lowercased asset type, containing a UUID', () => {
       const key = generateObjectKey('CONSENT_PHOTO');
       expect(key).toMatch(
-        /^consent_photo\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+        /^media\/consent_photo\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
       );
     });
 
