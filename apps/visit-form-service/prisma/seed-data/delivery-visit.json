@@ -1,0 +1,695 @@
+{
+  "schemaJson": [
+    {
+      "label": "Delivery form filled date",
+      "section": "Delivery Details",
+      "required": true,
+      "input_type": "date",
+      "question_code": "delivery_form_filled_date",
+      "dateRule": { "notFuture": true }
+    },
+    {
+      "label": "Date of delivery",
+      "section": "Delivery Details",
+      "required": true,
+      "input_type": "date",
+      "question_code": "date_of_delivery",
+      "dateRule": { "notFuture": true }
+    },
+    {
+      "label": "Time of delivery",
+      "section": "Delivery Details",
+      "required": true,
+      "input_type": "time",
+      "question_code": "time_of_delivery"
+    },
+    {
+      "label": "Date of discharge",
+      "section": "Delivery Details",
+      "required": true,
+      "input_type": "date",
+      "question_code": "date_of_discharge",
+      "dateRule": { "notFuture": true, "notBefore": { "field": "date_of_delivery" } }
+    },
+    {
+      "label": "Term of delivery",
+      "options": [
+        { "label": "Pre Term", "sort_order": 0, "value_code": "pre_term" },
+        { "label": "Post Term", "sort_order": 1, "value_code": "post_term" },
+        { "label": "Full Term", "sort_order": 2, "value_code": "full_term" }
+      ],
+      "section": "Delivery Details",
+      "required": true,
+      "input_type": "dropdown",
+      "question_code": "term_of_delivery"
+    },
+    {
+      "label": "Type of delivery",
+      "options": [
+        { "label": "Caesarian", "sort_order": 0, "value_code": "caesarian" },
+        { "label": "Normal", "sort_order": 1, "value_code": "normal" },
+        {
+          "label": "Assisted (Forcep/vacuum)",
+          "sort_order": 2,
+          "value_code": "assisted_forcep_vacuum"
+        }
+      ],
+      "section": "Delivery Details",
+      "required": true,
+      "input_type": "dropdown",
+      "question_code": "type_of_delivery"
+    },
+    {
+      "label": "Place of Delivery",
+      "options": [
+        {
+          "label": "District hospital (civil hospital)",
+          "sort_order": 0,
+          "value_code": "district_hospital"
+        },
+        {
+          "label": "Sub-district hospital",
+          "sort_order": 1,
+          "value_code": "sub_district_hospital"
+        },
+        { "label": "Rural Hospital", "sort_order": 2, "value_code": "rural_hospital" },
+        { "label": "PHC", "sort_order": 3, "value_code": "phc" },
+        { "label": "SC", "sort_order": 4, "value_code": "sc" },
+        { "label": "Pvt. Hospital", "sort_order": 5, "value_code": "pvt_hospital" },
+        { "label": "Home", "sort_order": 6, "value_code": "home" },
+        { "label": "Transit", "sort_order": 7, "value_code": "transit" }
+      ],
+      "section": "Delivery Details",
+      "required": true,
+      "input_type": "dropdown",
+      "question_code": "place_of_delivery"
+    },
+    {
+      "label": "Who conducted the delivery?",
+      "options": [
+        { "label": "Specialist", "sort_order": 0, "value_code": "specialist" },
+        { "label": "Medical officer", "sort_order": 1, "value_code": "medical_officer" },
+        { "label": "Staffnurse", "sort_order": 2, "value_code": "staffnurse" },
+        { "label": "ANM", "sort_order": 3, "value_code": "anm" },
+        { "label": "LHV", "sort_order": 4, "value_code": "lhv" },
+        { "label": "Dai", "sort_order": 5, "value_code": "dai" },
+        { "label": "Other-mention", "sort_order": 6, "value_code": "other" }
+      ],
+      "section": "Delivery Details",
+      "required": true,
+      "input_type": "dropdown",
+      "question_code": "who_conducted_the_delivery"
+    },
+    {
+      "label": "If home delivery, no of misoprostol tablets taken back",
+      "options": [
+        { "label": "Yes", "sort_order": 0, "value_code": "yes" },
+        { "label": "No", "sort_order": 1, "value_code": "no" }
+      ],
+      "section": "Delivery Details",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "misoprostol_tablets_taken_back",
+      "visibleWhen": { "field": "place_of_delivery", "operator": "eq", "value": "home" }
+    },
+    {
+      "label": "Reason for home delivery",
+      "options": [
+        { "label": "Financial constraint", "sort_order": 0, "value_code": "financial_constraint" },
+        {
+          "label": "Long distance to health facility/poor transportation",
+          "sort_order": 1,
+          "value_code": "long_distance_poor_transportation"
+        },
+        {
+          "label": "Poor experience of health facility",
+          "sort_order": 2,
+          "value_code": "poor_experience_of_health_facility"
+        },
+        {
+          "label": "Lack of awareness/decision making constraint",
+          "sort_order": 3,
+          "value_code": "lack_of_awareness_decision_making_constraint"
+        }
+      ],
+      "section": "Delivery Details",
+      "required": true,
+      "input_type": "dropdown",
+      "question_code": "reason_for_home_delivery",
+      "visibleWhen": { "field": "place_of_delivery", "operator": "eq", "value": "home" }
+    },
+    {
+      "label": "Did the mother experience any complications during delivery?",
+      "options": [
+        { "label": "Blood transfusion", "sort_order": 0, "value_code": "blood_transfusion" },
+        { "label": "Shoulder dystocia", "sort_order": 1, "value_code": "shoulder_dystocia" },
+        {
+          "label": "Complete perineal tear",
+          "sort_order": 2,
+          "value_code": "complete_perineal_tear"
+        },
+        {
+          "label": "Severe perineal tears",
+          "sort_order": 3,
+          "value_code": "severe_perineal_tears"
+        },
+        {
+          "label": "Postpartum hemorrhage (PPH)",
+          "sort_order": 4,
+          "value_code": "postpartum_hemorrhage_pph"
+        },
+        { "label": "Eclampsia", "sort_order": 5, "value_code": "eclampsia" },
+        { "label": "Abruption", "sort_order": 6, "value_code": "abruption" },
+        { "label": "Preterm labor", "sort_order": 7, "value_code": "preterm_labor" },
+        { "label": "Prolonged labor", "sort_order": 8, "value_code": "prolonged_labor" },
+        { "label": "Obstructed labor", "sort_order": 9, "value_code": "obstructed_labor" },
+        { "label": "Uterine rupture", "sort_order": 10, "value_code": "uterine_rupture" },
+        {
+          "label": "Infections during delivery",
+          "sort_order": 11,
+          "value_code": "infections_during_delivery"
+        },
+        {
+          "label": "Infections after delivery",
+          "sort_order": 12,
+          "value_code": "infections_after_delivery"
+        },
+        { "label": "Retained placenta", "sort_order": 13, "value_code": "retained_placenta" },
+        { "label": "Other (please specify)", "sort_order": 14, "value_code": "other" },
+        { "label": "None", "sort_order": 15, "value_code": "none" }
+      ],
+      "section": "Delivery Details",
+      "required": true,
+      "input_type": "multiselect",
+      "question_code": "did_mother_experience_complications"
+    },
+    {
+      "label": "Was this a case of multiple gestation?",
+      "options": [
+        { "label": "Yes", "sort_order": 0, "value_code": "yes" },
+        { "label": "No", "sort_order": 1, "value_code": "no" }
+      ],
+      "section": "Delivery Details",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "was_multiple_gestation"
+    },
+    {
+      "label": "If yes for multiple gestation, number of babies born",
+      "section": "Delivery Details",
+      "required": true,
+      "input_type": "number",
+      "question_code": "number_of_babies_born",
+      "numericRange": { "min": 1, "max": 3 },
+      "visibleWhen": { "field": "was_multiple_gestation", "operator": "eq", "value": "yes" }
+    },
+
+    {
+      "label": "Child1: delivery outcome",
+      "options": [
+        { "label": "Live Birth", "sort_order": 0, "value_code": "live_birth" },
+        {
+          "label": "Antepartum Still Birth (Fresh)",
+          "sort_order": 1,
+          "value_code": "antepartum_still_birth_fresh"
+        },
+        {
+          "label": "Intrapartum still birth (Macerated)",
+          "sort_order": 2,
+          "value_code": "intrapartum_still_birth_macerated"
+        }
+      ],
+      "section": "Child 1",
+      "required": true,
+      "input_type": "dropdown",
+      "question_code": "child1_delivery_outcome"
+    },
+    {
+      "label": "Child1: related complications during delivery?",
+      "options": [
+        { "label": "Birth asphyxia", "sort_order": 0, "value_code": "birth_asphyxia" },
+        { "label": "Fetal distress", "sort_order": 1, "value_code": "fetal_distress" },
+        { "label": "Birth trauma", "sort_order": 2, "value_code": "birth_trauma" },
+        { "label": "Neonatal infections", "sort_order": 3, "value_code": "neonatal_infections" },
+        {
+          "label": "Congenital anomalies detected",
+          "sort_order": 4,
+          "value_code": "congenital_anomalies_detected"
+        },
+        { "label": "Other (please specify)", "sort_order": 5, "value_code": "other" }
+      ],
+      "section": "Child 1",
+      "required": true,
+      "input_type": "multiselect",
+      "question_code": "child1_related_complications"
+    },
+    {
+      "label": "Child1: Immediate crying after birth",
+      "options": [
+        {
+          "label": "Cried immediately after birth",
+          "sort_order": 0,
+          "value_code": "cried_immediately"
+        },
+        { "label": "Delayed crying", "sort_order": 1, "value_code": "delayed_crying" },
+        { "label": "Did not cry at birth", "sort_order": 2, "value_code": "did_not_cry" }
+      ],
+      "section": "Child 1",
+      "required": true,
+      "input_type": "dropdown",
+      "question_code": "child1_immediate_crying"
+    },
+    {
+      "label": "Child1: Sex of baby",
+      "options": [
+        { "label": "Male", "sort_order": 0, "value_code": "male" },
+        { "label": "Female", "sort_order": 1, "value_code": "female" },
+        { "label": "Intersex / Other", "sort_order": 2, "value_code": "intersex_other" }
+      ],
+      "section": "Child 1",
+      "required": true,
+      "input_type": "dropdown",
+      "question_code": "child1_sex_of_baby"
+    },
+    {
+      "label": "Child1: Birth Length of the baby in cm",
+      "section": "Child 1",
+      "required": true,
+      "input_type": "number",
+      "question_code": "child1_birth_length_cm",
+      "numericRange": { "min": 35, "max": 60 }
+    },
+    {
+      "label": "Child1: Birth Weight of the baby in kg",
+      "section": "Child 1",
+      "required": true,
+      "input_type": "number",
+      "question_code": "child1_birth_weight_kg",
+      "numericRange": { "min": 0.5, "max": 6 }
+    },
+    {
+      "label": "Child1: Is the new born alive now?",
+      "options": [
+        { "label": "Yes", "sort_order": 0, "value_code": "yes" },
+        { "label": "No", "sort_order": 1, "value_code": "no" }
+      ],
+      "section": "Child 1",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "child1_is_newborn_alive_now"
+    },
+    {
+      "label": "Child1: If No, Cause of death",
+      "options": [
+        { "label": "Infections", "sort_order": 0, "value_code": "infections" },
+        { "label": "Diarrhea", "sort_order": 1, "value_code": "diarrhea" },
+        { "label": "Dehydration", "sort_order": 2, "value_code": "dehydration" },
+        {
+          "label": "Malnourished Children (Grade 3 and 4)",
+          "sort_order": 3,
+          "value_code": "malnourished_grade_3_4"
+        },
+        { "label": "Congenital defects", "sort_order": 4, "value_code": "congenital_defects" },
+        {
+          "label": "Birth Asphyxia and Birth Trauma",
+          "sort_order": 5,
+          "value_code": "birth_asphyxia_and_trauma"
+        },
+        { "label": "Accidental", "sort_order": 6, "value_code": "accidental" },
+        {
+          "label": "Delay in reaching the health centre",
+          "sort_order": 7,
+          "value_code": "delay_reaching_health_centre"
+        },
+        {
+          "label": "Delay in provision of services at the health centre",
+          "sort_order": 8,
+          "value_code": "delay_in_services_at_health_centre"
+        },
+        { "label": "Other (specify)", "sort_order": 9, "value_code": "other" }
+      ],
+      "section": "Child 1",
+      "required": true,
+      "input_type": "multiselect",
+      "question_code": "child1_cause_of_death",
+      "visibleWhen": { "field": "child1_is_newborn_alive_now", "operator": "eq", "value": "no" }
+    },
+    {
+      "label": "Child1: Place of death",
+      "options": [
+        { "label": "Home", "sort_order": 0, "value_code": "home" },
+        { "label": "Health facility", "sort_order": 1, "value_code": "health_facility" },
+        { "label": "Other", "sort_order": 2, "value_code": "other" }
+      ],
+      "section": "Child 1",
+      "required": true,
+      "input_type": "dropdown",
+      "question_code": "child1_place_of_death",
+      "visibleWhen": { "field": "child1_is_newborn_alive_now", "operator": "eq", "value": "no" }
+    },
+    {
+      "label": "Child1: Date of death",
+      "section": "Child 1",
+      "required": true,
+      "input_type": "date",
+      "question_code": "child1_date_of_death",
+      "dateRule": { "notFuture": true, "notBefore": { "field": "date_of_delivery" } },
+      "visibleWhen": { "field": "child1_is_newborn_alive_now", "operator": "eq", "value": "no" }
+    },
+
+    {
+      "label": "Child2: delivery outcome",
+      "options": [
+        { "label": "Live Birth", "sort_order": 0, "value_code": "live_birth" },
+        {
+          "label": "Antepartum Still Birth (Fresh)",
+          "sort_order": 1,
+          "value_code": "antepartum_still_birth_fresh"
+        },
+        {
+          "label": "Intrapartum still birth (Macerated)",
+          "sort_order": 2,
+          "value_code": "intrapartum_still_birth_macerated"
+        }
+      ],
+      "section": "Child 2",
+      "required": true,
+      "input_type": "dropdown",
+      "question_code": "child2_delivery_outcome",
+      "visibleWhen": { "field": "number_of_babies_born", "operator": "gte", "value": 2 }
+    },
+    {
+      "label": "Child2: related complications during delivery?",
+      "options": [
+        { "label": "Birth asphyxia", "sort_order": 0, "value_code": "birth_asphyxia" },
+        { "label": "Fetal distress", "sort_order": 1, "value_code": "fetal_distress" },
+        { "label": "Birth trauma", "sort_order": 2, "value_code": "birth_trauma" },
+        { "label": "Neonatal infections", "sort_order": 3, "value_code": "neonatal_infections" },
+        {
+          "label": "Congenital anomalies detected",
+          "sort_order": 4,
+          "value_code": "congenital_anomalies_detected"
+        },
+        { "label": "Other (please specify)", "sort_order": 5, "value_code": "other" }
+      ],
+      "section": "Child 2",
+      "required": true,
+      "input_type": "multiselect",
+      "question_code": "child2_related_complications",
+      "visibleWhen": { "field": "number_of_babies_born", "operator": "gte", "value": 2 }
+    },
+    {
+      "label": "Child2: Immediate crying after birth",
+      "options": [
+        {
+          "label": "Cried immediately after birth",
+          "sort_order": 0,
+          "value_code": "cried_immediately"
+        },
+        { "label": "Delayed crying", "sort_order": 1, "value_code": "delayed_crying" },
+        { "label": "Did not cry at birth", "sort_order": 2, "value_code": "did_not_cry" }
+      ],
+      "section": "Child 2",
+      "required": true,
+      "input_type": "dropdown",
+      "question_code": "child2_immediate_crying",
+      "visibleWhen": { "field": "number_of_babies_born", "operator": "gte", "value": 2 }
+    },
+    {
+      "label": "Child2: Sex of baby",
+      "options": [
+        { "label": "Male", "sort_order": 0, "value_code": "male" },
+        { "label": "Female", "sort_order": 1, "value_code": "female" },
+        { "label": "Intersex / Other", "sort_order": 2, "value_code": "intersex_other" }
+      ],
+      "section": "Child 2",
+      "required": true,
+      "input_type": "dropdown",
+      "question_code": "child2_sex_of_baby",
+      "visibleWhen": { "field": "number_of_babies_born", "operator": "gte", "value": 2 }
+    },
+    {
+      "label": "Child2: Birth Length of the baby in cm",
+      "section": "Child 2",
+      "required": true,
+      "input_type": "number",
+      "question_code": "child2_birth_length_cm",
+      "numericRange": { "min": 35, "max": 60 },
+      "visibleWhen": { "field": "number_of_babies_born", "operator": "gte", "value": 2 }
+    },
+    {
+      "label": "Child2: Birth Weight of the baby in kg",
+      "section": "Child 2",
+      "required": true,
+      "input_type": "number",
+      "question_code": "child2_birth_weight_kg",
+      "numericRange": { "min": 0.5, "max": 6 },
+      "visibleWhen": { "field": "number_of_babies_born", "operator": "gte", "value": 2 }
+    },
+    {
+      "label": "Child2: Is the new born alive now?",
+      "options": [
+        { "label": "Yes", "sort_order": 0, "value_code": "yes" },
+        { "label": "No", "sort_order": 1, "value_code": "no" }
+      ],
+      "section": "Child 2",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "child2_is_newborn_alive_now",
+      "visibleWhen": { "field": "number_of_babies_born", "operator": "gte", "value": 2 }
+    },
+    {
+      "label": "Child2: If No, Cause of death",
+      "options": [
+        { "label": "Infections", "sort_order": 0, "value_code": "infections" },
+        { "label": "Diarrhea", "sort_order": 1, "value_code": "diarrhea" },
+        { "label": "Dehydration", "sort_order": 2, "value_code": "dehydration" },
+        {
+          "label": "Malnourished Children (Grade 3 and 4)",
+          "sort_order": 3,
+          "value_code": "malnourished_grade_3_4"
+        },
+        { "label": "Congenital defects", "sort_order": 4, "value_code": "congenital_defects" },
+        {
+          "label": "Birth Asphyxia and Birth Trauma",
+          "sort_order": 5,
+          "value_code": "birth_asphyxia_and_trauma"
+        },
+        { "label": "Accidental", "sort_order": 6, "value_code": "accidental" },
+        {
+          "label": "Delay in reaching the health centre",
+          "sort_order": 7,
+          "value_code": "delay_reaching_health_centre"
+        },
+        {
+          "label": "Delay in provision of services at the health centre",
+          "sort_order": 8,
+          "value_code": "delay_in_services_at_health_centre"
+        },
+        { "label": "Other (specify)", "sort_order": 9, "value_code": "other" }
+      ],
+      "section": "Child 2",
+      "required": true,
+      "input_type": "multiselect",
+      "question_code": "child2_cause_of_death",
+      "visibleWhen": { "field": "child2_is_newborn_alive_now", "operator": "eq", "value": "no" }
+    },
+    {
+      "label": "Child2: Place of death",
+      "options": [
+        { "label": "Home", "sort_order": 0, "value_code": "home" },
+        { "label": "Health facility", "sort_order": 1, "value_code": "health_facility" },
+        { "label": "Other", "sort_order": 2, "value_code": "other" }
+      ],
+      "section": "Child 2",
+      "required": true,
+      "input_type": "dropdown",
+      "question_code": "child2_place_of_death",
+      "visibleWhen": { "field": "child2_is_newborn_alive_now", "operator": "eq", "value": "no" }
+    },
+    {
+      "label": "Child2: Date of death",
+      "section": "Child 2",
+      "required": true,
+      "input_type": "date",
+      "question_code": "child2_date_of_death",
+      "dateRule": { "notFuture": true, "notBefore": { "field": "date_of_delivery" } },
+      "visibleWhen": { "field": "child2_is_newborn_alive_now", "operator": "eq", "value": "no" }
+    },
+
+    {
+      "label": "Child3: delivery outcome",
+      "options": [
+        { "label": "Live Birth", "sort_order": 0, "value_code": "live_birth" },
+        {
+          "label": "Antepartum Still Birth (Fresh)",
+          "sort_order": 1,
+          "value_code": "antepartum_still_birth_fresh"
+        },
+        {
+          "label": "Intrapartum still birth (Macerated)",
+          "sort_order": 2,
+          "value_code": "intrapartum_still_birth_macerated"
+        }
+      ],
+      "section": "Child 3",
+      "required": true,
+      "input_type": "dropdown",
+      "question_code": "child3_delivery_outcome",
+      "visibleWhen": { "field": "number_of_babies_born", "operator": "gte", "value": 3 }
+    },
+    {
+      "label": "Child3: related complications during delivery?",
+      "options": [
+        { "label": "Birth asphyxia", "sort_order": 0, "value_code": "birth_asphyxia" },
+        { "label": "Fetal distress", "sort_order": 1, "value_code": "fetal_distress" },
+        { "label": "Birth trauma", "sort_order": 2, "value_code": "birth_trauma" },
+        { "label": "Neonatal infections", "sort_order": 3, "value_code": "neonatal_infections" },
+        {
+          "label": "Congenital anomalies detected",
+          "sort_order": 4,
+          "value_code": "congenital_anomalies_detected"
+        },
+        { "label": "Other (please specify)", "sort_order": 5, "value_code": "other" }
+      ],
+      "section": "Child 3",
+      "required": true,
+      "input_type": "multiselect",
+      "question_code": "child3_related_complications",
+      "visibleWhen": { "field": "number_of_babies_born", "operator": "gte", "value": 3 }
+    },
+    {
+      "label": "Child3: Immediate crying after birth",
+      "options": [
+        {
+          "label": "Cried immediately after birth",
+          "sort_order": 0,
+          "value_code": "cried_immediately"
+        },
+        { "label": "Delayed crying", "sort_order": 1, "value_code": "delayed_crying" },
+        { "label": "Did not cry at birth", "sort_order": 2, "value_code": "did_not_cry" }
+      ],
+      "section": "Child 3",
+      "required": true,
+      "input_type": "dropdown",
+      "question_code": "child3_immediate_crying",
+      "visibleWhen": { "field": "number_of_babies_born", "operator": "gte", "value": 3 }
+    },
+    {
+      "label": "Child3: Sex of baby",
+      "options": [
+        { "label": "Male", "sort_order": 0, "value_code": "male" },
+        { "label": "Female", "sort_order": 1, "value_code": "female" },
+        { "label": "Intersex / Other", "sort_order": 2, "value_code": "intersex_other" }
+      ],
+      "section": "Child 3",
+      "required": true,
+      "input_type": "dropdown",
+      "question_code": "child3_sex_of_baby",
+      "visibleWhen": { "field": "number_of_babies_born", "operator": "gte", "value": 3 }
+    },
+    {
+      "label": "Child3: Birth Length of the baby in cm",
+      "section": "Child 3",
+      "required": true,
+      "input_type": "number",
+      "question_code": "child3_birth_length_cm",
+      "numericRange": { "min": 35, "max": 60 },
+      "visibleWhen": { "field": "number_of_babies_born", "operator": "gte", "value": 3 }
+    },
+    {
+      "label": "Child3: Birth Weight of the baby in kg",
+      "section": "Child 3",
+      "required": true,
+      "input_type": "number",
+      "question_code": "child3_birth_weight_kg",
+      "numericRange": { "min": 0.5, "max": 6 },
+      "visibleWhen": { "field": "number_of_babies_born", "operator": "gte", "value": 3 }
+    },
+    {
+      "label": "Child3: Is the new born alive now?",
+      "options": [
+        { "label": "Yes", "sort_order": 0, "value_code": "yes" },
+        { "label": "No", "sort_order": 1, "value_code": "no" }
+      ],
+      "section": "Child 3",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "child3_is_newborn_alive_now",
+      "visibleWhen": { "field": "number_of_babies_born", "operator": "gte", "value": 3 }
+    },
+    {
+      "label": "Child3: If No, Cause of death",
+      "options": [
+        { "label": "Infections", "sort_order": 0, "value_code": "infections" },
+        { "label": "Diarrhea", "sort_order": 1, "value_code": "diarrhea" },
+        { "label": "Dehydration", "sort_order": 2, "value_code": "dehydration" },
+        {
+          "label": "Malnourished Children (Grade 3 and 4)",
+          "sort_order": 3,
+          "value_code": "malnourished_grade_3_4"
+        },
+        { "label": "Congenital defects", "sort_order": 4, "value_code": "congenital_defects" },
+        {
+          "label": "Birth Asphyxia and Birth Trauma",
+          "sort_order": 5,
+          "value_code": "birth_asphyxia_and_trauma"
+        },
+        { "label": "Accidental", "sort_order": 6, "value_code": "accidental" },
+        {
+          "label": "Delay in reaching the health centre",
+          "sort_order": 7,
+          "value_code": "delay_reaching_health_centre"
+        },
+        {
+          "label": "Delay in provision of services at the health centre",
+          "sort_order": 8,
+          "value_code": "delay_in_services_at_health_centre"
+        },
+        { "label": "Other (specify)", "sort_order": 9, "value_code": "other" }
+      ],
+      "section": "Child 3",
+      "required": true,
+      "input_type": "multiselect",
+      "question_code": "child3_cause_of_death",
+      "visibleWhen": { "field": "child3_is_newborn_alive_now", "operator": "eq", "value": "no" }
+    },
+    {
+      "label": "Child3: Place of death",
+      "options": [
+        { "label": "Home", "sort_order": 0, "value_code": "home" },
+        { "label": "Health facility", "sort_order": 1, "value_code": "health_facility" },
+        { "label": "Other", "sort_order": 2, "value_code": "other" }
+      ],
+      "section": "Child 3",
+      "required": true,
+      "input_type": "dropdown",
+      "question_code": "child3_place_of_death",
+      "visibleWhen": { "field": "child3_is_newborn_alive_now", "operator": "eq", "value": "no" }
+    },
+    {
+      "label": "Child3: Date of death",
+      "section": "Child 3",
+      "required": true,
+      "input_type": "date",
+      "question_code": "child3_date_of_death",
+      "dateRule": { "notFuture": true, "notBefore": { "field": "date_of_delivery" } },
+      "visibleWhen": { "field": "child3_is_newborn_alive_now", "operator": "eq", "value": "no" }
+    },
+
+    {
+      "label": "Remarks",
+      "section": "Delivery Details",
+      "required": false,
+      "input_type": "text",
+      "question_code": "remarks"
+    }
+  ],
+  "validationJson": [
+    {
+      "rule": "EXCLUSIVE_OPTION",
+      "field": "did_mother_experience_complications",
+      "exclusiveValues": ["none"]
+    }
+  ]
+}

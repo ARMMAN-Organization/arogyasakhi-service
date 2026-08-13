@@ -13,6 +13,8 @@ import {
 import { validateSubmission } from './form-validation';
 import { syncSocioDemographics } from '../beneficiaries/socio-demographics.client';
 import { syncHealthHistory } from '../beneficiaries/health-history.client';
+import { findBeneficiaryById } from '../beneficiaries/beneficiary.client';
+import { createChildBeneficiary } from '../beneficiaries/create-child.client';
 import { getAncestorChain } from '../geography/geography.client';
 import { triggerRiskAssessment } from '../risk-assessments/riskAssessment.client';
 
@@ -195,6 +197,62 @@ export class FormService {
     if (formCode === 'MOTHER_REGISTRATION') {
       await syncSocioDemographics(dto.beneficiaryId, dto.formData, authorizationHeader);
       await syncHealthHistory(dto.beneficiaryId, dto.formData, authorizationHeader);
+    }
+
+    // Auto-creates a CHILD beneficiary case for each live-born child on a
+    // Delivery submission (SRS: "Delivery form... auto-creates the child
+    // profile on submission") — one createChildBeneficiary() call per
+    // childN_* block whose delivery outcome is LIVE_BIRTH, independent and
+    // best-effort per child so one failing call (e.g. in a twin/triplet
+    // birth) never blocks the others or the already-saved submission.
+    if (formCode === 'DELIVERY_VISIT') {
+      const motherCase = await findBeneficiaryById(dto.beneficiaryId, authorizationHeader);
+      if (motherCase) {
+        const dateOfDelivery = dto.formData.date_of_delivery
+          ? new Date(String(dto.formData.date_of_delivery))
+          : null;
+        const childPrefixes = ['child1', 'child2', 'child3'] as const;
+        const SEX_MAP: Record<string, 'MALE' | 'FEMALE' | 'INTERSEX_OTHER'> = {
+          male: 'MALE',
+          female: 'FEMALE',
+          intersex_other: 'INTERSEX_OTHER',
+        };
+
+        await Promise.all(
+          childPrefixes.map(async (prefix) => {
+            const outcome = dto.formData[`${prefix}_delivery_outcome`];
+            if (outcome !== 'live_birth' || !dateOfDelivery) return;
+
+            const sexCode = dto.formData[`${prefix}_sex_of_baby`];
+            const birthWeightKg = dto.formData[`${prefix}_birth_weight_kg`];
+            const birthLengthCm = dto.formData[`${prefix}_birth_length_cm`];
+
+            await createChildBeneficiary(
+              {
+                motherCase,
+                // Deterministic and independent of localSubmissionUuid — a
+                // resubmit of the same Delivery form (idempotent replay,
+                // handled above) always derives the same per-child key, so a
+                // retry after a partial failure re-attempts only the
+                // children beneficiary-service hasn't already created.
+                localCaseUuid: `${dto.localSubmissionUuid}-${prefix}`,
+                registrationDate: dateOfDelivery,
+                dateOfBirth: dateOfDelivery,
+                sex: typeof sexCode === 'string' ? SEX_MAP[sexCode] : undefined,
+                birthWeightKg:
+                  typeof birthWeightKg === 'number' || typeof birthWeightKg === 'string'
+                    ? Number(birthWeightKg)
+                    : undefined,
+                birthLengthCm:
+                  typeof birthLengthCm === 'number' || typeof birthLengthCm === 'string'
+                    ? Number(birthLengthCm)
+                    : undefined,
+              },
+              authorizationHeader,
+            );
+          }),
+        );
+      }
     }
 
     // Triggers the risk-grading pipeline for every visit-linked submission
