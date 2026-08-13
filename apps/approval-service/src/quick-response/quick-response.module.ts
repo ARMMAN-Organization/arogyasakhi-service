@@ -1,8 +1,8 @@
-import type { DocumentedRouter } from '@armman/service-commons';
+import { createDocumentedRouter, type DocumentedRouter } from '../app.module';
 import type { PrismaService } from '../prisma/prisma.service';
 import { QuickResponseRepository } from './quick-response.repository';
 import { QuickResponseService } from './quick-response.service';
-import { createQuickResponseRouter } from './quick-response.controller';
+import { registerQuickResponseRoutes } from './quick-response.routes';
 import { LookupClient } from './lookup.client';
 import { EscalationClient } from './escalation.client';
 import { ReopenRequestClient } from './reopen-request.client';
@@ -15,7 +15,7 @@ import { UserClient } from './user.client';
 
 /**
  * Composition root for the Quick Response feature: wires repository +
- * cross-service clients → service → router.
+ * cross-service clients → service → routes.
  */
 export function createQuickResponseModule(prisma: PrismaService): DocumentedRouter {
   const repository = new QuickResponseRepository(prisma);
@@ -31,5 +31,7 @@ export function createQuickResponseModule(prisma: PrismaService): DocumentedRout
     new IncentiveClient(),
     new UserClient(),
   );
-  return createQuickResponseRouter(service);
+  const doc = createDocumentedRouter();
+  registerQuickResponseRoutes(doc, service);
+  return doc;
 }

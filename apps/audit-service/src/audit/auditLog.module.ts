@@ -1,15 +1,17 @@
-import type { DocumentedRouter } from '@armman/service-commons';
+import { createDocumentedRouter, type DocumentedRouter } from '../app.module';
 import type { PrismaService } from '../prisma/prisma.service';
 import { AuditLogRepository } from './auditLog.repository';
 import { AuditLogService } from './auditLog.service';
-import { createAuditLogRouter } from './auditLog.controller';
+import { registerAuditLogRoutes } from './auditLog.routes';
 
 /**
- * Composition root for the audit feature: wires repository → service → router.
+ * Composition root for the audit feature: wires repository → service → routes.
  * Replaces the former NestJS module + DI container.
  */
 export function createAuditLogModule(prisma: PrismaService): DocumentedRouter {
   const repository = new AuditLogRepository(prisma);
   const service = new AuditLogService(repository);
-  return createAuditLogRouter(service);
+  const doc = createDocumentedRouter();
+  registerAuditLogRoutes(doc, service);
+  return doc;
 }
