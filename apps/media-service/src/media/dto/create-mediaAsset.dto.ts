@@ -1,7 +1,11 @@
 import { z } from 'zod';
 
-/** Mirrors the `MediaAssetType` enum in the Prisma schema. */
-const mediaAssetTypeSchema = z.enum([
+/**
+ * Mirrors the `MediaAssetType` enum in the Prisma schema. Exported so
+ * `create-upload-url.dto.ts` shares this one source of truth instead of
+ * duplicating the literal list.
+ */
+export const mediaAssetTypeSchema = z.enum([
   'CONSENT_PHOTO',
   'REFERRAL_CASE_PAPER',
   'REFERRAL_DISCHARGE_SUMMARY',
@@ -16,31 +20,53 @@ const mediaAssetTypeSchema = z.enum([
 ]);
 
 /**
- * SHA-256 checksum, sent as a 64-char hex string (the only representation a
- * JSON request body can carry) and converted to the `Buffer` the `Bytes`
- * Prisma column expects. `z.instanceof(Buffer)` was used here previously,
- * but `express.json()` never produces a `Buffer` from a JSON field — that
- * made this endpoint unreachable over real HTTP with any client.
+ * Matches exactly what `s3.client.ts`'s `generateObjectKey` produces:
+ * `<folder>/<assetType-lowercased>/<uuid>`. Nothing server-side records
+ * which caller was issued which key (PR #153 review), so a key is a bearer
+ * capability by construction — this at least rejects a key that isn't even
+ * shaped like one this service ever generated (garbage, a path-traversal
+ * attempt, a key copied from an unrelated system), rather than accepting
+ * any non-empty string. It does not (and cannot, without adding request
+ * tracking) prevent a caller who has legitimately observed a valid key from
+ * finalizing it under different linkage fields than the original requester
+ * intended.
  */
-const checksumSchema = z
+const s3KeySchema = z
   .string()
   .trim()
-  .regex(/^[0-9a-f]{64}$/i, 'must be a 64-character hex-encoded SHA-256 checksum')
-  .transform((hex) => Buffer.from(hex, 'hex'));
+  .regex(
+    /^[a-z0-9_-]+\/[a-z0-9_-]+\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    'must be a key previously issued by POST /media/upload-url',
+  );
 
 /**
  * Validation schema for creating a media asset. `.strict()` rejects unknown
  * fields, matching the previous global ValidationPipe `forbidNonWhitelisted: true`.
+ *
+ * Notably absent: `storageUri`, `checksum`, `mimeType`. Those all used to be
+ * client-supplied, but a client can lie about what it uploaded — the service
+ * now derives them itself from S3's `HeadObject` response for the `s3Key`
+ * the client hands back (see `mediaAsset.service.ts`).
+ *
+ * Also absent: `uploadedAt`. The server sets this to the moment finalize
+ * actually runs (matching `createdAt`) — a client-declared upload timestamp
+ * is just another value nothing verifies, and finalize time is already an
+ * accurate record of when the asset became known to this service.
+ *
+ * `expectedSizeBytes` IS still client-supplied — it's the same value
+ * originally declared to `POST /media/upload-url` (see
+ * `create-upload-url.dto.ts`) — precisely so `create()` has something
+ * independent to cross-check S3's reported `ContentLength` against. Trusting
+ * S3's own `ContentLength` alone only proves "the object that's there now
+ * has this size," not "the object that's there is the one the client meant
+ * to upload" (e.g. a stale/wrong object left at a reused or guessed key).
  */
 export const createMediaAssetSchema = z
   .object({
     assetType: mediaAssetTypeSchema,
-    storageUri: z.string().trim().min(1).max(512),
-    checksum: checksumSchema,
-    mimeType: z.string().trim().min(1).max(120),
-    sizeBytes: z.coerce.bigint(),
+    s3Key: s3KeySchema,
+    expectedSizeBytes: z.coerce.number().int().positive(),
     uploadedByUserId: z.string().uuid().optional(),
-    uploadedAt: z.coerce.date(),
     linkedEntityType: z.string().trim().min(1).max(80).optional(),
     linkedEntityId: z.string().uuid().optional(),
     encryptedFlag: z.boolean().default(true),
