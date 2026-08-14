@@ -3,10 +3,14 @@ import type { FormRepository } from './form.repository';
 import * as geographyClient from '../geography/geography.client';
 import { syncSocioDemographics } from '../beneficiaries/socio-demographics.client';
 import { syncHealthHistory } from '../beneficiaries/health-history.client';
+import { findBeneficiaryById } from '../beneficiaries/beneficiary.client';
+import { createChildBeneficiary } from '../beneficiaries/create-child.client';
 
 jest.mock('../geography/geography.client');
 jest.mock('../beneficiaries/socio-demographics.client');
 jest.mock('../beneficiaries/health-history.client');
+jest.mock('../beneficiaries/beneficiary.client');
+jest.mock('../beneficiaries/create-child.client');
 
 describe('FormService', () => {
   const repository = {
@@ -703,6 +707,220 @@ describe('FormService', () => {
             ]),
           );
         });
+    });
+
+    describe('DELIVERY_VISIT child-profile auto-creation', () => {
+      const motherCase = {
+        id: 'b1',
+        sakhiId: 'sakhi-1',
+        projectId: 'project-1',
+        beneficiaryTypeLookupId: 'type-1',
+        caseTypeLookupId: 'case-type-1',
+        villageId: 'village-1',
+        padaId: 'pada-1',
+        healthSubCentreId: 'sc-1',
+        phcId: 'phc-1',
+        stateId: 'state-1',
+        districtId: 'district-1',
+      };
+
+      const deliveryVersion = {
+        id: 'version-1',
+        status: 'PUBLISHED',
+        formDefinition: { formCode: 'DELIVERY_VISIT' },
+        // Minimal — none required, so these tests can submit whichever
+        // childN_* fields each case needs without also having to satisfy an
+        // unrelated required field from a different form's schema.
+        schemaJson: [
+          { question_code: 'date_of_delivery', label: 'x', input_type: 'date', required: false },
+          {
+            question_code: 'number_of_babies_born',
+            label: 'x',
+            input_type: 'number',
+            required: false,
+          },
+          ...['child1', 'child2', 'child3'].flatMap((prefix) => [
+            {
+              question_code: `${prefix}_delivery_outcome`,
+              label: 'x',
+              input_type: 'dropdown',
+              required: false,
+            },
+            {
+              question_code: `${prefix}_sex_of_baby`,
+              label: 'x',
+              input_type: 'dropdown',
+              required: false,
+            },
+            {
+              question_code: `${prefix}_birth_weight_kg`,
+              label: 'x',
+              input_type: 'number',
+              required: false,
+            },
+            {
+              question_code: `${prefix}_birth_length_cm`,
+              label: 'x',
+              input_type: 'number',
+              required: false,
+            },
+          ]),
+        ],
+        validationJson: [],
+      };
+
+      beforeEach(() => {
+        repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+        repository.findVersionById.mockResolvedValue(deliveryVersion as never);
+        repository.createSubmission.mockResolvedValue({ id: 'sub-1' } as never);
+        jest.mocked(findBeneficiaryById).mockResolvedValue(motherCase);
+      });
+
+      it('creates a child beneficiary for a single live birth', async () => {
+        await service.createSubmission(
+          'DELIVERY_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {
+              date_of_delivery: '2026-08-01',
+              child1_delivery_outcome: 'live_birth',
+              child1_sex_of_baby: 'male',
+              child1_birth_weight_kg: 2.4,
+              child1_birth_length_cm: 45,
+            },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(createChildBeneficiary)).toHaveBeenCalledTimes(1);
+        expect(jest.mocked(createChildBeneficiary)).toHaveBeenCalledWith(
+          expect.objectContaining({
+            motherCase,
+            localCaseUuid: 'uuid-1-child1',
+            sex: 'MALE',
+            birthWeightKg: 2.4,
+            birthLengthCm: 45,
+          }),
+          'Bearer test-token',
+        );
+      });
+
+      it('creates one child beneficiary per live-born child in a multi-birth submission', async () => {
+        await service.createSubmission(
+          'DELIVERY_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {
+              date_of_delivery: '2026-08-01',
+              number_of_babies_born: 2,
+              child1_delivery_outcome: 'live_birth',
+              child1_sex_of_baby: 'male',
+              child2_delivery_outcome: 'live_birth',
+              child2_sex_of_baby: 'female',
+            },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(createChildBeneficiary)).toHaveBeenCalledTimes(2);
+        expect(jest.mocked(createChildBeneficiary)).toHaveBeenCalledWith(
+          expect.objectContaining({ localCaseUuid: 'uuid-1-child1', sex: 'MALE' }),
+          'Bearer test-token',
+        );
+        expect(jest.mocked(createChildBeneficiary)).toHaveBeenCalledWith(
+          expect.objectContaining({ localCaseUuid: 'uuid-1-child2', sex: 'FEMALE' }),
+          'Bearer test-token',
+        );
+      });
+
+      it('does not create a beneficiary for a stillborn child', async () => {
+        await service.createSubmission(
+          'DELIVERY_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {
+              date_of_delivery: '2026-08-01',
+              child1_delivery_outcome: 'antepartum_still_birth_fresh',
+            },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(createChildBeneficiary)).not.toHaveBeenCalled();
+      });
+
+      it('does not create a beneficiary for a non-existent child slot', async () => {
+        await service.createSubmission(
+          'DELIVERY_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {
+              date_of_delivery: '2026-08-01',
+              child1_delivery_outcome: 'live_birth',
+              // child2/child3 absent — single birth.
+            },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(createChildBeneficiary)).toHaveBeenCalledTimes(1);
+      });
+
+      it('does not attempt child creation for a non-DELIVERY_VISIT form', async () => {
+        repository.findVersionById.mockResolvedValue({
+          ...publishedVersion,
+          formDefinition: { formCode: 'MOTHER_REGISTRATION' },
+        } as never);
+
+        await service.createSubmission(
+          'MOTHER_REGISTRATION',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: { phone_owner: 'SELF' },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(findBeneficiaryById)).not.toHaveBeenCalled();
+        expect(jest.mocked(createChildBeneficiary)).not.toHaveBeenCalled();
+      });
+
+      it('does not throw and skips child creation when the mother case cannot be found', async () => {
+        jest.mocked(findBeneficiaryById).mockResolvedValue(null);
+
+        const result = await service.createSubmission(
+          'DELIVERY_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {
+              date_of_delivery: '2026-08-01',
+              child1_delivery_outcome: 'live_birth',
+            },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(result).toEqual({ id: 'sub-1' });
+        expect(jest.mocked(createChildBeneficiary)).not.toHaveBeenCalled();
+      });
     });
   });
 });

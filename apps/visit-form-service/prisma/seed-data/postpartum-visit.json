@@ -1,0 +1,614 @@
+{
+  "schemaJson": [
+    {
+      "label": "Actual visit date",
+      "section": "Postpartum Visit",
+      "required": true,
+      "input_type": "date",
+      "question_code": "actual_visit_date",
+      "dateRule": { "notFuture": true }
+    },
+    {
+      "label": "Visit name",
+      "options": [
+        { "label": "PP1 - 0 to 15 days (±2 days)", "sort_order": 0, "value_code": "pp1" },
+        { "label": "PP2 - 15 to 28 days (±2 days)", "sort_order": 1, "value_code": "pp2" },
+        { "label": "PP3 - 60 days (±5 days)", "sort_order": 2, "value_code": "pp3" },
+        { "label": "PP4 - 90 days (±5 days)", "sort_order": 3, "value_code": "pp4" },
+        { "label": "PP5 - 120 days (±5 days)", "sort_order": 4, "value_code": "pp5" }
+      ],
+      "section": "Postpartum Visit",
+      "required": true,
+      "input_type": "dropdown",
+      "question_code": "visit_name"
+    },
+    {
+      "label": "Is mother alive?",
+      "options": [
+        { "label": "Yes", "sort_order": 0, "value_code": "yes" },
+        { "label": "No", "sort_order": 1, "value_code": "no" }
+      ],
+      "section": "Postpartum Visit",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "is_mother_alive"
+    },
+    {
+      "label": "Have you experienced any of the following danger signs after delivery/ since last visit?",
+      "options": [
+        { "label": "Lower abdominal pain", "sort_order": 0, "value_code": "lower_abdominal_pain" },
+        {
+          "label": "Swelling or heaviness in legs",
+          "sort_order": 1,
+          "value_code": "swelling_or_heaviness_in_legs"
+        },
+        {
+          "label": "Abnormal Vaginal discharge (foul smelling and yellow)",
+          "sort_order": 2,
+          "value_code": "abnormal_vaginal_discharge"
+        },
+        {
+          "label": "Extreme weakness or paleness",
+          "sort_order": 3,
+          "value_code": "extreme_weakness_or_paleness"
+        },
+        { "label": "Convulsions", "sort_order": 4, "value_code": "convulsions" },
+        {
+          "label": "Severe Headaches/blurred vision",
+          "sort_order": 5,
+          "value_code": "severe_headaches_blurred_vision"
+        },
+        { "label": "Dizziness", "sort_order": 6, "value_code": "dizziness" },
+        {
+          "label": "Breathlessness/Palpitation",
+          "sort_order": 7,
+          "value_code": "breathlessness_palpitation"
+        },
+        {
+          "label": "Difficulty/burning sensation while passing urine",
+          "sort_order": 8,
+          "value_code": "difficulty_burning_sensation_passing_urine"
+        },
+        { "label": "Burning micturition", "sort_order": 9, "value_code": "burning_micturition" },
+        {
+          "label": "No abnormal signs and symptoms",
+          "sort_order": 10,
+          "value_code": "no_abnormal_signs_and_symptoms"
+        }
+      ],
+      "section": "Postpartum Visit",
+      "required": true,
+      "input_type": "multiselect",
+      "question_code": "danger_signs_since_delivery_or_last_visit",
+      "visibleWhen": { "field": "is_mother_alive", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Checking Palm and Nails",
+      "options": [
+        { "label": "Pale", "sort_order": 0, "value_code": "pale" },
+        { "label": "Yellow", "sort_order": 1, "value_code": "yellow" },
+        { "label": "Normal", "sort_order": 2, "value_code": "normal" }
+      ],
+      "section": "Postpartum Visit",
+      "required": true,
+      "input_type": "dropdown",
+      "question_code": "checking_palm_and_nails",
+      "visibleWhen": { "field": "is_mother_alive", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Checking Sclera (Eyes)",
+      "options": [
+        { "label": "Pale", "sort_order": 0, "value_code": "pale" },
+        { "label": "Yellow", "sort_order": 1, "value_code": "yellow" },
+        { "label": "Normal", "sort_order": 2, "value_code": "normal" }
+      ],
+      "section": "Postpartum Visit",
+      "required": true,
+      "input_type": "dropdown",
+      "question_code": "checking_sclera_eyes",
+      "visibleWhen": { "field": "is_mother_alive", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Checking Skin",
+      "options": [
+        { "label": "Pale", "sort_order": 0, "value_code": "pale" },
+        { "label": "Yellow", "sort_order": 1, "value_code": "yellow" },
+        { "label": "Normal", "sort_order": 2, "value_code": "normal" }
+      ],
+      "section": "Postpartum Visit",
+      "required": true,
+      "input_type": "dropdown",
+      "question_code": "checking_skin",
+      "visibleWhen": { "field": "is_mother_alive", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Swelling",
+      "options": [
+        { "label": "No swelling", "sort_order": 0, "value_code": "no_swelling" },
+        { "label": "Swollen hands", "sort_order": 1, "value_code": "swollen_hands" },
+        { "label": "Swollen feet", "sort_order": 2, "value_code": "swollen_feet" },
+        { "label": "Swollen Face", "sort_order": 3, "value_code": "swollen_face" }
+      ],
+      "section": "Postpartum Visit",
+      "required": true,
+      "input_type": "multiselect",
+      "question_code": "swelling",
+      "visibleWhen": { "field": "is_mother_alive", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Dehydration",
+      "options": [
+        { "label": "Dry tongue", "sort_order": 0, "value_code": "dry_tongue" },
+        { "label": "Loss of skin turgor", "sort_order": 1, "value_code": "loss_of_skin_turgor" },
+        { "label": "No", "sort_order": 2, "value_code": "no" }
+      ],
+      "section": "Postpartum Visit",
+      "required": true,
+      "input_type": "multiselect",
+      "question_code": "dehydration",
+      "visibleWhen": { "field": "is_mother_alive", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Have you experienced any of the following at your episiotomy or C-section wound site?",
+      "options": [
+        { "label": "Severe Pain", "sort_order": 0, "value_code": "severe_pain" },
+        { "label": "Swelling", "sort_order": 1, "value_code": "swelling" },
+        { "label": "Discharge", "sort_order": 2, "value_code": "discharge" },
+        { "label": "None of the above", "sort_order": 3, "value_code": "none_of_the_above" }
+      ],
+      "section": "Postpartum Visit",
+      "required": true,
+      "input_type": "multiselect",
+      "question_code": "episiotomy_or_csection_wound_issues",
+      "visibleWhen": { "field": "is_mother_alive", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Has the vaginal bleeding stopped post pregnancy?",
+      "options": [
+        { "label": "Yes", "sort_order": 0, "value_code": "yes" },
+        { "label": "No", "sort_order": 1, "value_code": "no" }
+      ],
+      "section": "Postpartum Visit",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "vaginal_bleeding_stopped",
+      "visibleWhen": { "field": "is_mother_alive", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "If no, How many Pads are changed in a day during your periods?",
+      "options": [
+        { "label": "Less than 3", "sort_order": 0, "value_code": "less_than_3" },
+        { "label": "3 to 4 (Take Follow Up)", "sort_order": 1, "value_code": "3_to_4" },
+        {
+          "label": "5 or more than 5 (Immediately Refer to Hospital)",
+          "sort_order": 2,
+          "value_code": "5_or_more"
+        }
+      ],
+      "section": "Postpartum Visit",
+      "required": true,
+      "input_type": "dropdown",
+      "question_code": "pads_changed_per_day",
+      "visibleWhen": { "field": "vaginal_bleeding_stopped", "operator": "eq", "value": "no" }
+    },
+    {
+      "label": "Are you able to breastfeed comfortably?",
+      "options": [
+        { "label": "Yes", "sort_order": 0, "value_code": "yes" },
+        { "label": "No", "sort_order": 1, "value_code": "no" }
+      ],
+      "section": "Postpartum Visit",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "able_to_breastfeed_comfortably",
+      "visibleWhen": { "field": "is_mother_alive", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "If no, What difficulties are you facing while breastfeeding?",
+      "options": [
+        { "label": "Feel pain", "sort_order": 0, "value_code": "feel_pain" },
+        {
+          "label": "Have cracked/inverted nipples",
+          "sort_order": 1,
+          "value_code": "cracked_inverted_nipples"
+        },
+        {
+          "label": "Baby not latching properly",
+          "sort_order": 2,
+          "value_code": "baby_not_latching_properly"
+        },
+        { "label": "Low milk supply", "sort_order": 3, "value_code": "low_milk_supply" },
+        {
+          "label": "Breast engorgement or swelling",
+          "sort_order": 4,
+          "value_code": "breast_engorgement_or_swelling"
+        },
+        { "label": "Baby refusing to feed", "sort_order": 5, "value_code": "baby_refusing_to_feed" }
+      ],
+      "section": "Postpartum Visit",
+      "required": true,
+      "input_type": "multiselect",
+      "question_code": "breastfeeding_difficulties",
+      "visibleWhen": { "field": "able_to_breastfeed_comfortably", "operator": "eq", "value": "no" }
+    },
+    {
+      "label": "How many times do you take meal in a day? (Full meal Excluding snacks)",
+      "options": [
+        { "label": "Once in a day", "sort_order": 0, "value_code": "once" },
+        { "label": "Twice in a day", "sort_order": 1, "value_code": "twice" },
+        { "label": "Three times in a day", "sort_order": 2, "value_code": "three_times" },
+        { "label": "More than 3 time in a day", "sort_order": 3, "value_code": "more_than_3" }
+      ],
+      "section": "Postpartum Visit",
+      "required": true,
+      "input_type": "dropdown",
+      "question_code": "meals_per_day",
+      "visibleWhen": { "field": "is_mother_alive", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Which of these food stuff have you consumed in the last 24 hours?",
+      "options": [
+        {
+          "label": "Cereals (nachni, bajra, jwari, gahu, rice etc.)",
+          "sort_order": 0,
+          "value_code": "cereals"
+        },
+        {
+          "label": "Pulses/Legumes (tur dal, chana, moong, etc.)",
+          "sort_order": 1,
+          "value_code": "pulses_legumes"
+        },
+        {
+          "label": "Nuts and seeds (Ground nuts, almond etc)",
+          "sort_order": 2,
+          "value_code": "nuts_and_seeds"
+        },
+        {
+          "label": "Dairy products Milk/milk products (paneer, dahi, taak, etc.)",
+          "sort_order": 3,
+          "value_code": "dairy_products"
+        },
+        { "label": "Fruits", "sort_order": 4, "value_code": "fruits" },
+        { "label": "Vegetables", "sort_order": 5, "value_code": "vegetables" },
+        { "label": "Green vegetables", "sort_order": 6, "value_code": "green_vegetables" },
+        {
+          "label": "Other vitamin A–rich fruits and vegetables (Mango, papaya, pumpkin, carrot)",
+          "sort_order": 7,
+          "value_code": "vitamin_a_rich_fruits_vegetables"
+        },
+        { "label": "Eggs", "sort_order": 8, "value_code": "eggs" },
+        { "label": "Poultry/meat/fish", "sort_order": 9, "value_code": "poultry_meat_fish" }
+      ],
+      "section": "Postpartum Visit",
+      "required": true,
+      "input_type": "multiselect",
+      "question_code": "food_consumed_last_24_hours",
+      "visibleWhen": { "field": "is_mother_alive", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Which of these food stuff do you avoid eating?",
+      "options": [
+        {
+          "label": "Cereals (nachni, bajra, jwari, gahu, rice etc.)",
+          "sort_order": 0,
+          "value_code": "cereals"
+        },
+        {
+          "label": "Pulses/Legumes (tur dal, chana, moong, etc.)",
+          "sort_order": 1,
+          "value_code": "pulses_legumes"
+        },
+        {
+          "label": "Nuts and seeds (Ground nuts, almond etc)",
+          "sort_order": 2,
+          "value_code": "nuts_and_seeds"
+        },
+        {
+          "label": "Dairy products Milk/milk products (paneer, dahi, taak, etc.)",
+          "sort_order": 3,
+          "value_code": "dairy_products"
+        },
+        { "label": "Fruits", "sort_order": 4, "value_code": "fruits" },
+        { "label": "Vegetables", "sort_order": 5, "value_code": "vegetables" },
+        { "label": "Green vegetables", "sort_order": 6, "value_code": "green_vegetables" },
+        {
+          "label": "Other vitamin A–rich fruits and vegetables (Mango, papaya, pumpkin, carrot)",
+          "sort_order": 7,
+          "value_code": "vitamin_a_rich_fruits_vegetables"
+        },
+        { "label": "Eggs", "sort_order": 8, "value_code": "eggs" },
+        { "label": "Poultry/meat/fish", "sort_order": 9, "value_code": "poultry_meat_fish" }
+      ],
+      "section": "Postpartum Visit",
+      "required": true,
+      "input_type": "multiselect",
+      "question_code": "food_avoided",
+      "visibleWhen": { "field": "is_mother_alive", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Are you taking IFA tablets?",
+      "options": [
+        { "label": "Yes", "sort_order": 0, "value_code": "yes" },
+        { "label": "No", "sort_order": 1, "value_code": "no" }
+      ],
+      "section": "Postpartum Visit",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "taking_ifa_tablets",
+      "visibleWhen": { "field": "is_mother_alive", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "How many IFA tablets did you consume since last visit?",
+      "section": "Postpartum Visit",
+      "required": true,
+      "input_type": "number",
+      "question_code": "ifa_tablets_consumed_since_last_visit",
+      "numericRange": { "min": 0, "max": 35 },
+      "visibleWhen": { "field": "taking_ifa_tablets", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "If no, what is the reasons for non consumption of IFA tablets?",
+      "options": [
+        { "label": "Forgot to take", "sort_order": 0, "value_code": "forgot_to_take" },
+        {
+          "label": "Due to side effects (Constipation, black stool, nausea)",
+          "sort_order": 1,
+          "value_code": "side_effects"
+        },
+        {
+          "label": "Misconception about IFA",
+          "sort_order": 2,
+          "value_code": "misconception_about_ifa"
+        },
+        {
+          "label": "Tablets not available",
+          "sort_order": 3,
+          "value_code": "tablets_not_available"
+        },
+        { "label": "Other", "sort_order": 4, "value_code": "other" }
+      ],
+      "section": "Postpartum Visit",
+      "required": true,
+      "input_type": "multiselect",
+      "question_code": "reason_for_non_consumption_of_ifa",
+      "visibleWhen": { "field": "taking_ifa_tablets", "operator": "eq", "value": "no" }
+    },
+    {
+      "label": "Calcium tablets received and consumed?",
+      "options": [
+        { "label": "Yes", "sort_order": 0, "value_code": "yes" },
+        { "label": "No", "sort_order": 1, "value_code": "no" }
+      ],
+      "section": "Postpartum Visit",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "calcium_tablets_received_and_consumed",
+      "visibleWhen": { "field": "is_mother_alive", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Are you currently using any family planning method?",
+      "options": [
+        { "label": "Yes", "sort_order": 0, "value_code": "yes" },
+        { "label": "No", "sort_order": 1, "value_code": "no" }
+      ],
+      "section": "Postpartum Visit",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "using_family_planning",
+      "visibleWhen": { "field": "is_mother_alive", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "If yes, which method(s) are you using? (Tick all that apply)",
+      "options": [
+        { "label": "Condoms", "sort_order": 0, "value_code": "condoms" },
+        {
+          "label": "Oral contraceptive pills (Mala-N or other)",
+          "sort_order": 1,
+          "value_code": "oral_contraceptive_pills"
+        },
+        {
+          "label": "Emergency contraceptive pills",
+          "sort_order": 2,
+          "value_code": "emergency_contraceptive_pills"
+        },
+        {
+          "label": "Injectable contraceptives (Antara)",
+          "sort_order": 3,
+          "value_code": "injectable_contraceptives_antara"
+        },
+        { "label": "IUCD (Copper-T)", "sort_order": 4, "value_code": "iucd_copper_t" },
+        { "label": "Lactational Amenorrhea Method (LAM)", "sort_order": 5, "value_code": "lam" },
+        {
+          "label": "Safe period / calendar method",
+          "sort_order": 6,
+          "value_code": "safe_period_calendar_method"
+        },
+        {
+          "label": "Withdrawal method (coitus interruptus)",
+          "sort_order": 7,
+          "value_code": "withdrawal_method"
+        },
+        {
+          "label": "Female sterilization (Tubectomy)",
+          "sort_order": 8,
+          "value_code": "female_sterilization_tubectomy"
+        },
+        {
+          "label": "Male sterilization (Vasectomy/NSSK)",
+          "sort_order": 9,
+          "value_code": "male_sterilization_vasectomy_nssk"
+        },
+        { "label": "Sexual abstinence", "sort_order": 10, "value_code": "sexual_abstinence" }
+      ],
+      "section": "Postpartum Visit",
+      "required": true,
+      "input_type": "multiselect",
+      "question_code": "family_planning_methods",
+      "visibleWhen": { "field": "using_family_planning", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Are you facing any difficulties or side effects due to contraceptive method?",
+      "options": [
+        { "label": "Irregular bleeding", "sort_order": 0, "value_code": "irregular_bleeding" },
+        { "label": "Headache", "sort_order": 1, "value_code": "headache" },
+        { "label": "Nausea", "sort_order": 2, "value_code": "nausea" },
+        { "label": "Weight changes", "sort_order": 3, "value_code": "weight_changes" },
+        { "label": "Mood changes", "sort_order": 4, "value_code": "mood_changes" },
+        {
+          "label": "Decreased sexual desire",
+          "sort_order": 5,
+          "value_code": "decreased_sexual_desire"
+        },
+        {
+          "label": "Pain or discomfort (for IUCD users)",
+          "sort_order": 6,
+          "value_code": "pain_or_discomfort_iucd"
+        },
+        { "label": "None", "sort_order": 7, "value_code": "none" }
+      ],
+      "section": "Postpartum Visit",
+      "required": true,
+      "input_type": "multiselect",
+      "question_code": "contraceptive_side_effects",
+      "visibleWhen": { "field": "using_family_planning", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Feeling sad, anxious, or stressed most days?",
+      "options": [
+        { "label": "Yes", "sort_order": 0, "value_code": "yes" },
+        { "label": "No", "sort_order": 1, "value_code": "no" }
+      ],
+      "section": "Postpartum Visit",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "feeling_sad_anxious_stressed",
+      "visibleWhen": { "field": "is_mother_alive", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Adequate family support during post partum?",
+      "options": [
+        { "label": "Yes", "sort_order": 0, "value_code": "yes" },
+        { "label": "No", "sort_order": 1, "value_code": "no" }
+      ],
+      "section": "Postpartum Visit",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "adequate_family_support",
+      "visibleWhen": { "field": "is_mother_alive", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Current weight of the woman in kg",
+      "section": "Postpartum Visit",
+      "required": true,
+      "input_type": "number",
+      "question_code": "current_weight_kg",
+      "numericRange": { "min": 25, "max": 100 },
+      "visibleWhen": { "field": "is_mother_alive", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Current BMI",
+      "section": "Postpartum Visit",
+      "required": true,
+      "input_type": "number",
+      "question_code": "current_bmi",
+      "computedFrom": "BMI",
+      "visibleWhen": { "field": "is_mother_alive", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Current Mid-Upper Arm Circumference in cm",
+      "section": "Postpartum Visit",
+      "required": true,
+      "input_type": "number",
+      "question_code": "current_muac_cm",
+      "numericRange": { "min": 10, "max": 40 },
+      "visibleWhen": { "field": "is_mother_alive", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Blood Pressure (BP) Systolic",
+      "section": "Postpartum Visit",
+      "required": true,
+      "input_type": "number",
+      "question_code": "bp_systolic",
+      "numericRange": { "min": 70, "max": 300 },
+      "visibleWhen": { "field": "is_mother_alive", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Blood Pressure (BP) Diastolic",
+      "section": "Postpartum Visit",
+      "required": true,
+      "input_type": "number",
+      "question_code": "bp_diastolic",
+      "numericRange": { "min": 40, "max": 130 },
+      "visibleWhen": { "field": "is_mother_alive", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Body Temperature in °F",
+      "section": "Postpartum Visit",
+      "required": true,
+      "input_type": "number",
+      "question_code": "body_temperature_f",
+      "numericRange": { "min": 94, "max": 105 },
+      "visibleWhen": { "field": "is_mother_alive", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Haemoglobin (Hb) g/dl",
+      "section": "Postpartum Visit",
+      "required": true,
+      "input_type": "number",
+      "question_code": "haemoglobin_g_dl",
+      "numericRange": { "min": 1, "max": 18 },
+      "visibleWhen": { "field": "is_mother_alive", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Random blood glucose in mg/dl",
+      "section": "Postpartum Visit",
+      "required": true,
+      "input_type": "number",
+      "question_code": "random_blood_glucose_mg_dl",
+      "numericRange": { "min": 40, "max": 400 },
+      "visibleWhen": { "field": "is_mother_alive", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Remarks",
+      "section": "Postpartum Visit",
+      "required": false,
+      "input_type": "text",
+      "question_code": "remarks"
+    },
+    {
+      "label": "How many ANC visits to the nearest health facility did the beneficiary complete before delivery? (Take the number from the MCP card)",
+      "section": "Postpartum Visit",
+      "required": true,
+      "input_type": "number",
+      "question_code": "anc_visits_completed_before_delivery",
+      "numericRange": { "min": 0, "max": 20 }
+    }
+  ],
+  "validationJson": [
+    {
+      "rule": "EXCLUSIVE_OPTION",
+      "field": "danger_signs_since_delivery_or_last_visit",
+      "exclusiveValues": ["no_abnormal_signs_and_symptoms"]
+    },
+    {
+      "rule": "EXCLUSIVE_OPTION",
+      "field": "episiotomy_or_csection_wound_issues",
+      "exclusiveValues": ["none_of_the_above"]
+    },
+    {
+      "rule": "EXCLUSIVE_OPTION",
+      "field": "dehydration",
+      "exclusiveValues": ["no"]
+    },
+    {
+      "rule": "EXCLUSIVE_OPTION",
+      "field": "swelling",
+      "exclusiveValues": ["no_swelling"]
+    },
+    {
+      "rule": "EXCLUSIVE_OPTION",
+      "field": "contraceptive_side_effects",
+      "exclusiveValues": ["none"]
+    }
+  ]
+}

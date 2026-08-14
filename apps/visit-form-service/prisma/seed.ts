@@ -4,6 +4,9 @@ import motherRegistrationPayload from './seed-data/mother-registration.json';
 import childRegistrationPayload from './seed-data/child-registration.json';
 import ancVisitPayload from './seed-data/anc-visit.json';
 import infantVisitPayload from './seed-data/infant-visit.json';
+import deliveryVisitPayload from './seed-data/delivery-visit.json';
+import postpartumVisitPayload from './seed-data/postpartum-visit.json';
+import neonatalVisitPayload from './seed-data/neonatal-visit.json';
 
 const prisma = new PrismaClient();
 
@@ -69,6 +72,27 @@ const FORMS: FormDraft[] = [
     entityType: 'CHILD',
     versionNo: 'v1',
     payload: infantVisitPayload,
+  },
+  {
+    formCode: 'DELIVERY_VISIT',
+    formName: 'Delivery Visit',
+    entityType: 'MOTHER',
+    versionNo: 'v1',
+    payload: deliveryVisitPayload,
+  },
+  {
+    formCode: 'POSTPARTUM_VISIT',
+    formName: 'Postpartum Visit',
+    entityType: 'MOTHER',
+    versionNo: 'v1',
+    payload: postpartumVisitPayload,
+  },
+  {
+    formCode: 'NEONATAL_VISIT',
+    formName: 'Neonatal Visit',
+    entityType: 'CHILD',
+    versionNo: 'v1',
+    payload: neonatalVisitPayload,
   },
 ];
 

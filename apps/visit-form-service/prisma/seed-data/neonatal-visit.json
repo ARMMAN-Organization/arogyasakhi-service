@@ -1,0 +1,494 @@
+{
+  "schemaJson": [
+    {
+      "label": "Actual visit date",
+      "section": "Neonatal Visit",
+      "required": true,
+      "input_type": "date",
+      "question_code": "actual_visit_date",
+      "dateRule": { "notFuture": true }
+    },
+    {
+      "label": "Visit name",
+      "options": [
+        { "label": "Neo 1 (0-7 days)", "sort_order": 0, "value_code": "nn1" },
+        { "label": "Neo 2 (8-28 Days)", "sort_order": 1, "value_code": "nn2" }
+      ],
+      "section": "Neonatal Visit",
+      "required": true,
+      "input_type": "dropdown",
+      "question_code": "visit_name"
+    },
+    {
+      "label": "Birth weight of the baby in kg (from the Delivery form, for the KMC eligibility check below)",
+      "section": "Neonatal Visit",
+      "required": true,
+      "input_type": "number",
+      "question_code": "birth_weight_kg",
+      "numericRange": { "min": 0.5, "max": 6 }
+    },
+    {
+      "label": "Term of delivery (from the Delivery form, for the KMC eligibility check below)",
+      "options": [
+        { "label": "Pre Term", "sort_order": 0, "value_code": "pre_term" },
+        { "label": "Post Term", "sort_order": 1, "value_code": "post_term" },
+        { "label": "Full Term", "sort_order": 2, "value_code": "full_term" }
+      ],
+      "section": "Neonatal Visit",
+      "required": true,
+      "input_type": "dropdown",
+      "question_code": "term_of_delivery"
+    },
+    {
+      "label": "Is the new born alive now?",
+      "options": [
+        { "label": "Yes", "sort_order": 0, "value_code": "yes" },
+        { "label": "No", "sort_order": 1, "value_code": "no" }
+      ],
+      "section": "Neonatal Visit",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "is_newborn_alive_now"
+    },
+    {
+      "label": "If No, Cause of death",
+      "options": [
+        { "label": "Infections", "sort_order": 0, "value_code": "infections" },
+        { "label": "Diarrhea", "sort_order": 1, "value_code": "diarrhea" },
+        { "label": "Dehydration", "sort_order": 2, "value_code": "dehydration" },
+        {
+          "label": "Malnourished Children (Grade 3 and 4)",
+          "sort_order": 3,
+          "value_code": "malnourished_grade_3_4"
+        },
+        { "label": "Congenital defects", "sort_order": 4, "value_code": "congenital_defects" },
+        {
+          "label": "Birth Asphyxia and Birth Trauma",
+          "sort_order": 5,
+          "value_code": "birth_asphyxia_and_trauma"
+        },
+        { "label": "Accidental", "sort_order": 6, "value_code": "accidental" },
+        {
+          "label": "Delay in reaching the health centre",
+          "sort_order": 7,
+          "value_code": "delay_reaching_health_centre"
+        },
+        {
+          "label": "Delay in provision of services at the health centre",
+          "sort_order": 8,
+          "value_code": "delay_in_services_at_health_centre"
+        },
+        { "label": "Other (specify)", "sort_order": 9, "value_code": "other" }
+      ],
+      "section": "Neonatal Visit",
+      "required": true,
+      "input_type": "multiselect",
+      "question_code": "cause_of_death",
+      "visibleWhen": { "field": "is_newborn_alive_now", "operator": "eq", "value": "no" }
+    },
+    {
+      "label": "Place of death",
+      "options": [
+        { "label": "Home", "sort_order": 0, "value_code": "home" },
+        { "label": "Health facility", "sort_order": 1, "value_code": "health_facility" },
+        { "label": "Other", "sort_order": 2, "value_code": "other" }
+      ],
+      "section": "Neonatal Visit",
+      "required": true,
+      "input_type": "dropdown",
+      "question_code": "place_of_death",
+      "visibleWhen": { "field": "is_newborn_alive_now", "operator": "eq", "value": "no" }
+    },
+    {
+      "label": "Date of death",
+      "section": "Neonatal Visit",
+      "required": true,
+      "input_type": "date",
+      "question_code": "date_of_death",
+      "dateRule": { "notFuture": true },
+      "visibleWhen": { "field": "is_newborn_alive_now", "operator": "eq", "value": "no" }
+    },
+    {
+      "label": "Is the neonate currently showing any danger signs?",
+      "options": [
+        { "label": "Dry cough/Wet cough/Persistent cough", "sort_order": 0, "value_code": "cough" },
+        { "label": "Chest indrawing", "sort_order": 1, "value_code": "chest_indrawing" },
+        { "label": "Fever > 37.8", "sort_order": 2, "value_code": "fever_gt_37_8" },
+        {
+          "label": "Umbilical stump Bleeding/Signs of infection",
+          "sort_order": 3,
+          "value_code": "umbilical_stump_bleeding_infection"
+        },
+        { "label": "Yellow eyes; Yellow skin", "sort_order": 4, "value_code": "yellow_eyes_skin" },
+        {
+          "label": "Presence of oedema (pitting)",
+          "sort_order": 5,
+          "value_code": "oedema_pitting"
+        },
+        { "label": "Convulsions", "sort_order": 6, "value_code": "convulsions" },
+        { "label": "Lethargic", "sort_order": 7, "value_code": "lethargic" },
+        { "label": "Reduced movement", "sort_order": 8, "value_code": "reduced_movement" },
+        {
+          "label": "Not able to drink/feed",
+          "sort_order": 9,
+          "value_code": "not_able_to_drink_feed"
+        },
+        { "label": "Vomits everything", "sort_order": 10, "value_code": "vomits_everything" },
+        { "label": "Diarrhoea", "sort_order": 11, "value_code": "diarrhoea" },
+        { "label": "Blood in stool", "sort_order": 12, "value_code": "blood_in_stool" },
+        {
+          "label": "No abnormal signs/symptoms",
+          "sort_order": 13,
+          "value_code": "no_abnormal_signs_symptoms"
+        }
+      ],
+      "section": "Neonatal Visit",
+      "required": true,
+      "input_type": "multiselect",
+      "question_code": "danger_signs",
+      "visibleWhen": { "field": "is_newborn_alive_now", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "What was the child fed immediately after birth?",
+      "options": [
+        { "label": "Colostrum Given", "sort_order": 0, "value_code": "colostrum_given" },
+        {
+          "label": "Breastfed within 1 hour of birth",
+          "sort_order": 1,
+          "value_code": "breastfed_within_1_hour"
+        },
+        {
+          "label": "Breastfed within 1-24 hour of birth",
+          "sort_order": 2,
+          "value_code": "breastfed_within_1_24_hours"
+        },
+        { "label": "After 24 hour of birth", "sort_order": 3, "value_code": "after_24_hours" },
+        { "label": "Honey", "sort_order": 4, "value_code": "honey" },
+        { "label": "Top feed given after birth", "sort_order": 5, "value_code": "top_feed_given" },
+        { "label": "Other", "sort_order": 6, "value_code": "other" },
+        { "label": "Don't know/don't remember", "sort_order": 7, "value_code": "dont_know" }
+      ],
+      "section": "Neonatal Visit",
+      "required": true,
+      "input_type": "dropdown",
+      "question_code": "fed_immediately_after_birth",
+      "visibleWhen": { "field": "is_newborn_alive_now", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Current feeding practice",
+      "options": [
+        {
+          "label": "Exclusive breastfeeding",
+          "sort_order": 0,
+          "value_code": "exclusive_breastfeeding"
+        },
+        {
+          "label": "Top feed + breastfeed",
+          "sort_order": 1,
+          "value_code": "top_feed_and_breastfeed"
+        },
+        {
+          "label": "Only top feed (cowmilk/buffalo milk/goat milk/formula milk)",
+          "sort_order": 2,
+          "value_code": "only_top_feed"
+        },
+        { "label": "Water + breastfeed", "sort_order": 3, "value_code": "water_and_breastfeed" }
+      ],
+      "section": "Neonatal Visit",
+      "required": true,
+      "input_type": "dropdown",
+      "question_code": "current_feeding_practice",
+      "visibleWhen": { "field": "is_newborn_alive_now", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Feeding concerns",
+      "options": [
+        { "label": "Mother not alive", "sort_order": 0, "value_code": "mother_not_alive" },
+        {
+          "label": "Mother has cracked/inverted nipples",
+          "sort_order": 1,
+          "value_code": "cracked_inverted_nipples"
+        },
+        {
+          "label": "Baby not latching properly",
+          "sort_order": 2,
+          "value_code": "baby_not_latching_properly"
+        },
+        { "label": "Low milk supply", "sort_order": 3, "value_code": "low_milk_supply" },
+        {
+          "label": "Breast engorgement or swelling",
+          "sort_order": 4,
+          "value_code": "breast_engorgement_or_swelling"
+        },
+        {
+          "label": "Baby refusing to feed",
+          "sort_order": 5,
+          "value_code": "baby_refusing_to_feed"
+        },
+        { "label": "Other", "sort_order": 6, "value_code": "other" },
+        { "label": "No concerns", "sort_order": 7, "value_code": "no_concerns" }
+      ],
+      "section": "Neonatal Visit",
+      "required": true,
+      "input_type": "multiselect",
+      "question_code": "feeding_concerns",
+      "visibleWhen": { "field": "is_newborn_alive_now", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Any deformity observed in the newborn?",
+      "options": [
+        { "label": "Yes", "sort_order": 0, "value_code": "yes" },
+        { "label": "No", "sort_order": 1, "value_code": "no" }
+      ],
+      "section": "Neonatal Visit",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "deformity_observed",
+      "visibleWhen": { "field": "is_newborn_alive_now", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Vaccination taken at birth?",
+      "options": [
+        { "label": "BCG", "sort_order": 0, "value_code": "bcg" },
+        { "label": "OPV", "sort_order": 1, "value_code": "opv" },
+        { "label": "Hepatitis B", "sort_order": 2, "value_code": "hepatitis_b" },
+        { "label": "Vitamin K", "sort_order": 3, "value_code": "vitamin_k" },
+        { "label": "None", "sort_order": 4, "value_code": "none" }
+      ],
+      "section": "Neonatal Visit",
+      "required": true,
+      "input_type": "multiselect",
+      "question_code": "vaccination_taken_at_birth",
+      "visibleWhen": { "field": "is_newborn_alive_now", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "BCG date",
+      "section": "Neonatal Visit",
+      "required": false,
+      "input_type": "date",
+      "question_code": "bcg_date"
+    },
+    {
+      "label": "OPV date",
+      "section": "Neonatal Visit",
+      "required": false,
+      "input_type": "date",
+      "question_code": "opv_date"
+    },
+    {
+      "label": "Hepatitis B date",
+      "section": "Neonatal Visit",
+      "required": false,
+      "input_type": "date",
+      "question_code": "hepatitis_b_date"
+    },
+    {
+      "label": "Vitamin K date",
+      "section": "Neonatal Visit",
+      "required": false,
+      "input_type": "date",
+      "question_code": "vitamin_k_date"
+    },
+    {
+      "label": "Thermal care practices",
+      "options": [
+        { "label": "Wiped/dried", "sort_order": 0, "value_code": "wiped_dried" },
+        { "label": "Kept warm", "sort_order": 1, "value_code": "kept_warm" },
+        { "label": "Not bathed early", "sort_order": 2, "value_code": "not_bathed_early" },
+        { "label": "Kept with mother", "sort_order": 3, "value_code": "kept_with_mother" }
+      ],
+      "section": "Neonatal Visit",
+      "required": true,
+      "input_type": "multiselect",
+      "question_code": "thermal_care_practices",
+      "visibleWhen": { "field": "is_newborn_alive_now", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Is Kangaroo Mother Care Practiced by mother or family?",
+      "options": [
+        { "label": "Yes", "sort_order": 0, "value_code": "yes" },
+        { "label": "No", "sort_order": 1, "value_code": "no" }
+      ],
+      "section": "Neonatal Visit",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "is_kmc_practiced",
+      "visibleWhen": { "field": "birth_weight_kg", "operator": "lt", "value": 2.5 }
+    },
+    {
+      "label": "KMC Duration",
+      "options": [
+        { "label": "0-4 hours daily", "sort_order": 0, "value_code": "0_to_4_hours" },
+        { "label": "4.1-8 Hours Daily", "sort_order": 1, "value_code": "4_1_to_8_hours" },
+        { "label": "8.1-12 Hours daily", "sort_order": 2, "value_code": "8_1_to_12_hours" }
+      ],
+      "section": "Neonatal Visit",
+      "required": true,
+      "input_type": "dropdown",
+      "question_code": "kmc_duration",
+      "visibleWhen": { "field": "is_kmc_practiced", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "KMC-Breastfeeding Duration",
+      "options": [
+        { "label": "Every 2 hourly", "sort_order": 0, "value_code": "every_2_hourly" },
+        { "label": "Every 4 Hourly", "sort_order": 1, "value_code": "every_4_hourly" },
+        { "label": "Whenever baby cries", "sort_order": 2, "value_code": "whenever_baby_cries" }
+      ],
+      "section": "Neonatal Visit",
+      "required": true,
+      "input_type": "dropdown",
+      "question_code": "kmc_breastfeeding_duration",
+      "visibleWhen": { "field": "is_kmc_practiced", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Umbilical cord care",
+      "options": [
+        { "label": "Clean & dry", "sort_order": 0, "value_code": "clean_and_dry" },
+        {
+          "label": "Redness/discharge/poor condition",
+          "sort_order": 1,
+          "value_code": "redness_discharge_poor_condition"
+        }
+      ],
+      "section": "Neonatal Visit",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "umbilical_cord_care",
+      "visibleWhen": { "field": "is_newborn_alive_now", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Has baby passed urine within last 24 hours",
+      "options": [
+        { "label": "Yes", "sort_order": 0, "value_code": "yes" },
+        { "label": "No", "sort_order": 1, "value_code": "no" },
+        { "label": "Not sure", "sort_order": 2, "value_code": "not_sure" }
+      ],
+      "section": "Neonatal Visit",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "passed_urine_last_24h",
+      "visibleWhen": { "field": "is_newborn_alive_now", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Has baby passed stool within last 48 hours",
+      "options": [
+        { "label": "Yes", "sort_order": 0, "value_code": "yes" },
+        { "label": "No", "sort_order": 1, "value_code": "no" },
+        { "label": "Not sure", "sort_order": 2, "value_code": "not_sure" }
+      ],
+      "section": "Neonatal Visit",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "passed_stool_last_48h",
+      "visibleWhen": { "field": "is_newborn_alive_now", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Activity level",
+      "options": [
+        { "label": "Active & moving", "sort_order": 0, "value_code": "active_and_moving" },
+        { "label": "Reduced movement", "sort_order": 1, "value_code": "reduced_movement" },
+        { "label": "Lethargic", "sort_order": 2, "value_code": "lethargic" }
+      ],
+      "section": "Neonatal Visit",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "activity_level",
+      "visibleWhen": { "field": "is_newborn_alive_now", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Current Length of the baby in cm",
+      "section": "Neonatal Visit",
+      "required": true,
+      "input_type": "number",
+      "question_code": "current_length_cm",
+      "numericRange": { "min": 35, "max": 60 },
+      "visibleWhen": { "field": "is_newborn_alive_now", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Current Weight of the baby in kg",
+      "section": "Neonatal Visit",
+      "required": true,
+      "input_type": "number",
+      "question_code": "current_weight_kg",
+      "numericRange": { "min": 0.5, "max": 6 },
+      "visibleWhen": { "field": "is_newborn_alive_now", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Nutritional status (Wasting)",
+      "options": [
+        { "label": "Normal", "sort_order": 0, "value_code": "normal" },
+        { "label": "MAM", "sort_order": 1, "value_code": "mam" },
+        { "label": "SAM", "sort_order": 2, "value_code": "sam" }
+      ],
+      "section": "Neonatal Visit",
+      "required": true,
+      "input_type": "dropdown",
+      "question_code": "nutritional_status_wasting",
+      "computedFrom": "NUTRITIONAL_ZSCORE",
+      "visibleWhen": { "field": "is_newborn_alive_now", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Nutritional status (Stunting)",
+      "options": [
+        { "label": "Normal", "sort_order": 0, "value_code": "normal" },
+        { "label": "Moderately stunted", "sort_order": 1, "value_code": "moderately_stunted" },
+        { "label": "Severely stunted", "sort_order": 2, "value_code": "severely_stunted" }
+      ],
+      "section": "Neonatal Visit",
+      "required": true,
+      "input_type": "dropdown",
+      "question_code": "nutritional_status_stunting",
+      "computedFrom": "NUTRITIONAL_ZSCORE",
+      "visibleWhen": { "field": "is_newborn_alive_now", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Nutritional status (Underweight)",
+      "options": [
+        { "label": "Normal", "sort_order": 0, "value_code": "normal" },
+        { "label": "MUW", "sort_order": 1, "value_code": "muw" },
+        { "label": "SUW", "sort_order": 2, "value_code": "suw" }
+      ],
+      "section": "Neonatal Visit",
+      "required": true,
+      "input_type": "dropdown",
+      "question_code": "nutritional_status_underweight",
+      "computedFrom": "NUTRITIONAL_ZSCORE",
+      "visibleWhen": { "field": "is_newborn_alive_now", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Remarks",
+      "section": "Neonatal Visit",
+      "required": false,
+      "input_type": "text",
+      "question_code": "remarks"
+    }
+  ],
+  "validationJson": [
+    {
+      "rule": "EXCLUSIVE_OPTION",
+      "field": "danger_signs",
+      "exclusiveValues": ["no_abnormal_signs_symptoms"]
+    },
+    {
+      "rule": "EXCLUSIVE_OPTION",
+      "field": "feeding_concerns",
+      "exclusiveValues": ["no_concerns"]
+    },
+    {
+      "rule": "EXCLUSIVE_OPTION",
+      "field": "vaccination_taken_at_birth",
+      "exclusiveValues": ["none"]
+    },
+    {
+      "rule": "REQUIRED_IF_SELECTED",
+      "field": "vaccination_taken_at_birth",
+      "optionFieldMap": {
+        "bcg": "bcg_date",
+        "opv": "opv_date",
+        "hepatitis_b": "hepatitis_b_date",
+        "vitamin_k": "vitamin_k_date"
+      }
+    }
+  ]
+}

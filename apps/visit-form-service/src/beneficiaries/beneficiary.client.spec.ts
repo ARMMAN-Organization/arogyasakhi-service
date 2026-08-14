@@ -13,16 +13,43 @@ describe('findBeneficiaryById', () => {
     global.fetch = originalFetch;
   });
 
-  it('returns the beneficiary case (id/sakhiId) when beneficiary-service returns 200', async () => {
+  it('returns the beneficiary case (id/sakhiId/projectId/lookup ids/geography) when beneficiary-service returns 200', async () => {
+    const data = {
+      id: 'ben-1',
+      sakhiId: 'sakhi-1',
+      projectId: 'project-1',
+      beneficiaryTypeLookupId: 'type-1',
+      caseTypeLookupId: 'case-type-1',
+      pii: {
+        villageId: 'village-1',
+        padaId: 'pada-1',
+        healthSubCentreId: 'sc-1',
+        phcId: 'phc-1',
+        stateId: 'state-1',
+        districtId: 'district-1',
+      },
+    };
     fetchMock.mockResolvedValue({
       ok: true,
       status: 200,
-      json: () => Promise.resolve({ success: true, data: { id: 'ben-1', sakhiId: 'sakhi-1' } }),
+      json: () => Promise.resolve({ success: true, data }),
     });
 
     const result = await findBeneficiaryById('ben-1', 'Bearer test-token');
 
-    expect(result).toEqual({ id: 'ben-1', sakhiId: 'sakhi-1' });
+    expect(result).toEqual({
+      id: 'ben-1',
+      sakhiId: 'sakhi-1',
+      projectId: 'project-1',
+      beneficiaryTypeLookupId: 'type-1',
+      caseTypeLookupId: 'case-type-1',
+      villageId: 'village-1',
+      padaId: 'pada-1',
+      healthSubCentreId: 'sc-1',
+      phcId: 'phc-1',
+      stateId: 'state-1',
+      districtId: 'district-1',
+    });
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining('/beneficiaries/ben-1'),
       expect.objectContaining({ headers: { Authorization: 'Bearer test-token' } }),

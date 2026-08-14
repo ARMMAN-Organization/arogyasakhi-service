@@ -20,6 +20,9 @@ const motherRegistration = loadSeedData('mother-registration.json');
 const childRegistration = loadSeedData('child-registration.json');
 const ancVisit = loadSeedData('anc-visit.json');
 const infantVisit = loadSeedData('infant-visit.json');
+const deliveryVisit = loadSeedData('delivery-visit.json');
+const postpartumVisit = loadSeedData('postpartum-visit.json');
+const neonatalVisit = loadSeedData('neonatal-visit.json');
 
 /**
  * Every seed-data file must round-trip through the same Zod schemas the
@@ -32,6 +35,9 @@ describe.each([
   ['child-registration.json', childRegistration],
   ['anc-visit.json', ancVisit],
   ['infant-visit.json', infantVisit],
+  ['delivery-visit.json', deliveryVisit],
+  ['postpartum-visit.json', postpartumVisit],
+  ['neonatal-visit.json', neonatalVisit],
 ])('%s', (_name, payload) => {
   it('has a schemaJson that satisfies schemaJsonSchema', () => {
     expect(() => schemaJsonSchema.parse(payload.schemaJson)).not.toThrow();
@@ -516,5 +522,274 @@ describe('infant-visit.json', () => {
 
   it('has no cross-field validation rules', () => {
     expect(infantVisit.validationJson).toEqual([]);
+  });
+});
+
+describe('delivery-visit.json', () => {
+  const fields = deliveryVisit.schemaJson;
+  const byCode = new Map(fields.map((f) => [f.question_code, f]));
+
+  it('has exactly 44 fields (13 mother-level + 3x10 child fields + remarks)', () => {
+    expect(fields).toHaveLength(44);
+  });
+
+  it('applies numericRange to every field the source doc bounds', () => {
+    const expectedRanges: Record<string, { min: number; max: number }> = {
+      number_of_babies_born: { min: 1, max: 3 },
+      child1_birth_length_cm: { min: 35, max: 60 },
+      child1_birth_weight_kg: { min: 0.5, max: 6 },
+      child2_birth_length_cm: { min: 35, max: 60 },
+      child2_birth_weight_kg: { min: 0.5, max: 6 },
+      child3_birth_length_cm: { min: 35, max: 60 },
+      child3_birth_weight_kg: { min: 0.5, max: 6 },
+    };
+    for (const [code, range] of Object.entries(expectedRanges)) {
+      expect(byCode.get(code)?.numericRange).toEqual(range);
+    }
+  });
+
+  it('gates home-delivery-only fields behind place_of_delivery=home', () => {
+    const HOME_GATE = { field: 'place_of_delivery', operator: 'eq', value: 'home' };
+    expect(byCode.get('misoprostol_tablets_taken_back')?.visibleWhen).toEqual(HOME_GATE);
+    expect(byCode.get('reason_for_home_delivery')?.visibleWhen).toEqual(HOME_GATE);
+  });
+
+  it('gates child2/child3 fields behind number_of_babies_born (row 12)', () => {
+    for (const code of [
+      'child2_delivery_outcome',
+      'child2_sex_of_baby',
+      'child2_birth_length_cm',
+      'child2_birth_weight_kg',
+    ]) {
+      expect(byCode.get(code)?.visibleWhen).toEqual({
+        field: 'number_of_babies_born',
+        operator: 'gte',
+        value: 2,
+      });
+    }
+    for (const code of [
+      'child3_delivery_outcome',
+      'child3_sex_of_baby',
+      'child3_birth_length_cm',
+      'child3_birth_weight_kg',
+    ]) {
+      expect(byCode.get(code)?.visibleWhen).toEqual({
+        field: 'number_of_babies_born',
+        operator: 'gte',
+        value: 3,
+      });
+    }
+  });
+
+  it('correctly defines childN_sex_of_baby as Male/Female/Intersex-Other, not cause-of-death — the source doc mislabels this row for Child3 (row 28)', () => {
+    for (const code of ['child1_sex_of_baby', 'child2_sex_of_baby', 'child3_sex_of_baby']) {
+      const field = byCode.get(code);
+      expect(field?.options?.map((o) => o.value_code)).toEqual([
+        'male',
+        'female',
+        'intersex_other',
+      ]);
+    }
+  });
+
+  it('gates each childN death-detail block behind that same child being reported not alive', () => {
+    for (const prefix of ['child1', 'child2', 'child3']) {
+      const gate = { field: `${prefix}_is_newborn_alive_now`, operator: 'eq', value: 'no' };
+      expect(byCode.get(`${prefix}_cause_of_death`)?.visibleWhen).toEqual(gate);
+      expect(byCode.get(`${prefix}_place_of_death`)?.visibleWhen).toEqual(gate);
+      expect(byCode.get(`${prefix}_date_of_death`)?.visibleWhen).toEqual(gate);
+    }
+  });
+
+  it('applies notBefore date_of_delivery to every childN_date_of_death (death cannot precede birth)', () => {
+    for (const prefix of ['child1', 'child2', 'child3']) {
+      expect(byCode.get(`${prefix}_date_of_death`)?.dateRule).toEqual({
+        notFuture: true,
+        notBefore: { field: 'date_of_delivery' },
+      });
+    }
+  });
+
+  it('has an EXCLUSIVE_OPTION rule so "None" cannot combine with a selected delivery complication', () => {
+    expect(deliveryVisit.validationJson).toContainEqual({
+      rule: 'EXCLUSIVE_OPTION',
+      field: 'did_mother_experience_complications',
+      exclusiveValues: ['none'],
+    });
+  });
+});
+
+describe('postpartum-visit.json', () => {
+  const fields = postpartumVisit.schemaJson;
+  const byCode = new Map(fields.map((f) => [f.question_code, f]));
+
+  it('has exactly 36 fields, per the Revised App Form Final Postpartum form', () => {
+    expect(fields).toHaveLength(36);
+  });
+
+  it('applies numericRange to every field the source doc bounds', () => {
+    const expectedRanges: Record<string, { min: number; max: number }> = {
+      ifa_tablets_consumed_since_last_visit: { min: 0, max: 35 },
+      current_weight_kg: { min: 25, max: 100 },
+      current_muac_cm: { min: 10, max: 40 },
+      bp_systolic: { min: 70, max: 300 },
+      bp_diastolic: { min: 40, max: 130 },
+      body_temperature_f: { min: 94, max: 105 },
+      haemoglobin_g_dl: { min: 1, max: 18 },
+      random_blood_glucose_mg_dl: { min: 40, max: 400 },
+      anc_visits_completed_before_delivery: { min: 0, max: 20 },
+    };
+    for (const [code, range] of Object.entries(expectedRanges)) {
+      expect(byCode.get(code)?.numericRange).toEqual(range);
+    }
+  });
+
+  it('short-circuits the rest of the form when the mother is not alive (row 3)', () => {
+    expect(byCode.get('is_mother_alive')?.required).toBe(true);
+    // Every subsequent mandatory field is gated behind is_mother_alive=yes,
+    // except anc_visits_completed_before_delivery, which the doc places
+    // outside the mother-status-gated flow (row 36).
+    for (const field of fields) {
+      if (
+        [
+          'actual_visit_date',
+          'visit_name',
+          'is_mother_alive',
+          'anc_visits_completed_before_delivery',
+        ].includes(field.question_code)
+      ) {
+        continue;
+      }
+      if (field.visibleWhen?.field === 'is_mother_alive') {
+        expect(field.visibleWhen).toEqual({
+          field: 'is_mother_alive',
+          operator: 'eq',
+          value: 'yes',
+        });
+      }
+    }
+  });
+
+  it('requires pads-changed-per-day only when bleeding has not stopped (row 11-12)', () => {
+    expect(byCode.get('pads_changed_per_day')?.visibleWhen).toEqual({
+      field: 'vaginal_bleeding_stopped',
+      operator: 'eq',
+      value: 'no',
+    });
+  });
+
+  it('requires breastfeeding-difficulties only when breastfeeding is uncomfortable (row 13-14)', () => {
+    expect(byCode.get('breastfeeding_difficulties')?.visibleWhen).toEqual({
+      field: 'able_to_breastfeed_comfortably',
+      operator: 'eq',
+      value: 'no',
+    });
+  });
+
+  it('requires the IFA non-consumption reason only when not taking IFA (row 18-20)', () => {
+    expect(byCode.get('reason_for_non_consumption_of_ifa')?.visibleWhen).toEqual({
+      field: 'taking_ifa_tablets',
+      operator: 'eq',
+      value: 'no',
+    });
+  });
+
+  it('requires family planning method only when using family planning (row 22-23)', () => {
+    expect(byCode.get('family_planning_methods')?.visibleWhen).toEqual({
+      field: 'using_family_planning',
+      operator: 'eq',
+      value: 'yes',
+    });
+  });
+
+  it('wires current_bmi to the BMI computed formula (row 28)', () => {
+    expect(byCode.get('current_bmi')?.computedFrom).toBe('BMI');
+  });
+
+  it('has 5 EXCLUSIVE_OPTION rules for the "none/no abnormal signs" checkbox groups', () => {
+    const exclusiveRules = postpartumVisit.validationJson.filter(
+      (r) => (r as { rule: string }).rule === 'EXCLUSIVE_OPTION',
+    );
+    expect(exclusiveRules).toHaveLength(5);
+  });
+});
+
+describe('neonatal-visit.json', () => {
+  const fields = neonatalVisit.schemaJson;
+  const byCode = new Map(fields.map((f) => [f.question_code, f]));
+
+  it('has exactly 32 fields (26 base + 4 per-vaccine date fields + 2 pre-filled delivery fields)', () => {
+    expect(fields).toHaveLength(32);
+  });
+
+  it('applies numericRange to birth/current length and weight', () => {
+    const expectedRanges: Record<string, { min: number; max: number }> = {
+      birth_weight_kg: { min: 0.5, max: 6 },
+      current_length_cm: { min: 35, max: 60 },
+      current_weight_kg: { min: 0.5, max: 6 },
+    };
+    for (const [code, range] of Object.entries(expectedRanges)) {
+      expect(byCode.get(code)?.numericRange).toEqual(range);
+    }
+  });
+
+  it('gates the death-detail block behind is_newborn_alive_now=no', () => {
+    const gate = { field: 'is_newborn_alive_now', operator: 'eq', value: 'no' };
+    expect(byCode.get('cause_of_death')?.visibleWhen).toEqual(gate);
+    expect(byCode.get('place_of_death')?.visibleWhen).toEqual(gate);
+    expect(byCode.get('date_of_death')?.visibleWhen).toEqual(gate);
+  });
+
+  it('gates the KMC block behind birth_weight_kg < 2.5 (row 11, low-birth-weight eligibility)', () => {
+    expect(byCode.get('is_kmc_practiced')?.visibleWhen).toEqual({
+      field: 'birth_weight_kg',
+      operator: 'lt',
+      value: 2.5,
+    });
+    expect(byCode.get('kmc_duration')?.visibleWhen).toEqual({
+      field: 'is_kmc_practiced',
+      operator: 'eq',
+      value: 'yes',
+    });
+    expect(byCode.get('kmc_breastfeeding_duration')?.visibleWhen).toEqual({
+      field: 'is_kmc_practiced',
+      operator: 'eq',
+      value: 'yes',
+    });
+  });
+
+  it('wires nutritional-status fields to the NUTRITIONAL_ZSCORE computed formula (rows 23-25)', () => {
+    for (const code of [
+      'nutritional_status_wasting',
+      'nutritional_status_stunting',
+      'nutritional_status_underweight',
+    ]) {
+      expect(byCode.get(code)?.computedFrom).toBe('NUTRITIONAL_ZSCORE');
+    }
+  });
+
+  it('has an EXCLUSIVE_OPTION rule so "None" cannot combine with a selected vaccine', () => {
+    expect(neonatalVisit.validationJson).toContainEqual({
+      rule: 'EXCLUSIVE_OPTION',
+      field: 'vaccination_taken_at_birth',
+      exclusiveValues: ['none'],
+    });
+  });
+
+  it('has a REQUIRED_IF_SELECTED rule so each selected vaccine requires its date', () => {
+    expect(neonatalVisit.validationJson).toContainEqual({
+      rule: 'REQUIRED_IF_SELECTED',
+      field: 'vaccination_taken_at_birth',
+      optionFieldMap: {
+        bcg: 'bcg_date',
+        opv: 'opv_date',
+        hepatitis_b: 'hepatitis_b_date',
+        vitamin_k: 'vitamin_k_date',
+      },
+    });
+  });
+
+  it('has 4 total validationJson rules (2 EXCLUSIVE_OPTION + 1 EXCLUSIVE_OPTION for feeding concerns + 1 REQUIRED_IF_SELECTED)', () => {
+    expect(neonatalVisit.validationJson).toHaveLength(4);
   });
 });
