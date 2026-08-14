@@ -204,7 +204,13 @@ export class FormService {
     // profile on submission") — one createChildBeneficiary() call per
     // childN_* block whose delivery outcome is LIVE_BIRTH, independent and
     // best-effort per child so one failing call (e.g. in a twin/triplet
-    // birth) never blocks the others or the already-saved submission.
+    // birth) never blocks the others or the already-saved submission. This
+    // is a genuine one-shot attempt, same stance as syncSocioDemographics
+    // above: if createChildBeneficiary fails here, nothing retries it later
+    // — a resubmit with the same localSubmissionUuid short-circuits on the
+    // idempotent-replay check earlier in this method and never reaches this
+    // block again. A missing child case has to be caught and fixed out of
+    // band (see the console.warn in createChildBeneficiary's catch).
     if (formCode === 'DELIVERY_VISIT') {
       const motherCase = await findBeneficiaryById(dto.beneficiaryId, authorizationHeader);
       if (motherCase) {
@@ -230,11 +236,10 @@ export class FormService {
             await createChildBeneficiary(
               {
                 motherCase,
-                // Deterministic and independent of localSubmissionUuid — a
-                // resubmit of the same Delivery form (idempotent replay,
-                // handled above) always derives the same per-child key, so a
-                // retry after a partial failure re-attempts only the
-                // children beneficiary-service hasn't already created.
+                // Deterministic per child so a dropped-connection retry of
+                // this specific call (network blip, not a form resubmit —
+                // see the block comment above) lands on the same case
+                // instead of creating a duplicate.
                 localCaseUuid: `${dto.localSubmissionUuid}-${prefix}`,
                 registrationDate: dateOfDelivery,
                 dateOfBirth: dateOfDelivery,

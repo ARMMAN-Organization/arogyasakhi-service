@@ -10,10 +10,12 @@ export interface CreateChildBeneficiaryInput {
    * service guessing or re-resolving them. */
   motherCase: BeneficiaryCase;
   /** Client-generated, per-child idempotency key — see localCaseUuid in
-   * beneficiary-service's createBeneficiarySchema. Must be independent of
-   * the Delivery submission's own localSubmissionUuid so a retry after a
-   * partial multi-child failure can re-attempt only the children that
-   * didn't yet get a case, without re-running the whole submission. */
+   * beneficiary-service's createBeneficiarySchema. Guards only against a
+   * dropped-connection retry of this specific HTTP call landing twice (see
+   * findByLocalCaseUuid in beneficiary.repository.ts); it does NOT give the
+   * Delivery submission itself a retry path — a resubmit of the same form
+   * never reaches this call again, so a failure here is a genuine one-shot
+   * best-effort attempt (see form.service.ts's DELIVERY_VISIT branch). */
   localCaseUuid: string;
   registrationDate: Date;
   dateOfBirth: Date;
