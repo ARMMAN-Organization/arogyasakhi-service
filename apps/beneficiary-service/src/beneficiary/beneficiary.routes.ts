@@ -13,6 +13,8 @@ import {
 import { createBeneficiarySchema } from './dto/create-beneficiary.dto';
 import { listBeneficiariesQuerySchema } from './dto/list-beneficiaries.dto';
 import { summaryQuerySchema } from './dto/summary-query.dto';
+import { idsQuerySchema } from './dto/ids-query.dto';
+import { byIdsWithRiskQuerySchema } from './dto/by-ids-with-risk-query.dto';
 import { upsertSocioDemographicsSchema } from './dto/upsert-socio-demographics.dto';
 import { upsertRiskConditionSummarySchema } from './dto/upsert-risk-condition-summary.dto';
 import { applyLmpChangeSchema } from './dto/apply-lmp-change.dto';
@@ -203,6 +205,13 @@ const registrationSummarySchema = z.object({
   total: z.number().int(),
   motherCount: z.number().int(),
   childCount: z.number().int(),
+  totalActiveBeneficiaries: z.number().int(),
+  activeMothersCount: z.number().int(),
+  activeChildrenCount: z.number().int(),
+  activeMothersHighRiskCount: z.number().int(),
+  activeChildrenHighRiskCount: z.number().int(),
+  activeMothersPercent: z.number().openapi({ example: 62.5 }),
+  activeChildrenPercent: z.number().openapi({ example: 37.5 }),
 });
 
 const riskSummarySchema = z.object({
@@ -262,6 +271,106 @@ export function registerBeneficiaryRoutes(doc: DocumentedRouter, service: Benefi
     requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
     validate(listBeneficiariesQuerySchema, 'query'),
     controller.list,
+  );
+
+  doc.get(
+    '/beneficiaries/ids',
+    {
+      summary:
+        'Bare in-scope beneficiary ids (no PII, unpaginated) — for other services that own ' +
+        'their own referral/visit/risk tables (no cross-service joins per the forklift rule) ' +
+        'but need to filter those tables to one Sakhi/roster. Same role-scoping (sakhiId) as ' +
+        'GET /beneficiaries, minus pagination/search/date-range.',
+      tags: ['Beneficiaries'],
+      responses: {
+        200: { description: 'In-scope beneficiary ids', schema: envelope(z.array(z.string())) },
+        401: errorResponse(401),
+        403: errorResponse(403, { message: "sakhiId is not in this Supervisor's roster." }),
+        500: errorResponse(500),
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(idsQuerySchema, 'query'),
+    controller.getIds,
+  );
+
+  doc.get(
+    '/beneficiaries/pada-breakdown',
+    {
+      summary:
+        'Pada Breakdown widget — one row per pada the in-scope beneficiaries live in, each ' +
+        'with a resolved padaName/villageName and the beneficiaries (id + caseType) in that ' +
+        'pada — caseType lets the caller split due/overdue/referral counts into a Women/Child ' +
+        'breakdown without a second round-trip. A beneficiary with no padaId on record is ' +
+        'excluded entirely — not grouped under a synthetic bucket. Same role-scoping ' +
+        '(sakhiId) as GET /beneficiaries/ids.',
+      tags: ['Beneficiaries'],
+      responses: {
+        200: {
+          description: 'Pada breakdown of in-scope beneficiaries',
+          schema: envelope(
+            z.array(
+              z.object({
+                padaId: z.string().uuid(),
+                padaName: z.string().nullable(),
+                villageName: z.string().nullable(),
+                beneficiaries: z.array(
+                  z.object({ id: z.string().uuid(), caseType: z.enum(CASE_TYPES) }),
+                ),
+              }),
+            ),
+          ),
+        },
+        401: errorResponse(401),
+        403: errorResponse(403, { message: "sakhiId is not in this Supervisor's roster." }),
+        500: errorResponse(500),
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(idsQuerySchema, 'query'),
+    controller.getPadaBreakdown,
+  );
+
+  doc.get(
+    '/beneficiaries/by-ids-with-risk',
+    {
+      summary:
+        "Decrypted name/phone plus a 4-bucket riskLevel, for the pada visit-list screen's " +
+        'cards. `ids` is a comma-separated list — trusted as-is (the caller has already ' +
+        "scoped it, e.g. to one pada's beneficiaries); an id not found is simply absent from " +
+        'the result, not a 404. `search` narrows to an exact name-hash match (names are ' +
+        'encrypted, no partial/fuzzy search). riskLevel is the worst current ' +
+        "(BeneficiaryRiskConditionSummary.latestGrade) grade across the beneficiary's risk " +
+        "conditions, collapsed from RISK_GRADE's 6 values to 4 buckets: NORMAL->none, " +
+        'MILD->mild, MODERATE->moderate, SEVERE/HIGH/CRITICAL->high.',
+      tags: ['Beneficiaries'],
+      responses: {
+        200: {
+          description: 'Beneficiaries with resolved name/phone/riskLevel',
+          schema: envelope(
+            z.array(
+              z.object({
+                id: z.string().uuid(),
+                beneficiaryName: z.string(),
+                phoneNumber: z.string().nullable(),
+                villageId: z.string().uuid().nullable(),
+                padaId: z.string().uuid().nullable(),
+                riskLevel: z.enum(['none', 'mild', 'moderate', 'high']),
+              }),
+            ),
+          ),
+        },
+        400: errorResponse(400, { message: 'ids: String must contain at least 1 character(s)' }),
+        401: errorResponse(401),
+        500: errorResponse(500),
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(byIdsWithRiskQuerySchema, 'query'),
+    controller.getByIdsWithRisk,
   );
 
   doc.get(

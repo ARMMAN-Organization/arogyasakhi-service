@@ -127,3 +127,31 @@ export async function resolveVillageNames(
   const body = (await res.json()) as { data: GeographyUnit[] };
   return new Map(body.data.map((v) => [v.geographyUnitId, v.name]));
 }
+
+/**
+ * Resolves geographyUnitId -> {name, parentId} for every PADA-level unit, via
+ * auth-service's existing `GET /geography-units?geoType=PADA`. Used by the
+ * pada-breakdown widget to enrich each padaId with a display-ready padaName
+ * and (via parentId + resolveVillageNames) villageName. A padaId not found
+ * in the response (stale/since-deleted pada) maps to `undefined` — not an
+ * error, since the caller decides how to render a missing name.
+ */
+export async function resolvePadaUnits(
+  authorizationHeader: string,
+): Promise<Map<string, { name: string; parentId: string | null }>> {
+  let res: Response;
+  try {
+    res = await fetch(`${AUTH_SERVICE_BASE_URL}/api/v1/geography-units?geoType=PADA`, {
+      headers: { Authorization: authorizationHeader },
+    });
+  } catch {
+    throw badGateway('Unable to resolve padas — the auth service is unreachable.');
+  }
+
+  if (!res.ok) {
+    throw badGateway('Unable to resolve padas — the auth service returned an error.');
+  }
+
+  const body = (await res.json()) as { data: GeographyUnit[] };
+  return new Map(body.data.map((p) => [p.geographyUnitId, { name: p.name, parentId: p.parentId }]));
+}

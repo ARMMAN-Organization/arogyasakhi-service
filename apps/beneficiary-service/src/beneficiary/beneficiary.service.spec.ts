@@ -3,7 +3,11 @@ import { encryptPii, type AuthenticatedUser } from '@armman/service-commons';
 import { BeneficiaryService } from './beneficiary.service';
 import type { BeneficiaryRepository } from './beneficiary.repository';
 import type { CreateBeneficiaryInput } from './dto/create-beneficiary.dto';
-import { resolveHealthBlockIdFromPhc, resolveVillageNames } from '../geography/geography.client';
+import {
+  resolveHealthBlockIdFromPhc,
+  resolvePadaUnits,
+  resolveVillageNames,
+} from '../geography/geography.client';
 import { resolveLookupValues } from '../lookups/lookup.client';
 import {
   getSakhiName,
@@ -29,6 +33,9 @@ describe('BeneficiaryService', () => {
     reactivateCase: jest.fn(),
     countByCaseType: jest.fn(),
     countByRiskGrade: jest.fn(),
+    findIds: jest.fn(),
+    findIdsGroupedByPada: jest.fn(),
+    findByIdsWithRisk: jest.fn(),
     upsertRiskConditionSummary: jest.fn(),
   } as unknown as jest.Mocked<BeneficiaryRepository>;
   let service: BeneficiaryService;
@@ -41,6 +48,7 @@ describe('BeneficiaryService', () => {
   const listSakhiNamesForSupervisorMock = jest.mocked(listSakhiNamesForSupervisor);
   const getSakhiNameMock = jest.mocked(getSakhiName);
   const resolveVillageNamesMock = jest.mocked(resolveVillageNames);
+  const resolvePadaUnitsMock = jest.mocked(resolvePadaUnits);
   const resolveProjectNamesMock = jest.mocked(resolveProjectNames);
 
   function caller(overrides: Partial<AuthenticatedUser> = {}): AuthenticatedUser {
@@ -1287,21 +1295,323 @@ describe('BeneficiaryService', () => {
     );
   });
 
+  describe('getIds', () => {
+    it('scopes a SAKHI caller to their own cases', async () => {
+      repository.findIds.mockResolvedValue(['b1', 'b2']);
+
+      const result = await service.getIds(undefined, caller(), AUTH_HEADER);
+
+      expect(repository.findIds).toHaveBeenCalledWith(
+        expect.objectContaining({ sakhiId: CALLER_ID }),
+      );
+      expect(result).toEqual(['b1', 'b2']);
+    });
+
+    it('scopes a SUPERVISOR caller to their roster', async () => {
+      listSakhiIdsForSupervisorMock.mockResolvedValue(['sakhi-a', 'sakhi-b']);
+      repository.findIds.mockResolvedValue([]);
+
+      await service.getIds(undefined, caller({ roles: ['SUPERVISOR'] }), AUTH_HEADER);
+
+      expect(repository.findIds).toHaveBeenCalledWith(
+        expect.objectContaining({ sakhiIds: ['sakhi-a', 'sakhi-b'] }),
+      );
+    });
+
+    it('rejects a SUPERVISOR sakhiId outside their roster', async () => {
+      listSakhiIdsForSupervisorMock.mockResolvedValue(['sakhi-a']);
+
+      await expect(
+        service.getIds('sakhi-outside', caller({ roles: ['SUPERVISOR'] }), AUTH_HEADER),
+      ).rejects.toThrow("sakhiId is not in this Supervisor's roster.");
+    });
+
+    it('leaves a MANAGER/ADMIN caller unscoped with no sakhiId filter', async () => {
+      repository.findIds.mockResolvedValue(['b1']);
+
+      await service.getIds(undefined, caller({ roles: ['MANAGER'] }), AUTH_HEADER);
+
+      expect(repository.findIds).toHaveBeenCalledWith(
+        expect.not.objectContaining({ sakhiId: expect.anything() }),
+      );
+    });
+  });
+
+  describe('getPadaBreakdown', () => {
+    it('scopes a SAKHI caller to their own cases', async () => {
+      repository.findIdsGroupedByPada.mockResolvedValue(
+        new Map([
+          [
+            'pada-1',
+            [
+              { id: 'b1', caseType: 'MOTHER' },
+              { id: 'b2', caseType: 'CHILD' },
+            ],
+          ],
+        ]),
+      );
+      resolvePadaUnitsMock.mockResolvedValue(
+        new Map([['pada-1', { name: 'Sample Pada', parentId: 'village-1' }]]),
+      );
+      resolveVillageNamesMock.mockResolvedValue(new Map([['village-1', 'Sample Village']]));
+
+      const result = await service.getPadaBreakdown(undefined, caller(), AUTH_HEADER);
+
+      expect(repository.findIdsGroupedByPada).toHaveBeenCalledWith(
+        expect.objectContaining({ sakhiId: CALLER_ID }),
+      );
+      expect(result).toEqual([
+        {
+          padaId: 'pada-1',
+          padaName: 'Sample Pada',
+          villageName: 'Sample Village',
+          beneficiaries: [
+            { id: 'b1', caseType: 'MOTHER' },
+            { id: 'b2', caseType: 'CHILD' },
+          ],
+        },
+      ]);
+    });
+
+    it('scopes a SUPERVISOR caller to their roster', async () => {
+      listSakhiIdsForSupervisorMock.mockResolvedValue(['sakhi-a', 'sakhi-b']);
+      repository.findIdsGroupedByPada.mockResolvedValue(new Map());
+
+      await service.getPadaBreakdown(undefined, caller({ roles: ['SUPERVISOR'] }), AUTH_HEADER);
+
+      expect(repository.findIdsGroupedByPada).toHaveBeenCalledWith(
+        expect.objectContaining({ sakhiIds: ['sakhi-a', 'sakhi-b'] }),
+      );
+    });
+
+    it('rejects a SUPERVISOR sakhiId outside their roster', async () => {
+      listSakhiIdsForSupervisorMock.mockResolvedValue(['sakhi-a']);
+
+      await expect(
+        service.getPadaBreakdown('sakhi-outside', caller({ roles: ['SUPERVISOR'] }), AUTH_HEADER),
+      ).rejects.toThrow("sakhiId is not in this Supervisor's roster.");
+    });
+
+    it('leaves a MANAGER/ADMIN caller unscoped with no sakhiId filter', async () => {
+      repository.findIdsGroupedByPada.mockResolvedValue(new Map());
+
+      await service.getPadaBreakdown(undefined, caller({ roles: ['MANAGER'] }), AUTH_HEADER);
+
+      expect(repository.findIdsGroupedByPada).toHaveBeenCalledWith(
+        expect.not.objectContaining({ sakhiId: expect.anything() }),
+      );
+    });
+
+    it('returns an empty array with no geography lookups when the caller has no beneficiaries in any pada', async () => {
+      repository.findIdsGroupedByPada.mockResolvedValue(new Map());
+
+      const result = await service.getPadaBreakdown(undefined, caller(), AUTH_HEADER);
+
+      expect(result).toEqual([]);
+      expect(resolvePadaUnitsMock).not.toHaveBeenCalled();
+      expect(resolveVillageNamesMock).not.toHaveBeenCalled();
+    });
+
+    it('resolves padaName/villageName to null for a stale/deleted pada, without failing the whole response', async () => {
+      repository.findIdsGroupedByPada.mockResolvedValue(
+        new Map([['pada-stale', [{ id: 'b1', caseType: 'MOTHER' }]]]),
+      );
+      resolvePadaUnitsMock.mockResolvedValue(new Map());
+      resolveVillageNamesMock.mockResolvedValue(new Map());
+
+      const result = await service.getPadaBreakdown(undefined, caller(), AUTH_HEADER);
+
+      expect(result).toEqual([
+        {
+          padaId: 'pada-stale',
+          padaName: null,
+          villageName: null,
+          beneficiaries: [{ id: 'b1', caseType: 'MOTHER' }],
+        },
+      ]);
+    });
+
+    it('returns one row per distinct pada when beneficiaries span multiple padas', async () => {
+      repository.findIdsGroupedByPada.mockResolvedValue(
+        new Map([
+          ['pada-1', [{ id: 'b1', caseType: 'MOTHER' }]],
+          [
+            'pada-2',
+            [
+              { id: 'b2', caseType: 'MOTHER' },
+              { id: 'b3', caseType: 'CHILD' },
+            ],
+          ],
+        ]),
+      );
+      resolvePadaUnitsMock.mockResolvedValue(
+        new Map([
+          ['pada-1', { name: 'Pada One', parentId: 'village-1' }],
+          ['pada-2', { name: 'Pada Two', parentId: 'village-1' }],
+        ]),
+      );
+      resolveVillageNamesMock.mockResolvedValue(new Map([['village-1', 'Sample Village']]));
+
+      const result = await service.getPadaBreakdown(undefined, caller(), AUTH_HEADER);
+
+      expect(result).toHaveLength(2);
+      expect(result).toEqual(
+        expect.arrayContaining([
+          {
+            padaId: 'pada-1',
+            padaName: 'Pada One',
+            villageName: 'Sample Village',
+            beneficiaries: [{ id: 'b1', caseType: 'MOTHER' }],
+          },
+          {
+            padaId: 'pada-2',
+            padaName: 'Pada Two',
+            villageName: 'Sample Village',
+            beneficiaries: [
+              { id: 'b2', caseType: 'MOTHER' },
+              { id: 'b3', caseType: 'CHILD' },
+            ],
+          },
+        ]),
+      );
+    });
+  });
+
+  describe('getByIdsWithRisk', () => {
+    it('decrypts name/phone and maps latestGrade to a riskLevel bucket', async () => {
+      repository.findByIdsWithRisk.mockResolvedValue([
+        {
+          id: 'b1',
+          fullNameEnc: encryptPii('Jane Doe'),
+          phoneEnc: encryptPii('9876543210'),
+          villageId: 'village-1',
+          padaId: 'pada-1',
+          latestGrade: 'MODERATE',
+        },
+      ]);
+
+      const result = await service.getByIdsWithRisk(['b1'], undefined);
+
+      expect(repository.findByIdsWithRisk).toHaveBeenCalledWith(['b1'], undefined);
+      expect(result).toEqual([
+        {
+          id: 'b1',
+          beneficiaryName: 'Jane Doe',
+          phoneNumber: '9876543210',
+          villageId: 'village-1',
+          padaId: 'pada-1',
+          riskLevel: 'moderate',
+        },
+      ]);
+    });
+
+    it.each([
+      ['NORMAL', 'none'],
+      ['MILD', 'mild'],
+      ['MODERATE', 'moderate'],
+      ['SEVERE', 'high'],
+      ['HIGH', 'high'],
+      ['CRITICAL', 'high'],
+      [null, 'none'],
+    ])('maps latestGrade %s to riskLevel %s', async (grade, expectedRiskLevel) => {
+      repository.findByIdsWithRisk.mockResolvedValue([
+        {
+          id: 'b1',
+          fullNameEnc: encryptPii('Jane Doe'),
+          phoneEnc: null,
+          villageId: null,
+          padaId: null,
+          latestGrade: grade,
+        },
+      ]);
+
+      const result = await service.getByIdsWithRisk(['b1'], undefined);
+
+      expect(result[0].riskLevel).toBe(expectedRiskLevel);
+    });
+
+    it('returns null phoneNumber when the beneficiary has no phone on record', async () => {
+      repository.findByIdsWithRisk.mockResolvedValue([
+        {
+          id: 'b1',
+          fullNameEnc: encryptPii('Jane Doe'),
+          phoneEnc: null,
+          villageId: null,
+          padaId: null,
+          latestGrade: null,
+        },
+      ]);
+
+      const result = await service.getByIdsWithRisk(['b1'], undefined);
+
+      expect(result[0].phoneNumber).toBeNull();
+    });
+
+    it('hashes a search term and passes it through to the repository', async () => {
+      repository.findByIdsWithRisk.mockResolvedValue([]);
+
+      await service.getByIdsWithRisk(['b1'], 'Jane');
+
+      expect(repository.findByIdsWithRisk).toHaveBeenCalledWith(['b1'], expect.any(Buffer));
+    });
+
+    it('returns an empty array when no ids match (id not found, or excluded by search)', async () => {
+      repository.findByIdsWithRisk.mockResolvedValue([]);
+
+      const result = await service.getByIdsWithRisk(['unknown-id'], undefined);
+
+      expect(result).toEqual([]);
+    });
+  });
+
   describe('getRegistrationSummary', () => {
     it('scopes a SAKHI caller to their own cases', async () => {
-      repository.countByCaseType.mockResolvedValue({ total: 5, motherCount: 3, childCount: 2 });
+      repository.countByCaseType.mockResolvedValue({
+        total: 5,
+        motherCount: 3,
+        childCount: 2,
+        totalActiveBeneficiaries: 5,
+        activeMothersCount: 3,
+        activeChildrenCount: 2,
+        activeMothersHighRiskCount: 1,
+        activeChildrenHighRiskCount: 0,
+        activeMothersPercent: 60,
+        activeChildrenPercent: 40,
+      });
 
       const result = await service.getRegistrationSummary({}, caller(), AUTH_HEADER);
 
       expect(repository.countByCaseType).toHaveBeenCalledWith(
         expect.objectContaining({ sakhiId: CALLER_ID }),
       );
-      expect(result).toEqual({ total: 5, motherCount: 3, childCount: 2 });
+      expect(result).toEqual({
+        total: 5,
+        motherCount: 3,
+        childCount: 2,
+        totalActiveBeneficiaries: 5,
+        activeMothersCount: 3,
+        activeChildrenCount: 2,
+        activeMothersHighRiskCount: 1,
+        activeChildrenHighRiskCount: 0,
+        activeMothersPercent: 60,
+        activeChildrenPercent: 40,
+      });
     });
 
     it('scopes a SUPERVISOR caller to their roster', async () => {
       listSakhiIdsForSupervisorMock.mockResolvedValue(['sakhi-a', 'sakhi-b']);
-      repository.countByCaseType.mockResolvedValue({ total: 0, motherCount: 0, childCount: 0 });
+      repository.countByCaseType.mockResolvedValue({
+        total: 0,
+        motherCount: 0,
+        childCount: 0,
+        totalActiveBeneficiaries: 0,
+        activeMothersCount: 0,
+        activeChildrenCount: 0,
+        activeMothersHighRiskCount: 0,
+        activeChildrenHighRiskCount: 0,
+        activeMothersPercent: 0,
+        activeChildrenPercent: 0,
+      });
 
       await service.getRegistrationSummary({}, caller({ roles: ['SUPERVISOR'] }), AUTH_HEADER);
 
@@ -1323,7 +1633,18 @@ describe('BeneficiaryService', () => {
     });
 
     it('leaves a MANAGER/ADMIN caller unscoped with no sakhiId filter', async () => {
-      repository.countByCaseType.mockResolvedValue({ total: 10, motherCount: 6, childCount: 4 });
+      repository.countByCaseType.mockResolvedValue({
+        total: 10,
+        motherCount: 6,
+        childCount: 4,
+        totalActiveBeneficiaries: 10,
+        activeMothersCount: 6,
+        activeChildrenCount: 4,
+        activeMothersHighRiskCount: 2,
+        activeChildrenHighRiskCount: 1,
+        activeMothersPercent: 60,
+        activeChildrenPercent: 40,
+      });
 
       await service.getRegistrationSummary({}, caller({ roles: ['MANAGER'] }), AUTH_HEADER);
 
@@ -1350,6 +1671,36 @@ describe('BeneficiaryService', () => {
           AUTH_HEADER,
         ),
       ).rejects.toThrow('Supervisor caller has no project scope.');
+    });
+
+    it('passes through the active-beneficiary breakdown from the repository unchanged', async () => {
+      repository.countByCaseType.mockResolvedValue({
+        total: 10,
+        motherCount: 6,
+        childCount: 4,
+        totalActiveBeneficiaries: 8,
+        activeMothersCount: 5,
+        activeChildrenCount: 3,
+        activeMothersHighRiskCount: 2,
+        activeChildrenHighRiskCount: 1,
+        activeMothersPercent: 62.5,
+        activeChildrenPercent: 37.5,
+      });
+
+      const result = await service.getRegistrationSummary({}, caller(), AUTH_HEADER);
+
+      expect(result).toEqual({
+        total: 10,
+        motherCount: 6,
+        childCount: 4,
+        totalActiveBeneficiaries: 8,
+        activeMothersCount: 5,
+        activeChildrenCount: 3,
+        activeMothersHighRiskCount: 2,
+        activeChildrenHighRiskCount: 1,
+        activeMothersPercent: 62.5,
+        activeChildrenPercent: 37.5,
+      });
     });
   });
 

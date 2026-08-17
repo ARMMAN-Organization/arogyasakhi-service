@@ -2,6 +2,7 @@ import { addDays } from '@armman/core';
 import {
   badRequest,
   conflict,
+  decryptPii,
   encryptPii,
   forbidden,
   hashForSearch,
@@ -23,7 +24,11 @@ import type { CreateBeneficiaryInput } from './dto/create-beneficiary.dto';
 import type { UpsertRiskConditionSummaryInput } from './dto/upsert-risk-condition-summary.dto';
 import type { SummaryQueryInput } from './dto/summary-query.dto';
 import type { UpsertSocioDemographicsInput } from './dto/upsert-socio-demographics.dto';
-import { resolveHealthBlockIdFromPhc, resolveVillageNames } from '../geography/geography.client';
+import {
+  resolveHealthBlockIdFromPhc,
+  resolvePadaUnits,
+  resolveVillageNames,
+} from '../geography/geography.client';
 import { resolveLookupIdsByValueCode, resolveLookupValues } from '../lookups/lookup.client';
 import {
   getSakhiName,
@@ -83,6 +88,25 @@ async function withResolvedSocioDemographics<T extends Record<string, unknown>>(
 }
 
 const GESTATION_DAYS = 280;
+
+/**
+ * Collapses RISK_GRADE's 6 values to the 4-bucket riskLevel the pada
+ * visit-list screen's badge uses — see BeneficiaryService.getByIdsWithRisk.
+ */
+function gradeToRiskLevel(grade: string | null): 'none' | 'mild' | 'moderate' | 'high' {
+  switch (grade) {
+    case 'MILD':
+      return 'mild';
+    case 'MODERATE':
+      return 'moderate';
+    case 'SEVERE':
+    case 'HIGH':
+    case 'CRITICAL':
+      return 'high';
+    default:
+      return 'none';
+  }
+}
 
 /**
  * Enforces the same scoping `list()` applies to reads on a single-case
@@ -333,6 +357,83 @@ export class BeneficiaryService {
    * beneficiary cases, same role-scoping and optional fromDate/toDate range
    * as `list()`.
    */
+  /**
+   * Returns the bare in-scope beneficiary ids (no PII, no pagination) — used
+   * by other services that own their own referral/visit/risk tables (no
+   * cross-service joins per the forklift rule) but need to filter those
+   * tables to one Sakhi/roster's beneficiaries. Same role-scoping as
+   * list()/getRegistrationSummary; no date-range filter since callers need
+   * the full in-scope set, not a registration-window slice.
+   */
+  async getIds(
+    sakhiId: string | undefined,
+    caller: AuthenticatedUser,
+    authorizationHeader: string,
+  ) {
+    const scoping = await resolveSakhiScoping(sakhiId, caller, authorizationHeader);
+    return this.repository.findIds(scoping);
+  }
+
+  /**
+   * Pada Breakdown widget — one row per distinct pada the caller's in-scope
+   * beneficiaries live in (a beneficiary with no padaId on record is
+   * excluded, per findIdsGroupedByPada), each with a resolved padaName,
+   * villageName (via the pada's parentId), and the beneficiaryIds in that
+   * pada — for other services to filter their own visit/referral tables by,
+   * since padaId is owned only here (no cross-service joins per the
+   * forklift rule). Same role-scoping as getIds.
+   */
+  async getPadaBreakdown(
+    sakhiId: string | undefined,
+    caller: AuthenticatedUser,
+    authorizationHeader: string,
+  ) {
+    const scoping = await resolveSakhiScoping(sakhiId, caller, authorizationHeader);
+    const byPada = await this.repository.findIdsGroupedByPada(scoping);
+    if (byPada.size === 0) return [];
+
+    const [padaUnits, villageNames] = await Promise.all([
+      resolvePadaUnits(authorizationHeader),
+      resolveVillageNames(authorizationHeader),
+    ]);
+
+    return [...byPada.entries()].map(([padaId, beneficiaries]) => {
+      const pada = padaUnits.get(padaId);
+      return {
+        padaId,
+        padaName: pada?.name ?? null,
+        villageName: (pada?.parentId ? villageNames.get(pada.parentId) : undefined) ?? null,
+        beneficiaries,
+      };
+    });
+  }
+
+  /**
+   * Decrypted name/phone plus a 4-bucket riskLevel, for the pada visit-list
+   * screen's cards — no role-scoping here: the caller (api-gateway) has
+   * already resolved the in-scope ids via its own pada/roster checks
+   * before calling this. `search` narrows to an exact name-hash match
+   * (names are encrypted, no partial/fuzzy search — same constraint as
+   * GET /beneficiaries). RISK_GRADE's 6 values collapse to 4 buckets:
+   * NORMAL -> none, MILD -> mild, MODERATE -> moderate, SEVERE/HIGH/
+   * CRITICAL -> high (the 3 most severe grades all read as "urgent" on a
+   * single badge). A beneficiary with no risk-condition-summary rows (or
+   * only ungraded/self-reported ones, latestGradeRank null) is "none".
+   */
+  async getByIdsWithRisk(ids: string[], search: string | undefined) {
+    const nameHash = search ? hashForSearch(normalizeForSearch(search)) : undefined;
+    const rows = await this.repository.findByIdsWithRisk(ids, nameHash);
+
+    return rows.map((row) => ({
+      id: row.id,
+      beneficiaryName: decryptPii(row.fullNameEnc),
+      phoneNumber: row.phoneEnc ? decryptPii(row.phoneEnc) : null,
+      villageId: row.villageId,
+      padaId: row.padaId,
+      riskLevel: gradeToRiskLevel(row.latestGrade),
+    }));
+  }
+
   async getRegistrationSummary(
     query: SummaryQueryInput,
     caller: AuthenticatedUser,

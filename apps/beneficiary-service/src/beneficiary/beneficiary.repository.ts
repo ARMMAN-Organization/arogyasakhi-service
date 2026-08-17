@@ -1,4 +1,5 @@
 import type { PrismaService } from '../prisma/prisma.service';
+import type { CaseType } from './beneficiary.constants';
 import type {
   BeneficiaryListFilters,
   BeneficiarySummaryFilters,
@@ -116,6 +117,62 @@ export class BeneficiaryRepository {
   }
 
   /**
+   * Returns the bare ids of in-scope beneficiary cases — no PII, no
+   * pagination — for other services (e.g. risk-referral-service's
+   * referral-summary) that need to filter their own tables by beneficiaryId
+   * but can't join across the forklift boundary. Same sakhiId/sakhiIds
+   * role-scoping as findMany/countByCaseType.
+   */
+  async findIds(filters: { sakhiId?: string; sakhiIds?: string[] }): Promise<string[]> {
+    const where: NonNullable<Parameters<typeof this.prisma.beneficiaryCase.findMany>[0]>['where'] =
+      { isDeleted: false };
+    if (filters.sakhiId) where.sakhiId = filters.sakhiId;
+    if (filters.sakhiIds) where.sakhiId = { in: filters.sakhiIds };
+
+    const rows = await this.prisma.beneficiaryCase.findMany({ where, select: { id: true } });
+    return rows.map((r) => r.id);
+  }
+
+  /**
+   * Groups in-scope beneficiaries (id + caseType) by their pii.padaId — for
+   * the pada breakdown widget's Women/Child split. A beneficiary with no
+   * padaId on record is excluded entirely (not grouped under a synthetic
+   * bucket) — per the widget's contract, a pada row needs a padaId to be
+   * usable as a list key/nav arg. Same sakhiId/sakhiIds role-scoping as
+   * findIds. caseType is included (not just the bare id) so the caller can
+   * split due/overdue/referral counts into womenCount/childCount without a
+   * second round-trip.
+   */
+  async findIdsGroupedByPada(filters: {
+    sakhiId?: string;
+    sakhiIds?: string[];
+  }): Promise<Map<string, { id: string; caseType: CaseType }[]>> {
+    const where: NonNullable<Parameters<typeof this.prisma.beneficiaryCase.findMany>[0]>['where'] =
+      { isDeleted: false, pii: { padaId: { not: null } } };
+    if (filters.sakhiId) where.sakhiId = filters.sakhiId;
+    if (filters.sakhiIds) where.sakhiId = { in: filters.sakhiIds };
+
+    const rows = await this.prisma.beneficiaryCase.findMany({
+      where,
+      select: { id: true, caseType: true, pii: { select: { padaId: true } } },
+    });
+
+    const byPada = new Map<string, { id: string; caseType: CaseType }[]>();
+    for (const row of rows) {
+      const padaId = row.pii.padaId;
+      if (!padaId) continue;
+      const entry = { id: row.id, caseType: row.caseType };
+      const existing = byPada.get(padaId);
+      if (existing) {
+        existing.push(entry);
+      } else {
+        byPada.set(padaId, [entry]);
+      }
+    }
+    return byPada;
+  }
+
+  /**
    * Counts in-scope beneficiary cases by caseType for the Registration
    * Summary widget — same role-scoping/date-range semantics as findMany's
    * `sakhiId`/`sakhiIds`/`fromDate`/`toDate` filters, just no pagination or
@@ -134,15 +191,49 @@ export class BeneficiaryRepository {
       };
     }
 
-    const grouped = await this.prisma.beneficiaryCase.groupBy({
-      by: ['caseType'],
-      where,
-      _count: { _all: true },
-    });
+    const activeWhere = { ...where, currentStatus: 'ACTIVE' as const };
+    const [grouped, activeGrouped, activeHighRiskGrouped] = await Promise.all([
+      this.prisma.beneficiaryCase.groupBy({
+        by: ['caseType'],
+        where,
+        _count: { _all: true },
+      }),
+      this.prisma.beneficiaryCase.groupBy({
+        by: ['caseType'],
+        where: activeWhere,
+        _count: { _all: true },
+      }),
+      this.prisma.beneficiaryCase.groupBy({
+        by: ['caseType'],
+        where: { ...activeWhere, currentSummary: { latestVisitHighRiskFlag: true } },
+        _count: { _all: true },
+      }),
+    ]);
 
     const motherCount = grouped.find((g) => g.caseType === 'MOTHER')?._count._all ?? 0;
     const childCount = grouped.find((g) => g.caseType === 'CHILD')?._count._all ?? 0;
-    return { total: motherCount + childCount, motherCount, childCount };
+    const activeMothersCount = activeGrouped.find((g) => g.caseType === 'MOTHER')?._count._all ?? 0;
+    const activeChildrenCount = activeGrouped.find((g) => g.caseType === 'CHILD')?._count._all ?? 0;
+    const activeMothersHighRiskCount =
+      activeHighRiskGrouped.find((g) => g.caseType === 'MOTHER')?._count._all ?? 0;
+    const activeChildrenHighRiskCount =
+      activeHighRiskGrouped.find((g) => g.caseType === 'CHILD')?._count._all ?? 0;
+    const totalActiveBeneficiaries = activeMothersCount + activeChildrenCount;
+
+    return {
+      total: motherCount + childCount,
+      motherCount,
+      childCount,
+      totalActiveBeneficiaries,
+      activeMothersCount,
+      activeChildrenCount,
+      activeMothersHighRiskCount,
+      activeChildrenHighRiskCount,
+      activeMothersPercent:
+        totalActiveBeneficiaries === 0 ? 0 : (activeMothersCount / totalActiveBeneficiaries) * 100,
+      activeChildrenPercent:
+        totalActiveBeneficiaries === 0 ? 0 : (activeChildrenCount / totalActiveBeneficiaries) * 100,
+    };
   }
 
   /**
@@ -475,5 +566,57 @@ export class BeneficiaryRepository {
       });
       return true;
     });
+  }
+
+  /**
+   * Decrypted name/phone plus the worst current risk grade, per requested
+   * id — for the pada visit-list screen's cards. `ids` is trusted as-is
+   * (the caller — api-gateway — has already scoped it, e.g. to one pada's
+   * beneficiaries); an id outside that set or not found is simply absent
+   * from the result, not a 404. `nameHash` (optional) narrows to beneficiaries
+   * whose name matches the screen's search box — same exact-hash-match
+   * constraint as GET /beneficiaries (names are encrypted, no partial/fuzzy
+   * search). riskGradeRank is the highest `latestGradeRank` across the
+   * beneficiary's BeneficiaryRiskConditionSummary rows — null if they have
+   * none — the service layer maps this + latestGrade to the 4-bucket
+   * riskLevel (none/mild/moderate/high).
+   */
+  async findByIdsWithRisk(ids: string[], nameHash?: Buffer) {
+    if (ids.length === 0) return [];
+
+    const cases = await this.prisma.beneficiaryCase.findMany({
+      where: {
+        id: { in: ids },
+        isDeleted: false,
+        ...(nameHash ? { pii: { fullNameSearchHash: nameHash } } : {}),
+      },
+      include: { pii: true },
+    });
+    if (cases.length === 0) return [];
+
+    const riskRows = await this.prisma.beneficiaryRiskConditionSummary.findMany({
+      where: { beneficiaryId: { in: cases.map((c) => c.id) } },
+      select: { beneficiaryId: true, latestGrade: true, latestGradeRank: true },
+    });
+    const worstByBeneficiary = new Map<string, { grade: string | null; rank: number }>();
+    for (const row of riskRows) {
+      if (row.latestGradeRank === null) continue;
+      const existing = worstByBeneficiary.get(row.beneficiaryId);
+      if (!existing || row.latestGradeRank > existing.rank) {
+        worstByBeneficiary.set(row.beneficiaryId, {
+          grade: row.latestGrade,
+          rank: row.latestGradeRank,
+        });
+      }
+    }
+
+    return cases.map((c) => ({
+      id: c.id,
+      fullNameEnc: c.pii.fullNameEnc,
+      phoneEnc: c.pii.phoneEnc,
+      villageId: c.pii.villageId,
+      padaId: c.pii.padaId,
+      latestGrade: worstByBeneficiary.get(c.id)?.grade ?? null,
+    }));
   }
 }
