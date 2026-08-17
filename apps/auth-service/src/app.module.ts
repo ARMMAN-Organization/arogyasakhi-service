@@ -80,12 +80,7 @@ export function createApp(prisma: PrismaService, signer: TokenSigner, redis: Red
   });
   app.use(requestId);
 
-  const authModule = createAuthModule(
-    prisma,
-    signer,
-    appConfig.JWT_ACCESS_TOKEN_TTL,
-    appConfig.JWT_REFRESH_TOKEN_TTL,
-  );
+  const authModule = createAuthModule(prisma, signer, appConfig.JWT_ADMIN_ACCESS_TOKEN_TTL);
   const projectModule = createProjectModule(prisma, signer);
   const lookupModule = createLookupModule(prisma, signer);
   const geographyModule = createGeographyModule(prisma, signer);

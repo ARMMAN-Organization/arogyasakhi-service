@@ -6,7 +6,8 @@ import { SignJWT, importPKCS8, importSPKI, jwtVerify, type CryptoKey, type JWTPa
  * without changing any call site — callers only depend on this interface.
  */
 export interface TokenSigner {
-  sign(payload: JWTPayload, expiresIn: string): Promise<string>;
+  /** Omit `expiresIn` to sign a token with no `exp` claim — it never expires by time. */
+  sign(payload: JWTPayload, expiresIn?: string): Promise<string>;
   verify(token: string): Promise<JWTPayload>;
 }
 
@@ -26,12 +27,10 @@ export class LocalKeypairTokenSigner implements TokenSigner {
     return new LocalKeypairTokenSigner(privateKey, publicKey);
   }
 
-  async sign(payload: JWTPayload, expiresIn: string): Promise<string> {
-    return new SignJWT(payload)
-      .setProtectedHeader({ alg: 'RS256' })
-      .setIssuedAt()
-      .setExpirationTime(expiresIn)
-      .sign(this.privateKey);
+  async sign(payload: JWTPayload, expiresIn?: string): Promise<string> {
+    const jwt = new SignJWT(payload).setProtectedHeader({ alg: 'RS256' }).setIssuedAt();
+    if (expiresIn) jwt.setExpirationTime(expiresIn);
+    return jwt.sign(this.privateKey);
   }
 
   async verify(token: string): Promise<JWTPayload> {
