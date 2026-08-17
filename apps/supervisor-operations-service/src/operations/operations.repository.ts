@@ -400,6 +400,19 @@ export class OperationsRepository {
   }
 
   /**
+   * A gathering's photos — `EventGathering` has no photo mechanism of its
+   * own, so this returns the parent `SupervisorEvent`'s gallery
+   * (`event_photos`), which is the only photo data actually captured for a
+   * training day. Ordered oldest-first (upload order).
+   */
+  findEventPhotos(eventId: string) {
+    return this.prisma.eventPhoto.findMany({
+      where: { eventId, isDeleted: false },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  /**
    * Upserts one row per Sakhi, keyed by the real DB unique constraint on
    * (gatheringId, sakhiId) — unlike event_attendance, gathering_attendance
    * has this constraint, so a genuine `prisma.upsert` works directly instead

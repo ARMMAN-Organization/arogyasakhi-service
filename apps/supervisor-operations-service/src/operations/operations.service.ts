@@ -614,6 +614,32 @@ export class OperationsService {
   }
 
   /**
+   * A gathering's photos, for offline reference. `EventGathering` has no
+   * photo mechanism of its own — this returns the parent event's completion
+   * photo (`photoMediaId`, mandatory once the event is COMPLETED) plus its
+   * `event_photos` gallery, since that's the only photo data actually
+   * captured for a training day. Same ownership rule as
+   * getGatheringAttendance/getGatheringTrainingMarks.
+   */
+  async getGatheringImages(gatheringId: string, caller: CallerIdentity) {
+    const gathering = await this.repository.findGatheringById(gatheringId);
+    if (!gathering) throw notFound('Gathering not found.');
+    const event = await this.repository.findEventById(gathering.eventId);
+    if (!event) throw notFound('Event not found.');
+    if (event.supervisorId !== caller.id && !isPrivileged(caller)) {
+      throw forbidden('You do not have access to this gathering.');
+    }
+
+    const photos = await this.repository.findEventPhotos(event.id);
+    return {
+      gatheringId,
+      eventId: event.id,
+      completionPhotoMediaId: event.photoMediaId,
+      photos: photos.map((p) => ({ id: p.id, mediaId: p.mediaId, createdAt: p.createdAt })),
+    };
+  }
+
+  /**
    * A SUPERVISOR may only record attendance for a gathering under their own
    * event. MANAGER and ADMIN are unrestricted. Upserts by
    * (gatheringId, sakhiId) so repeated submissions never create duplicate

@@ -28,6 +28,7 @@ describe('OperationsService — Meeting & Training flow', () => {
     findTopicMarksByGathering: jest.fn(),
     upsertTopicMark: jest.fn(),
     lockTopicMark: jest.fn(),
+    findEventPhotos: jest.fn(),
   } as unknown as jest.Mocked<OperationsRepository>;
   const sakhiClient = { findById: jest.fn() } as unknown as jest.Mocked<SakhiClient>;
   let service: OperationsService;
@@ -443,6 +444,73 @@ describe('OperationsService — Meeting & Training flow', () => {
       await expect(
         service.getGatheringTrainingMarks('gathering-1', adminCaller),
       ).resolves.toHaveLength(1);
+    });
+  });
+
+  describe('getGatheringImages', () => {
+    const photoRow = {
+      id: 'photo-1',
+      eventId: 'event-1',
+      mediaId: 'media-1',
+      createdAt: new Date('2026-08-01T10:00:00.000Z'),
+      createdByUserId: null,
+      isDeleted: false,
+      deletedAt: null,
+    };
+
+    it("returns the parent event's completion photo + gallery for the caller's own gathering", async () => {
+      repository.findGatheringById.mockResolvedValue(gatheringRow);
+      repository.findEventById.mockResolvedValue({
+        ...trainingEventRow,
+        photoMediaId: 'completion-media-1',
+      });
+      repository.findEventPhotos.mockResolvedValue([photoRow] as never);
+
+      await expect(service.getGatheringImages('gathering-1', supervisorCaller)).resolves.toEqual({
+        gatheringId: 'gathering-1',
+        eventId: 'event-1',
+        completionPhotoMediaId: 'completion-media-1',
+        photos: [{ id: 'photo-1', mediaId: 'media-1', createdAt: photoRow.createdAt }],
+      });
+      expect(repository.findEventPhotos).toHaveBeenCalledWith('event-1');
+    });
+
+    it('returns an empty gallery and null completion photo when none exist yet', async () => {
+      repository.findGatheringById.mockResolvedValue(gatheringRow);
+      repository.findEventById.mockResolvedValue(trainingEventRow);
+      repository.findEventPhotos.mockResolvedValue([]);
+
+      await expect(service.getGatheringImages('gathering-1', supervisorCaller)).resolves.toEqual({
+        gatheringId: 'gathering-1',
+        eventId: 'event-1',
+        completionPhotoMediaId: null,
+        photos: [],
+      });
+    });
+
+    it('throws 404 when the gathering does not exist', async () => {
+      repository.findGatheringById.mockResolvedValue(null);
+      await expect(service.getGatheringImages('missing', supervisorCaller)).rejects.toMatchObject({
+        status: 404,
+      });
+    });
+
+    it('rejects a non-owner Supervisor', async () => {
+      repository.findGatheringById.mockResolvedValue(gatheringRow);
+      repository.findEventById.mockResolvedValue(trainingEventRow);
+      await expect(
+        service.getGatheringImages('gathering-1', otherSupervisorCaller),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(repository.findEventPhotos).not.toHaveBeenCalled();
+    });
+
+    it('allows ADMIN unrestricted', async () => {
+      repository.findGatheringById.mockResolvedValue(gatheringRow);
+      repository.findEventById.mockResolvedValue(trainingEventRow);
+      repository.findEventPhotos.mockResolvedValue([photoRow] as never);
+      await expect(service.getGatheringImages('gathering-1', adminCaller)).resolves.toMatchObject({
+        photos: [{ id: 'photo-1' }],
+      });
     });
   });
 

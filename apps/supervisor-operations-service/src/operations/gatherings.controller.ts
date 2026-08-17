@@ -28,6 +28,11 @@ export function createGatheringsController(service: OperationsService) {
       res.json(ok(await service.getGatheringTrainingMarks(req.params.gatheringId, req.user)));
     }),
 
+    getImages: asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      res.json(ok(await service.getGatheringImages(req.params.gatheringId, req.user)));
+    }),
+
     updateAttendance: asyncHandler(async (req, res, next) => {
       if (!req.user) return next(unauthorized());
       res.json(

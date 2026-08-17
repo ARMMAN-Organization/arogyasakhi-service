@@ -88,6 +88,22 @@ const trainingMarkSchema = z.object({
   lockedAt: z.string().datetime().nullable(),
 });
 
+// GET .../images: EventGathering has no photo mechanism of its own, so this
+// projects the parent SupervisorEvent's completion photo + gallery — the
+// only photo data actually captured for a training day.
+const gatheringImagesSchema = z.object({
+  gatheringId: z.string().uuid(),
+  eventId: z.string().uuid(),
+  completionPhotoMediaId: z.string().uuid().nullable(),
+  photos: z.array(
+    z.object({
+      id: z.string().uuid(),
+      mediaId: z.string().uuid(),
+      createdAt: z.string().datetime(),
+    }),
+  ),
+});
+
 const gatheringIdParamsSchema = z
   .object({
     gatheringId: z.string().uuid(),
@@ -202,6 +218,25 @@ export function registerGatheringsRoutes(doc: DocumentedRouter, service: Operati
     requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
     validate(gatheringIdParamsSchema, 'params'),
     controller.getTrainingMarks,
+  );
+
+  doc.get(
+    '/gatherings/:gatheringId/images',
+    {
+      summary: "A gathering's photos (the parent event's completion photo + gallery)",
+      tags: ['Supervisor Operations'],
+      params: gatheringIdParamsSchema,
+      responses: {
+        200: { description: 'Photos for this gathering', schema: envelope(gatheringImagesSchema) },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller does not own this gathering', schema: apiErrorSchema },
+        404: { description: 'Gathering not found', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(gatheringIdParamsSchema, 'params'),
+    controller.getImages,
   );
 
   doc.put(
