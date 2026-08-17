@@ -50,13 +50,6 @@ const ALIAS_ROUTES: readonly AliasRoute[] = [
     summary: 'Download all Visit Category master rows',
   },
   {
-    path: '/visit-masters',
-    categoryCode: 'VISIT_CATEGORY',
-    handlerKey: 'visitMasters',
-    summary:
-      'Download all Visit Master rows (same data as Visit Category — no separate concept found)',
-  },
-  {
     path: '/item-categories',
     categoryCode: 'ITEM_CATEGORY',
     handlerKey: 'itemCategories',

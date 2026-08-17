@@ -20,7 +20,6 @@ export function createMasterDataAliasController(service: LookupService) {
     riskTypes: forCategory('RISK_TYPE'),
     riskLanguages: forCategory('LANGUAGE'),
     visitCategories: forCategory('VISIT_CATEGORY'),
-    visitMasters: forCategory('VISIT_CATEGORY'),
     itemCategories: forCategory('ITEM_CATEGORY'),
     uomList: forCategory('UOM'),
     transactionTypes: forCategory('TRANSACTION_TYPE'),
