@@ -109,6 +109,9 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
     requiresAuth: true,
   },
   { prefix: '/beneficiaries', target: appConfig.BENEFICIARY_SERVICE_URL, requiresAuth: true },
+  // UNCONFIRMED alias for GET /beneficiaries/risk-summary — see the route's
+  // own doc comment in beneficiary.routes.ts for why this is a best guess.
+  { prefix: '/risk-monitoring', target: appConfig.BENEFICIARY_SERVICE_URL, requiresAuth: true },
   { prefix: '/visits', target: appConfig.VISIT_FORM_SERVICE_URL, requiresAuth: true },
   { prefix: '/visit-schedules', target: appConfig.VISIT_FORM_SERVICE_URL, requiresAuth: true },
   // Visit-type reference catalog (SRS Appendix A/B) — the Supervisor app's
@@ -210,8 +213,20 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
     target: appConfig.SUPERVISOR_OPERATIONS_SERVICE_URL,
     requiresAuth: true,
   },
+  // Dedicated-path alias for GET /inventory-transactions/:id — same service.
+  {
+    prefix: '/item-transactions',
+    target: appConfig.SUPERVISOR_OPERATIONS_SERVICE_URL,
+    requiresAuth: true,
+  },
   {
     prefix: '/call-logs',
+    target: appConfig.SUPERVISOR_OPERATIONS_SERVICE_URL,
+    requiresAuth: true,
+  },
+  // Dedicated-path alias for GET /call-logs/by-sakhi/:sakhiId — same service.
+  {
+    prefix: '/sakhi-calls',
     target: appConfig.SUPERVISOR_OPERATIONS_SERVICE_URL,
     requiresAuth: true,
   },
