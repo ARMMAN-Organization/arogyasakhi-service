@@ -18,6 +18,36 @@ function isPrivileged(caller: CallerIdentity): boolean {
   return caller.roles.includes('MANAGER') || caller.roles.includes('ADMIN');
 }
 
+/**
+ * Resolves the caller's own sakhiId/sakhiIds scope with no query-level
+ * narrowing — SAKHI: own id; SUPERVISOR: full roster; MANAGER/ADMIN:
+ * unscoped. Used by getCountByBeneficiary/getByPada to intersect a
+ * caller-supplied beneficiaryIds list with the caller's own scope (never
+ * trust that list as pre-scoped — see those methods' own doc comments for
+ * the IDOR this closes).
+ */
+async function resolveCallerScoping(
+  caller: CallerIdentity,
+  authorizationHeader: string,
+): Promise<{ sakhiId?: string; sakhiIds?: string[] }> {
+  if (caller.roles.includes('SAKHI')) {
+    return { sakhiId: caller.id };
+  }
+  if (!isPrivileged(caller)) {
+    // SUPERVISOR
+    if (!caller.projectId) {
+      throw forbidden('Supervisor caller has no project scope.');
+    }
+    const roster = await listSakhiIdsForSupervisor(
+      caller.projectId,
+      caller.id,
+      authorizationHeader,
+    );
+    return { sakhiIds: roster };
+  }
+  return {};
+}
+
 /** Visit instance domain logic. Data access is delegated to the repository. */
 export class VisitInstanceService {
   constructor(private readonly repository: VisitInstanceRepository) {}
@@ -219,7 +249,18 @@ export class VisitInstanceService {
    * deduped to 0-or-1 — the gateway sums it as-is per visitsRemainingCount's
    * "visits still due today" definition (a count of visits, not people).
    */
-  async getCountByBeneficiary(beneficiaryIds: string[], authorizationHeader: string) {
+  async getCountByBeneficiary(
+    beneficiaryIds: string[],
+    caller: CallerIdentity,
+    authorizationHeader: string,
+  ) {
+    // Security: `beneficiaryIds` is caller-supplied and must never be
+    // trusted as pre-scoped — without this, any authenticated caller could
+    // pass an arbitrary beneficiaryIds list and get back another Sakhi's/
+    // roster's visit counts (IDOR). The repository intersects the
+    // requested ids with this scope via sakhiId, so an out-of-scope id is
+    // silently excluded from the result rather than surfaced as a 403.
+    const scoping = await resolveCallerScoping(caller, authorizationHeader);
     const statusCodes = await resolveVisitStatusCodes(authorizationHeader);
     const dueOrOverdueStatusLookupValueIds = [...statusCodes.entries()]
       .filter(([, code]) => code === 'PENDING' || code === 'MISSED')
@@ -227,11 +268,12 @@ export class VisitInstanceService {
     const today = new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00.000Z');
 
     const [grouped, dueTodayByBeneficiary] = await Promise.all([
-      this.repository.countByBeneficiary(beneficiaryIds),
+      this.repository.countByBeneficiary(beneficiaryIds, scoping),
       this.repository.countDueTodayByBeneficiary(
         beneficiaryIds,
         dueOrOverdueStatusLookupValueIds,
         today,
+        scoping,
       ),
     ]);
 
@@ -271,7 +313,16 @@ export class VisitInstanceService {
    * (e.g. "ANC3" -> "ANC 3") — a code with no trailing digits (e.g.
    * "DELIVERY") is left unchanged.
    */
-  async getByPada(beneficiaryIds: string[], date: string, authorizationHeader: string) {
+  async getByPada(
+    beneficiaryIds: string[],
+    date: string,
+    caller: CallerIdentity,
+    authorizationHeader: string,
+  ) {
+    // Security: same IDOR guard as getCountByBeneficiary — beneficiaryIds
+    // is caller-supplied and is intersected with the caller's own scope
+    // before querying, never trusted as pre-scoped.
+    const scoping = await resolveCallerScoping(caller, authorizationHeader);
     const statusCodes = await resolveVisitStatusCodes(authorizationHeader);
     const dueOrOverdueStatusLookupValueIds = [...statusCodes.entries()]
       .filter(([, code]) => code === 'PENDING' || code === 'MISSED')
@@ -282,6 +333,7 @@ export class VisitInstanceService {
       beneficiaryIds,
       dueOrOverdueStatusLookupValueIds,
       dateOnly,
+      scoping,
     );
 
     return rows.map((row) => ({

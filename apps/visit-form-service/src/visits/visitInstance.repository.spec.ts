@@ -3,7 +3,8 @@ import { VisitInstanceRepository } from './visitInstance.repository';
 describe('VisitInstanceRepository', () => {
   const count = jest.fn();
   const findMany = jest.fn();
-  const prisma = { visitInstance: { count, findMany } } as never;
+  const groupBy = jest.fn();
+  const prisma = { visitInstance: { count, findMany, groupBy } } as never;
   let repository: VisitInstanceRepository;
 
   const PENDING_ID = 'dddddddd-dddd-dddd-dddd-dddddddddddd';
@@ -76,6 +77,67 @@ describe('VisitInstanceRepository', () => {
     });
   });
 
+  describe('countByBeneficiary', () => {
+    it('groups due/overdue counts by beneficiaryId + statusLookupValueId, scoped to the caller', async () => {
+      groupBy.mockResolvedValue([
+        { beneficiaryId: 'ben-1', statusLookupValueId: PENDING_ID, _count: { _all: 2 } },
+      ]);
+
+      const result = await repository.countByBeneficiary(['ben-1'], { sakhiId: 'sakhi-1' });
+
+      expect(groupBy).toHaveBeenCalledWith({
+        by: ['beneficiaryId', 'statusLookupValueId'],
+        where: {
+          isDeleted: false,
+          beneficiaryId: { in: ['ben-1'] },
+          sakhiId: 'sakhi-1',
+        },
+        _count: { _all: true },
+      });
+      expect(result).toEqual([
+        { beneficiaryId: 'ben-1', statusLookupValueId: PENDING_ID, _count: { _all: 2 } },
+      ]);
+    });
+
+    it('applies a sakhiIds roster filter instead of sakhiId when scoped to a roster', async () => {
+      groupBy.mockResolvedValue([]);
+
+      await repository.countByBeneficiary(['ben-1'], { sakhiIds: ['sakhi-a', 'sakhi-b'] });
+
+      expect(groupBy).toHaveBeenCalledWith({
+        by: ['beneficiaryId', 'statusLookupValueId'],
+        where: {
+          isDeleted: false,
+          beneficiaryId: { in: ['ben-1'] },
+          sakhiId: { in: ['sakhi-a', 'sakhi-b'] },
+        },
+        _count: { _all: true },
+      });
+    });
+
+    it('applies no sakhi filter when scoping is empty (MANAGER/ADMIN)', async () => {
+      groupBy.mockResolvedValue([]);
+
+      await repository.countByBeneficiary(['ben-1'], {});
+
+      expect(groupBy).toHaveBeenCalledWith({
+        by: ['beneficiaryId', 'statusLookupValueId'],
+        where: {
+          isDeleted: false,
+          beneficiaryId: { in: ['ben-1'] },
+        },
+        _count: { _all: true },
+      });
+    });
+
+    it('returns an empty list without querying when beneficiaryIds is empty', async () => {
+      const result = await repository.countByBeneficiary([], { sakhiId: 'sakhi-1' });
+
+      expect(groupBy).not.toHaveBeenCalled();
+      expect(result).toEqual([]);
+    });
+  });
+
   describe('countDueTodayByBeneficiary', () => {
     it('groups visit rows by beneficiaryId, filtered to today + the given status ids', async () => {
       findMany.mockResolvedValue([
@@ -88,6 +150,7 @@ describe('VisitInstanceRepository', () => {
         ['ben-1', 'ben-2'],
         [PENDING_ID, MISSED_ID],
         TODAY,
+        { sakhiIds: ['ben-1', 'ben-2'] },
       );
 
       expect(findMany).toHaveBeenCalledWith({
@@ -96,6 +159,7 @@ describe('VisitInstanceRepository', () => {
           beneficiaryId: { in: ['ben-1', 'ben-2'] },
           statusLookupValueId: { in: [PENDING_ID, MISSED_ID] },
           schedule: { scheduledDate: TODAY },
+          sakhiId: { in: ['ben-1', 'ben-2'] },
         },
         select: { beneficiaryId: true },
       });
@@ -108,14 +172,14 @@ describe('VisitInstanceRepository', () => {
     });
 
     it('returns an empty map without querying when beneficiaryIds is empty', async () => {
-      const result = await repository.countDueTodayByBeneficiary([], [PENDING_ID], TODAY);
+      const result = await repository.countDueTodayByBeneficiary([], [PENDING_ID], TODAY, {});
 
       expect(findMany).not.toHaveBeenCalled();
       expect(result).toEqual(new Map());
     });
 
     it('returns an empty map without querying when dueOrOverdueStatusLookupValueIds is empty', async () => {
-      const result = await repository.countDueTodayByBeneficiary(['ben-1'], [], TODAY);
+      const result = await repository.countDueTodayByBeneficiary(['ben-1'], [], TODAY, {});
 
       expect(findMany).not.toHaveBeenCalled();
       expect(result).toEqual(new Map());
@@ -123,7 +187,7 @@ describe('VisitInstanceRepository', () => {
   });
 
   describe('findByPada', () => {
-    it('returns full visit rows for the given beneficiaries/status/date', async () => {
+    it('returns full visit rows for the given beneficiaries/status/date, scoped to the caller', async () => {
       const rows = [
         {
           id: 'visit-1',
@@ -133,7 +197,9 @@ describe('VisitInstanceRepository', () => {
       ];
       findMany.mockResolvedValue(rows);
 
-      const result = await repository.findByPada(['ben-1'], [PENDING_ID, MISSED_ID], TODAY);
+      const result = await repository.findByPada(['ben-1'], [PENDING_ID, MISSED_ID], TODAY, {
+        sakhiId: 'sakhi-1',
+      });
 
       expect(findMany).toHaveBeenCalledWith({
         where: {
@@ -141,6 +207,7 @@ describe('VisitInstanceRepository', () => {
           beneficiaryId: { in: ['ben-1'] },
           statusLookupValueId: { in: [PENDING_ID, MISSED_ID] },
           schedule: { scheduledDate: TODAY },
+          sakhiId: 'sakhi-1',
         },
         select: {
           id: true,
@@ -165,20 +232,20 @@ describe('VisitInstanceRepository', () => {
         },
       ]);
 
-      const result = await repository.findByPada(['ben-1'], [PENDING_ID], TODAY);
+      const result = await repository.findByPada(['ben-1'], [PENDING_ID], TODAY, {});
 
       expect(result).toHaveLength(2);
     });
 
     it('returns an empty list without querying when beneficiaryIds is empty', async () => {
-      const result = await repository.findByPada([], [PENDING_ID], TODAY);
+      const result = await repository.findByPada([], [PENDING_ID], TODAY, {});
 
       expect(findMany).not.toHaveBeenCalled();
       expect(result).toEqual([]);
     });
 
     it('returns an empty list without querying when dueOrOverdueStatusLookupValueIds is empty', async () => {
-      const result = await repository.findByPada(['ben-1'], [], TODAY);
+      const result = await repository.findByPada(['ben-1'], [], TODAY, {});
 
       expect(findMany).not.toHaveBeenCalled();
       expect(result).toEqual([]);

@@ -102,11 +102,19 @@ export class VisitInstanceRepository {
    * An empty `beneficiaryIds` returns no rows (not an error) — the caller
    * (api-gateway) may pass an empty list for a pada with zero beneficiaries.
    */
-  async countByBeneficiary(beneficiaryIds: string[]) {
+  async countByBeneficiary(
+    beneficiaryIds: string[],
+    scoping: { sakhiId?: string; sakhiIds?: string[] },
+  ) {
     if (beneficiaryIds.length === 0) return [];
     return this.prisma.visitInstance.groupBy({
       by: ['beneficiaryId', 'statusLookupValueId'],
-      where: { isDeleted: false, beneficiaryId: { in: beneficiaryIds } },
+      where: {
+        isDeleted: false,
+        beneficiaryId: { in: beneficiaryIds },
+        ...(scoping.sakhiId ? { sakhiId: scoping.sakhiId } : {}),
+        ...(scoping.sakhiIds ? { sakhiId: { in: scoping.sakhiIds } } : {}),
+      },
       _count: { _all: true },
     });
   }
@@ -127,6 +135,7 @@ export class VisitInstanceRepository {
     beneficiaryIds: string[],
     dueOrOverdueStatusLookupValueIds: string[],
     today: Date,
+    scoping: { sakhiId?: string; sakhiIds?: string[] },
   ): Promise<Map<string, number>> {
     if (beneficiaryIds.length === 0 || dueOrOverdueStatusLookupValueIds.length === 0) {
       return new Map();
@@ -138,6 +147,8 @@ export class VisitInstanceRepository {
         beneficiaryId: { in: beneficiaryIds },
         statusLookupValueId: { in: dueOrOverdueStatusLookupValueIds },
         schedule: { scheduledDate: today },
+        ...(scoping.sakhiId ? { sakhiId: scoping.sakhiId } : {}),
+        ...(scoping.sakhiIds ? { sakhiId: { in: scoping.sakhiIds } } : {}),
       },
       select: { beneficiaryId: true },
     });
@@ -164,6 +175,7 @@ export class VisitInstanceRepository {
     beneficiaryIds: string[],
     dueOrOverdueStatusLookupValueIds: string[],
     date: Date,
+    scoping: { sakhiId?: string; sakhiIds?: string[] },
   ) {
     if (beneficiaryIds.length === 0 || dueOrOverdueStatusLookupValueIds.length === 0) {
       return [];
@@ -175,6 +187,8 @@ export class VisitInstanceRepository {
         beneficiaryId: { in: beneficiaryIds },
         statusLookupValueId: { in: dueOrOverdueStatusLookupValueIds },
         schedule: { scheduledDate: date },
+        ...(scoping.sakhiId ? { sakhiId: scoping.sakhiId } : {}),
+        ...(scoping.sakhiIds ? { sakhiId: { in: scoping.sakhiIds } } : {}),
       },
       select: {
         id: true,

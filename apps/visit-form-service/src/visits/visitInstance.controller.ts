@@ -24,17 +24,21 @@ export function createVisitInstanceController(service: VisitInstanceService) {
     }),
 
     getCountByBeneficiary: asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
       const authorizationHeader = req.header('authorization');
       if (!authorizationHeader) return next(unauthorized());
       const { beneficiaryIds } = req.body as z.infer<typeof countByBeneficiarySchema>;
-      res.json(ok(await service.getCountByBeneficiary(beneficiaryIds, authorizationHeader)));
+      res.json(
+        ok(await service.getCountByBeneficiary(beneficiaryIds, req.user, authorizationHeader)),
+      );
     }),
 
     getByPada: asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
       const authorizationHeader = req.header('authorization');
       if (!authorizationHeader) return next(unauthorized());
       const { beneficiaryIds, date } = req.body as z.infer<typeof byPadaSchema>;
-      res.json(ok(await service.getByPada(beneficiaryIds, date, authorizationHeader)));
+      res.json(ok(await service.getByPada(beneficiaryIds, date, req.user, authorizationHeader)));
     }),
 
     create: asyncHandler(async (req, res) => {

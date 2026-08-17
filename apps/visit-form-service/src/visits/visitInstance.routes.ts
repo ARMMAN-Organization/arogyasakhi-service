@@ -146,9 +146,10 @@ export function registerVisitInstanceRoutes(doc: DocumentedRouter, service: Visi
       summary:
         'Due/overdue visit counts per beneficiaryId, for the Pada Breakdown widget — the ' +
         "caller (api-gateway) sums these per pada using beneficiary-service's own " +
-        'beneficiaryId -> padaId grouping. No role-scoping here: the caller has already ' +
-        "resolved the in-scope beneficiaryIds via beneficiary-service's own scoping before " +
-        'calling this endpoint — internal use only, not part of the public API surface.',
+        'beneficiaryId -> padaId grouping. `beneficiaryIds` is intersected server-side with ' +
+        "the caller's own scope (SAKHI: own; SUPERVISOR: roster; MANAGER/ADMIN: unscoped) — " +
+        'never trusted as pre-scoped; an out-of-scope id is silently excluded from the ' +
+        'result. Internal use only, not part of the public API surface.',
       tags: ['Visits'],
       responses: {
         200: {
@@ -173,9 +174,9 @@ export function registerVisitInstanceRoutes(doc: DocumentedRouter, service: Visi
       summary:
         "Full visit cards (visitId, visitType, dueDate) for the Pada visit-list screen's " +
         '"open" tab — due (PENDING) or overdue (MISSED) visits scheduled on `date` for the ' +
-        'given beneficiaryIds. No role-scoping here: the caller has already resolved the ' +
-        "in-scope beneficiaryIds via beneficiary-service's own scoping before calling this " +
-        'endpoint — internal use only, not part of the public API surface.',
+        "given beneficiaryIds, intersected server-side with the caller's own scope (SAKHI: " +
+        'own; SUPERVISOR: roster; MANAGER/ADMIN: unscoped) — never trusted as pre-scoped. ' +
+        'Internal use only, not part of the public API surface.',
       tags: ['Visits'],
       responses: {
         200: {
