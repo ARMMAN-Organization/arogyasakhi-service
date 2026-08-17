@@ -55,13 +55,15 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
   { prefix: '/geography-units', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
   { prefix: '/master-data', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
   { prefix: '/project-geography', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
+  // App-wide config key/value store (sync interval, min app version, etc.) —
+  // the Supervisor app's Download Master Data "Application Parameter" row.
+  { prefix: '/application-parameters', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
   // Dedicated-path aliases for /lookups/:categoryCode — same data, same
   // service, just a fixed categoryCode per path (see master-data-alias.routes.ts).
   { prefix: '/risk-categories', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
   { prefix: '/risk-types', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
   { prefix: '/risk-languages', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
   { prefix: '/visit-categories', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
-  { prefix: '/visit-masters', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
   { prefix: '/item-categories', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
   { prefix: '/uom-list', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
   { prefix: '/transaction-types', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
@@ -79,6 +81,10 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
   { prefix: '/beneficiaries', target: appConfig.BENEFICIARY_SERVICE_URL, requiresAuth: true },
   { prefix: '/visits', target: appConfig.VISIT_FORM_SERVICE_URL, requiresAuth: true },
   { prefix: '/visit-schedules', target: appConfig.VISIT_FORM_SERVICE_URL, requiresAuth: true },
+  // Visit-type reference catalog (SRS Appendix A/B) — the Supervisor app's
+  // Download Master Data "Visit Master" row. Owned by visit-form-service
+  // (not auth-service) since it already owns VisitSchedule/VisitCodeType.
+  { prefix: '/visit-masters', target: appConfig.VISIT_FORM_SERVICE_URL, requiresAuth: true },
   { prefix: '/forms', target: appConfig.VISIT_FORM_SERVICE_URL, requiresAuth: true },
   // Admin form-authoring routes (create/patch/publish draft versions) live
   // under /admin/forms in visit-form-service — a distinct prefix from /forms,
