@@ -5,6 +5,7 @@ import { createCallLogsController } from './callLogs.controller';
 import { createCallLogSchema } from './dto/create-call-log.dto';
 import { updateCallLogSchema } from './dto/update-call-log.dto';
 import { listRecentCallLogsQuerySchema } from './dto/list-recent-call-logs.dto';
+import { listSakhiCallsQuerySchema } from './dto/list-sakhi-calls.dto';
 import {
   CALL_SHEET_STAT_KINDS,
   listCallSheetStatsBatchQuerySchema,
@@ -184,6 +185,29 @@ export function registerCallLogsRoutes(doc: DocumentedRouter, service: Operation
     requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
     validate(sakhiIdParamsSchema, 'params'),
     controller.listBySakhi,
+  );
+
+  // Dedicated-path alias for GET /call-logs/by-sakhi/:sakhiId — same
+  // handler, same response — for the Beneficiary Data Download screen's
+  // "Sakhi Calls" row, which expects sakhiId as a query param at this path.
+  doc.get(
+    '/sakhi-calls',
+    {
+      summary: 'Full call history for a Sakhi (alias for GET /call-logs/by-sakhi/:sakhiId)',
+      tags: ['Supervisor Operations'],
+      query: listSakhiCallsQuerySchema,
+      responses: {
+        200: { description: 'Call logs for this Sakhi', schema: envelope(z.array(callLogSchema)) },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Sakhi not assigned to caller', schema: apiErrorSchema },
+        404: { description: 'Sakhi not found', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(listSakhiCallsQuerySchema, 'query'),
+    controller.listBySakhiQuery,
   );
 
   doc.get(

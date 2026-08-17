@@ -213,6 +213,16 @@ export class OperationsService {
     return this.repository.findInventoryTransactions();
   }
 
+  /** A SUPERVISOR may only view their own transaction. MANAGER and ADMIN are unrestricted. */
+  async getInventoryTransactionById(id: string, caller: CallerIdentity) {
+    const transaction = await this.repository.findInventoryTransactionById(id);
+    if (!transaction) throw notFound('Inventory transaction not found.');
+    if (transaction.supervisorId !== caller.id && !isPrivileged(caller)) {
+      throw forbidden('You do not have access to this transaction.');
+    }
+    return transaction;
+  }
+
   /**
    * A SUPERVISOR may only see a Sakhi's history if that Sakhi is actually
    * assigned to them (checked via auth-service, since sakhi_profiles isn't

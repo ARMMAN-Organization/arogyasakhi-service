@@ -892,6 +892,42 @@ describe('OperationsService', () => {
     });
   });
 
+  describe('getInventoryTransactionById', () => {
+    it('returns the transaction when the caller owns it', async () => {
+      repository.findInventoryTransactionById.mockResolvedValue(inventoryTransactionRow);
+      await expect(
+        service.getInventoryTransactionById(
+          'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+          supervisorCaller,
+        ),
+      ).resolves.toBe(inventoryTransactionRow);
+    });
+
+    it('throws 404 when the transaction does not exist', async () => {
+      repository.findInventoryTransactionById.mockResolvedValue(null);
+      await expect(
+        service.getInventoryTransactionById('missing', supervisorCaller),
+      ).rejects.toMatchObject({ status: 404 });
+    });
+
+    it('rejects a Supervisor who does not own the transaction', async () => {
+      repository.findInventoryTransactionById.mockResolvedValue(inventoryTransactionRow);
+      await expect(
+        service.getInventoryTransactionById(
+          'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+          otherSupervisorCaller,
+        ),
+      ).rejects.toMatchObject({ status: 403 });
+    });
+
+    it('allows an ADMIN to view a transaction they do not own', async () => {
+      repository.findInventoryTransactionById.mockResolvedValue(inventoryTransactionRow);
+      await expect(
+        service.getInventoryTransactionById('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', adminCaller),
+      ).resolves.toBe(inventoryTransactionRow);
+    });
+  });
+
   describe('updateInventoryTransaction', () => {
     it('updates via repository and returns the updated row when the caller owns the transaction', async () => {
       repository.findInventoryTransactionById.mockResolvedValue(inventoryTransactionRow);
