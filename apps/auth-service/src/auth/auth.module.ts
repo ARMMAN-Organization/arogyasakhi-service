@@ -9,11 +9,10 @@ import { registerAuthRoutes } from './auth.routes';
 export function createAuthModule(
   prisma: PrismaService,
   signer: TokenSigner,
-  accessTokenTtl: string,
-  refreshTokenTtl: string,
+  adminAccessTokenTtl: string,
 ): DocumentedRouter {
   const repository = new AuthRepository(prisma);
-  const service = new AuthService(repository, signer, accessTokenTtl, refreshTokenTtl);
+  const service = new AuthService(repository, signer, adminAccessTokenTtl);
   const doc = createDocumentedRouter();
   registerAuthRoutes(doc, service, signer);
   return doc;

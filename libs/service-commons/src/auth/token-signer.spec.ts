@@ -45,4 +45,14 @@ describe('LocalKeypairTokenSigner', () => {
     const token = await signer.sign({ sub: 'user-1' }, '-1s');
     await expect(signer.verify(token)).rejects.toThrow();
   });
+
+  it('signs a payload with no expiresIn and it never expires', async () => {
+    const token = await signer.sign({ sub: 'user-1', roles: ['SAKHI'] });
+    const payloadJson = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString());
+
+    expect(payloadJson.exp).toBeUndefined();
+
+    const payload = await signer.verify(token);
+    expect(payload.sub).toBe('user-1');
+  });
 });

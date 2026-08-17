@@ -89,7 +89,7 @@ describe('AuthService', () => {
     jest.clearAllMocks();
     process.env.PII_ENCRYPTION_KEY = randomBytes(32).toString('base64');
     signer.sign.mockResolvedValue('signed-access-token');
-    service = new AuthService(repository, signer, '15m', '30d');
+    service = new AuthService(repository, signer, '15m');
   });
 
   afterEach(() => {
@@ -109,7 +109,7 @@ describe('AuthService', () => {
       expect(tokens).toEqual({
         accessToken: 'signed-access-token',
         refreshToken: 'plain-refresh-token',
-        expiresIn: 900,
+        expiresIn: null,
         roles: ['SAKHI'],
         projectId: 'project-1',
         geographyUnitId: 'geo-1',
@@ -122,10 +122,61 @@ describe('AuthService', () => {
         }),
       );
       expect(repository.createSession).not.toHaveBeenCalled();
+      // No second (expiresIn) argument: the access token carries no exp
+      // claim and never expires by time.
+      expect(signer.sign).toHaveBeenCalledWith({
+        sub: 'user-1',
+        roles: ['SAKHI'],
+        projectId: 'project-1',
+        geographyUnitId: 'geo-1',
+      });
+    });
+
+    it('issues an expiring access token for an ADMIN login', async () => {
+      const adminUser = {
+        ...ACTIVE_USER,
+        userRoles: [{ projectId: null, geographyUnitId: null, role: { roleCode: 'ADMIN' } }],
+      };
+      repository.findUserByUsername.mockResolvedValue(adminUser as never);
+      (verifyPassword as jest.Mock).mockResolvedValue(true);
+
+      const tokens = await service.login(
+        { username: 'test.sakhi', password: 'correct' },
+        '127.0.0.1',
+      );
+
+      expect(tokens).toEqual({
+        accessToken: 'signed-access-token',
+        refreshToken: 'plain-refresh-token',
+        expiresIn: 900,
+        roles: ['ADMIN'],
+        projectId: null,
+        geographyUnitId: null,
+      });
       expect(signer.sign).toHaveBeenCalledWith(
-        { sub: 'user-1', roles: ['SAKHI'], projectId: 'project-1', geographyUnitId: 'geo-1' },
+        { sub: 'user-1', roles: ['ADMIN'], projectId: null, geographyUnitId: null },
         '15m',
       );
+    });
+
+    it('still expires the access token when ADMIN is only one of several roles held', async () => {
+      const multiRoleUser = {
+        ...ACTIVE_USER,
+        userRoles: [
+          { projectId: 'project-1', geographyUnitId: 'geo-1', role: { roleCode: 'SUPERVISOR' } },
+          { projectId: null, geographyUnitId: null, role: { roleCode: 'ADMIN' } },
+        ],
+      };
+      repository.findUserByUsername.mockResolvedValue(multiRoleUser as never);
+      (verifyPassword as jest.Mock).mockResolvedValue(true);
+
+      const tokens = await service.login(
+        { username: 'test.sakhi', password: 'correct' },
+        '127.0.0.1',
+      );
+
+      expect(tokens.expiresIn).toBe(900);
+      expect(signer.sign).toHaveBeenCalledWith(expect.anything(), '15m');
     });
 
     it('rejects with a generic error for a non-existent username', async () => {
@@ -170,11 +221,13 @@ describe('AuthService', () => {
   });
 
   describe('refresh', () => {
+    // expiresAt is null: sessions no longer expire by time (see
+    // AuthService.issueTokens) — only revokedAt gates rejection now.
     const ACTIVE_SESSION = {
       id: 'session-1',
       userId: 'user-1',
       revokedAt: null,
-      expiresAt: new Date(Date.now() + 1000 * 60 * 60),
+      expiresAt: null,
     };
 
     it('rotates the refresh token and issues a new pair on a valid token', async () => {
@@ -187,21 +240,28 @@ describe('AuthService', () => {
       expect(tokens).toEqual({
         accessToken: 'signed-access-token',
         refreshToken: 'plain-refresh-token',
-        expiresIn: 900,
+        expiresIn: null,
         roles: ['SAKHI'],
         projectId: 'project-1',
         geographyUnitId: 'geo-1',
       });
     });
 
-    it('rejects an expired refresh token', async () => {
+    it('still refreshes a session created before the never-expires change (real expiresAt, not revoked)', async () => {
+      // A pre-existing row can still carry a real expiresAt timestamp from
+      // before this schema change — including one that would have been "in
+      // the past" under the old TTL check. It must no longer matter: only
+      // revokedAt gates rejection now.
       repository.findActiveSessionByRefreshTokenHash.mockResolvedValue({
         ...ACTIVE_SESSION,
         expiresAt: new Date(Date.now() - 1000),
       } as never);
+      repository.findUserById.mockResolvedValue(ACTIVE_USER as never);
 
-      await expect(service.refresh('expired-token', null)).rejects.toMatchObject({ status: 401 });
-      expect(repository.revokeSession).not.toHaveBeenCalled();
+      const tokens = await service.refresh('presented-refresh-token', '127.0.0.1');
+
+      expect(repository.revokeSession).toHaveBeenCalledWith('session-1');
+      expect(tokens.expiresIn).toBeNull();
     });
 
     it('rejects an already-revoked refresh token', async () => {

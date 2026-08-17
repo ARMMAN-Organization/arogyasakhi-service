@@ -117,7 +117,12 @@ model UserSession {
   // device_registry.device_id — deferred; not modeled yet per current scope.
   deviceId         String?   @map("device_id")
   issuedAt         DateTime  @map("issued_at")
-  expiresAt        DateTime  @map("expires_at")
+  // Nullable: sessions no longer expire by time (see AuthService.issueTokens)
+  // — only an explicit /auth/logout or admin revocation sets revokedAt below.
+  // Null on every session created after that change; a pre-existing session
+  // from before it keeps its original real timestamp until its next refresh
+  // rotates it into a fresh, non-expiring one.
+  expiresAt        DateTime? @map("expires_at")
   revokedAt        DateTime? @map("revoked_at")
   ipAddress        String?   @map("ip_address") @db.VarChar(45)
   createdAt        DateTime  @default(now()) @map("created_at")

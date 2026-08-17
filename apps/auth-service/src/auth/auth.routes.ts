@@ -35,11 +35,23 @@ const createUserRequestSchema = createUserSchema.extend({
 });
 
 const authTokensSchema = z.object({
-  accessToken: z.string().openapi({ description: 'Short-lived JWT access token (RS256).' }),
+  accessToken: z.string().openapi({
+    description:
+      'JWT access token (RS256). Non-expiring (no exp claim) for every role except ADMIN, ' +
+      'which gets a short-lived expiry (JWT_ADMIN_ACCESS_TOKEN_TTL).',
+  }),
   refreshToken: z
     .string()
     .openapi({ description: 'Opaque refresh token; single-use, rotated on refresh.' }),
-  expiresIn: z.number().openapi({ description: 'Access token lifetime in seconds.', example: 900 }),
+  expiresIn: z
+    .number()
+    .nullable()
+    .openapi({
+      description:
+        'Access token lifetime in seconds, or null if it never expires. Null for every role ' +
+        'except ADMIN — only /auth/logout or revocation ends a non-expiring session.',
+      example: null,
+    }),
   roles: z
     .array(z.string())
     .openapi({ description: 'Every role code the caller holds.', example: ['SAKHI'] }),

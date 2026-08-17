@@ -29,12 +29,21 @@ export interface CallerScope {
 /** Prisma unique-constraint violation code (mobileNumber/email/roleCode etc). */
 const PRISMA_UNIQUE_CONSTRAINT_CODE = 'P2002';
 
+/**
+ * The one role that still gets a time-based access-token expiry. Every
+ * other role (SAKHI, SUPERVISOR, MANAGER) gets a non-expiring token — see
+ * `issueTokens`. A user holding ADMIN alongside any other role is still
+ * treated as ADMIN for this check (the more restrictive policy wins). The
+ * refresh-token session itself never expires by time for any role — only
+ * `/auth/logout` or an admin revocation (`revokedAt`) ends it.
+ */
+const EXPIRING_ROLE = 'ADMIN';
+
 export class AuthService {
   constructor(
     private readonly repository: AuthRepository,
     private readonly signer: TokenSigner,
-    private readonly accessTokenTtl: string,
-    private readonly refreshTokenTtl: string,
+    private readonly adminAccessTokenTtl: string,
   ) {}
 
   async login(input: LoginInput, ipAddress: string | null): Promise<AuthTokens> {
@@ -63,13 +72,13 @@ export class AuthService {
     const tokenHash = hashRefreshToken(refreshToken);
     const session = await this.repository.findActiveSessionByRefreshTokenHash(tokenHash);
 
-    if (!session || session.revokedAt || session.expiresAt < new Date()) {
-      throw unauthorized('Invalid or expired refresh token.');
+    if (!session || session.revokedAt) {
+      throw unauthorized('Invalid or revoked refresh token.');
     }
 
     const user = await this.repository.findUserById(session.userId);
     if (!user || user.isDeleted || user.status !== 'ACTIVE') {
-      throw unauthorized('Invalid or expired refresh token.');
+      throw unauthorized('Invalid or revoked refresh token.');
     }
 
     // Rotate: revoke the presented token, issue a brand new pair.
@@ -349,15 +358,16 @@ export class AuthService {
     const roles = userRoles.map((ur) => ur.role.roleCode);
     const [primary] = userRoles;
 
-    const accessToken = await this.signer.sign(
-      {
-        sub: userId,
-        roles,
-        projectId: primary?.projectId ?? null,
-        geographyUnitId: primary?.geographyUnitId ?? null,
-      },
-      this.accessTokenTtl,
-    );
+    const isExpiringRole = roles.includes(EXPIRING_ROLE);
+    const accessTokenPayload = {
+      sub: userId,
+      roles,
+      projectId: primary?.projectId ?? null,
+      geographyUnitId: primary?.geographyUnitId ?? null,
+    };
+    const accessToken = isExpiringRole
+      ? await this.signer.sign(accessTokenPayload, this.adminAccessTokenTtl)
+      : await this.signer.sign(accessTokenPayload);
 
     const refreshToken = generateRefreshToken();
     const now = new Date();
@@ -365,7 +375,6 @@ export class AuthService {
       userId,
       refreshTokenHash: hashRefreshToken(refreshToken),
       issuedAt: now,
-      expiresAt: new Date(now.getTime() + parseDurationMs(this.refreshTokenTtl)),
       ipAddress,
     };
 
@@ -378,7 +387,9 @@ export class AuthService {
     return {
       accessToken,
       refreshToken,
-      expiresIn: Math.floor(parseDurationMs(this.accessTokenTtl) / 1000),
+      expiresIn: isExpiringRole
+        ? Math.floor(parseDurationMs(this.adminAccessTokenTtl) / 1000)
+        : null,
       roles,
       projectId: primary?.projectId ?? null,
       geographyUnitId: primary?.geographyUnitId ?? null,
