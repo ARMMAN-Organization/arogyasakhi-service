@@ -15,6 +15,7 @@ import { createVisitInstanceModule } from './visits/visitInstance.module';
 import { buildVisitFormServiceOpenApiDocument } from './docs/openapi';
 import { createFormModule } from './forms/form.module';
 import { createVisitScheduleModule } from './visit-schedules/visitSchedule.module';
+import { createVisitMasterModule } from './visit-masters/visitMaster.module';
 
 // Re-export shared HTTP helpers so feature routers can import from a single place.
 export {
@@ -62,6 +63,7 @@ export function createApp(prisma: PrismaService): Application {
   const visitInstanceModule = createVisitInstanceModule(prisma);
   const formModule = createFormModule(prisma);
   const visitScheduleModule = createVisitScheduleModule(prisma);
+  const visitMasterModule = createVisitMasterModule(prisma);
 
   // All routes live under the global `api/v1` prefix.
   const api = express.Router();
@@ -75,12 +77,14 @@ export function createApp(prisma: PrismaService): Application {
         visitInstanceModule.registry,
         formModule.registry,
         visitScheduleModule.registry,
+        visitMasterModule.registry,
       ),
     ),
   );
   api.use(visitInstanceModule.router);
   api.use(formModule.router);
   api.use(visitScheduleModule.router);
+  api.use(visitMasterModule.router);
   app.use('/api/v1', api);
 
   app.use(notFoundHandler);

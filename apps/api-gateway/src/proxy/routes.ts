@@ -54,6 +54,22 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
   { prefix: '/lookups', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
   { prefix: '/geography-units', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
   { prefix: '/master-data', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
+  { prefix: '/project-geography', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
+  // App-wide config key/value store (sync interval, min app version, etc.) —
+  // the Supervisor app's Download Master Data "Application Parameter" row.
+  { prefix: '/application-parameters', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
+  // Dedicated-path aliases for /lookups/:categoryCode — same data, same
+  // service, just a fixed categoryCode per path (see master-data-alias.routes.ts).
+  { prefix: '/risk-categories', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
+  { prefix: '/risk-types', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
+  { prefix: '/risk-languages', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
+  { prefix: '/visit-categories', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
+  { prefix: '/item-categories', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
+  { prefix: '/uom-list', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
+  { prefix: '/transaction-types', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
+  { prefix: '/gathering-statuses', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
+  { prefix: '/gathering-types', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
+  { prefix: '/ddl-items', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
   // Sakhi profile reads (list under a project, single lookup) — used by the
   // Supervisor's Sakhi picker/detail header on inventory/meeting screens.
   { prefix: '/sakhis', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
@@ -65,6 +81,10 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
   { prefix: '/beneficiaries', target: appConfig.BENEFICIARY_SERVICE_URL, requiresAuth: true },
   { prefix: '/visits', target: appConfig.VISIT_FORM_SERVICE_URL, requiresAuth: true },
   { prefix: '/visit-schedules', target: appConfig.VISIT_FORM_SERVICE_URL, requiresAuth: true },
+  // Visit-type reference catalog (SRS Appendix A/B) — the Supervisor app's
+  // Download Master Data "Visit Master" row. Owned by visit-form-service
+  // (not auth-service) since it already owns VisitSchedule/VisitCodeType.
+  { prefix: '/visit-masters', target: appConfig.VISIT_FORM_SERVICE_URL, requiresAuth: true },
   { prefix: '/forms', target: appConfig.VISIT_FORM_SERVICE_URL, requiresAuth: true },
   // Admin form-authoring routes (create/patch/publish draft versions) live
   // under /admin/forms in visit-form-service — a distinct prefix from /forms,
@@ -80,6 +100,12 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
   // visit-form-service calls it through the gateway after persisting a
   // visit-linked submission, to trigger the risk-grading pipeline.
   { prefix: '/risk-assessments', target: appConfig.RISK_REFERRAL_SERVICE_URL, requiresAuth: true },
+  // Risk condition master-data read (batch code lookup, or a full
+  // download with no conditionCode filter) — was missing here despite
+  // being implemented downstream, so it 404'd at the gateway.
+  { prefix: '/risk-conditions', target: appConfig.RISK_REFERRAL_SERVICE_URL, requiresAuth: true },
+  // Dedicated-path alias for /risk-conditions — same data, same service.
+  { prefix: '/risk-parameters', target: appConfig.RISK_REFERRAL_SERVICE_URL, requiresAuth: true },
   { prefix: '/closures', target: appConfig.CLOSURE_REOPEN_SERVICE_URL, requiresAuth: true },
   // Internal-use decision endpoint, not part of the public Quick Response
   // surface — approval-service calls it through the gateway (rather than
@@ -140,6 +166,12 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
   },
   {
     prefix: '/inventory-items',
+    target: appConfig.SUPERVISOR_OPERATIONS_SERVICE_URL,
+    requiresAuth: true,
+  },
+  // Dedicated-path alias for /inventory-items — same data, same service.
+  {
+    prefix: '/item-master-list',
     target: appConfig.SUPERVISOR_OPERATIONS_SERVICE_URL,
     requiresAuth: true,
   },

@@ -53,6 +53,23 @@ export const ROLES: { roleCode: string; roleName: string; description: string }[
  * docs/Revised_App_Form_Final_20.3.26.xlsx.md in beneficiary-service,
  * Registration_PW_D sheet rows 23-32) — the SRS's authoritative source for
  * these categories, now available in-repo.
+ *
+ * RISK_CATEGORY, RISK_TYPE, VISIT_CATEGORY, ITEM_CATEGORY, TRANSACTION_TYPE,
+ * GATHERING_TYPE, and GATHERING_STATUS value_codes each match 1:1 the member
+ * names of the Postgres enum they expose as a downloadable master list for
+ * the Supervisor app (OverallRiskCategory, RiskPhase, VisitCodeType,
+ * InventoryItemCategory, InventoryTransactionType, SupervisorEventType,
+ * SupervisorEventStatus respectively) — same backfill rationale as
+ * VISIT_STATUS/REFERRAL_TYPE/CLOSURE_REASON above, and same drift risk: if
+ * the source enum ever gains/loses a member, this list needs a matching edit.
+ *
+ * LANGUAGE is sourced from docs/Arogya_Sakhi_SRS_v3.0.md Appendix I ("Language
+ * Support") — English and Marathi only, Hindi explicitly removed from scope.
+ *
+ * UOM is PROVISIONAL, same placeholder stance as BENEFICIARY_TYPE above — no
+ * source document defines a unit-of-measure master list, and
+ * inventory_items.unit is deliberately free text per the ERD, so these
+ * values are advisory only (a Supervisor-app picker), not a constraint.
  */
 export const LOOKUP_CATEGORIES: {
   categoryCode: string;
@@ -292,6 +309,136 @@ export const LOOKUP_CATEGORIES: {
       { valueCode: 'REJECTED', valueLabel: 'Rejected', sortOrder: 2 },
       { valueCode: 'AUTO_LAPSED', valueLabel: 'Auto-lapsed', sortOrder: 3 },
       { valueCode: 'CANCELLED', valueLabel: 'Cancelled', sortOrder: 4 },
+    ],
+  },
+  {
+    categoryCode: 'RISK_CATEGORY',
+    categoryName: 'Risk Category',
+    description:
+      "Overall risk category for a beneficiary case, mirroring risk-referral-service's " +
+      'OverallRiskCategory Postgres enum as a downloadable master list for the Supervisor app.',
+    values: [
+      { valueCode: 'NORMAL', valueLabel: 'Normal', sortOrder: 0 },
+      { valueCode: 'LOW', valueLabel: 'Low', sortOrder: 1 },
+      { valueCode: 'MEDIUM', valueLabel: 'Medium', sortOrder: 2 },
+      { valueCode: 'HIGH', valueLabel: 'High', sortOrder: 3 },
+      { valueCode: 'CRITICAL', valueLabel: 'Critical', sortOrder: 4 },
+    ],
+  },
+  {
+    categoryCode: 'RISK_TYPE',
+    categoryName: 'Risk Type',
+    description:
+      "Program phase a risk condition/assessment applies to, mirroring risk-referral-service's " +
+      'RiskPhase Postgres enum as a downloadable master list for the Supervisor app.',
+    values: [
+      { valueCode: 'REGISTRATION', valueLabel: 'Registration', sortOrder: 0 },
+      { valueCode: 'ANC', valueLabel: 'ANC', sortOrder: 1 },
+      { valueCode: 'DELIVERY', valueLabel: 'Delivery', sortOrder: 2 },
+      { valueCode: 'PP', valueLabel: 'Postpartum (PP)', sortOrder: 3 },
+      { valueCode: 'NN', valueLabel: 'Neonatal (NN)', sortOrder: 4 },
+      { valueCode: 'INC', valueLabel: 'Infant & Child (INC)', sortOrder: 5 },
+      { valueCode: 'CCV', valueLabel: 'Continuum of Care Visit (CCV)', sortOrder: 6 },
+    ],
+  },
+  {
+    categoryCode: 'VISIT_CATEGORY',
+    categoryName: 'Visit Category',
+    description:
+      "Visit-schedule code, mirroring visit-form-service's VisitCodeType Postgres enum as a " +
+      'downloadable master list for the Supervisor app.',
+    values: [
+      { valueCode: 'ANC', valueLabel: 'ANC', sortOrder: 0 },
+      { valueCode: 'ANC_HR', valueLabel: 'ANC (High-Risk)', sortOrder: 1 },
+      { valueCode: 'ANC_POST_EDD', valueLabel: 'ANC (Post-EDD)', sortOrder: 2 },
+      { valueCode: 'DELIVERY', valueLabel: 'Delivery', sortOrder: 3 },
+      { valueCode: 'PP', valueLabel: 'Postpartum (PP)', sortOrder: 4 },
+      { valueCode: 'NN', valueLabel: 'Neonatal (NN)', sortOrder: 5 },
+      { valueCode: 'INC', valueLabel: 'Infant & Child (INC)', sortOrder: 6 },
+      { valueCode: 'INC_HR', valueLabel: 'Infant & Child (High-Risk)', sortOrder: 7 },
+      { valueCode: 'CCV', valueLabel: 'Continuum of Care Visit', sortOrder: 8 },
+      { valueCode: 'CCV_HR', valueLabel: 'Continuum of Care Visit (High-Risk)', sortOrder: 9 },
+    ],
+  },
+  {
+    categoryCode: 'ITEM_CATEGORY',
+    categoryName: 'Item Category',
+    description:
+      "Inventory item category, mirroring supervisor-operations-service's InventoryItemCategory " +
+      'Postgres enum as a downloadable master list for the Supervisor app.',
+    values: [
+      { valueCode: 'CONSUMABLE', valueLabel: 'Consumable', sortOrder: 0 },
+      { valueCode: 'INSTRUMENT', valueLabel: 'Instrument', sortOrder: 1 },
+    ],
+  },
+  {
+    categoryCode: 'TRANSACTION_TYPE',
+    categoryName: 'Transaction Type',
+    description:
+      "Inventory transaction type, mirroring supervisor-operations-service's " +
+      'InventoryTransactionType Postgres enum as a downloadable master list for the Supervisor app.',
+    values: [
+      { valueCode: 'HANDOVER', valueLabel: 'Handover', sortOrder: 0 },
+      { valueCode: 'RETURNED', valueLabel: 'Returned', sortOrder: 1 },
+      { valueCode: 'PERMANENT_DAMAGED', valueLabel: 'Permanently Damaged', sortOrder: 2 },
+      { valueCode: 'MISPLACED', valueLabel: 'Misplaced', sortOrder: 3 },
+      { valueCode: 'CONSUMED', valueLabel: 'Consumed', sortOrder: 4 },
+    ],
+  },
+  {
+    categoryCode: 'GATHERING_TYPE',
+    categoryName: 'Gathering Type',
+    description:
+      "Supervisor event type, mirroring supervisor-operations-service's SupervisorEventType " +
+      'Postgres enum as a downloadable master list for the Supervisor app.',
+    values: [
+      { valueCode: 'MEETING', valueLabel: 'Meeting', sortOrder: 0 },
+      { valueCode: 'TRAINING', valueLabel: 'Training', sortOrder: 1 },
+    ],
+  },
+  {
+    categoryCode: 'GATHERING_STATUS',
+    categoryName: 'Gathering Status',
+    description:
+      "Supervisor event status, mirroring supervisor-operations-service's SupervisorEventStatus " +
+      'Postgres enum as a downloadable master list for the Supervisor app.',
+    values: [
+      { valueCode: 'SCHEDULED', valueLabel: 'Scheduled', sortOrder: 0 },
+      { valueCode: 'COMPLETED', valueLabel: 'Completed', sortOrder: 1 },
+      { valueCode: 'CANCELLED', valueLabel: 'Cancelled', sortOrder: 2 },
+    ],
+  },
+  {
+    categoryCode: 'LANGUAGE',
+    categoryName: 'Language',
+    description:
+      'App-wide supported language set (SRS Appendix I "Language Support" — English and ' +
+      'Marathi only for initial release, Hindi removed from scope, default English). Exposed ' +
+      "as a downloadable master list at /risk-languages for the Supervisor app; this is the app's " +
+      'general language toggle, not risk-specific translated content, which does not exist as ' +
+      'structured data anywhere in this codebase.',
+    values: [
+      { valueCode: 'EN', valueLabel: 'English', sortOrder: 0 },
+      { valueCode: 'MR', valueLabel: 'Marathi', sortOrder: 1 },
+    ],
+  },
+  {
+    categoryCode: 'UOM',
+    categoryName: 'Unit of Measure',
+    description:
+      'PROVISIONAL — placeholder pending a real source document, same as BENEFICIARY_TYPE ' +
+      'above. inventory_items.unit is deliberately free text (see ERD) and is NOT constrained ' +
+      'by this list; these are advisory values for a Supervisor-app picker only.',
+    values: [
+      { valueCode: 'PIECE', valueLabel: 'Piece', sortOrder: 0 },
+      { valueCode: 'BOX', valueLabel: 'Box', sortOrder: 1 },
+      { valueCode: 'STRIP', valueLabel: 'Strip', sortOrder: 2 },
+      { valueCode: 'BOTTLE', valueLabel: 'Bottle', sortOrder: 3 },
+      { valueCode: 'PACKET', valueLabel: 'Packet', sortOrder: 4 },
+      { valueCode: 'KG', valueLabel: 'Kilogram', sortOrder: 5 },
+      { valueCode: 'GRAM', valueLabel: 'Gram', sortOrder: 6 },
+      { valueCode: 'LITRE', valueLabel: 'Litre', sortOrder: 7 },
+      { valueCode: 'ML', valueLabel: 'Millilitre', sortOrder: 8 },
     ],
   },
 ];

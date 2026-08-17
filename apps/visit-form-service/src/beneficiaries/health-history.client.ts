@@ -85,7 +85,7 @@ export async function syncHealthHistory(
   const conditionCodes = extractSelfReportedConditionCodes(formData);
   if (conditionCodes.length === 0) return;
 
-  let resolved: { conditionCode: string; riskConditionId: string }[];
+  let resolved: { id: string; conditionCode: string }[];
   try {
     const res = await fetch(
       `${API_GATEWAY_BASE_URL}/api/v1/risk-conditions?conditionCode=${conditionCodes.join(',')}`,
@@ -99,7 +99,7 @@ export async function syncHealthHistory(
       return;
     }
     const body = (await res.json()) as {
-      data: { conditionCode: string; riskConditionId: string }[];
+      data: { id: string; conditionCode: string }[];
     };
     resolved = body.data;
   } catch (err) {
@@ -112,7 +112,7 @@ export async function syncHealthHistory(
   }
 
   const assessedAt = new Date().toISOString();
-  for (const { riskConditionId } of resolved) {
+  for (const { id: riskConditionId } of resolved) {
     try {
       const res = await fetch(
         `${API_GATEWAY_BASE_URL}/api/v1/beneficiaries/${beneficiaryId}/risk-condition-summary`,

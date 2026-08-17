@@ -187,6 +187,48 @@ model VisitStatusHistory {
   @@map("visit_status_history")
 }
 
+// Read-only reference/catalog data for the SRS's named visit-type
+// definitions (docs/Arogya_Sakhi_SRS_v3.0.md Appendix A "Visit Schedule
+// Rules" / Appendix B "Visit Windows Summary") — e.g. ANC1, PP3, INC_HR,
+// CCV_HR_SAM. Distinct from the coarser lookup_values VISIT_CATEGORY
+// grouping served by auth-service's /visit-categories: this is the actual
+// per-visit-type catalog (name, journey, scheduling-rule summary) that the
+// Supervisor app's "Download Master Data" screen's "Visit Master" row
+// exposes. visitType (the existing VisitCodeType enum, also used by
+// VisitSchedule.visitType above) plus entityType together already encode
+// each row's journey/phase (e.g. ANC/ANC_HR/ANC_POST_EDD + MOTHER ==
+// Mother-ANC; INC/INC_HR + CHILD == Child-INC) — no separate phase column
+// needed. visitCode is free-form (not the VisitCodeType enum itself)
+// because several rows share one visitType (e.g. ANC1 and the ANC2-ANCn
+// template both have visitType ANC) and because the HR/special variants
+// (ANC-HR, ANC-Post EDD, INC-HR, CCV-HR SAM/Other) aren't a single
+// canonical code on their own.
+model VisitMaster {
+  id              String         @id @default(uuid()) @map("visit_master_id")
+  // ANC1, ANC_REGULAR (template for ANC2-ANCn), PP3, INC_HR, CCV_HR_SAM, etc.
+  visitCode       String         @unique @map("visit_code") @db.VarChar(40)
+  visitType       VisitCodeType  @map("visit_type")
+  displayName     String         @map("display_name") @db.VarChar(160)
+  entityType      FormEntityType @map("entity_type")
+  // Position within its journey (e.g. PP3 -> 3). Null for non-sequential
+  // rows: HR/Post-EDD visits (triggered by a condition, not a fixed slot)
+  // and the ANC2-ANCn/INC2-INCn/CCV1-CCVn "regular" template rows, which
+  // stand for a variable number of actual generated visits.
+  sequenceOrder   Int?           @map("sequence_order")
+  // Scheduling-rule summary transcribed from SRS Appendix B, e.g.
+  // "Day +58, window Day +53 to Day +63".
+  description     String?
+  isActive        Boolean        @default(true) @map("is_active")
+  createdAt       DateTime       @default(now()) @map("created_at")
+  createdByUserId String?        @map("created_by_user_id")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+  updatedByUserId String?        @map("updated_by_user_id")
+  isDeleted       Boolean        @default(false) @map("is_deleted")
+  deletedAt       DateTime?      @map("deleted_at")
+
+  @@map("visit_masters")
+}
+
 model FormDefinition {
   id              String               @id @default(uuid()) @map("form_definition_id")
   formCode        String               @unique @map("form_code") @db.VarChar(60)

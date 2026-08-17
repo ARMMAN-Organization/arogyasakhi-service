@@ -24,7 +24,7 @@ const valueIdParamsSchema = z
   .object({ id: z.string().uuid().openapi({ example: '3eb3104f-3596-418f-8ccd-2e95323e14ba' }) })
   .strict();
 
-const lookupValueSchema = z.object({
+export const lookupValueSchema = z.object({
   id: z.string().uuid().openapi({ example: '3eb3104f-3596-418f-8ccd-2e95323e14ba' }),
   valueCode: z.string().openapi({ example: 'HIGH' }),
   valueLabel: z.string().openapi({ example: 'High' }),
@@ -33,7 +33,7 @@ const lookupValueSchema = z.object({
   isActive: z.boolean().openapi({ example: true }),
 });
 
-const lookupCategorySchema = z.object({
+export const lookupCategorySchema = z.object({
   id: z.string().uuid().openapi({ example: 'e23ecb9f-1bc5-493e-87a6-9a2960e3cd1c' }),
   categoryCode: z.string().openapi({ example: 'RISK_GRADE' }),
   categoryName: z.string().openapi({ example: 'Risk Grade' }),

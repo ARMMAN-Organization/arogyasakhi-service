@@ -419,6 +419,28 @@ model Pada {
   @@map("padas")
 }
 
+// Flat app-wide configuration key/value store — NOT a dropdown/reference list
+// (see LookupCategory/LookupValue below for that). Holds only non-sensitive,
+// non-business-rule display/behavior config the mobile apps cache locally
+// (e.g. a sync interval, minimum supported app version, a feature-flag
+// toggle, a max upload size). Business thresholds/rates/incentive figures
+// belong in GoRules/rules-service, never here, and this must never hold
+// secrets/credentials (root .claude/CLAUDE.md §9). Deliberately no
+// category/hierarchy — one key maps to one string value.
+model ApplicationParameter {
+  id              String   @id @default(uuid()) @map("application_parameter_id")
+  paramKey        String   @unique @map("param_key") @db.VarChar(100)
+  paramValue      String   @map("param_value") @db.VarChar(500)
+  description     String?
+  isActive        Boolean  @default(true) @map("is_active")
+  createdAt       DateTime @default(now()) @map("created_at")
+  createdByUserId String?  @map("created_by_user_id")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  updatedByUserId String?  @map("updated_by_user_id")
+
+  @@map("application_parameters")
+}
+
 // Column set matches ERD's lookup_categories/lookup_values tables. All
 // dropdown/select/radio options used in approved forms are maintained here
 // with a stable value_code, display label, and sort_order — form_versions'
