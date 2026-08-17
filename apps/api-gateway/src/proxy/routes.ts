@@ -55,6 +55,11 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
   { prefix: '/geography-units', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
   { prefix: '/master-data', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
   { prefix: '/project-geography', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
+  // Flat Sakhi roster download for offline reference — distinct from
+  // /projects/:id/sakhis (an assignment list), for the Beneficiary Data
+  // Download screen.
+  { prefix: '/arogya-sakhi-roster', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
+  { prefix: '/registration-targets', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
   // App-wide config key/value store (sync interval, min app version, etc.) —
   // the Supervisor app's Download Master Data "Application Parameter" row.
   { prefix: '/application-parameters', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
@@ -78,6 +83,31 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
   // every service's own `/docs.json` into a single page — there is no single
   // downstream service to proxy a bare `/docs` to, and per-service pages were
   // replaced by the unified view.
+  // These three MUST be registered before the generic '/beneficiaries' entry
+  // below — Express matches app.use() mounts in registration order, and the
+  // first matching prefix wins (the proxy middleware never calls next()).
+  // Each is more specific than '/beneficiaries' alone (a literal trailing
+  // segment — /risk, /risk-referrals, /visits — that '/beneficiaries' by
+  // itself doesn't have), so putting them first routes exactly those
+  // sub-paths to their owning service while every other /beneficiaries/*
+  // request still falls through to beneficiary-service unaffected.
+  {
+    prefix: '/beneficiaries/:beneficiaryId/risk',
+    target: appConfig.RISK_REFERRAL_SERVICE_URL,
+    requiresAuth: true,
+  },
+  // Covers both the header list and its /risk-referrals/:referralId/details
+  // sub-path — one mount, same target service for both.
+  {
+    prefix: '/beneficiaries/:beneficiaryId/risk-referrals',
+    target: appConfig.RISK_REFERRAL_SERVICE_URL,
+    requiresAuth: true,
+  },
+  {
+    prefix: '/beneficiaries/:beneficiaryId/visits',
+    target: appConfig.VISIT_FORM_SERVICE_URL,
+    requiresAuth: true,
+  },
   { prefix: '/beneficiaries', target: appConfig.BENEFICIARY_SERVICE_URL, requiresAuth: true },
   { prefix: '/visits', target: appConfig.VISIT_FORM_SERVICE_URL, requiresAuth: true },
   { prefix: '/visit-schedules', target: appConfig.VISIT_FORM_SERVICE_URL, requiresAuth: true },
