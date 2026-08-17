@@ -69,6 +69,28 @@ export function registerFormRoutes(doc: DocumentedRouter, service: FormService) 
   const controller = createFormController(service);
 
   doc.get(
+    '/forms/visit-code-form-map',
+    {
+      summary:
+        'Maps a VisitSchedule visitType (VisitCodeType) to the formCode a client must call ' +
+        'GET /forms/:formCode/active-version and POST /forms/:formCode/submissions with. ' +
+        'There is no separate form for an _HR visit type — an HR visit is filled using its ' +
+        "base visit type's form (e.g. ANC_HR -> ANC_VISIT). Static; requires authentication " +
+        'but no specific role, matching the other read routes on this router.',
+      tags: ['Forms'],
+      responses: {
+        200: {
+          description: 'visitType -> formCode map',
+          schema: envelope(z.record(z.string(), z.string())),
+        },
+        401: errorResponse(401),
+      },
+    },
+    trustGatewayIdentity,
+    controller.getVisitCodeFormMap,
+  );
+
+  doc.get(
     '/forms/:formCode/active-version',
     {
       summary: 'Get the currently published version of a form',
