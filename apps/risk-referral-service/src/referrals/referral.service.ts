@@ -46,29 +46,58 @@ export class ReferralService {
   }
 
   /**
+   * Intersects a caller-supplied beneficiaryIds list with the caller's own
+   * scope, resolved via beneficiary-service's GET /beneficiaries/ids (same
+   * helper getSummary uses) — referrals carries no sakhiId column of its
+   * own, so this is the only way to scope these endpoints. Never trust
+   * `beneficiaryIds` as pre-scoped: without this, any authenticated caller
+   * could pass an arbitrary id list and read another Sakhi's follow-ups
+   * (IDOR). MANAGER/ADMIN are unscoped (getIds returns "all ids" for them,
+   * so the intersection is a no-op).
+   */
+  private async scopeToCaller(
+    beneficiaryIds: string[],
+    caller: AuthenticatedUser,
+    authorizationHeader: string,
+  ): Promise<string[]> {
+    const isUnscoped = caller.roles.includes('MANAGER') || caller.roles.includes('ADMIN');
+    if (isUnscoped) return beneficiaryIds;
+    const allowedIds = new Set(await this.beneficiaryClient.getIds(authorizationHeader));
+    return beneficiaryIds.filter((id) => allowedIds.has(id));
+  }
+
+  /**
    * Pending/overdue follow-up counts per beneficiaryId, for the
    * pada-breakdown widget — the caller (api-gateway) sums these per pada
    * using beneficiary-service's own beneficiaryId -> padaId grouping.
    * "Overdue" = a PENDING follow-up whose followupDate has already passed.
-   * No role-scoping here: the caller has already resolved the in-scope
-   * beneficiaryIds via beneficiary-service's own scoping before calling
-   * this endpoint (see routes doc comment) — unlike getSummary above, this
-   * never calls beneficiaryClient.getIds itself.
+   * `beneficiaryIds` is intersected with the caller's own scope via
+   * scopeToCaller — an out-of-scope id is silently excluded, not a 403.
    */
-  getPendingFollowupsByBeneficiary(beneficiaryIds: string[]) {
+  async getPendingFollowupsByBeneficiary(
+    beneficiaryIds: string[],
+    caller: AuthenticatedUser,
+    authorizationHeader: string,
+  ) {
+    const scopedIds = await this.scopeToCaller(beneficiaryIds, caller, authorizationHeader);
     const today = new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00.000Z');
-    return this.repository.countPendingFollowupsByBeneficiary(beneficiaryIds, today);
+    return this.repository.countPendingFollowupsByBeneficiary(scopedIds, today);
   }
 
   /**
    * Full PENDING follow-up cards (followupId, beneficiaryId, followupDate)
-   * for the pada visit-list screen's "referral_follow_up" tab. No
-   * role-scoping: the caller (api-gateway) has already resolved the
-   * in-scope beneficiaryIds via beneficiary-service's own scoping.
+   * for the pada visit-list screen's "referral_follow_up" tab.
+   * `beneficiaryIds` is intersected with the caller's own scope via
+   * scopeToCaller — an out-of-scope id is silently excluded, not a 403.
    * Unfiltered by date, per findFollowupsByBeneficiary's doc comment.
    */
-  async getFollowupsByBeneficiary(beneficiaryIds: string[]) {
-    const rows = await this.repository.findFollowupsByBeneficiary(beneficiaryIds);
+  async getFollowupsByBeneficiary(
+    beneficiaryIds: string[],
+    caller: AuthenticatedUser,
+    authorizationHeader: string,
+  ) {
+    const scopedIds = await this.scopeToCaller(beneficiaryIds, caller, authorizationHeader);
+    const rows = await this.repository.findFollowupsByBeneficiary(scopedIds);
     return rows.map((row) => ({
       followupId: row.id,
       beneficiaryId: row.referral.beneficiaryId,

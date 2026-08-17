@@ -387,7 +387,8 @@ describe('ReferralService', () => {
   });
 
   describe('getPendingFollowupsByBeneficiary', () => {
-    it('passes the given beneficiaryIds and today straight through to the repository, no scoping', async () => {
+    it('scopes a SAKHI caller to their own ids before querying the repository', async () => {
+      beneficiaryClient.getIds.mockResolvedValue(['ben-1', 'ben-2']);
       repository.countPendingFollowupsByBeneficiary.mockResolvedValue(
         new Map([
           ['ben-1', { pendingCount: 2, overdueCount: 1 }],
@@ -395,13 +396,17 @@ describe('ReferralService', () => {
         ]),
       );
 
-      const result = await service.getPendingFollowupsByBeneficiary(['ben-1', 'ben-2']);
+      const result = await service.getPendingFollowupsByBeneficiary(
+        ['ben-1', 'ben-2'],
+        caller({ roles: ['SAKHI'] }),
+        AUTH_HEADER,
+      );
 
+      expect(beneficiaryClient.getIds).toHaveBeenCalledWith(AUTH_HEADER);
       expect(repository.countPendingFollowupsByBeneficiary).toHaveBeenCalledWith(
         ['ben-1', 'ben-2'],
         expect.any(Date),
       );
-      expect(beneficiaryClient.getIds).not.toHaveBeenCalled();
       expect(result).toEqual(
         new Map([
           ['ben-1', { pendingCount: 2, overdueCount: 1 }],
@@ -410,10 +415,47 @@ describe('ReferralService', () => {
       );
     });
 
-    it('returns an empty map for an empty beneficiaryIds list, without erroring', async () => {
+    it('silently excludes an out-of-scope beneficiaryId not returned by beneficiary-service', async () => {
+      beneficiaryClient.getIds.mockResolvedValue(['ben-1']);
       repository.countPendingFollowupsByBeneficiary.mockResolvedValue(new Map());
 
-      const result = await service.getPendingFollowupsByBeneficiary([]);
+      await service.getPendingFollowupsByBeneficiary(
+        ['ben-1', 'some-other-sakhis-ben'],
+        caller({ roles: ['SAKHI'] }),
+        AUTH_HEADER,
+      );
+
+      expect(repository.countPendingFollowupsByBeneficiary).toHaveBeenCalledWith(
+        ['ben-1'],
+        expect.any(Date),
+      );
+    });
+
+    it('leaves a MANAGER/ADMIN caller unscoped, without calling beneficiary-service', async () => {
+      repository.countPendingFollowupsByBeneficiary.mockResolvedValue(new Map());
+
+      await service.getPendingFollowupsByBeneficiary(
+        ['ben-1', 'ben-2'],
+        caller({ roles: ['MANAGER'] }),
+        AUTH_HEADER,
+      );
+
+      expect(beneficiaryClient.getIds).not.toHaveBeenCalled();
+      expect(repository.countPendingFollowupsByBeneficiary).toHaveBeenCalledWith(
+        ['ben-1', 'ben-2'],
+        expect.any(Date),
+      );
+    });
+
+    it('returns an empty map for an empty beneficiaryIds list, without erroring', async () => {
+      beneficiaryClient.getIds.mockResolvedValue([]);
+      repository.countPendingFollowupsByBeneficiary.mockResolvedValue(new Map());
+
+      const result = await service.getPendingFollowupsByBeneficiary(
+        [],
+        caller({ roles: ['SAKHI'] }),
+        AUTH_HEADER,
+      );
 
       expect(repository.countPendingFollowupsByBeneficiary).toHaveBeenCalledWith(
         [],
@@ -424,7 +466,8 @@ describe('ReferralService', () => {
   });
 
   describe('getFollowupsByBeneficiary', () => {
-    it('maps repository rows to follow-up cards, no scoping', async () => {
+    it('scopes a SAKHI caller to their own ids before querying the repository', async () => {
+      beneficiaryClient.getIds.mockResolvedValue(['ben-1']);
       repository.findFollowupsByBeneficiary.mockResolvedValue([
         {
           id: 'followup-1',
@@ -433,18 +476,54 @@ describe('ReferralService', () => {
         },
       ]);
 
-      const result = await service.getFollowupsByBeneficiary(['ben-1']);
+      const result = await service.getFollowupsByBeneficiary(
+        ['ben-1'],
+        caller({ roles: ['SAKHI'] }),
+        AUTH_HEADER,
+      );
 
+      expect(beneficiaryClient.getIds).toHaveBeenCalledWith(AUTH_HEADER);
       expect(repository.findFollowupsByBeneficiary).toHaveBeenCalledWith(['ben-1']);
       expect(result).toEqual([
         { followupId: 'followup-1', beneficiaryId: 'ben-1', followupDate: '2026-08-15' },
       ]);
     });
 
-    it('returns an empty list for an empty beneficiaryIds list, without erroring', async () => {
+    it('silently excludes an out-of-scope beneficiaryId not returned by beneficiary-service', async () => {
+      beneficiaryClient.getIds.mockResolvedValue(['ben-1']);
       repository.findFollowupsByBeneficiary.mockResolvedValue([]);
 
-      const result = await service.getFollowupsByBeneficiary([]);
+      await service.getFollowupsByBeneficiary(
+        ['ben-1', 'some-other-sakhis-ben'],
+        caller({ roles: ['SAKHI'] }),
+        AUTH_HEADER,
+      );
+
+      expect(repository.findFollowupsByBeneficiary).toHaveBeenCalledWith(['ben-1']);
+    });
+
+    it('leaves a MANAGER/ADMIN caller unscoped, without calling beneficiary-service', async () => {
+      repository.findFollowupsByBeneficiary.mockResolvedValue([]);
+
+      await service.getFollowupsByBeneficiary(
+        ['ben-1'],
+        caller({ roles: ['MANAGER'] }),
+        AUTH_HEADER,
+      );
+
+      expect(beneficiaryClient.getIds).not.toHaveBeenCalled();
+      expect(repository.findFollowupsByBeneficiary).toHaveBeenCalledWith(['ben-1']);
+    });
+
+    it('returns an empty list for an empty beneficiaryIds list, without erroring', async () => {
+      beneficiaryClient.getIds.mockResolvedValue([]);
+      repository.findFollowupsByBeneficiary.mockResolvedValue([]);
+
+      const result = await service.getFollowupsByBeneficiary(
+        [],
+        caller({ roles: ['SAKHI'] }),
+        AUTH_HEADER,
+      );
 
       expect(result).toEqual([]);
     });

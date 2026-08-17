@@ -148,9 +148,11 @@ export function createReferralRouter(service: ReferralService) {
       summary:
         'Pending-follow-up counts per beneficiaryId, for the Pada Breakdown widget — the ' +
         "caller (api-gateway) sums these per pada using beneficiary-service's own " +
-        'beneficiaryId -> padaId grouping. No role-scoping here: the caller has already ' +
-        "resolved the in-scope beneficiaryIds via beneficiary-service's own scoping before " +
-        'calling this endpoint — internal use only, not part of the public API surface.',
+        'beneficiaryId -> padaId grouping. `beneficiaryIds` is intersected server-side with ' +
+        "the caller's own scope (SAKHI: own; SUPERVISOR: roster; MANAGER/ADMIN: unscoped), " +
+        'resolved via beneficiary-service since referrals carries no sakhiId column — never ' +
+        'trusted as pre-scoped; an out-of-scope id is silently excluded from the result. ' +
+        'Internal use only, not part of the public API surface.',
       tags: ['Referrals'],
       responses: {
         200: {
@@ -165,9 +167,16 @@ export function createReferralRouter(service: ReferralService) {
     trustGatewayIdentity,
     requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
     validateBody(countByBeneficiarySchema),
-    asyncHandler(async (req, res) => {
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
       const { beneficiaryIds } = req.body as { beneficiaryIds: string[] };
-      const result = await service.getPendingFollowupsByBeneficiary(beneficiaryIds);
+      const result = await service.getPendingFollowupsByBeneficiary(
+        beneficiaryIds,
+        req.user,
+        authorizationHeader,
+      );
       res.json(ok(Object.fromEntries(result)));
     }),
   );
@@ -178,9 +187,11 @@ export function createReferralRouter(service: ReferralService) {
       summary:
         'Full PENDING follow-up cards (followupId, followupDate) for the Pada visit-list ' +
         'screen\'s "referral_follow_up" tab. Unfiltered by date — a pending follow-up doesn\'t ' +
-        "disappear from this list just because its date passed or hasn't arrived. No " +
-        'role-scoping here: the caller has already resolved the in-scope beneficiaryIds via ' +
-        "beneficiary-service's own scoping before calling this endpoint — internal use only.",
+        "disappear from this list just because its date passed or hasn't arrived. " +
+        "`beneficiaryIds` is intersected server-side with the caller's own scope (SAKHI: own; " +
+        'SUPERVISOR: roster; MANAGER/ADMIN: unscoped), resolved via beneficiary-service since ' +
+        'referrals carries no sakhiId column — never trusted as pre-scoped. Internal use ' +
+        'only, not part of the public API surface.',
       tags: ['Referrals'],
       responses: {
         200: {
@@ -203,9 +214,14 @@ export function createReferralRouter(service: ReferralService) {
     trustGatewayIdentity,
     requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
     validateBody(followupsByBeneficiarySchema),
-    asyncHandler(async (req, res) => {
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
       const { beneficiaryIds } = req.body as { beneficiaryIds: string[] };
-      res.json(ok(await service.getFollowupsByBeneficiary(beneficiaryIds)));
+      res.json(
+        ok(await service.getFollowupsByBeneficiary(beneficiaryIds, req.user, authorizationHeader)),
+      );
     }),
   );
 
