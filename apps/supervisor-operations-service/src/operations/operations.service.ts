@@ -15,6 +15,7 @@ import type { CreateGatheringInput } from './dto/create-gathering.dto';
 import type { UpdateGatheringAttendanceInput } from './dto/update-gathering-attendance.dto';
 import type { CompleteTopicMarkInput, CreateTopicMarkInput } from './dto/create-topic-mark.dto';
 import type { TopicMarkQuery } from './dto/topic-mark-query.dto';
+import type { ListGatheringsQuery } from './dto/list-gatherings.dto';
 import type { CallSheetStatKind } from './dto/call-sheet-stats.dto';
 import { CALL_SHEET_STAT_KINDS } from './dto/call-sheet-stats.dto';
 import type { SakhiClient } from './sakhi.client';
@@ -539,6 +540,18 @@ export class OperationsService {
   }
 
   /**
+   * Recent gatherings for offline reference, optionally scoped to one Sakhi
+   * (via `sakhiId`). Unlike the gathering-scoped reads below, this list
+   * carries no per-caller ownership scoping — matching `listEvents`'
+   * existing convention that recent-list endpoints are role-gated at the
+   * route (SUPERVISOR/MANAGER/ADMIN) but not filtered by caller identity in
+   * the service.
+   */
+  listGatherings(filters?: ListGatheringsQuery) {
+    return this.repository.findGatherings(filters);
+  }
+
+  /**
    * A SUPERVISOR may only view topics for a gathering under their own
    * event. MANAGER and ADMIN are unrestricted. Ownership is derived via the
    * gathering's parent event, since gatherings carry no supervisorId of
@@ -565,6 +578,39 @@ export class OperationsService {
       throw forbidden('You do not have access to this gathering.');
     }
     return this.repository.findGatheringAttendance(gatheringId);
+  }
+
+  /**
+   * A SUPERVISOR may only view the training-marks rollup for a gathering
+   * under their own event. MANAGER and ADMIN are unrestricted — same
+   * ownership rule as getGatheringAttendance. Unlike getTopicMark (one
+   * topic+gathering+sakhi combination via query params), this returns every
+   * Pre/Post mark recorded for the whole gathering — every Sakhi, every
+   * topic — with each mark's topic code/name inlined so the client doesn't
+   * need a second lookup call.
+   */
+  async getGatheringTrainingMarks(gatheringId: string, caller: CallerIdentity) {
+    const gathering = await this.repository.findGatheringById(gatheringId);
+    if (!gathering) throw notFound('Gathering not found.');
+    const event = await this.repository.findEventById(gathering.eventId);
+    if (!event) throw notFound('Event not found.');
+    if (event.supervisorId !== caller.id && !isPrivileged(caller)) {
+      throw forbidden('You do not have access to this gathering.');
+    }
+
+    const marks = await this.repository.findTopicMarksByGathering(gatheringId);
+    return marks.map((mark) => ({
+      id: mark.id,
+      gatheringId: mark.gatheringId,
+      topicId: mark.topicId,
+      topicCode: mark.topic.topicCode,
+      topicName: mark.topic.topicName,
+      sakhiId: mark.sakhiId,
+      markType: mark.markType,
+      score: mark.score,
+      isLocked: mark.isLocked,
+      lockedAt: mark.lockedAt,
+    }));
   }
 
   /**

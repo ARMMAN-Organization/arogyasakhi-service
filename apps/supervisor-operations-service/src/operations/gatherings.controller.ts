@@ -9,6 +9,10 @@ import type { topicMarkQuerySchema } from './dto/topic-mark-query.dto';
  */
 export function createGatheringsController(service: OperationsService) {
   return {
+    list: asyncHandler(async (req, res) => {
+      res.json(ok(await service.listGatherings(req.query)));
+    }),
+
     listTopics: asyncHandler(async (req, res, next) => {
       if (!req.user) return next(unauthorized());
       res.json(ok(await service.listGatheringTopics(req.params.gatheringId, req.user)));
@@ -17,6 +21,11 @@ export function createGatheringsController(service: OperationsService) {
     getAttendance: asyncHandler(async (req, res, next) => {
       if (!req.user) return next(unauthorized());
       res.json(ok(await service.getGatheringAttendance(req.params.gatheringId, req.user)));
+    }),
+
+    getTrainingMarks: asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      res.json(ok(await service.getGatheringTrainingMarks(req.params.gatheringId, req.user)));
     }),
 
     updateAttendance: asyncHandler(async (req, res, next) => {

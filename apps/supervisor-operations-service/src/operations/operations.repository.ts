@@ -10,6 +10,7 @@ import type { UpdateCallLogInput } from './dto/update-call-log.dto';
 import type { CreateTrainingTopicInput } from './dto/create-training-topic.dto';
 import type { RescheduleEventInput } from './dto/reschedule-event.dto';
 import type { UpdateGatheringAttendanceInput } from './dto/update-gathering-attendance.dto';
+import type { ListGatheringsQuery } from './dto/list-gatherings.dto';
 
 /**
  * Data access for supervisor operations. Owns only this service's tables
@@ -358,6 +359,27 @@ export class OperationsRepository {
     });
   }
 
+  /**
+   * Recent gatherings for offline reference, optionally scoped to one Sakhi.
+   * `EventGathering` carries no `sakhiId` column (a gathering is a session,
+   * not a per-Sakhi row), so `sakhiId` filters through the
+   * `gathering_attendance` join relation instead — rows where that Sakhi has
+   * an attendance record for the gathering. Ordered/limited to match
+   * `findEvents`' "recent list" convention (date desc, capped at 50).
+   */
+  findGatherings(filters: ListGatheringsQuery = {}) {
+    return this.prisma.eventGathering.findMany({
+      where: {
+        isDeleted: false,
+        ...(filters.sakhiId
+          ? { attendance: { some: { sakhiId: filters.sakhiId, isDeleted: false } } }
+          : {}),
+      },
+      orderBy: { gatheringDate: 'desc' },
+      take: 50,
+    });
+  }
+
   findGatheringById(id: string) {
     return this.prisma.eventGathering.findFirst({ where: { id, isDeleted: false } });
   }
@@ -413,6 +435,20 @@ export class OperationsRepository {
   findTopicMark(gatheringId: string, topicId: string, sakhiId: string, markType: 'PRE' | 'POST') {
     return this.prisma.topicMark.findUnique({
       where: { gatheringId_topicId_sakhiId_markType: { gatheringId, topicId, sakhiId, markType } },
+    });
+  }
+
+  /**
+   * Every Pre/Post mark recorded for one gathering — all Sakhis, all topics
+   * — joined to the topic catalog so the caller has topicCode/topicName
+   * inline without a second lookup call. Unlike gathering_attendance,
+   * topic_marks has no isDeleted column, so no soft-delete filter applies.
+   */
+  findTopicMarksByGathering(gatheringId: string) {
+    return this.prisma.topicMark.findMany({
+      where: { gatheringId },
+      include: { topic: true },
+      orderBy: { createdAt: 'asc' },
     });
   }
 

@@ -5,6 +5,7 @@ import { createGatheringsController } from './gatherings.controller';
 import { updateGatheringAttendanceSchema } from './dto/update-gathering-attendance.dto';
 import { completeTopicMarkSchema, createTopicMarkSchema } from './dto/create-topic-mark.dto';
 import { topicMarkQuerySchema } from './dto/topic-mark-query.dto';
+import { listGatheringsQuerySchema } from './dto/list-gatherings.dto';
 import {
   requireRoles,
   trustGatewayIdentity,
@@ -34,6 +35,20 @@ const gatheringTopicSchema = z.object({
   topic: trainingTopicSchema,
 });
 
+// Mirrors events.routes.ts's gatheringSchema — duplicated rather than
+// imported since response/doc schemas live alongside their own routes file
+// by design; this is the lean list shape GET /gatherings returns (no nested
+// topics/attendance/marks — those stay on their own existing endpoints).
+const gatheringSchema = z.object({
+  id: z.string().uuid(),
+  eventId: z.string().uuid(),
+  gatheringDate: z.string().datetime(),
+  remarks: z.string().nullable(),
+  status: z.enum(['SCHEDULED', 'COMPLETED', 'CANCELLED']),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+
 const gatheringAttendanceSchema = z.object({
   id: z.string().uuid(),
   gatheringId: z.string().uuid(),
@@ -55,6 +70,22 @@ const topicMarkSchema = z.object({
   lockedAt: z.string().datetime().nullable(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
+});
+
+// The GET .../training-marks rollup shape: one row per (topic, sakhi,
+// markType) for the whole gathering, with the topic's code/name inlined so
+// the client doesn't need a second lookup call against /training-topics.
+const trainingMarkSchema = z.object({
+  id: z.string().uuid(),
+  gatheringId: z.string().uuid(),
+  topicId: z.string().uuid(),
+  topicCode: z.string(),
+  topicName: z.string(),
+  sakhiId: z.string().uuid(),
+  markType: z.enum(['PRE', 'POST']),
+  score: z.number(),
+  isLocked: z.boolean(),
+  lockedAt: z.string().datetime().nullable(),
 });
 
 const gatheringIdParamsSchema = z
@@ -89,6 +120,25 @@ function envelope<T extends z.ZodTypeAny>(data: T) {
  */
 export function registerGatheringsRoutes(doc: DocumentedRouter, service: OperationsService) {
   const controller = createGatheringsController(service);
+
+  doc.get(
+    '/gatherings',
+    {
+      summary: 'List recent gatherings (Training sessions), optionally scoped to one Sakhi',
+      tags: ['Supervisor Operations'],
+      query: listGatheringsQuerySchema,
+      responses: {
+        200: { description: 'Gatherings', schema: envelope(z.array(gatheringSchema)) },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(listGatheringsQuerySchema, 'query'),
+    controller.list,
+  );
 
   doc.get(
     '/gatherings/:gatheringId/topics',
@@ -129,6 +179,29 @@ export function registerGatheringsRoutes(doc: DocumentedRouter, service: Operati
     requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
     validate(gatheringIdParamsSchema, 'params'),
     controller.getAttendance,
+  );
+
+  doc.get(
+    '/gatherings/:gatheringId/training-marks',
+    {
+      summary:
+        'A rollup of every Pre/Post training mark for one gathering (all Sakhis, all topics)',
+      tags: ['Supervisor Operations'],
+      params: gatheringIdParamsSchema,
+      responses: {
+        200: {
+          description: 'Training marks for this gathering',
+          schema: envelope(z.array(trainingMarkSchema)),
+        },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller does not own this gathering', schema: apiErrorSchema },
+        404: { description: 'Gathering not found', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(gatheringIdParamsSchema, 'params'),
+    controller.getTrainingMarks,
   );
 
   doc.put(
