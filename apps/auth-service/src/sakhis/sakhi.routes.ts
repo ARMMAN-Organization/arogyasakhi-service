@@ -47,9 +47,11 @@ function envelope<T extends z.ZodTypeAny>(data: T) {
 
 /**
  * Sakhi profile read HTTP routes. Mounted under the global `api/v1` prefix.
- * Restricted to SUPERVISOR/MANAGER/ADMIN — a Sakhi does not look up other
- * Sakhis; these endpoints back the Supervisor's Sakhi picker and detail
- * header (e.g. the Assign/Issue Item screen).
+ * `listByProject` is restricted to SUPERVISOR/MANAGER/ADMIN — these back the
+ * Supervisor's Sakhi picker and detail header (e.g. the Assign/Issue Item
+ * screen). `getById` additionally allows SAKHI, but only for their own id
+ * (see SakhiService.getById) — needed by the Sakhi dashboard for the
+ * caller's own name/profile; a Sakhi still cannot look up another Sakhi.
  */
 export function registerSakhiRoutes(
   doc: DocumentedRouter,
@@ -80,7 +82,10 @@ export function registerSakhiRoutes(
   doc.get(
     '/sakhis/:sakhiId',
     {
-      summary: 'Get a Sakhi by id',
+      summary:
+        'Get a Sakhi by id. A SAKHI caller may only fetch their own id (403 otherwise) — ' +
+        "used by the Sakhi dashboard for the caller's own name/profile, in addition to this " +
+        "route's original Supervisor picker/detail-header use.",
       tags: ['Sakhis'],
       params: sakhiIdParamsSchema,
       responses: {
@@ -92,7 +97,7 @@ export function registerSakhiRoutes(
       },
     },
     authenticate(signer),
-    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
     validate(sakhiIdParamsSchema, 'params'),
     controller.getById,
   );

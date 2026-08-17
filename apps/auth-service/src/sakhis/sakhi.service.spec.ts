@@ -170,5 +170,34 @@ describe('SakhiService', () => {
         status: 403,
       });
     });
+
+    it('allows a SAKHI caller to fetch their own record', async () => {
+      repository.findById.mockResolvedValue(rawProfile() as never);
+      const sakhiCaller = { id: 'user-1', roles: ['SAKHI'], projectId: null };
+      await expect(service.getById('user-1', sakhiCaller)).resolves.toMatchObject({
+        sakhiId: 'user-1',
+      });
+    });
+
+    it(
+      "allows a SAKHI caller to fetch their own record even when their JWT's projectId " +
+        "doesn't match their profile's primaryProjectId — regression: the SUPERVISOR " +
+        'project-scope check must not also apply to a SAKHI fetching their own record',
+      async () => {
+        repository.findById.mockResolvedValue(rawProfile() as never); // primaryProjectId: 'project-1'
+        const sakhiCaller = { id: 'user-1', roles: ['SAKHI'], projectId: 'some-other-project' };
+        await expect(service.getById('user-1', sakhiCaller)).resolves.toMatchObject({
+          sakhiId: 'user-1',
+        });
+      },
+    );
+
+    it('rejects a SAKHI caller fetching a different Sakhi', async () => {
+      const sakhiCaller = { id: 'user-1', roles: ['SAKHI'], projectId: null };
+      await expect(service.getById('user-2', sakhiCaller)).rejects.toMatchObject({
+        status: 403,
+      });
+      expect(repository.findById).not.toHaveBeenCalled();
+    });
   });
 });
