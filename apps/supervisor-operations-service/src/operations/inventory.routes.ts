@@ -91,6 +91,25 @@ export function registerInventoryRoutes(doc: DocumentedRouter, service: Operatio
     controller.listItems,
   );
 
+  // Alias for consumers that expect a dedicated "Item Master List" path
+  // rather than /inventory-items — same handler, same response, same role
+  // restriction, just a different URL.
+  doc.get(
+    '/item-master-list',
+    {
+      summary: 'Download all Item Master rows (alias for GET /inventory-items)',
+      tags: ['Supervisor Operations'],
+      responses: {
+        200: { description: 'Inventory items', schema: envelope(z.array(inventoryItemSchema)) },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    controller.listItems,
+  );
+
   doc.post(
     '/inventory-items',
     {
