@@ -338,13 +338,14 @@ export function registerBeneficiaryRoutes(doc: DocumentedRouter, service: Benefi
     {
       summary:
         "Decrypted name/phone plus a 4-bucket riskLevel, for the pada visit-list screen's " +
-        'cards. `ids` is a comma-separated list — trusted as-is (the caller has already ' +
-        "scoped it, e.g. to one pada's beneficiaries); an id not found is simply absent from " +
-        'the result, not a 404. `search` narrows to an exact name-hash match (names are ' +
-        'encrypted, no partial/fuzzy search). riskLevel is the worst current ' +
-        "(BeneficiaryRiskConditionSummary.latestGrade) grade across the beneficiary's risk " +
-        "conditions, collapsed from RISK_GRADE's 6 values to 4 buckets: NORMAL->none, " +
-        'MILD->mild, MODERATE->moderate, SEVERE/HIGH/CRITICAL->high.',
+        'cards. `ids` is a comma-separated list, further intersected server-side with the ' +
+        "caller's own scope (SAKHI: own; SUPERVISOR: roster; MANAGER/ADMIN: unscoped) — an id " +
+        'outside that scope, or simply not found, is absent from the result, not a 404 or ' +
+        '403 (never trust a caller-supplied id list as pre-scoped). `search` narrows to an ' +
+        'exact name-hash match (names are encrypted, no partial/fuzzy search). riskLevel is ' +
+        'the worst current (BeneficiaryRiskConditionSummary.latestGrade) grade across the ' +
+        "beneficiary's risk conditions, collapsed from RISK_GRADE's 6 values to 4 buckets: " +
+        'NORMAL->none, MILD->mild, MODERATE->moderate, SEVERE/HIGH/CRITICAL->high.',
       tags: ['Beneficiaries'],
       responses: {
         200: {

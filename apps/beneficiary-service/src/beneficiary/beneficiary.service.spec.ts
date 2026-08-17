@@ -1490,9 +1490,13 @@ describe('BeneficiaryService', () => {
         },
       ]);
 
-      const result = await service.getByIdsWithRisk(['b1'], undefined);
+      const result = await service.getByIdsWithRisk(['b1'], undefined, caller(), AUTH_HEADER);
 
-      expect(repository.findByIdsWithRisk).toHaveBeenCalledWith(['b1'], undefined);
+      expect(repository.findByIdsWithRisk).toHaveBeenCalledWith(
+        ['b1'],
+        undefined,
+        expect.objectContaining({ sakhiId: CALLER_ID }),
+      );
       expect(result).toEqual([
         {
           id: 'b1',
@@ -1525,7 +1529,7 @@ describe('BeneficiaryService', () => {
         },
       ]);
 
-      const result = await service.getByIdsWithRisk(['b1'], undefined);
+      const result = await service.getByIdsWithRisk(['b1'], undefined, caller(), AUTH_HEADER);
 
       expect(result[0].riskLevel).toBe(expectedRiskLevel);
     });
@@ -1542,7 +1546,7 @@ describe('BeneficiaryService', () => {
         },
       ]);
 
-      const result = await service.getByIdsWithRisk(['b1'], undefined);
+      const result = await service.getByIdsWithRisk(['b1'], undefined, caller(), AUTH_HEADER);
 
       expect(result[0].phoneNumber).toBeNull();
     });
@@ -1550,17 +1554,81 @@ describe('BeneficiaryService', () => {
     it('hashes a search term and passes it through to the repository', async () => {
       repository.findByIdsWithRisk.mockResolvedValue([]);
 
-      await service.getByIdsWithRisk(['b1'], 'Jane');
+      await service.getByIdsWithRisk(['b1'], 'Jane', caller(), AUTH_HEADER);
 
-      expect(repository.findByIdsWithRisk).toHaveBeenCalledWith(['b1'], expect.any(Buffer));
+      expect(repository.findByIdsWithRisk).toHaveBeenCalledWith(
+        ['b1'],
+        expect.any(Buffer),
+        expect.anything(),
+      );
     });
 
     it('returns an empty array when no ids match (id not found, or excluded by search)', async () => {
       repository.findByIdsWithRisk.mockResolvedValue([]);
 
-      const result = await service.getByIdsWithRisk(['unknown-id'], undefined);
+      const result = await service.getByIdsWithRisk(
+        ['unknown-id'],
+        undefined,
+        caller(),
+        AUTH_HEADER,
+      );
 
       expect(result).toEqual([]);
+    });
+
+    // Security regression: a caller must never be able to fetch another
+    // Sakhi's/roster's beneficiaries by simply passing arbitrary ids — see
+    // the IDOR fix in getByIdsWithRisk's own doc comment.
+    it('scopes a SAKHI caller to their own ids — an out-of-scope id is silently excluded by the repository filter', async () => {
+      repository.findByIdsWithRisk.mockResolvedValue([]);
+
+      await service.getByIdsWithRisk(
+        ['some-other-sakhis-beneficiary'],
+        undefined,
+        caller(),
+        AUTH_HEADER,
+      );
+
+      expect(repository.findByIdsWithRisk).toHaveBeenCalledWith(
+        ['some-other-sakhis-beneficiary'],
+        undefined,
+        expect.objectContaining({ sakhiId: CALLER_ID }),
+      );
+    });
+
+    it('scopes a SUPERVISOR caller to their roster', async () => {
+      listSakhiIdsForSupervisorMock.mockResolvedValue(['sakhi-a', 'sakhi-b']);
+      repository.findByIdsWithRisk.mockResolvedValue([]);
+
+      await service.getByIdsWithRisk(
+        ['b1'],
+        undefined,
+        caller({ roles: ['SUPERVISOR'] }),
+        AUTH_HEADER,
+      );
+
+      expect(repository.findByIdsWithRisk).toHaveBeenCalledWith(
+        ['b1'],
+        undefined,
+        expect.objectContaining({ sakhiIds: ['sakhi-a', 'sakhi-b'] }),
+      );
+    });
+
+    it('leaves a MANAGER/ADMIN caller unscoped', async () => {
+      repository.findByIdsWithRisk.mockResolvedValue([]);
+
+      await service.getByIdsWithRisk(
+        ['b1'],
+        undefined,
+        caller({ roles: ['MANAGER'] }),
+        AUTH_HEADER,
+      );
+
+      expect(repository.findByIdsWithRisk).toHaveBeenCalledWith(
+        ['b1'],
+        undefined,
+        expect.not.objectContaining({ sakhiId: expect.anything() }),
+      );
     });
   });
 

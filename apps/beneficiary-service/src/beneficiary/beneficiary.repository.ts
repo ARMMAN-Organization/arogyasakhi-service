@@ -581,13 +581,19 @@ export class BeneficiaryRepository {
    * none — the service layer maps this + latestGrade to the 4-bucket
    * riskLevel (none/mild/moderate/high).
    */
-  async findByIdsWithRisk(ids: string[], nameHash?: Buffer) {
+  async findByIdsWithRisk(
+    ids: string[],
+    nameHash: Buffer | undefined,
+    scoping: { sakhiId?: string; sakhiIds?: string[] },
+  ) {
     if (ids.length === 0) return [];
 
     const cases = await this.prisma.beneficiaryCase.findMany({
       where: {
         id: { in: ids },
         isDeleted: false,
+        ...(scoping.sakhiId ? { sakhiId: scoping.sakhiId } : {}),
+        ...(scoping.sakhiIds ? { sakhiId: { in: scoping.sakhiIds } } : {}),
         ...(nameHash ? { pii: { fullNameSearchHash: nameHash } } : {}),
       },
       include: { pii: true },

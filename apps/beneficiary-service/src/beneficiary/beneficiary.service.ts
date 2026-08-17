@@ -420,9 +420,22 @@ export class BeneficiaryService {
    * single badge). A beneficiary with no risk-condition-summary rows (or
    * only ungraded/self-reported ones, latestGradeRank null) is "none".
    */
-  async getByIdsWithRisk(ids: string[], search: string | undefined) {
+  async getByIdsWithRisk(
+    ids: string[],
+    search: string | undefined,
+    caller: AuthenticatedUser,
+    authorizationHeader: string,
+  ) {
+    // Security: `ids` is caller-supplied and must never be trusted as-is —
+    // without this, any authenticated caller could pass an arbitrary id
+    // list and get back another Sakhi's beneficiaries' decrypted name/
+    // phone/riskLevel (IDOR). Same self/roster/unscoped scoping as
+    // getIds/getPadaBreakdown; findByIdsWithRisk intersects `ids` with this
+    // scope in its own WHERE clause, so an out-of-scope id is silently
+    // dropped from the result rather than surfaced as a 403.
+    const scoping = await resolveSakhiScoping(undefined, caller, authorizationHeader);
     const nameHash = search ? hashForSearch(normalizeForSearch(search)) : undefined;
-    const rows = await this.repository.findByIdsWithRisk(ids, nameHash);
+    const rows = await this.repository.findByIdsWithRisk(ids, nameHash, scoping);
 
     return rows.map((row) => ({
       id: row.id,
