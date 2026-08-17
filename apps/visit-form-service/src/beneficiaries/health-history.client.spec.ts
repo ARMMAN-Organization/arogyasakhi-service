@@ -100,7 +100,7 @@ describe('syncHealthHistory', () => {
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({
-          data: [{ conditionCode: 'HYPERTENSION_HIGH_BP', riskConditionId: 'rc-1' }],
+          data: [{ id: 'rc-1', conditionCode: 'HYPERTENSION_HIGH_BP' }],
         }),
       })
       .mockResolvedValueOnce({ ok: true, status: 200 });
@@ -139,8 +139,8 @@ describe('syncHealthHistory', () => {
         ok: true,
         json: async () => ({
           data: [
-            { conditionCode: 'HYPERTENSION_HIGH_BP', riskConditionId: 'rc-1' },
-            { conditionCode: 'SICKLE_CELL_TRAIT', riskConditionId: 'rc-2' },
+            { id: 'rc-1', conditionCode: 'HYPERTENSION_HIGH_BP' },
+            { id: 'rc-2', conditionCode: 'SICKLE_CELL_TRAIT' },
           ],
         }),
       })
@@ -161,7 +161,7 @@ describe('syncHealthHistory', () => {
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({
-          data: [{ conditionCode: 'HYPERTENSION_HIGH_BP', riskConditionId: 'rc-1' }],
+          data: [{ id: 'rc-1', conditionCode: 'HYPERTENSION_HIGH_BP' }],
         }),
       })
       .mockResolvedValueOnce({ ok: true, status: 200 });
@@ -202,8 +202,8 @@ describe('syncHealthHistory', () => {
         ok: true,
         json: async () => ({
           data: [
-            { conditionCode: 'HYPERTENSION_HIGH_BP', riskConditionId: 'rc-1' },
-            { conditionCode: 'SICKLE_CELL_TRAIT', riskConditionId: 'rc-2' },
+            { id: 'rc-1', conditionCode: 'HYPERTENSION_HIGH_BP' },
+            { id: 'rc-2', conditionCode: 'SICKLE_CELL_TRAIT' },
           ],
         }),
       })
