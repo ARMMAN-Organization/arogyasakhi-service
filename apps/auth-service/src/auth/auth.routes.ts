@@ -50,7 +50,7 @@ const authTokensSchema = z.object({
       description:
         'Access token lifetime in seconds, or null if it never expires. Null for every role ' +
         'except ADMIN — only /auth/logout or revocation ends a non-expiring session.',
-      example: null,
+      examples: [null, 900],
     }),
   roles: z
     .array(z.string())
