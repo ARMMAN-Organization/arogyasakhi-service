@@ -20,6 +20,7 @@ import { createLookupModule } from './lookups/lookup.module';
 import { createGeographyModule } from './geography/geography.module';
 import { createMasterDataModule } from './master-data/master-data.module';
 import { createSakhiModule } from './sakhis/sakhi.module';
+import { createProjectGeographyModule } from './project-geography/project-geography.module';
 import { buildAuthServiceOpenApiDocument } from './docs/openapi';
 
 // Re-export shared HTTP helpers so feature routers can import from a single place.
@@ -91,6 +92,7 @@ export function createApp(prisma: PrismaService, signer: TokenSigner, redis: Red
   const geographyModule = createGeographyModule(prisma, signer);
   const masterDataModule = createMasterDataModule(prisma, signer);
   const sakhiModule = createSakhiModule(prisma, signer);
+  const projectGeographyModule = createProjectGeographyModule(prisma, signer);
 
   // All routes live under the global `api/v1` prefix.
   const api = express.Router();
@@ -107,6 +109,7 @@ export function createApp(prisma: PrismaService, signer: TokenSigner, redis: Red
         geographyModule.registry,
         masterDataModule.registry,
         sakhiModule.registry,
+        projectGeographyModule.registry,
       ),
     ),
   );
@@ -118,6 +121,7 @@ export function createApp(prisma: PrismaService, signer: TokenSigner, redis: Red
   api.use(geographyModule.router);
   api.use(masterDataModule.router);
   api.use(sakhiModule.router);
+  api.use(projectGeographyModule.router);
   app.use('/api/v1', api);
 
   app.use(notFoundHandler);
