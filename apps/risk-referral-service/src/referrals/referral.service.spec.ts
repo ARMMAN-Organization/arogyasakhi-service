@@ -5,8 +5,10 @@ import type { CreateReferralInput } from './dto/create-referral.dto';
 import type { DecideReferralInput } from './dto/decide-referral.dto';
 import { BeneficiaryClient } from './beneficiary.client';
 import { listSakhiIdsForSupervisor } from './sakhi.client';
+import { resolveReferralTypeLookupId } from './lookup.client';
 
 jest.mock('./sakhi.client');
+jest.mock('./lookup.client');
 
 const AUTH_HEADER = 'Bearer test-token';
 
@@ -50,11 +52,16 @@ describe('ReferralService', () => {
     findById: jest.fn(),
     create: jest.fn(),
     updateStatus: jest.fn(),
+    countSummary: jest.fn(),
+    countPendingFollowupsByBeneficiary: jest.fn(),
+    findFollowupsByBeneficiary: jest.fn(),
   } as unknown as jest.Mocked<ReferralRepository>;
   const beneficiaryClient = {
     getById: jest.fn(),
+    getIds: jest.fn(),
   } as unknown as jest.Mocked<BeneficiaryClient>;
   const listSakhiIdsForSupervisorMock = jest.mocked(listSakhiIdsForSupervisor);
+  const resolveReferralTypeLookupIdMock = jest.mocked(resolveReferralTypeLookupId);
   let service: ReferralService;
 
   beforeEach(() => {
@@ -316,5 +323,130 @@ describe('ReferralService', () => {
       supervisorApprovalStatus: 'NOT_REQUIRED',
     };
     await expect(service.create(dto)).rejects.toThrow('db down');
+  });
+
+  describe('getSummary', () => {
+    it('resolves the caller-scoped beneficiary ids for a SAKHI caller', async () => {
+      beneficiaryClient.getIds.mockResolvedValue(['ben-1', 'ben-2']);
+      resolveReferralTypeLookupIdMock.mockResolvedValue('lookup-accompanied');
+      repository.countSummary.mockResolvedValue({
+        accompaniedReferralsCount: 3,
+        pendingFollowUpsCount: 2,
+      });
+
+      const result = await service.getSummary(caller({ roles: ['SAKHI'] }), AUTH_HEADER);
+
+      expect(beneficiaryClient.getIds).toHaveBeenCalledWith(AUTH_HEADER);
+      expect(repository.countSummary).toHaveBeenCalledWith(
+        ['ben-1', 'ben-2'],
+        'lookup-accompanied',
+      );
+      expect(result).toEqual({ accompaniedReferralsCount: 3, pendingFollowUpsCount: 2 });
+    });
+
+    it('resolves the roster beneficiary ids for a SUPERVISOR caller', async () => {
+      beneficiaryClient.getIds.mockResolvedValue(['ben-1']);
+      resolveReferralTypeLookupIdMock.mockResolvedValue('lookup-accompanied');
+      repository.countSummary.mockResolvedValue({
+        accompaniedReferralsCount: 1,
+        pendingFollowUpsCount: 0,
+      });
+
+      await service.getSummary(caller({ roles: ['SUPERVISOR'] }), AUTH_HEADER);
+
+      expect(beneficiaryClient.getIds).toHaveBeenCalledWith(AUTH_HEADER);
+      expect(repository.countSummary).toHaveBeenCalledWith(['ben-1'], 'lookup-accompanied');
+    });
+
+    it('leaves a MANAGER/ADMIN caller unscoped — no beneficiary-ids lookup made', async () => {
+      resolveReferralTypeLookupIdMock.mockResolvedValue('lookup-accompanied');
+      repository.countSummary.mockResolvedValue({
+        accompaniedReferralsCount: 10,
+        pendingFollowUpsCount: 4,
+      });
+
+      await service.getSummary(caller({ roles: ['MANAGER'] }), AUTH_HEADER);
+
+      expect(beneficiaryClient.getIds).not.toHaveBeenCalled();
+      expect(repository.countSummary).toHaveBeenCalledWith(undefined, 'lookup-accompanied');
+    });
+
+    it('treats an unseeded ACCOMPANIED lookup value as zero matches, not a crash', async () => {
+      beneficiaryClient.getIds.mockResolvedValue([]);
+      resolveReferralTypeLookupIdMock.mockResolvedValue(null);
+      repository.countSummary.mockResolvedValue({
+        accompaniedReferralsCount: 0,
+        pendingFollowUpsCount: 0,
+      });
+
+      const result = await service.getSummary(caller({ roles: ['SAKHI'] }), AUTH_HEADER);
+
+      expect(repository.countSummary).toHaveBeenCalledWith([], null);
+      expect(result).toEqual({ accompaniedReferralsCount: 0, pendingFollowUpsCount: 0 });
+    });
+  });
+
+  describe('getPendingFollowupsByBeneficiary', () => {
+    it('passes the given beneficiaryIds and today straight through to the repository, no scoping', async () => {
+      repository.countPendingFollowupsByBeneficiary.mockResolvedValue(
+        new Map([
+          ['ben-1', { pendingCount: 2, overdueCount: 1 }],
+          ['ben-2', { pendingCount: 0, overdueCount: 0 }],
+        ]),
+      );
+
+      const result = await service.getPendingFollowupsByBeneficiary(['ben-1', 'ben-2']);
+
+      expect(repository.countPendingFollowupsByBeneficiary).toHaveBeenCalledWith(
+        ['ben-1', 'ben-2'],
+        expect.any(Date),
+      );
+      expect(beneficiaryClient.getIds).not.toHaveBeenCalled();
+      expect(result).toEqual(
+        new Map([
+          ['ben-1', { pendingCount: 2, overdueCount: 1 }],
+          ['ben-2', { pendingCount: 0, overdueCount: 0 }],
+        ]),
+      );
+    });
+
+    it('returns an empty map for an empty beneficiaryIds list, without erroring', async () => {
+      repository.countPendingFollowupsByBeneficiary.mockResolvedValue(new Map());
+
+      const result = await service.getPendingFollowupsByBeneficiary([]);
+
+      expect(repository.countPendingFollowupsByBeneficiary).toHaveBeenCalledWith(
+        [],
+        expect.any(Date),
+      );
+      expect(result).toEqual(new Map());
+    });
+  });
+
+  describe('getFollowupsByBeneficiary', () => {
+    it('maps repository rows to follow-up cards, no scoping', async () => {
+      repository.findFollowupsByBeneficiary.mockResolvedValue([
+        {
+          id: 'followup-1',
+          followupDate: new Date('2026-08-15T00:00:00.000Z'),
+          referral: { beneficiaryId: 'ben-1' },
+        },
+      ]);
+
+      const result = await service.getFollowupsByBeneficiary(['ben-1']);
+
+      expect(repository.findFollowupsByBeneficiary).toHaveBeenCalledWith(['ben-1']);
+      expect(result).toEqual([
+        { followupId: 'followup-1', beneficiaryId: 'ben-1', followupDate: '2026-08-15' },
+      ]);
+    });
+
+    it('returns an empty list for an empty beneficiaryIds list, without erroring', async () => {
+      repository.findFollowupsByBeneficiary.mockResolvedValue([]);
+
+      const result = await service.getFollowupsByBeneficiary([]);
+
+      expect(result).toEqual([]);
+    });
   });
 });
