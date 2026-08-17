@@ -2,6 +2,8 @@ import { z } from 'zod';
 import { asyncHandler, ok, unauthorized } from '../app.module';
 import type { VisitInstanceService } from './visitInstance.service';
 import type { visitSummaryQuerySchema } from './dto/visit-summary-query.dto';
+import type { countByBeneficiarySchema } from './dto/count-by-beneficiary.dto';
+import type { byPadaSchema } from './dto/by-pada.dto';
 
 /**
  * Visit instance request handlers. Mounted under the global `api/v1`
@@ -19,6 +21,20 @@ export function createVisitInstanceController(service: VisitInstanceService) {
       if (!authorizationHeader) return next(unauthorized());
       const query = req.query as unknown as z.infer<typeof visitSummaryQuerySchema>;
       res.json(ok(await service.getVisitSummary(query, req.user, authorizationHeader)));
+    }),
+
+    getCountByBeneficiary: asyncHandler(async (req, res, next) => {
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const { beneficiaryIds } = req.body as z.infer<typeof countByBeneficiarySchema>;
+      res.json(ok(await service.getCountByBeneficiary(beneficiaryIds, authorizationHeader)));
+    }),
+
+    getByPada: asyncHandler(async (req, res, next) => {
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const { beneficiaryIds, date } = req.body as z.infer<typeof byPadaSchema>;
+      res.json(ok(await service.getByPada(beneficiaryIds, date, authorizationHeader)));
     }),
 
     create: asyncHandler(async (req, res) => {

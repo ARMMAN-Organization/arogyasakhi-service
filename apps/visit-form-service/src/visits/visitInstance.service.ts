@@ -182,6 +182,120 @@ export class VisitInstanceService {
       total += row._count._all;
     }
 
-    return { total, byStatus };
+    // "Ending soon" = a due (PENDING) or overdue (MISSED) visit whose
+    // schedule window closes within the next 3 days — see dashboard SRS
+    // discussion; there is no separate DUE/OVERDUE status (same mapping as
+    // above/getCountByBeneficiary).
+    const dueOrOverdueStatusLookupValueIds = [...statusCodes.entries()]
+      .filter(([, code]) => code === 'PENDING' || code === 'MISSED')
+      .map(([id]) => id);
+    const today = new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00.000Z');
+    const endBoundary = new Date(today);
+    endBoundary.setUTCDate(endBoundary.getUTCDate() + 3);
+    const endingSoonVisitsCount = await this.repository.countEndingSoon({
+      sakhiId,
+      sakhiIds,
+      fromDate: query.fromDate,
+      toDate: query.toDate,
+      dueOrOverdueStatusLookupValueIds,
+      today,
+      endBoundary,
+    });
+
+    return { total, byStatus, endingSoonVisitsCount };
   }
+
+  /**
+   * Due/overdue/due-today visit counts per beneficiaryId, for the
+   * pada-breakdown widget — the caller (api-gateway) sums due/overdue per
+   * pada+caseType for the Women/Child split, and dueTodayCount across all
+   * beneficiaries in a pada for visitsRemainingCount. No role-scoping here:
+   * the caller has already resolved the in-scope beneficiaryIds via
+   * beneficiary-service's own scoping before calling this endpoint (see
+   * routes doc comment). "Due" maps to VISIT_STATUS PENDING, "overdue" to
+   * MISSED — there is no separate DUE/OVERDUE status (see
+   * dashboard.controller.ts's identical mapping in api-gateway).
+   * dueTodayCount is a raw visit count for that beneficiary today, not
+   * deduped to 0-or-1 — the gateway sums it as-is per visitsRemainingCount's
+   * "visits still due today" definition (a count of visits, not people).
+   */
+  async getCountByBeneficiary(beneficiaryIds: string[], authorizationHeader: string) {
+    const statusCodes = await resolveVisitStatusCodes(authorizationHeader);
+    const dueOrOverdueStatusLookupValueIds = [...statusCodes.entries()]
+      .filter(([, code]) => code === 'PENDING' || code === 'MISSED')
+      .map(([id]) => id);
+    const today = new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00.000Z');
+
+    const [grouped, dueTodayByBeneficiary] = await Promise.all([
+      this.repository.countByBeneficiary(beneficiaryIds),
+      this.repository.countDueTodayByBeneficiary(
+        beneficiaryIds,
+        dueOrOverdueStatusLookupValueIds,
+        today,
+      ),
+    ]);
+
+    const byBeneficiary: Record<
+      string,
+      { dueVisitsCount: number; overdueVisitsCount: number; dueTodayCount: number }
+    > = {};
+    for (const row of grouped) {
+      const code = row.statusLookupValueId ? statusCodes.get(row.statusLookupValueId) : undefined;
+      if (code !== 'PENDING' && code !== 'MISSED') continue;
+      const entry = (byBeneficiary[row.beneficiaryId] ??= {
+        dueVisitsCount: 0,
+        overdueVisitsCount: 0,
+        dueTodayCount: 0,
+      });
+      if (code === 'PENDING') entry.dueVisitsCount += row._count._all;
+      if (code === 'MISSED') entry.overdueVisitsCount += row._count._all;
+    }
+    for (const [beneficiaryId, count] of dueTodayByBeneficiary) {
+      const entry = (byBeneficiary[beneficiaryId] ??= {
+        dueVisitsCount: 0,
+        overdueVisitsCount: 0,
+        dueTodayCount: 0,
+      });
+      entry.dueTodayCount = count;
+    }
+    return byBeneficiary;
+  }
+
+  /**
+   * Full visit cards (visitId, beneficiaryId, visitType, dueDate) for the
+   * pada visit-list screen's "open" tab — due (PENDING) or overdue (MISSED)
+   * visits scheduled on `date` for the given beneficiaries. No
+   * role-scoping: the caller (api-gateway) has already resolved the
+   * in-scope beneficiaryIds via beneficiary-service's own scoping.
+   * visitType is the device-generated visitCode formatted for display
+   * (e.g. "ANC3" -> "ANC 3") — a code with no trailing digits (e.g.
+   * "DELIVERY") is left unchanged.
+   */
+  async getByPada(beneficiaryIds: string[], date: string, authorizationHeader: string) {
+    const statusCodes = await resolveVisitStatusCodes(authorizationHeader);
+    const dueOrOverdueStatusLookupValueIds = [...statusCodes.entries()]
+      .filter(([, code]) => code === 'PENDING' || code === 'MISSED')
+      .map(([id]) => id);
+    const dateOnly = new Date(`${date}T00:00:00.000Z`);
+
+    const rows = await this.repository.findByPada(
+      beneficiaryIds,
+      dueOrOverdueStatusLookupValueIds,
+      dateOnly,
+    );
+
+    return rows.map((row) => ({
+      visitId: row.id,
+      beneficiaryId: row.beneficiaryId,
+      visitType: formatVisitCode(row.schedule.visitCode),
+      dueDate: row.schedule.scheduledDate.toISOString().slice(0, 10),
+    }));
+  }
+}
+
+/** Inserts a space before the trailing digits of a device-generated visit
+ * code — "ANC3" -> "ANC 3", "INC11" -> "INC 11". A code with no trailing
+ * digits (e.g. "DELIVERY") is returned unchanged. */
+function formatVisitCode(visitCode: string): string {
+  return visitCode.replace(/(\D)(\d+)$/, '$1 $2');
 }

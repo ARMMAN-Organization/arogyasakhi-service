@@ -16,6 +16,10 @@ describe('VisitInstanceService', () => {
     create: jest.fn(),
     updateStatus: jest.fn(),
     countByStatus: jest.fn(),
+    countEndingSoon: jest.fn(),
+    countDueTodayByBeneficiary: jest.fn(),
+    findByPada: jest.fn(),
+    countByBeneficiary: jest.fn(),
   } as unknown as jest.Mocked<VisitInstanceRepository>;
   let service: VisitInstanceService;
 
@@ -286,6 +290,7 @@ describe('VisitInstanceService', () => {
         { statusLookupValueId: COMPLETED_ID, _count: { _all: 3 } },
       ]);
       resolveVisitStatusCodesMock.mockResolvedValue(new Map([[COMPLETED_ID, 'COMPLETED']]));
+      repository.countEndingSoon.mockResolvedValue(0);
 
       const result = await service.getVisitSummary(
         {},
@@ -296,13 +301,17 @@ describe('VisitInstanceService', () => {
       expect(repository.countByStatus).toHaveBeenCalledWith(
         expect.objectContaining({ sakhiId: SAKHI_ID }),
       );
-      expect(result).toEqual({ total: 3, byStatus: { COMPLETED: 3 } });
+      expect(repository.countEndingSoon).toHaveBeenCalledWith(
+        expect.objectContaining({ sakhiId: SAKHI_ID }),
+      );
+      expect(result).toEqual({ total: 3, byStatus: { COMPLETED: 3 }, endingSoonVisitsCount: 0 });
     });
 
     it('scopes a SUPERVISOR caller to their roster', async () => {
       listSakhiIdsForSupervisorMock.mockResolvedValue(['sakhi-a', 'sakhi-b']);
       repository.countByStatus.mockResolvedValue([]);
       resolveVisitStatusCodesMock.mockResolvedValue(new Map());
+      repository.countEndingSoon.mockResolvedValue(0);
 
       await service.getVisitSummary(
         {},
@@ -311,6 +320,9 @@ describe('VisitInstanceService', () => {
       );
 
       expect(repository.countByStatus).toHaveBeenCalledWith(
+        expect.objectContaining({ sakhiIds: ['sakhi-a', 'sakhi-b'] }),
+      );
+      expect(repository.countEndingSoon).toHaveBeenCalledWith(
         expect.objectContaining({ sakhiIds: ['sakhi-a', 'sakhi-b'] }),
       );
     });
@@ -328,6 +340,7 @@ describe('VisitInstanceService', () => {
     it('leaves a MANAGER caller unscoped', async () => {
       repository.countByStatus.mockResolvedValue([]);
       resolveVisitStatusCodesMock.mockResolvedValue(new Map());
+      repository.countEndingSoon.mockResolvedValue(0);
 
       await service.getVisitSummary({}, { id: 'manager-1', roles: ['MANAGER'] }, AUTH_HEADER);
 
@@ -349,6 +362,7 @@ describe('VisitInstanceService', () => {
     it('returns all-zero counts when no visits are in scope', async () => {
       repository.countByStatus.mockResolvedValue([]);
       resolveVisitStatusCodesMock.mockResolvedValue(new Map());
+      repository.countEndingSoon.mockResolvedValue(0);
 
       const result = await service.getVisitSummary(
         {},
@@ -356,7 +370,211 @@ describe('VisitInstanceService', () => {
         AUTH_HEADER,
       );
 
-      expect(result).toEqual({ total: 0, byStatus: {} });
+      expect(result).toEqual({ total: 0, byStatus: {}, endingSoonVisitsCount: 0 });
+    });
+
+    it('resolves endingSoonVisitsCount from the repository, restricted to PENDING/MISSED lookup ids', async () => {
+      const PENDING_ID = 'dddddddd-dddd-dddd-dddd-dddddddddddd';
+      repository.countByStatus.mockResolvedValue([
+        { statusLookupValueId: PENDING_ID, _count: { _all: 2 } },
+      ]);
+      resolveVisitStatusCodesMock.mockResolvedValue(
+        new Map([
+          [PENDING_ID, 'PENDING'],
+          [MISSED_ID, 'MISSED'],
+          [COMPLETED_ID, 'COMPLETED'],
+        ]),
+      );
+      repository.countEndingSoon.mockResolvedValue(1);
+
+      const result = await service.getVisitSummary(
+        {},
+        { id: SAKHI_ID, roles: ['SAKHI'] },
+        AUTH_HEADER,
+      );
+
+      expect(repository.countEndingSoon).toHaveBeenCalledWith(
+        expect.objectContaining({
+          dueOrOverdueStatusLookupValueIds: expect.arrayContaining([PENDING_ID, MISSED_ID]),
+        }),
+      );
+      const [call] = repository.countEndingSoon.mock.calls;
+      expect(call[0].dueOrOverdueStatusLookupValueIds).not.toContain(COMPLETED_ID);
+      expect(result.endingSoonVisitsCount).toBe(1);
+    });
+  });
+
+  describe('getCountByBeneficiary', () => {
+    const PENDING_ID = 'dddddddd-dddd-dddd-dddd-dddddddddddd';
+
+    it('groups due (PENDING) and overdue (MISSED) counts per beneficiaryId, dueTodayCount 0 by default', async () => {
+      repository.countByBeneficiary.mockResolvedValue([
+        { beneficiaryId: 'ben-1', statusLookupValueId: PENDING_ID, _count: { _all: 2 } },
+        { beneficiaryId: 'ben-1', statusLookupValueId: MISSED_ID, _count: { _all: 1 } },
+        { beneficiaryId: 'ben-2', statusLookupValueId: MISSED_ID, _count: { _all: 3 } },
+      ]);
+      resolveVisitStatusCodesMock.mockResolvedValue(
+        new Map([
+          [PENDING_ID, 'PENDING'],
+          [MISSED_ID, 'MISSED'],
+        ]),
+      );
+      repository.countDueTodayByBeneficiary.mockResolvedValue(new Map());
+
+      const result = await service.getCountByBeneficiary(['ben-1', 'ben-2'], AUTH_HEADER);
+
+      expect(repository.countByBeneficiary).toHaveBeenCalledWith(['ben-1', 'ben-2']);
+      expect(repository.countDueTodayByBeneficiary).toHaveBeenCalledWith(
+        ['ben-1', 'ben-2'],
+        expect.arrayContaining([PENDING_ID, MISSED_ID]),
+        expect.any(Date),
+      );
+      expect(result).toEqual({
+        'ben-1': { dueVisitsCount: 2, overdueVisitsCount: 1, dueTodayCount: 0 },
+        'ben-2': { dueVisitsCount: 0, overdueVisitsCount: 3, dueTodayCount: 0 },
+      });
+    });
+
+    it('merges dueTodayCount into the same per-beneficiary entry as due/overdue', async () => {
+      repository.countByBeneficiary.mockResolvedValue([
+        { beneficiaryId: 'ben-1', statusLookupValueId: PENDING_ID, _count: { _all: 2 } },
+      ]);
+      resolveVisitStatusCodesMock.mockResolvedValue(new Map([[PENDING_ID, 'PENDING']]));
+      repository.countDueTodayByBeneficiary.mockResolvedValue(new Map([['ben-1', 2]]));
+
+      const result = await service.getCountByBeneficiary(['ben-1'], AUTH_HEADER);
+
+      expect(result).toEqual({
+        'ben-1': { dueVisitsCount: 2, overdueVisitsCount: 0, dueTodayCount: 2 },
+      });
+    });
+
+    it('creates a fresh entry for a beneficiary who only has a due-today count (no other due/overdue rows)', async () => {
+      repository.countByBeneficiary.mockResolvedValue([]);
+      resolveVisitStatusCodesMock.mockResolvedValue(new Map());
+      repository.countDueTodayByBeneficiary.mockResolvedValue(new Map([['ben-2', 1]]));
+
+      const result = await service.getCountByBeneficiary(['ben-2'], AUTH_HEADER);
+
+      expect(result).toEqual({
+        'ben-2': { dueVisitsCount: 0, overdueVisitsCount: 0, dueTodayCount: 1 },
+      });
+    });
+
+    it('ignores statuses other than PENDING/MISSED (e.g. STARTED, COMPLETED)', async () => {
+      const STARTED_ID = 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee';
+      repository.countByBeneficiary.mockResolvedValue([
+        { beneficiaryId: 'ben-1', statusLookupValueId: STARTED_ID, _count: { _all: 5 } },
+        { beneficiaryId: 'ben-1', statusLookupValueId: COMPLETED_ID, _count: { _all: 2 } },
+      ]);
+      resolveVisitStatusCodesMock.mockResolvedValue(
+        new Map([
+          [STARTED_ID, 'STARTED'],
+          [COMPLETED_ID, 'COMPLETED'],
+        ]),
+      );
+      repository.countDueTodayByBeneficiary.mockResolvedValue(new Map());
+
+      const result = await service.getCountByBeneficiary(['ben-1'], AUTH_HEADER);
+
+      expect(result).toEqual({});
+    });
+
+    it('returns an empty object for an empty beneficiaryIds list, without erroring', async () => {
+      repository.countByBeneficiary.mockResolvedValue([]);
+      resolveVisitStatusCodesMock.mockResolvedValue(new Map());
+      repository.countDueTodayByBeneficiary.mockResolvedValue(new Map());
+
+      const result = await service.getCountByBeneficiary([], AUTH_HEADER);
+
+      expect(repository.countByBeneficiary).toHaveBeenCalledWith([]);
+      expect(result).toEqual({});
+    });
+
+    it('a beneficiary with no visits at all is simply absent from the result', async () => {
+      repository.countByBeneficiary.mockResolvedValue([]);
+      resolveVisitStatusCodesMock.mockResolvedValue(new Map());
+      repository.countDueTodayByBeneficiary.mockResolvedValue(new Map());
+
+      const result = await service.getCountByBeneficiary(['ben-with-no-visits'], AUTH_HEADER);
+
+      expect(result).toEqual({});
+      expect(result['ben-with-no-visits']).toBeUndefined();
+    });
+  });
+
+  describe('getByPada', () => {
+    const PENDING_ID = 'dddddddd-dddd-dddd-dddd-dddddddddddd';
+
+    it('maps repository rows to visit cards, formatting visitCode with a space before trailing digits', async () => {
+      resolveVisitStatusCodesMock.mockResolvedValue(new Map([[PENDING_ID, 'PENDING']]));
+      repository.findByPada.mockResolvedValue([
+        {
+          id: 'visit-1',
+          beneficiaryId: 'ben-1',
+          schedule: { visitCode: 'ANC3', scheduledDate: new Date('2026-08-20T00:00:00.000Z') },
+        },
+      ]);
+
+      const result = await service.getByPada(['ben-1'], '2026-08-20', AUTH_HEADER);
+
+      expect(repository.findByPada).toHaveBeenCalledWith(
+        ['ben-1'],
+        [PENDING_ID],
+        new Date('2026-08-20T00:00:00.000Z'),
+      );
+      expect(result).toEqual([
+        {
+          visitId: 'visit-1',
+          beneficiaryId: 'ben-1',
+          visitType: 'ANC 3',
+          dueDate: '2026-08-20',
+        },
+      ]);
+    });
+
+    it('leaves a visitCode with no trailing digits unchanged', async () => {
+      resolveVisitStatusCodesMock.mockResolvedValue(new Map([[PENDING_ID, 'PENDING']]));
+      repository.findByPada.mockResolvedValue([
+        {
+          id: 'visit-1',
+          beneficiaryId: 'ben-1',
+          schedule: { visitCode: 'DELIVERY', scheduledDate: new Date('2026-08-20T00:00:00.000Z') },
+        },
+      ]);
+
+      const result = await service.getByPada(['ben-1'], '2026-08-20', AUTH_HEADER);
+
+      expect(result[0].visitType).toBe('DELIVERY');
+    });
+
+    it('returns 2 separate cards for a beneficiary with 2 due visits that date (not deduped)', async () => {
+      resolveVisitStatusCodesMock.mockResolvedValue(new Map([[PENDING_ID, 'PENDING']]));
+      repository.findByPada.mockResolvedValue([
+        {
+          id: 'visit-1',
+          beneficiaryId: 'ben-1',
+          schedule: { visitCode: 'ANC3', scheduledDate: new Date('2026-08-20T00:00:00.000Z') },
+        },
+        {
+          id: 'visit-2',
+          beneficiaryId: 'ben-1',
+          schedule: { visitCode: 'ANC4', scheduledDate: new Date('2026-08-20T00:00:00.000Z') },
+        },
+      ]);
+
+      const result = await service.getByPada(['ben-1'], '2026-08-20', AUTH_HEADER);
+
+      expect(result).toHaveLength(2);
+    });
+
+    it('returns an empty list for an empty beneficiaryIds list, without erroring', async () => {
+      resolveVisitStatusCodesMock.mockResolvedValue(new Map());
+      repository.findByPada.mockResolvedValue([]);
+
+      const result = await service.getByPada([], '2026-08-20', AUTH_HEADER);
+
+      expect(result).toEqual([]);
     });
   });
 });
