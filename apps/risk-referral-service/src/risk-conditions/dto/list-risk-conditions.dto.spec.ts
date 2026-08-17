@@ -15,9 +15,9 @@ describe('listRiskConditionsQuerySchema', () => {
     expect(result.success).toBe(true);
   });
 
-  it('rejects a missing conditionCode', () => {
+  it('accepts a missing conditionCode (requests all active conditions)', () => {
     const result = listRiskConditionsQuerySchema.safeParse({});
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
   });
 
   it('rejects an empty conditionCode', () => {

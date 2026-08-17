@@ -8,9 +8,10 @@ import type { RiskConditionService } from './riskCondition.service';
 export function createRiskConditionController(service: RiskConditionService) {
   return {
     listByConditionCodes: asyncHandler(async (req, res) => {
-      const codes = String(req.query.conditionCode)
-        .split(',')
-        .map((c) => c.trim());
+      const codes =
+        typeof req.query.conditionCode === 'string'
+          ? req.query.conditionCode.split(',').map((c) => c.trim())
+          : undefined;
       const found = await service.listByConditionCodes(codes);
       res.json(ok(found));
     }),

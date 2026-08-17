@@ -7,9 +7,16 @@ import { trustGatewayIdentity, validate, type DocumentedRouter } from '../app.mo
 
 extendZodWithOpenApi(z);
 
-const riskConditionLookupSchema = z.object({
+const riskConditionSchema = z.object({
+  id: z.string().uuid(),
   conditionCode: z.string(),
-  riskConditionId: z.string().uuid(),
+  conditionName: z.string(),
+  entityType: z.enum(['MOTHER', 'CHILD']),
+  phase: z.enum(['REGISTRATION', 'ANC', 'DELIVERY', 'PP', 'NN', 'INC', 'CCV']),
+  gradeScale: z.enum(['BINARY', 'NORMAL_MILD_MODERATE_SEVERE', 'NORMAL_LOW_MEDIUM_HIGH']),
+  referralRequiredDefault: z.boolean(),
+  educationRequiredDefault: z.boolean(),
+  status: z.enum(['ACTIVE', 'INACTIVE']),
 });
 
 const apiErrorSchema = z.object({
@@ -37,16 +44,19 @@ export function registerRiskConditionRoutes(doc: DocumentedRouter, service: Risk
     '/risk-conditions',
     {
       summary:
-        'Resolve a comma-separated batch of condition codes to their riskConditionId. ' +
-        'Codes with no matching ACTIVE row are omitted from the response rather than ' +
-        'failing the whole batch.',
+        'List risk conditions. With conditionCode, resolves a comma-separated batch of ' +
+        'condition codes to their full rows (codes with no matching ACTIVE row are omitted ' +
+        'from the response rather than failing the whole batch). Without conditionCode, ' +
+        'returns every ACTIVE risk condition — the master-data download.',
       tags: ['Risk Conditions'],
       responses: {
         200: {
-          description: 'Resolved condition lookups (may be a subset of the requested codes)',
-          schema: envelope(z.array(riskConditionLookupSchema)),
+          description:
+            'Risk condition rows — the full set when conditionCode is omitted, or the ' +
+            'resolved subset matching the requested codes',
+          schema: envelope(z.array(riskConditionSchema)),
         },
-        400: { description: 'Missing/malformed conditionCode query param', schema: apiErrorSchema },
+        400: { description: 'Malformed conditionCode query param', schema: apiErrorSchema },
         401: { description: 'Unauthenticated', schema: apiErrorSchema },
       },
     },

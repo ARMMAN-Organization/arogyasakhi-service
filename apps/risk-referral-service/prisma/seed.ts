@@ -1,5 +1,6 @@
 import { PrismaClient } from '../../../node_modules/.prisma/client-risk-referral-service';
 import selfReportedConditions from './seed-data/self-reported-conditions.json';
+import riskParameters from './seed-data/risk-parameters.json';
 
 const prisma = new PrismaClient();
 
@@ -12,6 +13,14 @@ interface SeedResult {
 interface SelfReportedConditionSeed {
   conditionCode: string;
   conditionName: string;
+}
+
+interface RiskParameterSeed {
+  parameterCode: string;
+  parameterName: string;
+  entityType: 'MOTHER' | 'CHILD';
+  unit: string | null;
+  dataType: 'NUMERIC' | 'BOOLEAN' | 'CATEGORICAL';
 }
 
 /**
@@ -61,8 +70,54 @@ async function seedSelfReportedConditions(): Promise<SeedResult> {
   };
 }
 
+/**
+ * Master data for the raw measurable clinical parameters (e.g. systolic BP,
+ * hemoglobin) that feed a rules-service rule evaluation — distinct from
+ * RiskCondition, which is the resulting diagnosed/flagged condition after
+ * grading. Content lives in ./seed-data/risk-parameters.json, based on the
+ * observedValueJson keys referenced in apps/rules-service (e.g. systolicBp,
+ * hemoglobin — see ruleVersion.routes.ts) and the corresponding question
+ * codes in apps/visit-form-service/prisma/seed-data (anc-visit.json,
+ * postpartum-visit.json, infant-visit.json).
+ */
+async function seedRiskParameters(): Promise<SeedResult> {
+  let createdCount = 0;
+
+  for (const parameter of riskParameters as RiskParameterSeed[]) {
+    const existing = await prisma.riskParameter.findUnique({
+      where: { parameterCode: parameter.parameterCode },
+    });
+    if (existing) continue;
+
+    await prisma.riskParameter.create({
+      data: {
+        parameterCode: parameter.parameterCode,
+        parameterName: parameter.parameterName,
+        entityType: parameter.entityType,
+        unit: parameter.unit,
+        dataType: parameter.dataType,
+        status: 'ACTIVE',
+      },
+    });
+    createdCount += 1;
+  }
+
+  if (createdCount === 0) {
+    return {
+      step: 'risk-parameters',
+      created: false,
+      message: 'All risk parameter rows already present — skipped.',
+    };
+  }
+  return {
+    step: 'risk-parameters',
+    created: true,
+    message: `Seeded ${createdCount} risk parameter row(s).`,
+  };
+}
+
 async function main(): Promise<void> {
-  const results = [await seedSelfReportedConditions()];
+  const results = [await seedSelfReportedConditions(), await seedRiskParameters()];
 
   console.log('\nSeed summary:');
   for (const r of results) {
