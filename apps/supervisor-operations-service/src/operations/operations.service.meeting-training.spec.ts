@@ -184,6 +184,27 @@ describe('OperationsService — Meeting & Training flow', () => {
       ).resolves.toEqual(photoRow);
     });
 
+    // Whether this photo becomes the event's completion photo is decided
+    // atomically by the repository's own conditional UPDATE (see
+    // operations.repository.spec.ts), not by a boolean the service computes
+    // from a pre-read here — a pre-read boolean would race two concurrent
+    // calls into both "winning" (PR #165 review). The service always
+    // delegates with the same 3 args regardless of the event's current
+    // photoMediaId.
+    it('delegates to the repository with the same args regardless of the current photo state', async () => {
+      repository.findEventById.mockResolvedValue({
+        ...trainingEventRow,
+        photoMediaId: 'existing-media',
+      });
+      repository.createEventPhoto.mockResolvedValue(photoRow as never);
+      await service.addEventPhoto('event-1', { mediaId: 'media-2' }, supervisorCaller);
+      expect(repository.createEventPhoto).toHaveBeenCalledWith(
+        'event-1',
+        'media-2',
+        supervisorCaller.id,
+      );
+    });
+
     it('throws 404 when the event does not exist', async () => {
       repository.findEventById.mockResolvedValue(null);
       await expect(
