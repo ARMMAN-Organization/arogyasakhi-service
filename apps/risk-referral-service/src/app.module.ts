@@ -14,6 +14,9 @@ import { createHealthRouter } from './health/health.controller';
 import { createReferralModule } from './referrals/referral.module';
 import { createRiskAssessmentModule } from './risk-assessments/riskAssessment.module';
 import { createRiskConditionModule } from './risk-conditions/riskCondition.module';
+import { createRiskParameterModule } from './risk-parameters/riskParameter.module';
+import { createBeneficiaryRiskModule } from './beneficiary-risk/beneficiaryRisk.module';
+import { createBeneficiaryRiskReferralModule } from './beneficiary-risk-referrals/beneficiaryRiskReferral.module';
 import { buildRiskReferralServiceOpenApiDocument } from './docs/openapi';
 
 // Re-export shared HTTP helpers so feature routers can import from a single place.
@@ -56,6 +59,9 @@ export function createApp(prisma: PrismaService): Application {
   const referralModule = createReferralModule(prisma);
   const riskAssessmentModule = createRiskAssessmentModule(prisma);
   const riskConditionModule = createRiskConditionModule(prisma);
+  const riskParameterModule = createRiskParameterModule(prisma);
+  const beneficiaryRiskModule = createBeneficiaryRiskModule(prisma);
+  const beneficiaryRiskReferralModule = createBeneficiaryRiskReferralModule(prisma);
 
   // All routes live under the global `api/v1` prefix.
   const api = express.Router();
@@ -69,12 +75,18 @@ export function createApp(prisma: PrismaService): Application {
         referralModule.registry,
         riskAssessmentModule.registry,
         riskConditionModule.registry,
+        riskParameterModule.registry,
+        beneficiaryRiskModule.registry,
+        beneficiaryRiskReferralModule.registry,
       ),
     ),
   );
   api.use(referralModule.router);
   api.use(riskAssessmentModule.router);
   api.use(riskConditionModule.router);
+  api.use(riskParameterModule.router);
+  api.use(beneficiaryRiskModule.router);
+  api.use(beneficiaryRiskReferralModule.router);
   app.use('/api/v1', api);
 
   app.use(notFoundHandler);

@@ -13,6 +13,14 @@ export class IncentiveRateRepository {
     return this.prisma.incentiveRate.findFirst({ where: { id, isDeleted: false } });
   }
 
+  /** The full rate master list, for offline reference (Master Data Download). */
+  findAll() {
+    return this.prisma.incentiveRate.findMany({
+      where: { isDeleted: false },
+      orderBy: [{ rateType: 'asc' }, { effectiveFrom: 'desc' }],
+    });
+  }
+
   /**
    * Finds the rate effective as of `asOf` for a rate/referral type,
    * preferring a geography-specific rate over a global one (`geographyUnitId:

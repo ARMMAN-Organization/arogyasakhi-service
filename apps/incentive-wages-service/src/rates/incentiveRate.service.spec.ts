@@ -4,12 +4,26 @@ import type { IncentiveRateRepository } from './incentiveRate.repository';
 describe('IncentiveRateService', () => {
   const repository = {
     findActiveRate: jest.fn(),
+    findAll: jest.fn(),
   } as unknown as jest.Mocked<IncentiveRateRepository>;
   let service: IncentiveRateService;
 
   beforeEach(() => {
     jest.resetAllMocks();
     service = new IncentiveRateService(repository);
+  });
+
+  describe('findAll', () => {
+    it('returns every rate from the repository', async () => {
+      const rates = [{ id: 'rate-1' }, { id: 'rate-2' }];
+      repository.findAll.mockResolvedValue(rates as never);
+      await expect(service.findAll()).resolves.toBe(rates);
+    });
+
+    it('returns an empty list when no rates exist', async () => {
+      repository.findAll.mockResolvedValue([]);
+      await expect(service.findAll()).resolves.toEqual([]);
+    });
   });
 
   it('resolves via repository with the given query', async () => {

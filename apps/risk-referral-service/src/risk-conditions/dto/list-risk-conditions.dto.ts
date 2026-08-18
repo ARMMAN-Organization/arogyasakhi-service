@@ -6,10 +6,12 @@ export const MAX_BATCH_CONDITION_CODES = 100;
 /**
  * Query schema for `GET /risk-conditions?conditionCode=...` — a comma
  * separated batch of condition codes to resolve to riskConditionIds in one
- * round trip. Kept as a plain string + `.refine()` (not `z.coerce.*`),
- * matching list-call-sheet-stats-batch.dto.ts's own note on why —
- * zod-to-openapi cannot introspect a `ZodEffects`-wrapped transform and
- * crashes OpenAPI doc generation at startup.
+ * round trip. `conditionCode` is optional: omitting it entirely requests
+ * every ACTIVE risk condition (a master-data download), rather than a
+ * code-filtered batch lookup. Kept as a plain string + `.refine()` (not
+ * `z.coerce.*`), matching list-call-sheet-stats-batch.dto.ts's own note on
+ * why — zod-to-openapi cannot introspect a `ZodEffects`-wrapped transform
+ * and crashes OpenAPI doc generation at startup.
  */
 export const listRiskConditionsQuerySchema = z
   .object({
@@ -19,7 +21,8 @@ export const listRiskConditionsQuerySchema = z
       .min(1)
       .refine((v) => v.split(',').length <= MAX_BATCH_CONDITION_CODES, {
         message: `conditionCode: must be a comma-separated list of at most ${MAX_BATCH_CONDITION_CODES} codes`,
-      }),
+      })
+      .optional(),
   })
   .strict();
 

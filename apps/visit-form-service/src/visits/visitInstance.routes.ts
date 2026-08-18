@@ -19,6 +19,7 @@ import {
 extendZodWithOpenApi(z);
 
 const idParamsSchema = z.object({ id: z.string().uuid() }).strict();
+const beneficiaryIdParamsSchema = z.object({ beneficiaryId: z.string().uuid() }).strict();
 
 // Request DTO annotated with examples for Swagger UI; validation behavior is
 // unchanged (`.openapi()` only attaches documentation metadata).
@@ -138,6 +139,32 @@ export function registerVisitInstanceRoutes(doc: DocumentedRouter, service: Visi
     requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
     validate(visitSummaryQuerySchema, 'query'),
     controller.getVisitSummary,
+  );
+
+  doc.get(
+    '/beneficiaries/:beneficiaryId/visits',
+    {
+      summary:
+        "A beneficiary's full visit history (Beneficiary Data Download screen — offline " +
+        'reference, so this returns every visit instance for the beneficiary, not just the ' +
+        'recent ones GET /visits lists). Same fields as GET /visits, filtered to one ' +
+        'beneficiary and ordered by actualVisitDate desc (nulls last).',
+      tags: ['Visits'],
+      params: beneficiaryIdParamsSchema,
+      responses: {
+        200: {
+          description: 'Visit instances for this beneficiary',
+          schema: envelope(z.array(visitInstanceSchema)),
+        },
+        401: errorResponse(401),
+        403: errorResponse(403),
+        500: errorResponse(500),
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER'),
+    validate(beneficiaryIdParamsSchema, 'params'),
+    controller.listByBeneficiary,
   );
 
   doc.post(

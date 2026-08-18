@@ -1,0 +1,93 @@
+[
+  {
+    "parameterCode": "SYSTOLIC_BP",
+    "parameterName": "Systolic Blood Pressure",
+    "entityType": "MOTHER",
+    "unit": "mmHg",
+    "dataType": "NUMERIC"
+  },
+  {
+    "parameterCode": "DIASTOLIC_BP",
+    "parameterName": "Diastolic Blood Pressure",
+    "entityType": "MOTHER",
+    "unit": "mmHg",
+    "dataType": "NUMERIC"
+  },
+  {
+    "parameterCode": "HEMOGLOBIN",
+    "parameterName": "Hemoglobin",
+    "entityType": "MOTHER",
+    "unit": "g/dL",
+    "dataType": "NUMERIC"
+  },
+  {
+    "parameterCode": "MOTHER_WEIGHT_KG",
+    "parameterName": "Weight (Mother)",
+    "entityType": "MOTHER",
+    "unit": "kg",
+    "dataType": "NUMERIC"
+  },
+  {
+    "parameterCode": "MOTHER_HEIGHT_CM",
+    "parameterName": "Height (Mother)",
+    "entityType": "MOTHER",
+    "unit": "cm",
+    "dataType": "NUMERIC"
+  },
+  {
+    "parameterCode": "BMI",
+    "parameterName": "Body Mass Index",
+    "entityType": "MOTHER",
+    "unit": "kg/m2",
+    "dataType": "NUMERIC"
+  },
+  {
+    "parameterCode": "MOTHER_BODY_TEMPERATURE_F",
+    "parameterName": "Body Temperature (Mother)",
+    "entityType": "MOTHER",
+    "unit": "°F",
+    "dataType": "NUMERIC"
+  },
+  {
+    "parameterCode": "MOTHER_DANGER_SIGNS_PRESENT",
+    "parameterName": "Danger Signs Present (Mother)",
+    "entityType": "MOTHER",
+    "unit": null,
+    "dataType": "BOOLEAN"
+  },
+  {
+    "parameterCode": "CHILD_BIRTH_WEIGHT_KG",
+    "parameterName": "Birth Weight",
+    "entityType": "CHILD",
+    "unit": "kg",
+    "dataType": "NUMERIC"
+  },
+  {
+    "parameterCode": "CHILD_WEIGHT_KG",
+    "parameterName": "Current Weight (Child)",
+    "entityType": "CHILD",
+    "unit": "kg",
+    "dataType": "NUMERIC"
+  },
+  {
+    "parameterCode": "CHILD_RESPIRATORY_RATE",
+    "parameterName": "Respiratory Rate (Child)",
+    "entityType": "CHILD",
+    "unit": "breaths/min",
+    "dataType": "NUMERIC"
+  },
+  {
+    "parameterCode": "CHILD_DANGER_SIGNS_PRESENT",
+    "parameterName": "Danger Signs Present (Child)",
+    "entityType": "CHILD",
+    "unit": null,
+    "dataType": "BOOLEAN"
+  },
+  {
+    "parameterCode": "CHILD_NUTRITIONAL_STATUS",
+    "parameterName": "Nutritional Status (Child)",
+    "entityType": "CHILD",
+    "unit": null,
+    "dataType": "CATEGORICAL"
+  }
+]

@@ -10,6 +10,7 @@ jest.mock('../lookups/lookup.client');
 describe('VisitInstanceService', () => {
   const repository = {
     findMany: jest.fn(),
+    findManyByBeneficiaryId: jest.fn(),
     findById: jest.fn(),
     findByLocalVisitUuid: jest.fn(),
     findScheduleById: jest.fn(),
@@ -73,6 +74,24 @@ describe('VisitInstanceService', () => {
     const rows = [sampleRow];
     repository.findMany.mockResolvedValue(rows);
     await expect(service.list()).resolves.toBe(rows);
+  });
+
+  describe('listByBeneficiaryId', () => {
+    it('returns the repository result for a beneficiary with visit history', async () => {
+      const rows = [sampleRow];
+      repository.findManyByBeneficiaryId.mockResolvedValue(rows);
+
+      await expect(service.listByBeneficiaryId(sampleRow.beneficiaryId)).resolves.toBe(rows);
+      expect(repository.findManyByBeneficiaryId).toHaveBeenCalledWith(sampleRow.beneficiaryId);
+    });
+
+    it('returns an empty array for a beneficiary with no visits', async () => {
+      repository.findManyByBeneficiaryId.mockResolvedValue([]);
+
+      await expect(
+        service.listByBeneficiaryId('99999999-9999-9999-9999-999999999999'),
+      ).resolves.toEqual([]);
+    });
   });
 
   const dto: CreateVisitInstanceInput = {

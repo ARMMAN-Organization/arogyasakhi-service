@@ -28,10 +28,11 @@ const schema = z.object({
     .string()
     .min(1)
     .transform((v) => v.replace(/\\n/g, '\n')),
-  // jose "expiresIn" style durations, e.g. "15m", "30d". Values per the HLD §4.2.
-  JWT_ACCESS_TOKEN_TTL: z.string().default('15m'),
-  JWT_REFRESH_TOKEN_TTL: z.string().default('30d'),
   REDIS_URL: z.string().url(),
+  // jose "expiresIn" style duration, e.g. "15m". Access tokens have no
+  // expiry by default (see AuthService.issueTokens) — this applies ONLY to
+  // ADMIN-role logins, the one role that still gets a time-based expiry.
+  JWT_ADMIN_ACCESS_TOKEN_TTL: z.string().default('15m'),
 });
 
 export type AppConfig = z.infer<typeof schema>;

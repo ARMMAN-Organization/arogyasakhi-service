@@ -57,6 +57,19 @@ export class VisitInstanceService {
   }
 
   /**
+   * A beneficiary's full visit history, for the reference app's Beneficiary
+   * Data Download screen (offline reference — a Sakhi pre-fetches this
+   * before a household visit with no connectivity). Unscoped by caller,
+   * same as list() above: role gate only (SAKHI/SUPERVISOR/MANAGER), no
+   * per-Sakhi/roster ownership check — this mirrors GET /visits' existing
+   * behavior rather than introducing new IDOR scoping this endpoint wasn't
+   * asked to add.
+   */
+  listByBeneficiaryId(beneficiaryId: string) {
+    return this.repository.findManyByBeneficiaryId(beneficiaryId);
+  }
+
+  /**
    * Idempotent by localVisitUuid (@unique) — mirrors form.service.ts's
    * createSubmission and beneficiary.service.ts's enroll pattern. Without
    * this, a retried offline visit upload hit P2002 on the unique constraint

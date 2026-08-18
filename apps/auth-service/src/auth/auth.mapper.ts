@@ -3,8 +3,8 @@ import { decryptPii } from '@armman/service-commons';
 export interface AuthTokens {
   accessToken: string;
   refreshToken: string;
-  /** Access token lifetime in seconds, from now. */
-  expiresIn: number;
+  /** Access token lifetime in seconds, from now. Null — this access token has no `exp` claim and never expires by time; only /auth/logout or revocation ends the session. */
+  expiresIn: number | null;
   /** Every role code the caller holds — same set encoded in the access token's `roles` claim. */
   roles: string[];
   /** The primary role assignment's project/geography scope (first assignment; see issueTokens). */

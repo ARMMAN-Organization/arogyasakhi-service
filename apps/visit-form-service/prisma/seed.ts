@@ -165,8 +165,217 @@ async function seedForms(): Promise<SeedResult> {
   };
 }
 
+type VisitCodeType =
+  | 'ANC'
+  | 'ANC_HR'
+  | 'ANC_POST_EDD'
+  | 'DELIVERY'
+  | 'PP'
+  | 'NN'
+  | 'INC'
+  | 'INC_HR'
+  | 'CCV'
+  | 'CCV_HR';
+
+interface VisitMasterSeed {
+  visitCode: string;
+  visitType: VisitCodeType;
+  displayName: string;
+  entityType: 'MOTHER' | 'CHILD';
+  sequenceOrder: number | null;
+  description: string;
+}
+
+/**
+ * Visit master catalog — the SRS's named visit-type definitions, transcribed
+ * from docs/Arogya_Sakhi_SRS_v3.0.md Appendix A ("Visit Schedule Rules") and
+ * Appendix B ("Visit Windows Summary"). Real master data required in every
+ * environment for the Supervisor app's "Download Master Data" screen's
+ * "Visit Master" row — not test data. `_REGULAR` rows (ANC_REGULAR,
+ * INC_REGULAR, CCV_REGULAR) are templates standing in for the variable
+ * number of actual generated ANC2-ANCn / INC2-INCn / CCV1-CCVn visits, since
+ * those aren't a fixed, enumerable set of codes the way ANC1/PP1-5/NN1-2/
+ * INC1 are.
+ */
+const VISIT_MASTERS: VisitMasterSeed[] = [
+  {
+    visitCode: 'ANC1',
+    visitType: 'ANC',
+    displayName: 'ANC Visit 1',
+    entityType: 'MOTHER',
+    sequenceOrder: 1,
+    description: 'Registration date (Day 0). Window: Day 0 to Day +5.',
+  },
+  {
+    visitCode: 'ANC_REGULAR',
+    visitType: 'ANC',
+    displayName: 'ANC Visit (Regular, 2 onward)',
+    entityType: 'MOTHER',
+    sequenceOrder: null,
+    description:
+      'Previous scheduled date + 30 days. Window: Schedule -5 to Schedule +5. ' +
+      'Template for ANC2-ANCn.',
+  },
+  {
+    visitCode: 'ANC_HR',
+    visitType: 'ANC_HR',
+    displayName: 'ANC High-Risk Visit',
+    entityType: 'MOTHER',
+    sequenceOrder: null,
+    description: 'Actual visit date + 15 days. Window: Anchor -2 to Anchor +2.',
+  },
+  {
+    visitCode: 'ANC_POST_EDD',
+    visitType: 'ANC_POST_EDD',
+    displayName: 'ANC Post-EDD Visit',
+    entityType: 'MOTHER',
+    sequenceOrder: null,
+    description: 'EDD + 8. Window: EDD +8 to EDD +13.',
+  },
+  {
+    visitCode: 'PP1',
+    visitType: 'PP',
+    displayName: 'Postpartum Visit 1',
+    entityType: 'MOTHER',
+    sequenceOrder: 1,
+    description: 'Day 0 (delivery date). Window: Day 0 to Day +14.',
+  },
+  {
+    visitCode: 'PP2',
+    visitType: 'PP',
+    displayName: 'Postpartum Visit 2',
+    entityType: 'MOTHER',
+    sequenceOrder: 2,
+    description: 'Day +15. Window: Day +15 to Day +28.',
+  },
+  {
+    visitCode: 'PP3',
+    visitType: 'PP',
+    displayName: 'Postpartum Visit 3',
+    entityType: 'MOTHER',
+    sequenceOrder: 3,
+    description: 'Day +58. Window: Day +53 to Day +63.',
+  },
+  {
+    visitCode: 'PP4',
+    visitType: 'PP',
+    displayName: 'Postpartum Visit 4',
+    entityType: 'MOTHER',
+    sequenceOrder: 4,
+    description: 'Day +88. Window: Day +83 to Day +93.',
+  },
+  {
+    visitCode: 'PP5',
+    visitType: 'PP',
+    displayName: 'Postpartum Visit 5',
+    entityType: 'MOTHER',
+    sequenceOrder: 5,
+    description:
+      'Day +118. Window: Day +113 to Day +123. Completion triggers mother closure prompt.',
+  },
+  {
+    visitCode: 'NN1',
+    visitType: 'NN',
+    displayName: 'Neonatal Visit 1',
+    entityType: 'CHILD',
+    sequenceOrder: 1,
+    description: 'With delivery form. Window: Day 0 to Day +14.',
+  },
+  {
+    visitCode: 'NN2',
+    visitType: 'NN',
+    displayName: 'Neonatal Visit 2',
+    entityType: 'CHILD',
+    sequenceOrder: 2,
+    description: 'Day +15. Window: Day +15 to Day +28.',
+  },
+  {
+    visitCode: 'INC1',
+    visitType: 'INC',
+    displayName: 'Infant Care Visit 1',
+    entityType: 'CHILD',
+    sequenceOrder: 1,
+    description:
+      'Early registration (Day 0-58): DOB +58, window DOB +53 to DOB +63. ' +
+      'Late registration (after Day 58): registration date, window Reg date -5 to Reg date +5.',
+  },
+  {
+    visitCode: 'INC_REGULAR',
+    visitType: 'INC',
+    displayName: 'Infant Care Visit (Regular, 2 onward)',
+    entityType: 'CHILD',
+    sequenceOrder: null,
+    description:
+      'Previous scheduled + 30 days. Window: Schedule -5 to Schedule +5. ' +
+      'Template for INC2-INCn.',
+  },
+  {
+    visitCode: 'INC_HR',
+    visitType: 'INC_HR',
+    displayName: 'Infant Care High-Risk Visit',
+    entityType: 'CHILD',
+    sequenceOrder: null,
+    description: 'Actual visit + 15 days. Window: Anchor -2 to Anchor +2.',
+  },
+  {
+    visitCode: 'CCV_REGULAR',
+    visitType: 'CCV',
+    displayName: 'Child Continuum Visit (Regular)',
+    entityType: 'CHILD',
+    sequenceOrder: null,
+    description:
+      'State-dependent cadence (monthly, or every 2 months, per current risk state). ' +
+      'Window: Schedule -5 to Schedule +5. Template for CCV1-CCVn.',
+  },
+  {
+    visitCode: 'CCV_HR_SAM',
+    visitType: 'CCV_HR',
+    displayName: 'Child Continuum High-Risk Visit (SAM)',
+    entityType: 'CHILD',
+    sequenceOrder: null,
+    description:
+      'Actual visit + 30 days (SAM or danger sign detected in last 3 INC/CCV visits). ' +
+      'Window: Schedule -5 to Schedule +5.',
+  },
+  {
+    visitCode: 'CCV_HR_OTHER',
+    visitType: 'CCV_HR',
+    displayName: 'Child Continuum High-Risk Visit (Other)',
+    entityType: 'CHILD',
+    sequenceOrder: null,
+    description:
+      'Actual visit + 30 days (other high-risk condition detected in last 3 INC/CCV visits). ' +
+      'Window: Schedule -5 to Schedule +5.',
+  },
+];
+
+async function seedVisitMasters(): Promise<SeedResult> {
+  let createdCount = 0;
+
+  for (const row of VISIT_MASTERS) {
+    const existing = await prisma.visitMaster.findUnique({ where: { visitCode: row.visitCode } });
+    if (existing) continue;
+
+    await prisma.visitMaster.create({ data: row });
+    createdCount += 1;
+  }
+
+  if (createdCount === 0) {
+    return {
+      step: 'visitMasters',
+      created: false,
+      message: 'All visit master rows already present — skipped.',
+    };
+  }
+  return {
+    step: 'visitMasters',
+    created: true,
+    message: `Seeded ${createdCount} visit master row(s).`,
+  };
+}
+
 async function main(): Promise<void> {
-  const results = [await seedForms()];
+  const results = [await seedForms(), await seedVisitMasters()];
 
   console.log('\nSeed summary:');
   for (const r of results) {

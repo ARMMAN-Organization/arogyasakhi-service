@@ -19,13 +19,16 @@ describe('OperationsService — Meeting & Training flow', () => {
     createTrainingTopic: jest.fn(),
     findActiveTrainingTopicIds: jest.fn(),
     createGathering: jest.fn(),
+    findGatherings: jest.fn(),
     findGatheringById: jest.fn(),
     findGatheringTopics: jest.fn(),
     findGatheringAttendance: jest.fn(),
     upsertGatheringAttendance: jest.fn(),
     findTopicMark: jest.fn(),
+    findTopicMarksByGathering: jest.fn(),
     upsertTopicMark: jest.fn(),
     lockTopicMark: jest.fn(),
+    findEventPhotos: jest.fn(),
   } as unknown as jest.Mocked<OperationsRepository>;
   const sakhiClient = { findById: jest.fn() } as unknown as jest.Mocked<SakhiClient>;
   let service: OperationsService;
@@ -258,6 +261,68 @@ describe('OperationsService — Meeting & Training flow', () => {
     });
   });
 
+  describe('listGatherings', () => {
+    it('lists recent gatherings via repository when no filter is given', async () => {
+      repository.findGatherings.mockResolvedValue([gatheringRow]);
+      await expect(service.listGatherings(supervisorCaller, 'Bearer token')).resolves.toEqual([
+        gatheringRow,
+      ]);
+      expect(repository.findGatherings).toHaveBeenCalledWith(undefined);
+      expect(sakhiClient.findById).not.toHaveBeenCalled();
+    });
+
+    it("passes a sakhiId filter through to the repository when it's the caller's own Sakhi", async () => {
+      const sakhi = {
+        sakhiId: 'sakhi-1',
+        supervisorId: supervisorCaller.id,
+        primaryProjectId: 'p1',
+      };
+      sakhiClient.findById.mockResolvedValue(sakhi);
+      repository.findGatherings.mockResolvedValue([gatheringRow]);
+
+      await service.listGatherings(supervisorCaller, 'Bearer token', { sakhiId: 'sakhi-1' });
+
+      expect(repository.findGatherings).toHaveBeenCalledWith({ sakhiId: 'sakhi-1' });
+    });
+
+    it('returns an empty list when no gathering matches', async () => {
+      const sakhi = {
+        sakhiId: 'sakhi-none',
+        supervisorId: supervisorCaller.id,
+        primaryProjectId: 'p1',
+      };
+      sakhiClient.findById.mockResolvedValue(sakhi);
+      repository.findGatherings.mockResolvedValue([]);
+
+      await expect(
+        service.listGatherings(supervisorCaller, 'Bearer token', { sakhiId: 'sakhi-none' }),
+      ).resolves.toEqual([]);
+    });
+
+    it("403s when a SUPERVISOR's sakhiId filter is not on their own roster", async () => {
+      const sakhi = {
+        sakhiId: 'sakhi-1',
+        supervisorId: otherSupervisorCaller.id,
+        primaryProjectId: 'p1',
+      };
+      sakhiClient.findById.mockResolvedValue(sakhi);
+
+      await expect(
+        service.listGatherings(supervisorCaller, 'Bearer token', { sakhiId: 'sakhi-1' }),
+      ).rejects.toThrow('You do not have access to this Sakhi.');
+      expect(repository.findGatherings).not.toHaveBeenCalled();
+    });
+
+    it('leaves an ADMIN caller unscoped even with a sakhiId filter', async () => {
+      repository.findGatherings.mockResolvedValue([gatheringRow]);
+
+      await service.listGatherings(adminCaller, 'Bearer token', { sakhiId: 'sakhi-1' });
+
+      expect(sakhiClient.findById).not.toHaveBeenCalled();
+      expect(repository.findGatherings).toHaveBeenCalledWith({ sakhiId: 'sakhi-1' });
+    });
+  });
+
   describe('listGatheringTopics', () => {
     it("returns topics for a gathering under the caller's own event", async () => {
       repository.findGatheringById.mockResolvedValue(gatheringRow);
@@ -346,6 +411,149 @@ describe('OperationsService — Meeting & Training flow', () => {
         service.updateGatheringAttendance('gathering-1', dto, otherSupervisorCaller),
       ).rejects.toMatchObject({ status: 403 });
       expect(repository.upsertGatheringAttendance).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getGatheringTrainingMarks', () => {
+    const markWithTopicRow = {
+      id: 'mark-1',
+      gatheringId: 'gathering-1',
+      topicId: 'topic-1',
+      sakhiId: 'sakhi-1',
+      markType: 'PRE' as const,
+      score: 80 as never,
+      isLocked: false,
+      lockedAt: null,
+      createdAt: new Date(),
+      createdByUserId: null,
+      updatedAt: new Date(),
+      updatedByUserId: null,
+      topic: topicRow,
+    };
+
+    it("returns a rollup of every mark for the caller's own gathering, with topic code/name inlined", async () => {
+      repository.findGatheringById.mockResolvedValue(gatheringRow);
+      repository.findEventById.mockResolvedValue(trainingEventRow);
+      repository.findTopicMarksByGathering.mockResolvedValue([markWithTopicRow] as never);
+
+      await expect(
+        service.getGatheringTrainingMarks('gathering-1', supervisorCaller),
+      ).resolves.toEqual([
+        {
+          id: 'mark-1',
+          gatheringId: 'gathering-1',
+          topicId: 'topic-1',
+          topicCode: 'ANEMIA',
+          topicName: 'Anemia',
+          sakhiId: 'sakhi-1',
+          markType: 'PRE',
+          score: 80,
+          isLocked: false,
+          lockedAt: null,
+        },
+      ]);
+    });
+
+    it('returns an empty list when no marks have been recorded yet', async () => {
+      repository.findGatheringById.mockResolvedValue(gatheringRow);
+      repository.findEventById.mockResolvedValue(trainingEventRow);
+      repository.findTopicMarksByGathering.mockResolvedValue([]);
+
+      await expect(
+        service.getGatheringTrainingMarks('gathering-1', supervisorCaller),
+      ).resolves.toEqual([]);
+    });
+
+    it('throws 404 when the gathering does not exist', async () => {
+      repository.findGatheringById.mockResolvedValue(null);
+      await expect(
+        service.getGatheringTrainingMarks('missing', supervisorCaller),
+      ).rejects.toMatchObject({ status: 404 });
+    });
+
+    it('rejects a non-owner Supervisor', async () => {
+      repository.findGatheringById.mockResolvedValue(gatheringRow);
+      repository.findEventById.mockResolvedValue(trainingEventRow);
+      await expect(
+        service.getGatheringTrainingMarks('gathering-1', otherSupervisorCaller),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(repository.findTopicMarksByGathering).not.toHaveBeenCalled();
+    });
+
+    it('allows ADMIN unrestricted', async () => {
+      repository.findGatheringById.mockResolvedValue(gatheringRow);
+      repository.findEventById.mockResolvedValue(trainingEventRow);
+      repository.findTopicMarksByGathering.mockResolvedValue([markWithTopicRow] as never);
+      await expect(
+        service.getGatheringTrainingMarks('gathering-1', adminCaller),
+      ).resolves.toHaveLength(1);
+    });
+  });
+
+  describe('getGatheringImages', () => {
+    const photoRow = {
+      id: 'photo-1',
+      eventId: 'event-1',
+      mediaId: 'media-1',
+      createdAt: new Date('2026-08-01T10:00:00.000Z'),
+      createdByUserId: null,
+      isDeleted: false,
+      deletedAt: null,
+    };
+
+    it("returns the parent event's completion photo + gallery for the caller's own gathering", async () => {
+      repository.findGatheringById.mockResolvedValue(gatheringRow);
+      repository.findEventById.mockResolvedValue({
+        ...trainingEventRow,
+        photoMediaId: 'completion-media-1',
+      });
+      repository.findEventPhotos.mockResolvedValue([photoRow] as never);
+
+      await expect(service.getGatheringImages('gathering-1', supervisorCaller)).resolves.toEqual({
+        gatheringId: 'gathering-1',
+        eventId: 'event-1',
+        completionPhotoMediaId: 'completion-media-1',
+        photos: [{ id: 'photo-1', mediaId: 'media-1', createdAt: photoRow.createdAt }],
+      });
+      expect(repository.findEventPhotos).toHaveBeenCalledWith('event-1');
+    });
+
+    it('returns an empty gallery and null completion photo when none exist yet', async () => {
+      repository.findGatheringById.mockResolvedValue(gatheringRow);
+      repository.findEventById.mockResolvedValue(trainingEventRow);
+      repository.findEventPhotos.mockResolvedValue([]);
+
+      await expect(service.getGatheringImages('gathering-1', supervisorCaller)).resolves.toEqual({
+        gatheringId: 'gathering-1',
+        eventId: 'event-1',
+        completionPhotoMediaId: null,
+        photos: [],
+      });
+    });
+
+    it('throws 404 when the gathering does not exist', async () => {
+      repository.findGatheringById.mockResolvedValue(null);
+      await expect(service.getGatheringImages('missing', supervisorCaller)).rejects.toMatchObject({
+        status: 404,
+      });
+    });
+
+    it('rejects a non-owner Supervisor', async () => {
+      repository.findGatheringById.mockResolvedValue(gatheringRow);
+      repository.findEventById.mockResolvedValue(trainingEventRow);
+      await expect(
+        service.getGatheringImages('gathering-1', otherSupervisorCaller),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(repository.findEventPhotos).not.toHaveBeenCalled();
+    });
+
+    it('allows ADMIN unrestricted', async () => {
+      repository.findGatheringById.mockResolvedValue(gatheringRow);
+      repository.findEventById.mockResolvedValue(trainingEventRow);
+      repository.findEventPhotos.mockResolvedValue([photoRow] as never);
+      await expect(service.getGatheringImages('gathering-1', adminCaller)).resolves.toMatchObject({
+        photos: [{ id: 'photo-1' }],
+      });
     });
   });
 

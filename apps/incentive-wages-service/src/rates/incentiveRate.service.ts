@@ -5,6 +5,11 @@ import type { ListActiveRateQuery } from './dto/list-active-rate.dto';
 export class IncentiveRateService {
   constructor(private readonly repository: IncentiveRateRepository) {}
 
+  /** The full rate master list, for offline reference (Master Data Download). */
+  findAll() {
+    return this.repository.findAll();
+  }
+
   findActive(query: ListActiveRateQuery) {
     return this.repository.findActiveRate(
       query.rateType,

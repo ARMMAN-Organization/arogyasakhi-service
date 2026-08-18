@@ -73,7 +73,6 @@ export class AuthRepository {
     userId: string;
     refreshTokenHash: string;
     issuedAt: Date;
-    expiresAt: Date;
     ipAddress: string | null;
   }) {
     return this.prisma.userSession.create({ data });
@@ -91,7 +90,6 @@ export class AuthRepository {
       userId: string;
       refreshTokenHash: string;
       issuedAt: Date;
-      expiresAt: Date;
       ipAddress: string | null;
     },
   ) {

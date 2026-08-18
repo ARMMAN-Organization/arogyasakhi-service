@@ -61,6 +61,12 @@ enum RiskConditionStatus {
   INACTIVE
 }
 
+enum RiskParameterDataType {
+  NUMERIC
+  BOOLEAN
+  CATEGORICAL
+}
+
 enum OverallRiskCategory {
   NORMAL
   LOW
@@ -140,6 +146,27 @@ model RiskCondition {
   riskFlags RiskFlag[]
 
   @@map("risk_conditions")
+}
+
+// risk_parameters is the raw measurable clinical dimension (e.g. SYSTOLIC_BP,
+// HEMOGLOBIN) that feeds a rules-service rule evaluation — distinct from
+// RiskCondition, which is the resulting diagnosed/flagged condition (e.g.
+// HYPERTENSION_HIGH_BP) after grading. Read-only reference data surfaced to
+// the Supervisor app's "Download Master Data" screen via GET /risk-parameters.
+model RiskParameter {
+  id              String                 @id @default(uuid()) @map("risk_parameter_id")
+  parameterCode   String                 @unique @map("parameter_code") @db.VarChar(80)
+  parameterName   String                 @map("parameter_name") @db.VarChar(160)
+  entityType      RiskEntityType         @map("entity_type")
+  unit            String?                @db.VarChar(40)
+  dataType        RiskParameterDataType  @map("data_type")
+  status          RiskConditionStatus
+  createdAt       DateTime               @default(now()) @map("created_at")
+  createdByUserId String?                @map("created_by_user_id")
+  updatedAt       DateTime               @updatedAt @map("updated_at")
+  updatedByUserId String?                @map("updated_by_user_id")
+
+  @@map("risk_parameters")
 }
 
 model RiskAssessment {

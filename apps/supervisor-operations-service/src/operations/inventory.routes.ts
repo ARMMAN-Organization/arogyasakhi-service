@@ -91,6 +91,25 @@ export function registerInventoryRoutes(doc: DocumentedRouter, service: Operatio
     controller.listItems,
   );
 
+  // Alias for consumers that expect a dedicated "Item Master List" path
+  // rather than /inventory-items — same handler, same response, same role
+  // restriction, just a different URL.
+  doc.get(
+    '/item-master-list',
+    {
+      summary: 'Download all Item Master rows (alias for GET /inventory-items)',
+      tags: ['Supervisor Operations'],
+      responses: {
+        200: { description: 'Inventory items', schema: envelope(z.array(inventoryItemSchema)) },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    controller.listItems,
+  );
+
   doc.post(
     '/inventory-items',
     {
@@ -170,6 +189,48 @@ export function registerInventoryRoutes(doc: DocumentedRouter, service: Operatio
     requireRoles('SUPERVISOR', 'ADMIN'),
     validateBody(createInventoryTransactionRequestSchema),
     controller.createTransactions,
+  );
+
+  doc.get(
+    '/inventory-transactions/:id',
+    {
+      summary: 'Fetch a single inventory transaction by id',
+      tags: ['Supervisor Operations'],
+      params: transactionIdParamsSchema,
+      responses: {
+        200: { description: 'Inventory transaction', schema: envelope(inventoryTransactionSchema) },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller does not own this transaction', schema: apiErrorSchema },
+        404: { description: 'Transaction not found', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(transactionIdParamsSchema, 'params'),
+    controller.getTransactionById,
+  );
+
+  // Dedicated-path alias for GET /inventory-transactions/:id — same handler,
+  // same response — for the Beneficiary Data Download screen's "Item
+  // Transaction Detail" row, which expects this path specifically.
+  doc.get(
+    '/item-transactions/:id/details',
+    {
+      summary:
+        'Fetch a single inventory transaction by id (alias for GET /inventory-transactions/:id)',
+      tags: ['Supervisor Operations'],
+      params: transactionIdParamsSchema,
+      responses: {
+        200: { description: 'Inventory transaction', schema: envelope(inventoryTransactionSchema) },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller does not own this transaction', schema: apiErrorSchema },
+        404: { description: 'Transaction not found', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(transactionIdParamsSchema, 'params'),
+    controller.getTransactionById,
   );
 
   doc.put(

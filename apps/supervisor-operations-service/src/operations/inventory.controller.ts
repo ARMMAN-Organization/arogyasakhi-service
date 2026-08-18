@@ -21,6 +21,11 @@ export function createInventoryController(service: OperationsService) {
       res.json(ok(await service.listInventoryTransactions()));
     }),
 
+    getTransactionById: asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      res.json(ok(await service.getInventoryTransactionById(req.params.id, req.user)));
+    }),
+
     listTransactionsBySakhi: asyncHandler(async (req, res, next) => {
       if (!req.user) return next(unauthorized());
       const authorizationHeader = req.header('authorization');

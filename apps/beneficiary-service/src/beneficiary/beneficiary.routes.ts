@@ -420,6 +420,35 @@ export function registerBeneficiaryRoutes(doc: DocumentedRouter, service: Benefi
     controller.getRiskSummary,
   );
 
+  // UNCONFIRMED alias for the Beneficiary Data Download screen's "Risk
+  // Monitoring" row — "Risk Monitoring" has no definition anywhere in the
+  // SRS/ERD/HLD or the reference app spec we have, so this is a best-guess
+  // mapping to the closest existing thing (the risk-summary aggregate), not
+  // a confirmed match. If "Risk Monitoring" turns out to mean something
+  // else (e.g. a per-beneficiary trend rather than an aggregate), replace
+  // this alias rather than trusting it.
+  doc.get(
+    '/risk-monitoring',
+    {
+      summary:
+        'UNCONFIRMED alias for GET /beneficiaries/risk-summary — "Risk Monitoring" has no ' +
+        'definition anywhere in the SRS/ERD/HLD; this is the closest existing match, not a ' +
+        'confirmed one.',
+      tags: ['Beneficiaries'],
+      responses: {
+        200: { description: 'Risk grade counts', schema: envelope(riskSummarySchema) },
+        400: errorResponse(400, { message: 'fromDate must be on or before toDate.' }),
+        401: errorResponse(401),
+        403: errorResponse(403, { message: "sakhiId is not in this Supervisor's roster." }),
+        500: errorResponse(500),
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(summaryQuerySchema, 'query'),
+    controller.getRiskSummary,
+  );
+
   doc.get(
     '/beneficiaries/:id',
     {
