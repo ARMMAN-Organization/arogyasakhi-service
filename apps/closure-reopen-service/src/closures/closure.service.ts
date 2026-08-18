@@ -7,6 +7,24 @@ import type { BeneficiaryClient } from '../reopen-requests/beneficiary.client';
 import type { CreateClosureInput } from './dto/create-closure.dto';
 import type { DecideClosureInput } from './dto/decide-closure.dto';
 
+/** Narrows a caught Prisma error to a unique-constraint violation (P2002). */
+function isUniqueConstraintViolation(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'code' in err &&
+    (err as { code: unknown }).code === 'P2002'
+  );
+}
+
+/**
+ * CLOSURE_REASON valueCodes that require Supervisor review before the
+ * beneficiary closes — resolved from the server's own read of
+ * closureReasonLookupValueId, never from client input (see
+ * createClosureSchema's doc comment for the trust gap this closes).
+ */
+const REASONS_REQUIRING_REVIEW = new Set(['MIGRATION']);
+
 /** Closure domain logic. Data access is delegated to the repository. */
 export class ClosureService {
   constructor(
@@ -27,12 +45,49 @@ export class ClosureService {
    * the original closure unchanged instead of creating a duplicate row or
    * re-firing the Quick Response card / beneficiary-close side effects below
    * a second time — this mobile flow is offline-first and expected to retry.
+   *
+   * supervisorStatus is derived here from the server's own read of
+   * closureReasonLookupValueId (REASONS_REQUIRING_REVIEW), never from client
+   * input — a client can no longer set supervisorStatus/supervisorId
+   * directly to self-approve a closure and skip review (see
+   * createClosureSchema's doc comment).
+   *
+   * A concurrent retry racing on the same localClosureUuid (two near-
+   * simultaneous requests both passing the findByLocalClosureUuid check as
+   * null) hits the column's own unique constraint on create() — caught here
+   * and turned into the same idempotent-replay result as a sequential retry,
+   * rather than a raw 500.
    */
   async create(dto: CreateClosureInput, authorizationHeader: string) {
     const existing = await this.repository.findByLocalClosureUuid(dto.localClosureUuid);
     if (existing) return existing;
 
-    const created = await this.repository.create(dto);
+    // Delegates ownership scoping to beneficiary-service's own
+    // GET /beneficiaries/:id (SAKHI-own-case / SUPERVISOR-roster /
+    // MANAGER-unrestricted) rather than duplicating that IDOR check here —
+    // this service owns no sakhiId data of its own. Without this, any
+    // authenticated SAKHI could raise a closure (and, for a MIGRATION
+    // reason, a real supervisor-approval card) for a beneficiary they have
+    // no relationship to. Throws 403/404 as-is on failure.
+    await this.beneficiaryClient.getById(dto.beneficiaryId, authorizationHeader);
+
+    const reasonCode = await this.lookupClient.resolveClosureReasonCode(
+      dto.closureReasonLookupValueId,
+      authorizationHeader,
+    );
+    const supervisorStatus =
+      reasonCode && REASONS_REQUIRING_REVIEW.has(reasonCode) ? ('PENDING' as const) : null;
+
+    let created;
+    try {
+      created = await this.repository.create(dto, supervisorStatus);
+    } catch (err) {
+      if (isUniqueConstraintViolation(err)) {
+        const winner = await this.repository.findByLocalClosureUuid(dto.localClosureUuid);
+        if (winner) return winner;
+      }
+      throw err;
+    }
 
     if (created.supervisorStatus === 'PENDING') {
       try {

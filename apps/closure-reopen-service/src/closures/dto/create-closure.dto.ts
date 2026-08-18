@@ -5,6 +5,15 @@ import { z } from 'zod';
  * (prisma/schema.prisma model Closure) — no invented fields. Audit/soft-delete
  * columns (createdByUserId, updatedByUserId, isDeleted, deletedAt) are
  * server-set and excluded from client input.
+ *
+ * supervisorStatus/supervisorId/supervisorNotes are deliberately NOT fields
+ * here — they used to be client-suppliable, which let a SAKHI POST
+ * `supervisorStatus: "APPROVED"` directly and bypass supervisor review
+ * entirely (the beneficiary gets closed immediately with a row falsely
+ * showing a decision that was never made). ClosureService.create() now
+ * derives supervisorStatus itself from the server's own read of
+ * closureReasonLookupValueId — a client can never set it.
+ *
  * `.strict()` rejects unknown fields, matching the previous global
  * ValidationPipe `forbidNonWhitelisted: true`.
  */
@@ -27,9 +36,6 @@ export const createClosureSchema = z
     eventDate: z.coerce.date().optional(),
     closureDate: z.coerce.date(),
     submittedByUserId: z.string().uuid(),
-    supervisorStatus: z.enum(['PENDING', 'APPROVED', 'REJECTED']).optional(),
-    supervisorId: z.string().uuid().optional(),
-    supervisorNotes: z.string().trim().min(1).optional(),
   })
   .strict();
 

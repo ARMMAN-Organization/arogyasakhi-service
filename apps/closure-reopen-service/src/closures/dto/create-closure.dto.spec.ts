@@ -14,15 +14,25 @@ describe('createClosureSchema', () => {
     expect(createClosureSchema.safeParse(validBase).success).toBe(true);
   });
 
-  it('accepts an optional eventDate/supervisorStatus/supervisorId/supervisorNotes', () => {
+  it('accepts an optional eventDate', () => {
     const result = createClosureSchema.safeParse({
       ...validBase,
       eventDate: '2026-06-01',
-      supervisorStatus: 'PENDING',
-      supervisorId: '44444444-4444-4444-4444-444444444444',
-      supervisorNotes: 'Migrating out of the project area.',
     });
     expect(result.success).toBe(true);
+  });
+
+  it('rejects a client-supplied supervisorStatus — server-derived only, never client input', () => {
+    const result = createClosureSchema.safeParse({ ...validBase, supervisorStatus: 'APPROVED' });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a client-supplied supervisorId', () => {
+    const result = createClosureSchema.safeParse({
+      ...validBase,
+      supervisorId: '44444444-4444-4444-4444-444444444444',
+    });
+    expect(result.success).toBe(false);
   });
 
   it('rejects a missing localClosureUuid', () => {

@@ -267,20 +267,36 @@ describe('BeneficiaryService', () => {
       expect(repository.updatePhase).toHaveBeenCalledWith(beneficiaryId, 'ANC', 'PP');
     });
 
-    it('advances a CHILD case to NN', async () => {
+    it('is a no-op when a CHILD case is already at NN (its creation default)', async () => {
       repository.findById.mockResolvedValue(
-        caseRow({ caseType: 'CHILD', currentPhase: 'ANC' }) as never,
+        caseRow({ caseType: 'CHILD', currentPhase: 'NN' }) as never,
       );
-      repository.updatePhase.mockResolvedValue(true);
 
-      await service.applyPhaseChange(
+      const result = await service.applyPhaseChange(
         beneficiaryId,
         'NN',
         caller({ id: sakhiId, roles: ['SAKHI'] }),
         AUTH_HEADER,
       );
 
-      expect(repository.updatePhase).toHaveBeenCalledWith(beneficiaryId, 'ANC', 'NN');
+      expect(repository.updatePhase).not.toHaveBeenCalled();
+      expect(result).toMatchObject({ id: beneficiaryId });
+    });
+
+    it('409s a CHILD case transition from any phase other than NN — regression: the CHILD branch must validate fromPhase, not just toPhase', async () => {
+      repository.findById.mockResolvedValue(
+        caseRow({ caseType: 'CHILD', currentPhase: 'INC' }) as never,
+      );
+
+      await expect(
+        service.applyPhaseChange(
+          beneficiaryId,
+          'NN',
+          caller({ id: sakhiId, roles: ['SAKHI'] }),
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 409 });
+      expect(repository.updatePhase).not.toHaveBeenCalled();
     });
 
     it('returns the updated case via getById', async () => {
@@ -406,6 +422,7 @@ describe('BeneficiaryService', () => {
         sakhiId,
         caseType: 'MOTHER',
         currentStatus: 'ACTIVE',
+        statusHistory: [],
         pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
         ...overrides,
       };
@@ -452,8 +469,13 @@ describe('BeneficiaryService', () => {
       expect(repository.closeCase).not.toHaveBeenCalled();
     });
 
-    it('is idempotent when the case is already CLOSED — no repository write, no error', async () => {
-      repository.findById.mockResolvedValue(caseRow({ currentStatus: 'CLOSED' }) as never);
+    it('is idempotent when the case is already CLOSED with the same reasonCode — no repository write, no error', async () => {
+      repository.findById.mockResolvedValue(
+        caseRow({
+          currentStatus: 'CLOSED',
+          statusHistory: [{ toStatus: 'CLOSED', reasonCode: 'MEDICAL' }],
+        }) as never,
+      );
 
       const result = await service.applyClosure(
         beneficiaryId,
@@ -464,6 +486,41 @@ describe('BeneficiaryService', () => {
 
       expect(repository.closeCase).not.toHaveBeenCalled();
       expect(result).toMatchObject({ id: beneficiaryId });
+    });
+
+    it('is idempotent when already CLOSED with no statusHistory row recorded (pre-existing data)', async () => {
+      repository.findById.mockResolvedValue(
+        caseRow({ currentStatus: 'CLOSED', statusHistory: [] }) as never,
+      );
+
+      const result = await service.applyClosure(
+        beneficiaryId,
+        'MEDICAL',
+        caller({ id: sakhiId, roles: ['SAKHI'] }),
+        AUTH_HEADER,
+      );
+
+      expect(repository.closeCase).not.toHaveBeenCalled();
+      expect(result).toMatchObject({ id: beneficiaryId });
+    });
+
+    it('409s when already CLOSED with a genuinely different reasonCode — regression: must not silently drop the discrepancy', async () => {
+      repository.findById.mockResolvedValue(
+        caseRow({
+          currentStatus: 'CLOSED',
+          statusHistory: [{ toStatus: 'CLOSED', reasonCode: 'MEDICAL' }],
+        }) as never,
+      );
+
+      await expect(
+        service.applyClosure(
+          beneficiaryId,
+          'MIGRATION',
+          caller({ id: sakhiId, roles: ['SAKHI'] }),
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 409 });
+      expect(repository.closeCase).not.toHaveBeenCalled();
     });
 
     it('403s when a SAKHI targets a case outside their own roster', async () => {
@@ -552,6 +609,25 @@ describe('BeneficiaryService', () => {
       );
 
       expect(result).toMatchObject({ id: beneficiaryId });
+    });
+
+    it('409s when closeCase races to a genuinely different reasonCode than the race winner', async () => {
+      repository.findById.mockResolvedValueOnce(caseRow() as never).mockResolvedValueOnce(
+        caseRow({
+          currentStatus: 'CLOSED',
+          statusHistory: [{ toStatus: 'CLOSED', reasonCode: 'MIGRATION' }],
+        }) as never,
+      );
+      repository.closeCase.mockResolvedValue(false);
+
+      await expect(
+        service.applyClosure(
+          beneficiaryId,
+          'MEDICAL',
+          caller({ id: sakhiId, roles: ['SAKHI'] }),
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 409 });
     });
 
     it('409s when closeCase fails and the case is still not CLOSED on re-read', async () => {

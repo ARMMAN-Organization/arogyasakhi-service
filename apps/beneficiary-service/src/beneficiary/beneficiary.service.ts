@@ -745,7 +745,7 @@ export class BeneficiaryService {
 
     const isValidTransition =
       (existing.caseType === 'MOTHER' && fromPhase === 'ANC' && toPhase === 'PP') ||
-      (existing.caseType === 'CHILD' && toPhase === 'NN');
+      (existing.caseType === 'CHILD' && fromPhase === 'NN' && toPhase === 'NN');
     if (!isValidTransition) {
       throw conflict(`Cannot move a ${existing.caseType} case from ${fromPhase} to ${toPhase}.`);
     }
@@ -782,6 +782,19 @@ export class BeneficiaryService {
    * A SAKHI caller may only apply this to their own case (same ownership
    * check as applyPhaseChange) — assertCallerCanTouchCase alone doesn't
    * cover this route, since it only scopes SUPERVISOR callers.
+   *
+   * KNOWN GAP: this is reachable directly by a SAKHI (not just via
+   * closure-reopen-service's own call chain) — this codebase has no
+   * machine/service-account identity, so "server-to-server only" can't be
+   * cryptographically enforced today. A SAKHI who owns the case can call
+   * this endpoint directly with any reasonCode and close it without ever
+   * creating a `closures` row via POST /closures — bypassing that record's
+   * audit trail and (for a MIGRATION-equivalent reason) the supervisor
+   * review closure-reopen-service's ClosureService.create() would have
+   * required. The ownership check above bounds this to a SAKHI's own case
+   * (not a cross-tenant IDOR), but it is a real gap in the review workflow.
+   * Tracked as a follow-up, not fixed here — would need a real machine
+   * identity concept to close properly.
    */
   async applyClosure(
     beneficiaryId: string,
@@ -801,7 +814,21 @@ export class BeneficiaryService {
     }
 
     if (existing.currentStatus === 'CLOSED') {
-      return this.projectCase(beneficiaryId, authorizationHeader, existing);
+      // Idempotent no-op only for a genuine retry of the SAME closure
+      // (matching reasonCode) — the doc comment above claims reasonCode is
+      // "recorded on beneficiary_status_history for audit," which would be
+      // false for a differing reasonCode silently swallowed here (e.g.
+      // closed once as MEDICAL, then a real MIGRATION closure attempt
+      // returning 200 with no trace of ever happening). A genuinely
+      // different closure reason for an already-closed case is a caller
+      // error, not a retry — surfaced as a 409 rather than silently dropped.
+      const lastClose = existing.statusHistory.find((h) => h.toStatus === 'CLOSED');
+      if (!lastClose || lastClose.reasonCode === reasonCode) {
+        return this.projectCase(beneficiaryId, authorizationHeader, existing);
+      }
+      throw conflict(
+        `This case was already closed with reason ${lastClose.reasonCode}, not ${reasonCode}.`,
+      );
     }
 
     const closed = await this.repository.closeCase(beneficiaryId, caller.id, reasonCode);
@@ -812,7 +839,13 @@ export class BeneficiaryService {
       const recheck = await this.repository.findById(beneficiaryId);
       if (!recheck) throw notFound('Beneficiary case not found.');
       if (recheck.currentStatus === 'CLOSED') {
-        return this.projectCase(beneficiaryId, authorizationHeader, recheck);
+        const raceWinner = recheck.statusHistory.find((h) => h.toStatus === 'CLOSED');
+        if (!raceWinner || raceWinner.reasonCode === reasonCode) {
+          return this.projectCase(beneficiaryId, authorizationHeader, recheck);
+        }
+        throw conflict(
+          `This case was already closed with reason ${raceWinner.reasonCode}, not ${reasonCode}.`,
+        );
       }
       throw conflict('Unable to close this beneficiary case.');
     }

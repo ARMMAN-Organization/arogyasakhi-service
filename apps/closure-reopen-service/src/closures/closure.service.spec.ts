@@ -42,10 +42,12 @@ describe('ClosureService', () => {
   const approvalClient = { create: jest.fn() } as unknown as jest.Mocked<ApprovalClient>;
   const lookupClient = {
     resolveApprovalStatusId: jest.fn(),
+    resolveClosureReasonCode: jest.fn(),
   } as unknown as jest.Mocked<LookupClient>;
   const notificationClient = { notify: jest.fn() } as unknown as jest.Mocked<NotificationClient>;
   const beneficiaryClient = {
     closeCase: jest.fn(),
+    getById: jest.fn(),
   } as unknown as jest.Mocked<BeneficiaryClient>;
   let service: ClosureService;
   const authHeader = 'Bearer token';
@@ -60,6 +62,11 @@ describe('ClosureService', () => {
       id: '22222222-2222-2222-2222-222222222222',
       currentStatus: 'CLOSED',
     });
+    beneficiaryClient.getById.mockResolvedValue({
+      id: '22222222-2222-2222-2222-222222222222',
+      currentStatus: 'ACTIVE',
+    });
+    lookupClient.resolveClosureReasonCode.mockResolvedValue('WITHDRAWAL');
     service = new ClosureService(
       repository,
       approvalClient,
@@ -95,13 +102,47 @@ describe('ClosureService', () => {
       submittedByUserId: '33333333-3333-3333-3333-333333333333',
     };
 
-    it('creates via repository with the given data', async () => {
+    it('creates via repository with the given data and server-derived supervisorStatus', async () => {
       const created = closureRow();
       repository.create.mockResolvedValue(created);
 
       await expect(service.create(dto, authHeader)).resolves.toBe(created);
-      expect(repository.create).toHaveBeenCalledWith(dto);
+      expect(repository.create).toHaveBeenCalledWith(dto, null);
       expect(approvalClient.create).not.toHaveBeenCalled();
+    });
+
+    it('checks ownership via beneficiaryClient.getById before creating', async () => {
+      repository.create.mockResolvedValue(closureRow());
+      await service.create(dto, authHeader);
+      expect(beneficiaryClient.getById).toHaveBeenCalledWith(dto.beneficiaryId, authHeader);
+    });
+
+    it('propagates a 403 from the ownership check without creating a closure', async () => {
+      beneficiaryClient.getById.mockRejectedValue(
+        Object.assign(new Error('This beneficiary case is outside your own roster.'), {
+          status: 403,
+        }),
+      );
+      await expect(service.create(dto, authHeader)).rejects.toMatchObject({ status: 403 });
+      expect(repository.create).not.toHaveBeenCalled();
+    });
+
+    it('derives supervisorStatus: PENDING only when the resolved reason is MIGRATION — never from client input', async () => {
+      lookupClient.resolveClosureReasonCode.mockResolvedValue('MIGRATION');
+      repository.create.mockResolvedValue(closureRow({ supervisorStatus: 'PENDING' }));
+
+      await service.create(dto, authHeader);
+
+      expect(repository.create).toHaveBeenCalledWith(dto, 'PENDING');
+    });
+
+    it('derives supervisorStatus: null for a non-review reason', async () => {
+      lookupClient.resolveClosureReasonCode.mockResolvedValue('WITHDRAWAL');
+      repository.create.mockResolvedValue(closureRow({ supervisorStatus: null }));
+
+      await service.create(dto, authHeader);
+
+      expect(repository.create).toHaveBeenCalledWith(dto, null);
     });
 
     it('propagates repository errors on create', async () => {
@@ -139,6 +180,10 @@ describe('ClosureService', () => {
       function pendingClosure() {
         return closureRow({ supervisorStatus: 'PENDING' as const });
       }
+
+      beforeEach(() => {
+        lookupClient.resolveClosureReasonCode.mockResolvedValue('MIGRATION');
+      });
 
       it('raises a CLOSURE_REVIEW card when the closure needs supervisor review', async () => {
         const created = pendingClosure();

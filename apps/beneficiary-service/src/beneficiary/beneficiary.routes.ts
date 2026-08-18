@@ -594,11 +594,16 @@ export function registerBeneficiaryRoutes(doc: DocumentedRouter, service: Benefi
     {
       summary:
         'Close a beneficiary case after a closure submission (ANC_CLOSURE_VISIT / ' +
-        'CHILD_CLOSURE_VISIT) — server-to-server only, called by closure-reopen-service. ' +
-        "Forwards the submitting SAKHI's own token for a non-reviewed closure, or the " +
-        "deciding Supervisor's token once a MIGRATION closure is approved — this codebase " +
-        'has no machine/service-account identity. Idempotent: closing an already-CLOSED case ' +
-        'is a no-op success, not a 409, since the mobile app may retry this call offline.',
+        'CHILD_CLOSURE_VISIT) — intended to be called server-to-server by ' +
+        "closure-reopen-service, forwarding the submitting SAKHI's own token for a " +
+        "non-reviewed closure, or the deciding Supervisor's token once a MIGRATION closure " +
+        'is approved. KNOWN GAP: this codebase has no machine/service-account identity, so ' +
+        'this is also reachable directly by a SAKHI who owns the case, bypassing the ' +
+        'closures audit row and any required supervisor review (see BeneficiaryService.' +
+        'applyClosure doc comment) — tracked as a follow-up, not enforced here. Idempotent: ' +
+        'closing an already-CLOSED case with the same reasonCode is a no-op success, not a ' +
+        '409, since the mobile app may retry this call offline; a genuinely different ' +
+        'reasonCode 409s instead of silently overwriting the audit trail.',
       tags: ['Beneficiaries'],
       params: idParamsSchema,
       responses: {

@@ -8,6 +8,16 @@ import type { BeneficiaryClient } from './beneficiary.client';
 import type { CreateReopenRequestInput } from './dto/create-reopen-request.dto';
 import type { DecideReopenRequestInput } from './dto/decide-reopen-request.dto';
 
+/** Narrows a caught Prisma error to a unique-constraint violation (P2002). */
+function isUniqueConstraintViolation(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'code' in err &&
+    (err as { code: unknown }).code === 'P2002'
+  );
+}
+
 /** Reopen request domain logic. Data access is delegated to the repository. */
 export class ReopenRequestService {
   constructor(
@@ -49,6 +59,12 @@ export class ReopenRequestService {
    * unchanged instead of creating a duplicate row or re-firing the Quick
    * Response card a second time — this mobile flow is offline-first and
    * expected to retry, same as closures' localClosureUuid.
+   *
+   * A concurrent retry racing on the same localReopenRequestUuid (two near-
+   * simultaneous requests both passing the findByLocalReopenRequestUuid
+   * check as null) hits the column's own unique constraint on create() —
+   * caught here and turned into the same idempotent-replay result as a
+   * sequential retry, rather than a raw 500.
    */
   async create(
     dto: CreateReopenRequestInput,
@@ -58,7 +74,18 @@ export class ReopenRequestService {
     const existing = await this.repository.findByLocalReopenRequestUuid(dto.localReopenRequestUuid);
     if (existing) return existing;
 
-    const created = await this.repository.create({ ...dto, requestedByUserId });
+    let created;
+    try {
+      created = await this.repository.create({ ...dto, requestedByUserId });
+    } catch (err) {
+      if (isUniqueConstraintViolation(err)) {
+        const winner = await this.repository.findByLocalReopenRequestUuid(
+          dto.localReopenRequestUuid,
+        );
+        if (winner) return winner;
+      }
+      throw err;
+    }
 
     try {
       const decisionStatusLookupId = await this.lookupClient.resolveApprovalStatusId(

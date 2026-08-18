@@ -23,8 +23,13 @@ export class ClosureRepository {
     return this.prisma.closure.findFirst({ where: { localClosureUuid, isDeleted: false } });
   }
 
-  create(data: CreateClosureInput) {
-    return this.prisma.closure.create({ data });
+  /**
+   * supervisorStatus is a server-derived value (see ClosureService.create),
+   * never client-suppliable — passed explicitly here rather than as part of
+   * CreateClosureInput, which no longer carries it.
+   */
+  create(data: CreateClosureInput, supervisorStatus: 'PENDING' | null) {
+    return this.prisma.closure.create({ data: { ...data, supervisorStatus } });
   }
 
   /**

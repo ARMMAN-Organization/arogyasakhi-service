@@ -160,7 +160,7 @@ export class FormService {
     if (existing) {
       const childBeneficiaryIds =
         formCode === 'DELIVERY_VISIT'
-          ? await this.resolveDeliveryChildren(dto, authorizationHeader)
+          ? await this.resolveDeliveryChildren(dto, existing.beneficiaryId, authorizationHeader)
           : undefined;
       if (formCode === 'ANC_CLOSURE_VISIT' || formCode === 'CHILD_CLOSURE_VISIT') {
         // Re-run on replay same as resolveDeliveryChildren above — createClosure
@@ -228,7 +228,7 @@ export class FormService {
     // resolveDeliveryChildren for the per-child best-effort details.
     const childBeneficiaryIds =
       formCode === 'DELIVERY_VISIT'
-        ? await this.resolveDeliveryChildren(dto, authorizationHeader)
+        ? await this.resolveDeliveryChildren(dto, dto.beneficiaryId, authorizationHeader)
         : undefined;
 
     // Closes the loop the SRS's closure flow otherwise leaves open:
@@ -280,12 +280,38 @@ export class FormService {
    * that were created the first time, without creating duplicates — this is
    * what lets a retried submission still return childBeneficiaryIds instead
    * of the caller having no way to find the child it already created.
+   *
+   * `beneficiaryId` is a separate parameter (not read off `dto`) so a replay
+   * call site can pass the originally-stored `existing.beneficiaryId`
+   * instead of trusting the retry request's own body — same reasoning
+   * resolveClosureRequest already applies to its own replay call site; a
+   * retried request with a swapped beneficiaryId in its body must not run
+   * child-creation against a different beneficiary than the one actually
+   * recorded.
    */
   private async resolveDeliveryChildren(
     dto: CreateSubmissionInput,
+    beneficiaryId: string,
     authorizationHeader: string,
   ): Promise<string[] | undefined> {
-    const motherCase = await findBeneficiaryById(dto.beneficiaryId, authorizationHeader);
+    // Unlike every other downstream call in createSubmission
+    // (createChildBeneficiary, updateBeneficiaryPhase, createClosure, risk/
+    // socio-demographic/health-history syncs), findBeneficiaryById throws
+    // (badGateway) on anything but a 404 — caught here so a transient
+    // beneficiary-service failure can't turn an already-durably-saved
+    // submission into a failed HTTP response; only a genuine 404 (no
+    // motherCase) is expected to short-circuit this method.
+    let motherCase;
+    try {
+      motherCase = await findBeneficiaryById(beneficiaryId, authorizationHeader);
+    } catch (err) {
+      console.warn(
+        `Unable to resolve mother beneficiary ${dto.beneficiaryId} for DELIVERY_VISIT ` +
+          `child auto-creation; the submission itself was still saved. ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+      );
+      return undefined;
+    }
     if (!motherCase) return undefined;
 
     const dateOfDelivery = dto.formData.date_of_delivery
