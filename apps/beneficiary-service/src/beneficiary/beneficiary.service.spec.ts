@@ -1630,6 +1630,27 @@ describe('BeneficiaryService', () => {
         expect.not.objectContaining({ sakhiId: expect.anything() }),
       );
     });
+
+    it(
+      'leaves a caller holding both MANAGER and SAKHI unscoped — regression: the SAKHI ' +
+        'branch must not run ahead of the privileged-role check',
+      async () => {
+        repository.findByIdsWithRisk.mockResolvedValue([]);
+
+        await service.getByIdsWithRisk(
+          ['b1'],
+          undefined,
+          caller({ roles: ['MANAGER', 'SAKHI'] }),
+          AUTH_HEADER,
+        );
+
+        expect(repository.findByIdsWithRisk).toHaveBeenCalledWith(
+          ['b1'],
+          undefined,
+          expect.not.objectContaining({ sakhiId: expect.anything() }),
+        );
+      },
+    );
   });
 
   describe('getRegistrationSummary', () => {

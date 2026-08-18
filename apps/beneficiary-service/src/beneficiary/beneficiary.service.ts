@@ -214,6 +214,18 @@ export interface ListBeneficiariesQuery {
 }
 
 /**
+ * MANAGER and ADMIN are unrestricted across all Sakhi-scoping checks —
+ * checked as the absence of an elevated role, not the presence of a
+ * restrictive one (SAKHI/SUPERVISOR), since a caller can hold multiple role
+ * assignments at once and must not be scoped down just because one of their
+ * roles is restrictive. Matches the same isPrivileged() pattern in every
+ * other service's own scoping helper.
+ */
+function isPrivileged(caller: AuthenticatedUser): boolean {
+  return caller.roles.includes('MANAGER') || caller.roles.includes('ADMIN');
+}
+
+/**
  * Resolves the sakhiId/sakhiIds scoping filters shared by `list()` and the
  * count-only summary endpoints: a SAKHI only ever sees their own cases, a
  * SUPERVISOR is scoped to their own roster (optionally narrowed to one
@@ -227,6 +239,9 @@ async function resolveSakhiScoping(
   caller: AuthenticatedUser,
   authorizationHeader: string,
 ): Promise<{ sakhiId?: string; sakhiIds?: string[] }> {
+  if (isPrivileged(caller)) {
+    return querySakhiId ? { sakhiId: querySakhiId } : {};
+  }
   if (caller.roles.includes('SAKHI')) {
     return { sakhiId: caller.id };
   }
