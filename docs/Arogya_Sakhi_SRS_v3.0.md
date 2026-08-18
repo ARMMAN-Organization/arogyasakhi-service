@@ -198,7 +198,7 @@ The program covers the full 1000-day care journey — from early pregnancy throu
 | Enrolment — Mother        | Register pregnant women. ANC schedule auto-generated offline.                                                      | Confirmed                      |
 | Enrolment — Child         | Register children 0–12 months. NN and INC schedule generated offline.                                              | Confirmed                      |
 | ANC Visit Scheduling      | Formula-driven, uncapped. Max 10 visits. ANC for late delivery post EDD.                                           | Confirmed                      |
-| PP Visit Scheduling       | PP1–PP5. Day 0, 15, 45, 75, 105 from delivery.                                                                     | Confirmed                      |
+| PP Visit Scheduling       | PP1–PP5. Day 0, 15, 58, 88, 118 from delivery.                                                                     | Confirmed                      |
 | NN Visit Scheduling       | NN1 and NN2 within first 28 days. Three scenarios based on delivery form date.                                     | Confirmed                      |
 | INC Visit Scheduling      | 0–12m. Two-formula approach. Max 11 visits. DOB+370(365+5) cutoff.                                                 | Confirmed                      |
 | CCV Visit Scheduling      | 13–24m. State-dependent cadence. Four risk states.                                                                 | Confirmed                      |
@@ -289,9 +289,9 @@ All PP visits are anchored to the delivery date. Schedule is generated on delive
 | PP2   | Day +15                                          | Day +15      | Day +28       | 1 missed → Supervisor immediately |
 | PP3   | Delivery Day+58 (PP2 Window close days(28) + 30) | Day +53      | Day +63       | 1 missed → Supervisor immediately |
 | PP4   | Delivery Day+88 (PP3 scheduled(58 + 30))         | Day +83      | Day +93       | 1 missed → Supervisor immediately |
-| PP5   | Day +105 (PP4 scheduled(88 + 30))                | Day +113     | Day +123      | 1 missed → Supervisor immediately |
+| PP5   | Day +118 (PP4 scheduled(88 + 30))                | Day +113     | Day +123      | 1 missed → Supervisor immediately |
 
-_Note: PP1 and PP2 use fixed date ranges (not ±N windows). PP3–PP5 use ±5 day windows. PP5 completion triggers the mother closure prompt._
+_Note: PP1 and PP2 use fixed date ranges (not ±N windows). PP3–PP5 use ±5–10 day windows. PP5 completion triggers the mother closure prompt. Resolved 2026-08-18: PP5 = Day+118 (window 113–123) is authoritative, matching the implemented GoRules scheduling pack (`apps/rules-service/src/rules/scheduling/pp.rulesJson.ts`) and the Appendix A.2 table below — not the earlier Day+105 figure that appeared here._
 
 **NN Visit Schedule**
 
@@ -608,7 +608,7 @@ Last CCV visit form submission (or CCV-HR if journey extended) immediately opens
 | BR-02   | INC schedule is fixed at enrolment (early registration) or at registration date (late registration). Does not shift on missed visits.                                                                                            | Confirmed — Shweta/Prajakta, 5 May 2026      |
 | BR-03   | HR visit anchor is the actual date the Sakhi completed the triggering visit — not the scheduled date. Applies to ANC-HR, INC-HR, and CCV-HR.                                                                                     | Confirmed — ARMMAN answers file, 23 Apr 2026 |
 | BR-04   | When delivery form is submitted, ALL open ANC visits are automatically marked as Lapsed.                                                                                                                                         | Confirmed — ARMMAN answers file, 23 Apr 2026 |
-| BR-05   | PP3, PP4, PP5 are anchored to scheduled dates, not actual completion dates. If PP2 completed late, PP3 stays at Day 45.                                                                                                          | Confirmed — ARMMAN visit logic table         |
+| BR-05   | PP3, PP4, PP5 are anchored to scheduled dates, not actual completion dates. If PP2 completed late, PP3 stays at Day +58.                                                                                                         | Confirmed — ARMMAN visit logic table         |
 | BR-06   | No HR visits are generated during the neonatal phase (NN1, NN2). Critical conditions in neonatal phase trigger the referral flow only. [SR-NN-01]                                                                                | Confirmed — May 2026                         |
 | BR-07   | A 7-day referral follow-up window blocks only the form filling of the next scheduled visit. Follow-up must be completed before the next visit opens.                                                                             | Confirmed — PRD 2.0                          |
 | BR-08   | ANC Post-EDD visit name is system-generated dynamically as ANC(n+1) where n = total regular ANC visits. [SR-ANC-01]                                                                                                              | Confirmed — ANC schedule walkthrough session |

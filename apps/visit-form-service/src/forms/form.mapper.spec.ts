@@ -1,5 +1,22 @@
-import { buildFormAnswers } from './form.mapper';
+import { buildFormAnswers, toApiFormSubmission } from './form.mapper';
 import type { FormField } from './dto/form-field.dto';
+
+/** Minimal FormSubmissionRow factory — only the fields toApiFormSubmission reads. */
+function submissionRow() {
+  return {
+    id: 'sub-1',
+    formVersionId: 'version-1',
+    beneficiaryId: 'b1',
+    visitId: null,
+    submittedByUserId: 'u1',
+    submittedAt: new Date('2026-08-01T00:00:00.000Z'),
+    localSubmissionUuid: 'uuid-1',
+    formDataJson: { date_of_delivery: '2026-08-01' },
+    validationStatus: 'VALID' as const,
+    createdAt: new Date('2026-08-01T00:00:00.000Z'),
+    updatedAt: new Date('2026-08-01T00:00:00.000Z'),
+  };
+}
 
 /** Minimal FormField factory — only the fields buildFormAnswers reads. */
 function field(question_code: string, input_type: string): FormField {
@@ -152,6 +169,25 @@ describe('buildFormAnswers', () => {
       expect(rows).toHaveLength(1);
       expect(rows[0]).toEqual(
         expect.objectContaining({ fieldCode: 'gravida', answerValueNumber: 2 }),
+      );
+    });
+  });
+
+  describe('toApiFormSubmission', () => {
+    it('omits childBeneficiaryIds when called without a second argument', () => {
+      const result = toApiFormSubmission(submissionRow());
+      expect('childBeneficiaryIds' in result).toBe(false);
+    });
+
+    it('omits childBeneficiaryIds when passed an empty array', () => {
+      const result = toApiFormSubmission(submissionRow(), []);
+      expect('childBeneficiaryIds' in result).toBe(false);
+    });
+
+    it('includes childBeneficiaryIds, in order, when passed a non-empty array', () => {
+      const result = toApiFormSubmission(submissionRow(), ['child-1', 'child-2']);
+      expect(result).toEqual(
+        expect.objectContaining({ childBeneficiaryIds: ['child-1', 'child-2'] }),
       );
     });
   });
