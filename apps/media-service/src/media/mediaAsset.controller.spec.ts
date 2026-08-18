@@ -1,5 +1,4 @@
 import type { Request, Response } from 'express';
-import { createMediaAssetController } from './mediaAsset.controller';
 import type { MediaAssetService } from './mediaAsset.service';
 
 /**
@@ -8,7 +7,18 @@ import type { MediaAssetService } from './mediaAsset.service';
  * a raw Buffer serializes over JSON as `{type:"Buffer",data:[...]}`, not a
  * usable string. The controller must convert it to a hex string before it
  * ever reaches `res.json()`.
+ *
+ * `mediaAsset.controller.ts` imports from `../app.module`, which imports
+ * `./config/app-config`, which calls `process.exit(1)` at module-load time if
+ * `DATABASE_URL`/`S3_BUCKET_NAME` aren't set — true in CI, unlike local dev's
+ * `.env` — so they must be set before the module under test is required
+ * (matches reporting-etl-service/info.controller.spec.ts's same workaround).
  */
+process.env.DATABASE_URL ??= 'postgresql://user:pass@localhost:5432/test';
+process.env.S3_BUCKET_NAME ??= 'test-bucket';
+
+const { createMediaAssetController } =
+  require('./mediaAsset.controller') as typeof import('./mediaAsset.controller');
 describe('createMediaAssetController', () => {
   const checksumBuffer = Buffer.from('bf48f6236dae5154c342cf06397b396e', 'hex');
   const baseAsset = {
