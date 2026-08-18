@@ -2,6 +2,7 @@ import { createReopenRequestSchema } from './create-reopen-request.dto';
 
 describe('createReopenRequestSchema', () => {
   const baseInput = {
+    localReopenRequestUuid: 'device-abc-reopen-001',
     beneficiaryId: '22222222-2222-2222-2222-222222222222',
     requestReason: 'MIGRATION_RETURNED' as const,
   };
@@ -26,6 +27,26 @@ describe('createReopenRequestSchema', () => {
   it('rejects a missing beneficiaryId', () => {
     const { beneficiaryId: _omit, ...rest } = baseInput;
     expect(createReopenRequestSchema.safeParse(rest).success).toBe(false);
+  });
+
+  it('rejects a missing localReopenRequestUuid', () => {
+    const { localReopenRequestUuid: _omit, ...rest } = baseInput;
+    expect(createReopenRequestSchema.safeParse(rest).success).toBe(false);
+  });
+
+  it('rejects an empty localReopenRequestUuid', () => {
+    expect(
+      createReopenRequestSchema.safeParse({ ...baseInput, localReopenRequestUuid: '' }).success,
+    ).toBe(false);
+  });
+
+  it('rejects a localReopenRequestUuid over 80 characters', () => {
+    expect(
+      createReopenRequestSchema.safeParse({
+        ...baseInput,
+        localReopenRequestUuid: 'x'.repeat(81),
+      }).success,
+    ).toBe(false);
   });
 
   it('rejects a non-UUID beneficiaryId', () => {

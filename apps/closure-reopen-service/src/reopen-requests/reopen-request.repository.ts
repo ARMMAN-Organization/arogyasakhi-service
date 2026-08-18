@@ -10,6 +10,32 @@ export class ReopenRequestRepository {
     return this.prisma.reopenRequest.findFirst({ where: { id, isDeleted: false } });
   }
 
+  /**
+   * Finds a reopen request previously created from this exact
+   * client-generated localReopenRequestUuid — lets create() treat a
+   * dropped-connection retry as an idempotent replay instead of a new
+   * reopen request.
+   */
+  findByLocalReopenRequestUuid(localReopenRequestUuid: string) {
+    return this.prisma.reopenRequest.findFirst({
+      where: { localReopenRequestUuid, isDeleted: false },
+    });
+  }
+
+  /**
+   * All reopen requests raised for one beneficiary, most-recent first — lets
+   * the app show "Reopen pending review" (any entry with
+   * supervisorStatus: 'PENDING') instead of just "Closed" while a request is
+   * mid-flow. A beneficiary with no reopen requests returns an empty array,
+   * not an error — most beneficiaries never had one.
+   */
+  findByBeneficiaryId(beneficiaryId: string) {
+    return this.prisma.reopenRequest.findMany({
+      where: { beneficiaryId, isDeleted: false },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
   create(data: CreateReopenRequestInput & { requestedByUserId: string }) {
     return this.prisma.reopenRequest.create({
       data: { ...data, requestedAt: new Date() },

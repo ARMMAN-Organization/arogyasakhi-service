@@ -11,6 +11,7 @@ import type { DecideReopenRequestInput } from './dto/decide-reopen-request.dto';
 function reopenRequest(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     id: '11111111-1111-1111-1111-111111111111',
+    localReopenRequestUuid: 'device-abc-reopen-001',
     beneficiaryId: '22222222-2222-2222-2222-222222222222',
     requestReason: 'CLOSED_BY_MISTAKE' as const,
     requestedByUserId: '33333333-3333-3333-3333-333333333333',
@@ -33,6 +34,8 @@ function reopenRequest(overrides: Partial<Record<string, unknown>> = {}) {
 describe('ReopenRequestService', () => {
   const repository = {
     findById: jest.fn(),
+    findByBeneficiaryId: jest.fn(),
+    findByLocalReopenRequestUuid: jest.fn(),
     decide: jest.fn(),
     create: jest.fn(),
   } as unknown as jest.Mocked<ReopenRequestRepository>;
@@ -44,6 +47,7 @@ describe('ReopenRequestService', () => {
   } as unknown as jest.Mocked<LookupClient>;
   const beneficiaryClient = {
     reactivateCase: jest.fn(),
+    getById: jest.fn(),
   } as unknown as jest.Mocked<BeneficiaryClient>;
   let service: ReopenRequestService;
   const supervisorId = '44444444-4444-4444-4444-444444444444';
@@ -53,6 +57,7 @@ describe('ReopenRequestService', () => {
   beforeEach(() => {
     jest.resetAllMocks();
     consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    repository.findByLocalReopenRequestUuid.mockResolvedValue(null);
     beneficiaryClient.reactivateCase.mockResolvedValue({
       id: '22222222-2222-2222-2222-222222222222',
       currentStatus: 'ACTIVE',
@@ -71,12 +76,100 @@ describe('ReopenRequestService', () => {
     consoleErrorSpy.mockRestore();
   });
 
+  describe('listByBeneficiaryId', () => {
+    const beneficiaryId = '22222222-2222-2222-2222-222222222222';
+
+    it('returns the reopen requests when the beneficiary lookup succeeds', async () => {
+      beneficiaryClient.getById.mockResolvedValue({ id: beneficiaryId, currentStatus: 'CLOSED' });
+      const rows = [reopenRequest()];
+      repository.findByBeneficiaryId.mockResolvedValue(rows);
+
+      await expect(service.listByBeneficiaryId(beneficiaryId, authHeader)).resolves.toBe(rows);
+      expect(repository.findByBeneficiaryId).toHaveBeenCalledWith(beneficiaryId);
+    });
+
+    it('returns an empty array when the beneficiary has no reopen requests', async () => {
+      beneficiaryClient.getById.mockResolvedValue({ id: beneficiaryId, currentStatus: 'CLOSED' });
+      repository.findByBeneficiaryId.mockResolvedValue([]);
+
+      await expect(service.listByBeneficiaryId(beneficiaryId, authHeader)).resolves.toEqual([]);
+    });
+
+    it('propagates a 403 from the beneficiary lookup without querying reopen requests', async () => {
+      beneficiaryClient.getById.mockRejectedValue(
+        Object.assign(new Error('This beneficiary case is outside your own roster.'), {
+          status: 403,
+        }),
+      );
+
+      await expect(service.listByBeneficiaryId(beneficiaryId, authHeader)).rejects.toMatchObject({
+        status: 403,
+      });
+      expect(repository.findByBeneficiaryId).not.toHaveBeenCalled();
+    });
+
+    it('propagates a 404 from the beneficiary lookup without querying reopen requests', async () => {
+      beneficiaryClient.getById.mockRejectedValue(
+        Object.assign(new Error('Beneficiary case not found.'), { status: 404 }),
+      );
+
+      await expect(service.listByBeneficiaryId(beneficiaryId, authHeader)).rejects.toMatchObject({
+        status: 404,
+      });
+      expect(repository.findByBeneficiaryId).not.toHaveBeenCalled();
+    });
+
+    it('propagates a badGateway error when the beneficiary lookup is unreachable', async () => {
+      beneficiaryClient.getById.mockRejectedValue(
+        Object.assign(new Error('Unable to resolve the beneficiary — unreachable.'), {
+          status: 502,
+        }),
+      );
+
+      await expect(service.listByBeneficiaryId(beneficiaryId, authHeader)).rejects.toMatchObject({
+        status: 502,
+      });
+      expect(repository.findByBeneficiaryId).not.toHaveBeenCalled();
+    });
+  });
+
   describe('create', () => {
     const sakhiId = '55555555-5555-5555-5555-555555555555';
     const dto: CreateReopenRequestInput = {
+      localReopenRequestUuid: 'device-abc-reopen-001',
       beneficiaryId: '22222222-2222-2222-2222-222222222222',
       requestReason: 'CLOSED_BY_MISTAKE',
     };
+
+    describe('idempotent replay via localReopenRequestUuid', () => {
+      it('returns the existing reopen request without creating a new row on a retried submission', async () => {
+        const existing = reopenRequest();
+        repository.findByLocalReopenRequestUuid.mockResolvedValue(existing);
+
+        await expect(service.create(dto, sakhiId, authHeader)).resolves.toBe(existing);
+        expect(repository.create).not.toHaveBeenCalled();
+      });
+
+      it('does not re-raise a Quick Response card on a retried submission', async () => {
+        const existing = reopenRequest();
+        repository.findByLocalReopenRequestUuid.mockResolvedValue(existing);
+
+        await service.create(dto, sakhiId, authHeader);
+
+        expect(approvalClient.create).not.toHaveBeenCalled();
+      });
+
+      it("looks up by this submission's own localReopenRequestUuid", async () => {
+        repository.create.mockResolvedValue(reopenRequest());
+        lookupClient.resolveApprovalStatusId.mockResolvedValue('pending-lookup-id');
+
+        await service.create(dto, sakhiId, authHeader);
+
+        expect(repository.findByLocalReopenRequestUuid).toHaveBeenCalledWith(
+          dto.localReopenRequestUuid,
+        );
+      });
+    });
 
     it('creates via repository with requestedByUserId stamped from the caller', async () => {
       const created = reopenRequest({ requestedByUserId: sakhiId });

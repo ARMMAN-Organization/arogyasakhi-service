@@ -46,6 +46,8 @@ enum ReopenSupervisorStatus {
 
 model Closure {
   id                         String                   @id @default(uuid()) @map("closure_id")
+  // Client-generated idempotency key — see createClosureSchema's doc comment.
+  localClosureUuid           String                   @unique @map("local_closure_uuid") @db.VarChar(80)
   // beneficiary_cases.beneficiary_id — owned by another service, no cross-service relation.
   beneficiaryId              String                   @map("beneficiary_id")
   closureType                ClosureType              @map("closure_type")
@@ -73,6 +75,8 @@ model Closure {
 
 model ReopenRequest {
   id                         String                 @id @default(uuid()) @map("reopen_request_id")
+  // Client-generated idempotency key — see createReopenRequestSchema's doc comment.
+  localReopenRequestUuid     String                 @unique @map("local_reopen_request_uuid") @db.VarChar(80)
   // beneficiary_cases.beneficiary_id — owned by another service, no cross-service relation.
   beneficiaryId              String                 @map("beneficiary_id")
   requestReason              ReopenRequestReason    @map("request_reason")

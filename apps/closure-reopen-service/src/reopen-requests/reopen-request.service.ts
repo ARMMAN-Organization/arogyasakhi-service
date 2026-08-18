@@ -20,17 +20,44 @@ export class ReopenRequestService {
   ) {}
 
   /**
+   * All reopen requests for one beneficiary, most-recent first — for the
+   * app's "Reopen pending review" state (any entry with
+   * supervisorStatus: 'PENDING'), which currentStatus alone can't show since
+   * a beneficiary stays CLOSED for the entire time a reopen request is
+   * pending, only flipping to ACTIVE on approval.
+   *
+   * Delegates ownership scoping to beneficiary-service's own
+   * GET /beneficiaries/:id (SAKHI-own-case / SUPERVISOR-roster /
+   * MANAGER-unrestricted) rather than duplicating that IDOR check here —
+   * this service owns no sakhiId data of its own. A 403/404 from that call
+   * propagates as-is; only on success does this query reopen_requests.
+   */
+  async listByBeneficiaryId(beneficiaryId: string, authorizationHeader: string) {
+    await this.beneficiaryClient.getById(beneficiaryId, authorizationHeader);
+    return this.repository.findByBeneficiaryId(beneficiaryId);
+  }
+
+  /**
    * Raises a Sakhi's reopen request (FR-S-10.3) and, on success, raises the
    * matching REOPEN Quick Response card in approval-service. The reopen
    * request is the source of truth — a failure raising the card is logged
    * and tolerated rather than failing an already-successful submission
    * (same tolerance the decide() audit/notification calls use).
+   *
+   * Idempotent replay: a dropped-connection retry resubmits the same
+   * client-generated localReopenRequestUuid. Return the original request
+   * unchanged instead of creating a duplicate row or re-firing the Quick
+   * Response card a second time — this mobile flow is offline-first and
+   * expected to retry, same as closures' localClosureUuid.
    */
   async create(
     dto: CreateReopenRequestInput,
     requestedByUserId: string,
     authorizationHeader: string,
   ) {
+    const existing = await this.repository.findByLocalReopenRequestUuid(dto.localReopenRequestUuid);
+    if (existing) return existing;
+
     const created = await this.repository.create({ ...dto, requestedByUserId });
 
     try {

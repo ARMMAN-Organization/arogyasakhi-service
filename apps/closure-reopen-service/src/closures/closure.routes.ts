@@ -17,6 +17,9 @@ extendZodWithOpenApi(z);
 // Request DTO annotated with examples for Swagger UI; validation behavior is
 // unchanged (`.openapi()` only attaches documentation metadata).
 const createClosureRequestSchema = createClosureSchema.extend({
+  localClosureUuid: createClosureSchema.shape.localClosureUuid.openapi({
+    example: 'device-abc-closure-001',
+  }),
   beneficiaryId: createClosureSchema.shape.beneficiaryId.openapi({
     example: '123e4567-e89b-12d3-a456-426614174000',
   }),
@@ -36,6 +39,7 @@ const createClosureRequestSchema = createClosureSchema.extend({
 // fields — for accurate Swagger documentation only.
 const closureSchema = z.object({
   id: z.string().uuid(),
+  localClosureUuid: z.string(),
   beneficiaryId: z.string().uuid(),
   closureType: z.enum(['MEDICAL', 'NON_MEDICAL', 'PROGRAM_COMPLETION']),
   closureReasonLookupValueId: z.string().uuid(),

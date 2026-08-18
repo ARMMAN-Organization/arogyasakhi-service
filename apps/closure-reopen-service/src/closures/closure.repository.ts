@@ -14,6 +14,15 @@ export class ClosureRepository {
     return this.prisma.closure.findFirst({ where: { id, isDeleted: false } });
   }
 
+  /**
+   * Finds a closure previously created from this exact client-generated
+   * localClosureUuid — lets create() treat a dropped-connection retry as an
+   * idempotent replay instead of a new closure.
+   */
+  findByLocalClosureUuid(localClosureUuid: string) {
+    return this.prisma.closure.findFirst({ where: { localClosureUuid, isDeleted: false } });
+  }
+
   create(data: CreateClosureInput) {
     return this.prisma.closure.create({ data });
   }

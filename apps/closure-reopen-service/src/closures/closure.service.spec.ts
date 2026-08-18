@@ -3,14 +3,39 @@ import type { ClosureRepository } from './closure.repository';
 import type { ApprovalClient } from '../reopen-requests/approval.client';
 import type { LookupClient } from '../reopen-requests/lookup.client';
 import type { NotificationClient } from '../reopen-requests/notification.client';
+import type { BeneficiaryClient } from '../reopen-requests/beneficiary.client';
 import type { CreateClosureInput } from './dto/create-closure.dto';
 import type { DecideClosureInput } from './dto/decide-closure.dto';
 import type { ClosureType } from '../../../../node_modules/.prisma/client-closure-reopen-service';
+
+function closureRow(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: '11111111-1111-1111-1111-111111111111',
+    localClosureUuid: 'device-abc-closure-001',
+    beneficiaryId: '22222222-2222-2222-2222-222222222222',
+    closureType: 'MEDICAL' as ClosureType,
+    closureReasonLookupValueId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+    eventDate: null,
+    closureDate: new Date('2026-06-05'),
+    submittedByUserId: '33333333-3333-3333-3333-333333333333',
+    supervisorStatus: null,
+    supervisorId: null,
+    supervisorNotes: null,
+    createdAt: new Date(),
+    createdByUserId: null,
+    updatedAt: new Date(),
+    updatedByUserId: null,
+    isDeleted: false,
+    deletedAt: null,
+    ...overrides,
+  };
+}
 
 describe('ClosureService', () => {
   const repository = {
     findMany: jest.fn(),
     findById: jest.fn(),
+    findByLocalClosureUuid: jest.fn(),
     create: jest.fn(),
     decide: jest.fn(),
   } as unknown as jest.Mocked<ClosureRepository>;
@@ -19,6 +44,9 @@ describe('ClosureService', () => {
     resolveApprovalStatusId: jest.fn(),
   } as unknown as jest.Mocked<LookupClient>;
   const notificationClient = { notify: jest.fn() } as unknown as jest.Mocked<NotificationClient>;
+  const beneficiaryClient = {
+    closeCase: jest.fn(),
+  } as unknown as jest.Mocked<BeneficiaryClient>;
   let service: ClosureService;
   const authHeader = 'Bearer token';
   const supervisorId = '44444444-4444-4444-4444-444444444444';
@@ -27,7 +55,18 @@ describe('ClosureService', () => {
   beforeEach(() => {
     jest.resetAllMocks();
     consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
-    service = new ClosureService(repository, approvalClient, lookupClient, notificationClient);
+    repository.findByLocalClosureUuid.mockResolvedValue(null);
+    beneficiaryClient.closeCase.mockResolvedValue({
+      id: '22222222-2222-2222-2222-222222222222',
+      currentStatus: 'CLOSED',
+    });
+    service = new ClosureService(
+      repository,
+      approvalClient,
+      lookupClient,
+      notificationClient,
+      beneficiaryClient,
+    );
   });
 
   afterEach(() => {
@@ -41,77 +80,14 @@ describe('ClosureService', () => {
   });
 
   it('returns the repository list unchanged', async () => {
-    const rows = [
-      {
-        id: '11111111-1111-1111-1111-111111111111',
-        beneficiaryId: '22222222-2222-2222-2222-222222222222',
-        closureType: 'MEDICAL' as ClosureType,
-        closureReasonLookupValueId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
-        eventDate: new Date('2026-06-01'),
-        closureDate: new Date('2026-06-05'),
-        submittedByUserId: '33333333-3333-3333-3333-333333333333',
-        supervisorStatus: null,
-        supervisorId: null,
-        supervisorNotes: null,
-        createdAt: new Date(),
-        createdByUserId: null,
-        updatedAt: new Date(),
-        updatedByUserId: null,
-        isDeleted: false,
-        deletedAt: null,
-      },
-    ];
+    const rows = [closureRow()];
     repository.findMany.mockResolvedValue(rows);
     await expect(service.list()).resolves.toBe(rows);
   });
 
-  it('creates via repository with the given data', async () => {
+  describe('create', () => {
     const dto: CreateClosureInput = {
-      beneficiaryId: '22222222-2222-2222-2222-222222222222',
-      closureType: 'MEDICAL',
-      closureReasonLookupValueId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
-      eventDate: new Date('2026-06-01'),
-      closureDate: new Date('2026-06-05'),
-      submittedByUserId: '33333333-3333-3333-3333-333333333333',
-    };
-    const created = {
-      id: '11111111-1111-1111-1111-111111111111',
-      beneficiaryId: dto.beneficiaryId,
-      closureType: dto.closureType as ClosureType,
-      closureReasonLookupValueId: dto.closureReasonLookupValueId,
-      eventDate: dto.eventDate ?? null,
-      closureDate: dto.closureDate,
-      submittedByUserId: dto.submittedByUserId,
-      supervisorStatus: null,
-      supervisorId: null,
-      supervisorNotes: null,
-      createdAt: new Date(),
-      createdByUserId: null,
-      updatedAt: new Date(),
-      updatedByUserId: null,
-      isDeleted: false,
-      deletedAt: null,
-    };
-    repository.create.mockResolvedValue(created);
-    await expect(service.create(dto, authHeader)).resolves.toBe(created);
-    expect(repository.create).toHaveBeenCalledWith(dto);
-    expect(approvalClient.create).not.toHaveBeenCalled();
-  });
-
-  it('propagates repository errors on create', async () => {
-    const dto: CreateClosureInput = {
-      beneficiaryId: '22222222-2222-2222-2222-222222222222',
-      closureType: 'MEDICAL',
-      closureReasonLookupValueId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
-      closureDate: new Date('2026-06-05'),
-      submittedByUserId: '33333333-3333-3333-3333-333333333333',
-    };
-    repository.create.mockRejectedValue(new Error('db down'));
-    await expect(service.create(dto, authHeader)).rejects.toThrow('db down');
-  });
-
-  describe('create — CLOSURE_REVIEW linkage', () => {
-    const dto: CreateClosureInput = {
+      localClosureUuid: 'device-abc-closure-001',
       beneficiaryId: '22222222-2222-2222-2222-222222222222',
       closureType: 'MEDICAL',
       closureReasonLookupValueId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
@@ -119,108 +95,151 @@ describe('ClosureService', () => {
       submittedByUserId: '33333333-3333-3333-3333-333333333333',
     };
 
-    function pendingClosure() {
-      return {
-        id: '11111111-1111-1111-1111-111111111111',
-        beneficiaryId: dto.beneficiaryId,
-        closureType: dto.closureType as ClosureType,
-        closureReasonLookupValueId: dto.closureReasonLookupValueId,
-        eventDate: null,
-        closureDate: dto.closureDate,
-        submittedByUserId: dto.submittedByUserId,
-        supervisorStatus: 'PENDING' as const,
-        supervisorId: null,
-        supervisorNotes: null,
-        createdAt: new Date(),
-        createdByUserId: null,
-        updatedAt: new Date(),
-        updatedByUserId: null,
-        isDeleted: false,
-        deletedAt: null,
-      };
-    }
-
-    it('raises a CLOSURE_REVIEW card when the closure needs supervisor review', async () => {
-      const created = pendingClosure();
-      repository.create.mockResolvedValue(created);
-      lookupClient.resolveApprovalStatusId.mockResolvedValue('pending-lookup-id');
-
-      await service.create(dto, authHeader);
-
-      expect(lookupClient.resolveApprovalStatusId).toHaveBeenCalledWith('PENDING', authHeader);
-      expect(approvalClient.create).toHaveBeenCalledWith(
-        {
-          requestType: 'CLOSURE_REVIEW',
-          beneficiaryId: created.beneficiaryId,
-          sourceEntityType: 'Closure',
-          sourceEntityId: created.id,
-          closureId: created.id,
-          requestedByUserId: created.submittedByUserId,
-          decisionStatusLookupId: 'pending-lookup-id',
-        },
-        authHeader,
-      );
-    });
-
-    it('does not raise a card for a closure that does not need supervisor review', async () => {
-      const created = {
-        id: '11111111-1111-1111-1111-111111111111',
-        beneficiaryId: dto.beneficiaryId,
-        closureType: dto.closureType as ClosureType,
-        closureReasonLookupValueId: dto.closureReasonLookupValueId,
-        eventDate: null,
-        closureDate: dto.closureDate,
-        submittedByUserId: dto.submittedByUserId,
-        supervisorStatus: null,
-        supervisorId: null,
-        supervisorNotes: null,
-        createdAt: new Date(),
-        createdByUserId: null,
-        updatedAt: new Date(),
-        updatedByUserId: null,
-        isDeleted: false,
-        deletedAt: null,
-      };
+    it('creates via repository with the given data', async () => {
+      const created = closureRow();
       repository.create.mockResolvedValue(created);
 
-      await service.create(dto, authHeader);
-
+      await expect(service.create(dto, authHeader)).resolves.toBe(created);
+      expect(repository.create).toHaveBeenCalledWith(dto);
       expect(approvalClient.create).not.toHaveBeenCalled();
     });
 
-    it('still returns the created closure when raising the card fails', async () => {
-      const created = pendingClosure();
-      repository.create.mockResolvedValue(created);
-      lookupClient.resolveApprovalStatusId.mockResolvedValue('pending-lookup-id');
-      approvalClient.create.mockRejectedValue(
-        Object.assign(new Error('Bad gateway'), { status: 502 }),
-      );
+    it('propagates repository errors on create', async () => {
+      repository.create.mockRejectedValue(new Error('db down'));
+      await expect(service.create(dto, authHeader)).rejects.toThrow('db down');
+    });
 
-      await expect(service.create(dto, authHeader)).resolves.toBe(created);
-      expect(consoleErrorSpy).toHaveBeenCalled();
+    describe('idempotent replay via localClosureUuid', () => {
+      it('returns the existing closure without creating a new row on a retried submission', async () => {
+        const existing = closureRow();
+        repository.findByLocalClosureUuid.mockResolvedValue(existing);
+
+        await expect(service.create(dto, authHeader)).resolves.toBe(existing);
+        expect(repository.create).not.toHaveBeenCalled();
+      });
+
+      it('does not re-raise a Quick Response card or re-close the beneficiary on a retried submission', async () => {
+        const existing = closureRow({ supervisorStatus: 'PENDING' });
+        repository.findByLocalClosureUuid.mockResolvedValue(existing);
+
+        await service.create(dto, authHeader);
+
+        expect(approvalClient.create).not.toHaveBeenCalled();
+        expect(beneficiaryClient.closeCase).not.toHaveBeenCalled();
+      });
+
+      it("looks up by this submission's own localClosureUuid", async () => {
+        repository.create.mockResolvedValue(closureRow());
+        await service.create(dto, authHeader);
+        expect(repository.findByLocalClosureUuid).toHaveBeenCalledWith(dto.localClosureUuid);
+      });
+    });
+
+    describe('CLOSURE_REVIEW linkage', () => {
+      function pendingClosure() {
+        return closureRow({ supervisorStatus: 'PENDING' as const });
+      }
+
+      it('raises a CLOSURE_REVIEW card when the closure needs supervisor review', async () => {
+        const created = pendingClosure();
+        repository.create.mockResolvedValue(created);
+        lookupClient.resolveApprovalStatusId.mockResolvedValue('pending-lookup-id');
+
+        await service.create(dto, authHeader);
+
+        expect(lookupClient.resolveApprovalStatusId).toHaveBeenCalledWith('PENDING', authHeader);
+        expect(approvalClient.create).toHaveBeenCalledWith(
+          {
+            requestType: 'CLOSURE_REVIEW',
+            beneficiaryId: created.beneficiaryId,
+            sourceEntityType: 'Closure',
+            sourceEntityId: created.id,
+            closureId: created.id,
+            requestedByUserId: created.submittedByUserId,
+            decisionStatusLookupId: 'pending-lookup-id',
+          },
+          authHeader,
+        );
+      });
+
+      it('does not close the beneficiary when the closure needs supervisor review', async () => {
+        repository.create.mockResolvedValue(pendingClosure());
+        lookupClient.resolveApprovalStatusId.mockResolvedValue('pending-lookup-id');
+
+        await service.create(dto, authHeader);
+
+        expect(beneficiaryClient.closeCase).not.toHaveBeenCalled();
+      });
+
+      it('still returns the created closure when raising the card fails', async () => {
+        const created = pendingClosure();
+        repository.create.mockResolvedValue(created);
+        lookupClient.resolveApprovalStatusId.mockResolvedValue('pending-lookup-id');
+        approvalClient.create.mockRejectedValue(
+          Object.assign(new Error('Bad gateway'), { status: 502 }),
+        );
+
+        await expect(service.create(dto, authHeader)).resolves.toBe(created);
+        expect(consoleErrorSpy).toHaveBeenCalled();
+      });
+    });
+
+    describe('immediate beneficiary closure (no supervisor review needed)', () => {
+      it('closes the beneficiary for a MEDICAL closure', async () => {
+        const created = closureRow({ closureType: 'MEDICAL', supervisorStatus: null });
+        repository.create.mockResolvedValue(created);
+
+        await service.create(dto, authHeader);
+
+        expect(beneficiaryClient.closeCase).toHaveBeenCalledWith(
+          created.beneficiaryId,
+          'MEDICAL',
+          authHeader,
+        );
+      });
+
+      it('closes the beneficiary for a NON_MEDICAL closure', async () => {
+        const created = closureRow({ closureType: 'NON_MEDICAL', supervisorStatus: null });
+        repository.create.mockResolvedValue(created);
+
+        await service.create({ ...dto, closureType: 'NON_MEDICAL' }, authHeader);
+
+        expect(beneficiaryClient.closeCase).toHaveBeenCalledWith(
+          created.beneficiaryId,
+          'NON_MEDICAL',
+          authHeader,
+        );
+      });
+
+      it('closes the beneficiary for a PROGRAM_COMPLETION closure', async () => {
+        const created = closureRow({ closureType: 'PROGRAM_COMPLETION', supervisorStatus: null });
+        repository.create.mockResolvedValue(created);
+
+        await service.create({ ...dto, closureType: 'PROGRAM_COMPLETION' }, authHeader);
+
+        expect(beneficiaryClient.closeCase).toHaveBeenCalledWith(
+          created.beneficiaryId,
+          'PROGRAM_COMPLETION',
+          authHeader,
+        );
+      });
+
+      it('still returns the created closure when closing the beneficiary fails', async () => {
+        const created = closureRow({ supervisorStatus: null });
+        repository.create.mockResolvedValue(created);
+        beneficiaryClient.closeCase.mockRejectedValue(
+          Object.assign(new Error('Bad gateway'), { status: 502 }),
+        );
+
+        await expect(service.create(dto, authHeader)).resolves.toBe(created);
+        expect(consoleErrorSpy).toHaveBeenCalled();
+      });
     });
   });
 
   describe('decide', () => {
     function pendingClosure() {
-      return {
-        id: '11111111-1111-1111-1111-111111111111',
-        beneficiaryId: '22222222-2222-2222-2222-222222222222',
-        closureType: 'MEDICAL' as ClosureType,
-        closureReasonLookupValueId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
-        eventDate: null,
-        closureDate: new Date('2026-06-05'),
-        submittedByUserId: '33333333-3333-3333-3333-333333333333',
-        supervisorStatus: 'PENDING' as const,
-        supervisorId: null,
-        supervisorNotes: null,
-        createdAt: new Date(),
-        createdByUserId: null,
-        updatedAt: new Date(),
-        updatedByUserId: null,
-        isDeleted: false,
-        deletedAt: null,
-      };
+      return closureRow({ supervisorStatus: 'PENDING' as const });
     }
 
     it('approves a PENDING closure and notifies the Sakhi', async () => {
@@ -241,6 +260,47 @@ describe('ClosureService', () => {
         expect.any(String),
         authHeader,
       );
+    });
+
+    it('closes the beneficiary on APPROVED', async () => {
+      const pending = pendingClosure();
+      const decided = { ...pending, supervisorStatus: 'APPROVED' as const, supervisorId };
+      repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(decided);
+      repository.decide.mockResolvedValue(true);
+
+      await service.decide(pending.id, supervisorId, { decision: 'APPROVED' }, authHeader);
+
+      expect(beneficiaryClient.closeCase).toHaveBeenCalledWith(
+        pending.beneficiaryId,
+        pending.closureType,
+        authHeader,
+      );
+    });
+
+    it('does not close the beneficiary on REJECTED', async () => {
+      const pending = pendingClosure();
+      const decided = { ...pending, supervisorStatus: 'REJECTED' as const, supervisorId };
+      repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(decided);
+      repository.decide.mockResolvedValue(true);
+
+      await service.decide(pending.id, supervisorId, { decision: 'REJECTED' }, authHeader);
+
+      expect(beneficiaryClient.closeCase).not.toHaveBeenCalled();
+    });
+
+    it('does not fail the decision when closing the beneficiary fails after APPROVED', async () => {
+      const pending = pendingClosure();
+      const decided = { ...pending, supervisorStatus: 'APPROVED' as const, supervisorId };
+      repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(decided);
+      repository.decide.mockResolvedValue(true);
+      beneficiaryClient.closeCase.mockRejectedValue(
+        Object.assign(new Error('Bad gateway'), { status: 502 }),
+      );
+
+      await expect(
+        service.decide(pending.id, supervisorId, { decision: 'APPROVED' }, authHeader),
+      ).resolves.toBe(decided);
+      expect(consoleErrorSpy).toHaveBeenCalled();
     });
 
     it('rejects a PENDING closure', async () => {
@@ -267,7 +327,7 @@ describe('ClosureService', () => {
     });
 
     it('422s when the closure does not require supervisor review', async () => {
-      repository.findById.mockResolvedValue({ ...pendingClosure(), supervisorStatus: null });
+      repository.findById.mockResolvedValue(closureRow({ supervisorStatus: null }));
       await expect(
         service.decide(
           '11111111-1111-1111-1111-111111111111',
@@ -280,10 +340,7 @@ describe('ClosureService', () => {
     });
 
     it('409s on an already-APPROVED closure', async () => {
-      repository.findById.mockResolvedValue({
-        ...pendingClosure(),
-        supervisorStatus: 'APPROVED' as const,
-      });
+      repository.findById.mockResolvedValue(closureRow({ supervisorStatus: 'APPROVED' as const }));
       await expect(
         service.decide(
           '11111111-1111-1111-1111-111111111111',

@@ -3,6 +3,7 @@ import type { ClosureRepository } from './closure.repository';
 import type { ApprovalClient } from '../reopen-requests/approval.client';
 import type { LookupClient } from '../reopen-requests/lookup.client';
 import type { NotificationClient } from '../reopen-requests/notification.client';
+import type { BeneficiaryClient } from '../reopen-requests/beneficiary.client';
 import type { CreateClosureInput } from './dto/create-closure.dto';
 import type { DecideClosureInput } from './dto/decide-closure.dto';
 
@@ -13,6 +14,7 @@ export class ClosureService {
     private readonly approvalClient: ApprovalClient,
     private readonly lookupClient: LookupClient,
     private readonly notificationClient: NotificationClient,
+    private readonly beneficiaryClient: BeneficiaryClient,
   ) {}
 
   list() {
@@ -20,14 +22,16 @@ export class ClosureService {
   }
 
   /**
-   * Creates the closure and, only when it needs supervisor review
-   * (supervisorStatus is set — per the schema, only MIGRATION-reason
-   * closures), also raises the matching CLOSURE_REVIEW Quick Response card
-   * in approval-service (FR-SV-4.4). A failure raising the card is logged
-   * and tolerated rather than failing an already-successful closure
-   * submission — same tolerance reopen-request.service.ts's create() uses.
+   * Idempotent replay: a dropped-connection retry of a Sakhi's closure
+   * submission resubmits the same client-generated localClosureUuid. Return
+   * the original closure unchanged instead of creating a duplicate row or
+   * re-firing the Quick Response card / beneficiary-close side effects below
+   * a second time — this mobile flow is offline-first and expected to retry.
    */
   async create(dto: CreateClosureInput, authorizationHeader: string) {
+    const existing = await this.repository.findByLocalClosureUuid(dto.localClosureUuid);
+    if (existing) return existing;
+
     const created = await this.repository.create(dto);
 
     if (created.supervisorStatus === 'PENDING') {
@@ -60,6 +64,24 @@ export class ClosureService {
           err,
         );
       }
+    } else {
+      // No supervisor review needed (MEDICAL/NON_MEDICAL/PROGRAM_COMPLETION)
+      // — close the beneficiary right away instead of waiting on a decision
+      // that will never come. Best-effort/tolerated, same stance as the
+      // Quick Response card raise above: the closures row is already the
+      // source of truth for this submission having happened.
+      try {
+        await this.beneficiaryClient.closeCase(
+          created.beneficiaryId,
+          created.closureType,
+          authorizationHeader,
+        );
+      } catch (err) {
+        console.error(
+          `Closure ${created.id} was created but closing beneficiary ${created.beneficiaryId} failed:`,
+          err,
+        );
+      }
     }
 
     return created;
@@ -67,10 +89,18 @@ export class ClosureService {
 
   /**
    * Decides a pending closure review (FR-SV-4.4). Approve/Reject both flip
-   * supervisorStatus here — the "beneficiary moves to Closed/Open list"
-   * consequence lives in beneficiary-service, out of this service's
-   * ownership (forklift rule). The Sakhi notification is best-effort — its
-   * failure doesn't fail an already-committed decision.
+   * supervisorStatus here. On APPROVED, also closes the beneficiary case via
+   * beneficiary-service (the "beneficiary moves to the Closed list"
+   * consequence — out of this service's own ownership per the forklift
+   * rule). REJECTED leaves the beneficiary exactly as it was — same
+   * "rejection changes nothing beyond the closures row" contract
+   * reopen-request.service.ts's decide() uses for a rejected reopen.
+   *
+   * The beneficiary-close call is best-effort (logged, not thrown) — the
+   * decision above is already committed, and this method's own guard
+   * (supervisorStatus !== 'PENDING') means a closure can never be decided a
+   * second time to retry just this step; same tolerance/manual-follow-up
+   * stance as reopen-request.service.ts's decide() uses for reactivateCase.
    */
   async decide(
     id: string,
@@ -96,6 +126,22 @@ export class ClosureService {
     }
 
     const decided = await this.repository.findById(id);
+
+    if (dto.decision === 'APPROVED') {
+      try {
+        await this.beneficiaryClient.closeCase(
+          existing.beneficiaryId,
+          existing.closureType,
+          authorizationHeader,
+        );
+      } catch (err) {
+        console.error(
+          `Closure ${id} was approved but closing beneficiary ${existing.beneficiaryId} ` +
+            `failed (this closure cannot be re-decided to retry — needs manual follow-up):`,
+          err,
+        );
+      }
+    }
 
     try {
       await this.notificationClient.notify(

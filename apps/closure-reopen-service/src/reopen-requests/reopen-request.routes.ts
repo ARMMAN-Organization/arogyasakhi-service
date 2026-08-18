@@ -18,6 +18,12 @@ const reopenRequestIdParamsSchema = z
   .object({ id: z.string().uuid().openapi({ example: '123e4567-e89b-12d3-a456-426614174000' }) })
   .strict();
 
+const listByBeneficiaryQuerySchema = z
+  .object({
+    beneficiaryId: z.string().uuid().openapi({ example: '123e4567-e89b-12d3-a456-426614174000' }),
+  })
+  .strict();
+
 const decideReopenRequestRequestSchema = decideReopenRequestSchema.extend({
   decision: decideReopenRequestSchema.shape.decision.openapi({ example: 'APPROVED' }),
 });
@@ -26,6 +32,7 @@ const decideReopenRequestRequestSchema = decideReopenRequestSchema.extend({
 // invented fields — for accurate Swagger documentation only.
 const reopenRequestSchema = z.object({
   id: z.string().uuid(),
+  localReopenRequestUuid: z.string(),
   beneficiaryId: z.string().uuid(),
   requestReason: z.enum(['MIGRATION_RETURNED', 'CLOSED_BY_MISTAKE', 'OTHER']),
   requestedByUserId: z.string().uuid(),
@@ -66,6 +73,39 @@ function envelope<T extends z.ZodTypeAny>(data: T) {
  */
 export function registerReopenRequestRoutes(doc: DocumentedRouter, service: ReopenRequestService) {
   const controller = createReopenRequestController(service);
+
+  doc.get(
+    '/reopen-requests',
+    {
+      summary:
+        "A beneficiary's reopen-request history, most-recent first — lets the app show " +
+        '"Reopen pending review" (any entry with supervisorStatus: \'PENDING\') instead of ' +
+        'just "Closed" while a request is mid-flow, since currentStatus alone stays CLOSED ' +
+        'for the entire pending window. Ownership scoping is delegated to ' +
+        "beneficiary-service's own GET /beneficiaries/:id (SAKHI-own-case / SUPERVISOR-roster " +
+        '/ MANAGER-unrestricted) — a beneficiaryId the caller cannot access 403s/404s the same ' +
+        'way that lookup would.',
+      tags: ['Reopen Requests'],
+      query: listByBeneficiaryQuerySchema,
+      responses: {
+        200: {
+          description: "Beneficiary's reopen requests (empty array if none)",
+          schema: envelope(z.array(reopenRequestSchema)),
+        },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: {
+          description: 'Caller role not permitted, or outside their own roster/case',
+          schema: apiErrorSchema,
+        },
+        404: { description: 'Beneficiary not found', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER'),
+    validate(listByBeneficiaryQuerySchema, 'query'),
+    controller.listByBeneficiaryId,
+  );
 
   doc.post(
     '/reopen-requests',
