@@ -337,4 +337,59 @@ describe('createPadaVisitsRouter (route wiring)', () => {
     const requestBody = JSON.parse((byPadaCall[1] as { body: string }).body);
     expect(requestBody.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
+
+  it(
+    'skips the by-ids-with-risk call entirely when the pada has zero due visits and zero ' +
+      'pending follow-ups — regression: an empty ids= query used to 400 on every empty pada',
+    async () => {
+      signer.verify.mockResolvedValue({ sub: 'caller-1', roles: ['ADMIN'] });
+      fetchMock
+        .mockResolvedValueOnce(jsonResponse(200, { data: [padaBreakdownRow] })) // pada-breakdown
+        .mockResolvedValueOnce(jsonResponse(200, { data: [] })) // visits/by-pada — no due visits
+        .mockResolvedValueOnce(jsonResponse(200, { data: [] })); // followups-by-beneficiary — none pending
+      // No 4th mock queued — the test fails if by-ids-with-risk is still called.
+
+      const port = await startServer();
+      const { status, body } = await get(port, `/padas/${PADA_ID}/visits?status=open`, {
+        Authorization: AUTH_HEADER,
+      });
+
+      expect(status).toBe(200);
+      expect(body).toEqual({
+        success: true,
+        message: 'OK',
+        data: { openCount: 0, referralFollowUpCount: 0, visits: [] },
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    },
+  );
+
+  it('degrades to empty tab counts (not a 500) when visits/by-pada is unreachable', async () => {
+    signer.verify.mockResolvedValue({ sub: 'caller-1', roles: ['ADMIN'] });
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(200, { data: [padaBreakdownRow] })) // pada-breakdown
+      .mockResolvedValueOnce(jsonResponse(500, {})) // visits/by-pada fails
+      .mockResolvedValueOnce(
+        jsonResponse(200, {
+          data: [{ followupId: 'followup-1', beneficiaryId: 'ben-2', followupDate: '2026-08-15' }],
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(200, {
+          data: [
+            { id: 'ben-2', beneficiaryName: 'Asha Kumari', phoneNumber: null, riskLevel: 'high' },
+          ],
+        }),
+      );
+
+    const port = await startServer();
+    const { status, body } = await get(port, `/padas/${PADA_ID}/visits?status=referral_follow_up`, {
+      Authorization: AUTH_HEADER,
+    });
+
+    expect(status).toBe(200);
+    expect(body).toMatchObject({
+      data: { openCount: 0, referralFollowUpCount: 1 },
+    });
+  });
 });

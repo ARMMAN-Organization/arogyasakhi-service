@@ -1,14 +1,34 @@
-import { Router, type RequestHandler } from 'express';
+import { Router } from 'express';
+import pino from 'pino';
 import {
   asyncHandler,
+  authenticate,
   forbidden,
   notFound,
   ok,
   requireRoles,
+  TRUSTED_GEOGRAPHY_UNIT_ID_HEADER,
+  TRUSTED_PROJECT_ID_HEADER,
+  TRUSTED_ROLES_HEADER,
+  TRUSTED_USER_ID_HEADER,
   unauthorized,
   type AuthenticatedUser,
   type TokenSigner,
 } from '@armman/service-commons';
+
+// A standalone structured logger for degrade()'s failure logging — not
+// req.log, since degrade() call sites across this file/padas.controller.ts/
+// pada-visits.controller.ts don't thread req through; matches the shared
+// pino JSON-log convention (buildLoggerOptions) instead of console.error.
+const logger = pino({ level: process.env.LOG_LEVEL ?? 'info' });
+
+/** Alias kept local to this file's call sites — `authenticate()` is the
+ * gateway-side auth middleware here (it never proxies to a downstream
+ * service, so `verifyAndForwardIdentity` doesn't apply); this route just
+ * needs `Pick<TokenSigner, 'verify'>` (see the shared `authenticate` for
+ * why that's now its parameter type) since the gateway holds a
+ * verify-only PublicKeyVerifier, never a full sign+verify TokenSigner. */
+export const authenticateGateway = authenticate;
 
 // Read directly from process.env (not appConfig) — importing appConfig would
 // pull in its full Zod schema (requires JWT_PUBLIC_KEY etc. with no
@@ -51,43 +71,6 @@ interface VisitSummary {
 interface LastSynced {
   lastSyncedAt: string | null;
 }
-
-/**
- * Minimal Bearer-token verification for this gateway-side route only — a
- * local copy of service-commons' `authenticate()`, not a reuse of it: that
- * function's parameter type is the full `TokenSigner` (sign + verify), but
- * the gateway only ever holds a verify-only `PublicKeyVerifier` (it never
- * issues tokens — see main.ts). `authenticate()` never calls `.sign()` at
- * runtime, so this narrows the same logic to the verify-only shape instead
- * of an unsafe cast to satisfy the wider type.
- */
-export function authenticateGateway(signer: Pick<TokenSigner, 'verify'>): RequestHandler {
-  return (req, _res, next) => {
-    const header = req.header('authorization');
-    if (!header?.startsWith('Bearer ')) return next(unauthorized());
-    const token = header.slice('Bearer '.length).trim();
-    if (!token) return next(unauthorized());
-
-    signer
-      .verify(token)
-      .then((payload) => {
-        req.user = {
-          id: String(payload.sub),
-          roles: Array.isArray(payload.roles) ? (payload.roles as string[]) : [],
-          projectId: typeof payload.projectId === 'string' ? payload.projectId : null,
-          geographyUnitId:
-            typeof payload.geographyUnitId === 'string' ? payload.geographyUnitId : null,
-        };
-        next();
-      })
-      .catch(() => next(unauthorized('Invalid or expired token.')));
-  };
-}
-
-const TRUSTED_USER_ID_HEADER = 'x-armman-user-id';
-const TRUSTED_ROLES_HEADER = 'x-armman-roles';
-const TRUSTED_PROJECT_ID_HEADER = 'x-armman-project-id';
-const TRUSTED_GEOGRAPHY_UNIT_ID_HEADER = 'x-armman-geography-unit-id';
 
 /**
  * The same trusted-identity headers `verifyAndForwardIdentity` sets when
@@ -206,7 +189,7 @@ export async function degrade<T>(label: string, promise: Promise<T>): Promise<T 
   try {
     return await promise;
   } catch (err) {
-    console.error(`Sakhi dashboard: ${label} failed — degrading to null.`, err);
+    logger.error({ err, label }, `Sakhi dashboard: ${label} failed — degrading to null.`);
     return null;
   }
 }
@@ -245,7 +228,7 @@ export function createDashboardRouter(signer: Pick<TokenSigner, 'verify'>): Rout
         degrade(
           'referral referral-summary',
           fetchJson<ReferralSummary>(
-            `${RISK_REFERRAL_SERVICE_URL}/api/v1/referrals/referral-summary`,
+            `${RISK_REFERRAL_SERVICE_URL}/api/v1/referrals/referral-summary?sakhiId=${sakhiId}`,
             caller,
             authorizationHeader,
           ),

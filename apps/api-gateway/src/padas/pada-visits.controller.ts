@@ -132,21 +132,30 @@ export function createPadaVisitsRouter(signer: Pick<TokenSigner, 'verify'>): Rou
 
       // Both tabs' rows are fetched every time regardless of `status` — the
       // response always reports both openCount/referralFollowUpCount so
-      // the FE can show both tab labels from one call.
+      // the FE can show both tab labels from one call. Degraded (not
+      // hard-fail) same as the sibling pada-list endpoint's equivalent
+      // counts — an outage in either downstream service shouldn't 500 the
+      // whole visit-list screen, just leave that tab's cards/count empty.
       const [openCards, followupCards] = await Promise.all([
-        postJson<OpenVisitCard[]>(
-          `${VISIT_FORM_SERVICE_URL}/api/v1/visits/by-pada`,
-          { beneficiaryIds, date },
-          caller,
-          authorizationHeader,
+        degrade(
+          'visit by-pada',
+          postJson<OpenVisitCard[]>(
+            `${VISIT_FORM_SERVICE_URL}/api/v1/visits/by-pada`,
+            { beneficiaryIds, date },
+            caller,
+            authorizationHeader,
+          ),
         ),
-        postJson<FollowupCard[]>(
-          `${RISK_REFERRAL_SERVICE_URL}/api/v1/referrals/followups-by-beneficiary`,
-          { beneficiaryIds },
-          caller,
-          authorizationHeader,
+        degrade(
+          'referral followups-by-beneficiary',
+          postJson<FollowupCard[]>(
+            `${RISK_REFERRAL_SERVICE_URL}/api/v1/referrals/followups-by-beneficiary`,
+            { beneficiaryIds },
+            caller,
+            authorizationHeader,
+          ),
         ),
-      ]);
+      ]).then(([open, followups]) => [open ?? [], followups ?? []] as const);
 
       const openCount = openCards.length;
       const referralFollowUpCount = followupCards.length;
@@ -155,14 +164,22 @@ export function createPadaVisitsRouter(signer: Pick<TokenSigner, 'verify'>): Rou
           ? openCards.map((c) => c.beneficiaryId)
           : followupCards.map((c) => c.beneficiaryId);
 
-      const beneficiariesWithRisk = await degrade(
-        'beneficiary by-ids-with-risk',
-        fetchJson<BeneficiaryWithRisk[]>(
-          `${BENEFICIARY_SERVICE_URL}/api/v1/beneficiaries/by-ids-with-risk?ids=${activeBeneficiaryIds.join(',')}${search ? `&search=${encodeURIComponent(search)}` : ''}`,
-          caller,
-          authorizationHeader,
-        ),
-      );
+      // Every "empty" pada (a common, everyday state) would otherwise still
+      // fire a by-ids-with-risk?ids= request with an empty `ids` value,
+      // which beneficiary-service's schema rejects with a 400 on every
+      // call — wasted round trip + a spurious console.error on the happy
+      // path, masked only by degrade() below. Skip the call entirely.
+      const beneficiariesWithRisk =
+        activeBeneficiaryIds.length === 0
+          ? []
+          : await degrade(
+              'beneficiary by-ids-with-risk',
+              fetchJson<BeneficiaryWithRisk[]>(
+                `${BENEFICIARY_SERVICE_URL}/api/v1/beneficiaries/by-ids-with-risk?ids=${activeBeneficiaryIds.join(',')}${search ? `&search=${encodeURIComponent(search)}` : ''}`,
+                caller,
+                authorizationHeader,
+              ),
+            );
       const beneficiaryById = new Map((beneficiariesWithRisk ?? []).map((b) => [b.id, b]));
 
       // When a search is applied, only cards for matching beneficiaries
