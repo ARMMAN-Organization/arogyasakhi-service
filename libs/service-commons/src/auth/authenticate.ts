@@ -25,8 +25,13 @@ export interface AuthMarker {
  * Verifies the `Authorization: Bearer <token>` access token and populates
  * `req.user`. Must run before `requireRoles(...)` on any protected route —
  * `requireRoles` only checks `req.user`, it never authenticates on its own.
+ *
+ * Only ever calls `.verify()` — accepts `Pick<TokenSigner, 'verify'>` so a
+ * verify-only signer (e.g. the gateway's `PublicKeyVerifier`, which never
+ * issues tokens) satisfies this without an unsafe cast to the full
+ * sign+verify `TokenSigner` interface.
  */
-export function authenticate(signer: TokenSigner): RequestHandler & AuthMarker {
+export function authenticate(signer: Pick<TokenSigner, 'verify'>): RequestHandler & AuthMarker {
   const handler: RequestHandler & Partial<AuthMarker> = (req: Request, _res, next) => {
     const header = req.header('authorization');
     if (!header?.startsWith('Bearer ')) return next(unauthorized());
