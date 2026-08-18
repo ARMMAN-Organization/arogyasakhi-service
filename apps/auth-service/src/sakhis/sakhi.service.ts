@@ -90,7 +90,7 @@ export class SakhiService {
    * projectId claim would be wrongly 403'd fetching their own record.
    */
   async getById(id: string, caller: CallerScope) {
-    if (caller.roles.includes('SAKHI')) {
+    if (!isPrivileged(caller) && caller.roles.includes('SAKHI')) {
       if (caller.id !== id) {
         throw forbidden('A Sakhi may only view their own profile.');
       }

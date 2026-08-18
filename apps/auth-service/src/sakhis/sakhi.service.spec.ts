@@ -199,5 +199,18 @@ describe('SakhiService', () => {
       });
       expect(repository.findById).not.toHaveBeenCalled();
     });
+
+    it(
+      'allows a caller holding both MANAGER and SAKHI to fetch any Sakhi, not just their ' +
+        'own — regression: the SAKHI self-only branch must not run ahead of isPrivileged()',
+      async () => {
+        repository.findById.mockResolvedValue(rawProfile() as never); // sakhiId: 'user-1'
+        const dualRoleCaller = { id: 'manager-1', roles: ['MANAGER', 'SAKHI'], projectId: null };
+
+        await expect(service.getById('user-1', dualRoleCaller)).resolves.toMatchObject({
+          sakhiId: 'user-1',
+        });
+      },
+    );
   });
 });
