@@ -38,6 +38,22 @@ export function registerIncentiveRateRoutes(doc: DocumentedRouter, service: Ince
   const controller = createIncentiveRateController(service);
 
   doc.get(
+    '/incentive-rates',
+    {
+      summary: 'Download the full incentive rate master list, for offline reference',
+      tags: ['Incentives'],
+      responses: {
+        200: { description: 'All incentive rates', schema: envelope(z.array(incentiveRateSchema)) },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    controller.listAll,
+  );
+
+  doc.get(
     '/incentive-rates/active',
     {
       summary: 'Resolve the currently effective incentive rate for a rate/referral type',

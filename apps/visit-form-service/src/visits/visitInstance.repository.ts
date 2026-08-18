@@ -14,6 +14,24 @@ export class VisitInstanceRepository {
     return this.prisma.visitInstance.findUnique({ where: { localVisitUuid } });
   }
 
+  /**
+   * Full visit history for one beneficiary (Beneficiary Data Download screen
+   * — offline reference, so no take/limit: a Sakhi needs the complete
+   * history, not just the most recent page). Ordered by actualVisitDate
+   * desc, nulls last: most-recently-conducted visits first, with visits that
+   * never happened (MISSED, no actualVisitDate) trailing at the end rather
+   * than sorting unpredictably against dated rows. Excludes soft-deleted
+   * rows, matching findById/findScheduleById's isDeleted convention (unlike
+   * findMany() above, which is a "recent activity" feed where that filter
+   * was never added).
+   */
+  findManyByBeneficiaryId(beneficiaryId: string) {
+    return this.prisma.visitInstance.findMany({
+      where: { beneficiaryId, isDeleted: false },
+      orderBy: { actualVisitDate: { sort: 'desc', nulls: 'last' } },
+    });
+  }
+
   findById(id: string) {
     return this.prisma.visitInstance.findFirst({ where: { id, isDeleted: false } });
   }

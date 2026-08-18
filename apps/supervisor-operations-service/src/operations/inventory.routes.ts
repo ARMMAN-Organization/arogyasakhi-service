@@ -191,6 +191,48 @@ export function registerInventoryRoutes(doc: DocumentedRouter, service: Operatio
     controller.createTransactions,
   );
 
+  doc.get(
+    '/inventory-transactions/:id',
+    {
+      summary: 'Fetch a single inventory transaction by id',
+      tags: ['Supervisor Operations'],
+      params: transactionIdParamsSchema,
+      responses: {
+        200: { description: 'Inventory transaction', schema: envelope(inventoryTransactionSchema) },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller does not own this transaction', schema: apiErrorSchema },
+        404: { description: 'Transaction not found', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(transactionIdParamsSchema, 'params'),
+    controller.getTransactionById,
+  );
+
+  // Dedicated-path alias for GET /inventory-transactions/:id — same handler,
+  // same response — for the Beneficiary Data Download screen's "Item
+  // Transaction Detail" row, which expects this path specifically.
+  doc.get(
+    '/item-transactions/:id/details',
+    {
+      summary:
+        'Fetch a single inventory transaction by id (alias for GET /inventory-transactions/:id)',
+      tags: ['Supervisor Operations'],
+      params: transactionIdParamsSchema,
+      responses: {
+        200: { description: 'Inventory transaction', schema: envelope(inventoryTransactionSchema) },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller does not own this transaction', schema: apiErrorSchema },
+        404: { description: 'Transaction not found', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(transactionIdParamsSchema, 'params'),
+    controller.getTransactionById,
+  );
+
   doc.put(
     '/inventory-transactions/:id',
     {

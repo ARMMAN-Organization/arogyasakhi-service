@@ -611,6 +611,32 @@ model ProjectRegistrationTarget {
   @@map("project_registration_targets")
 }
 
+// sakhi_registration_targets — NOT in the ERD/HLD/SRS. ProjectRegistrationTarget
+// above is project-grain only (no sakhiId); the reference Android app's
+// "Beneficiary/Master Data Download" screen needs a per-Sakhi target for
+// offline reference, so this is a genuinely new model at Sakhi grain, added
+// for that endpoint. Follows this file's ProjectRegistrationTarget as the
+// closest existing convention, but (unlike it) keeps the isDeleted/deletedAt
+// soft-delete columns, matching the rest of this schema's default (see root
+// .claude/CLAUDE.md §11) rather than ProjectRegistrationTarget's documented
+// ERD-merge exception.
+model SakhiRegistrationTarget {
+  id                 String    @id @default(uuid()) @map("sakhi_registration_target_id")
+  sakhiId            String    @map("sakhi_id")
+  projectId          String    @map("project_id")
+  targetPeriodStart  DateTime  @map("target_period_start") @db.Date
+  targetPeriodEnd    DateTime  @map("target_period_end") @db.Date
+  registrationTarget Int?      @map("registration_target")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  createdByUserId    String?   @map("created_by_user_id")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+  updatedByUserId    String?   @map("updated_by_user_id")
+  isDeleted          Boolean   @default(false) @map("is_deleted")
+  deletedAt          DateTime? @map("deleted_at")
+
+  @@map("sakhi_registration_targets")
+}
+
 enum SakhiAssignmentType {
   PRIMARY
   SECONDARY

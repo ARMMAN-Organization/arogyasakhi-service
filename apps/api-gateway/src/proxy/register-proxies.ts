@@ -1,4 +1,4 @@
-import type { Application } from 'express';
+import type { Application, Request } from 'express';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import { errorHandler, type TokenSigner, verifyAndForwardIdentity } from '@armman/service-commons';
 
@@ -48,10 +48,22 @@ function mountProxy(
     createProxyMiddleware({
       target,
       changeOrigin: true,
-      // The mount path strips the prefix, so rebuild the full downstream path
-      // (services share the `api/v1` prefix and own the same path segment,
-      // unless `downstreamMountPath` says otherwise).
-      pathRewrite: (path) => `${downstreamMountPath}${path}`,
+      // Express strips the matched mount prefix from `path` before this
+      // runs, so the common case (downstream path identical to the gateway
+      // path) just forwards the untouched original request path+query via
+      // `req.originalUrl` — this also correctly handles a `mountPath` that
+      // contains an Express `:param` segment (e.g.
+      // `/beneficiaries/:beneficiaryId/risk`), where Express's stripped
+      // `path` no longer contains the resolved id and `downstreamMountPath`
+      // (a literal string with a `:beneficiaryId` placeholder) can't be
+      // concatenated back into a real path. Only the `downstreamPrefix`
+      // case (gateway path differs from the downstream path, e.g.
+      // `/docs/beneficiary.json` -> `/docs.json`) still needs the
+      // strip-and-rebuild via `path`.
+      pathRewrite: (path, req) =>
+        downstreamMountPath === mountPath
+          ? (req as Request).originalUrl
+          : `${downstreamMountPath}${path}`,
       on: {
         proxyReq: (proxyReq, req) => {
           const requestId = req.headers['x-request-id'];

@@ -40,6 +40,17 @@ export function createCallLogsController(service: OperationsService) {
       );
     }),
 
+    // GET /sakhi-calls?sakhiId= — same as listBySakhi, just reading sakhiId
+    // from the query string instead of a path param, for the Beneficiary
+    // Data Download screen's "Sakhi Calls" row, which expects this shape.
+    listBySakhiQuery: asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const sakhiId = String(req.query.sakhiId);
+      res.json(ok(await service.listCallLogsBySakhi(sakhiId, req.user, authorizationHeader)));
+    }),
+
     listRecentBySakhi: asyncHandler(async (req, res, next) => {
       if (!req.user) return next(unauthorized());
       const authorizationHeader = req.header('authorization');

@@ -22,6 +22,8 @@ import { createMasterDataModule } from './master-data/master-data.module';
 import { createSakhiModule } from './sakhis/sakhi.module';
 import { createProjectGeographyModule } from './project-geography/project-geography.module';
 import { createApplicationParameterModule } from './application-parameters/application-parameter.module';
+import { createArogyaSakhiRosterModule } from './arogya-sakhi-roster/arogya-sakhi-roster.module';
+import { createRegistrationTargetModule } from './registration-targets/registration-target.module';
 import { buildAuthServiceOpenApiDocument } from './docs/openapi';
 
 // Re-export shared HTTP helpers so feature routers can import from a single place.
@@ -90,6 +92,8 @@ export function createApp(prisma: PrismaService, signer: TokenSigner, redis: Red
   const sakhiModule = createSakhiModule(prisma, signer);
   const projectGeographyModule = createProjectGeographyModule(prisma, signer);
   const applicationParameterModule = createApplicationParameterModule(prisma, signer);
+  const arogyaSakhiRosterModule = createArogyaSakhiRosterModule(prisma, signer);
+  const registrationTargetModule = createRegistrationTargetModule(prisma, signer);
 
   // All routes live under the global `api/v1` prefix.
   const api = express.Router();
@@ -108,6 +112,8 @@ export function createApp(prisma: PrismaService, signer: TokenSigner, redis: Red
         sakhiModule.registry,
         projectGeographyModule.registry,
         applicationParameterModule.registry,
+        arogyaSakhiRosterModule.registry,
+        registrationTargetModule.registry,
       ),
     ),
   );
@@ -121,6 +127,8 @@ export function createApp(prisma: PrismaService, signer: TokenSigner, redis: Red
   api.use(sakhiModule.router);
   api.use(projectGeographyModule.router);
   api.use(applicationParameterModule.router);
+  api.use(arogyaSakhiRosterModule.router);
+  api.use(registrationTargetModule.router);
   app.use('/api/v1', api);
 
   app.use(notFoundHandler);

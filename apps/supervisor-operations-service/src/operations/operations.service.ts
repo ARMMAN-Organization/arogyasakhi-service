@@ -15,6 +15,7 @@ import type { CreateGatheringInput } from './dto/create-gathering.dto';
 import type { UpdateGatheringAttendanceInput } from './dto/update-gathering-attendance.dto';
 import type { CompleteTopicMarkInput, CreateTopicMarkInput } from './dto/create-topic-mark.dto';
 import type { TopicMarkQuery } from './dto/topic-mark-query.dto';
+import type { ListGatheringsQuery } from './dto/list-gatherings.dto';
 import type { CallSheetStatKind } from './dto/call-sheet-stats.dto';
 import { CALL_SHEET_STAT_KINDS } from './dto/call-sheet-stats.dto';
 import type { SakhiClient } from './sakhi.client';
@@ -210,6 +211,16 @@ export class OperationsService {
 
   listInventoryTransactions() {
     return this.repository.findInventoryTransactions();
+  }
+
+  /** A SUPERVISOR may only view their own transaction. MANAGER and ADMIN are unrestricted. */
+  async getInventoryTransactionById(id: string, caller: CallerIdentity) {
+    const transaction = await this.repository.findInventoryTransactionById(id);
+    if (!transaction) throw notFound('Inventory transaction not found.');
+    if (transaction.supervisorId !== caller.id && !isPrivileged(caller)) {
+      throw forbidden('You do not have access to this transaction.');
+    }
+    return transaction;
   }
 
   /**
@@ -539,6 +550,30 @@ export class OperationsService {
   }
 
   /**
+   * Recent gatherings for offline reference, optionally scoped to one Sakhi
+   * (via `sakhiId`). Unlike `listEvents`' status/eventType filters — which
+   * carry no identity dimension to scope — `sakhiId` here names a specific
+   * Sakhi's data, so a SUPERVISOR may only pass a `sakhiId` actually
+   * assigned to them (same ownership rule as listCallLogsBySakhi/
+   * getCallSheetStats). MANAGER and ADMIN are unrestricted. No `sakhiId`
+   * filter at all is unscoped for every role, same as listEvents.
+   */
+  async listGatherings(
+    caller: CallerIdentity,
+    authorizationHeader: string,
+    filters?: ListGatheringsQuery,
+  ) {
+    if (filters?.sakhiId && !isPrivileged(caller)) {
+      const sakhi = await this.sakhiClient.findById(filters.sakhiId, authorizationHeader);
+      if (!sakhi) throw notFound('Sakhi not found.');
+      if (sakhi.supervisorId !== caller.id) {
+        throw forbidden('You do not have access to this Sakhi.');
+      }
+    }
+    return this.repository.findGatherings(filters);
+  }
+
+  /**
    * A SUPERVISOR may only view topics for a gathering under their own
    * event. MANAGER and ADMIN are unrestricted. Ownership is derived via the
    * gathering's parent event, since gatherings carry no supervisorId of
@@ -565,6 +600,65 @@ export class OperationsService {
       throw forbidden('You do not have access to this gathering.');
     }
     return this.repository.findGatheringAttendance(gatheringId);
+  }
+
+  /**
+   * A SUPERVISOR may only view the training-marks rollup for a gathering
+   * under their own event. MANAGER and ADMIN are unrestricted — same
+   * ownership rule as getGatheringAttendance. Unlike getTopicMark (one
+   * topic+gathering+sakhi combination via query params), this returns every
+   * Pre/Post mark recorded for the whole gathering — every Sakhi, every
+   * topic — with each mark's topic code/name inlined so the client doesn't
+   * need a second lookup call.
+   */
+  async getGatheringTrainingMarks(gatheringId: string, caller: CallerIdentity) {
+    const gathering = await this.repository.findGatheringById(gatheringId);
+    if (!gathering) throw notFound('Gathering not found.');
+    const event = await this.repository.findEventById(gathering.eventId);
+    if (!event) throw notFound('Event not found.');
+    if (event.supervisorId !== caller.id && !isPrivileged(caller)) {
+      throw forbidden('You do not have access to this gathering.');
+    }
+
+    const marks = await this.repository.findTopicMarksByGathering(gatheringId);
+    return marks.map((mark) => ({
+      id: mark.id,
+      gatheringId: mark.gatheringId,
+      topicId: mark.topicId,
+      topicCode: mark.topic.topicCode,
+      topicName: mark.topic.topicName,
+      sakhiId: mark.sakhiId,
+      markType: mark.markType,
+      score: mark.score,
+      isLocked: mark.isLocked,
+      lockedAt: mark.lockedAt,
+    }));
+  }
+
+  /**
+   * A gathering's photos, for offline reference. `EventGathering` has no
+   * photo mechanism of its own — this returns the parent event's completion
+   * photo (`photoMediaId`, mandatory once the event is COMPLETED) plus its
+   * `event_photos` gallery, since that's the only photo data actually
+   * captured for a training day. Same ownership rule as
+   * getGatheringAttendance/getGatheringTrainingMarks.
+   */
+  async getGatheringImages(gatheringId: string, caller: CallerIdentity) {
+    const gathering = await this.repository.findGatheringById(gatheringId);
+    if (!gathering) throw notFound('Gathering not found.');
+    const event = await this.repository.findEventById(gathering.eventId);
+    if (!event) throw notFound('Event not found.');
+    if (event.supervisorId !== caller.id && !isPrivileged(caller)) {
+      throw forbidden('You do not have access to this gathering.');
+    }
+
+    const photos = await this.repository.findEventPhotos(event.id);
+    return {
+      gatheringId,
+      eventId: event.id,
+      completionPhotoMediaId: event.photoMediaId,
+      photos: photos.map((p) => ({ id: p.id, mediaId: p.mediaId, createdAt: p.createdAt })),
+    };
   }
 
   /**
