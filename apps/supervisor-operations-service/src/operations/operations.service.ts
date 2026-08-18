@@ -551,13 +551,25 @@ export class OperationsService {
 
   /**
    * Recent gatherings for offline reference, optionally scoped to one Sakhi
-   * (via `sakhiId`). Unlike the gathering-scoped reads below, this list
-   * carries no per-caller ownership scoping — matching `listEvents`'
-   * existing convention that recent-list endpoints are role-gated at the
-   * route (SUPERVISOR/MANAGER/ADMIN) but not filtered by caller identity in
-   * the service.
+   * (via `sakhiId`). Unlike `listEvents`' status/eventType filters — which
+   * carry no identity dimension to scope — `sakhiId` here names a specific
+   * Sakhi's data, so a SUPERVISOR may only pass a `sakhiId` actually
+   * assigned to them (same ownership rule as listCallLogsBySakhi/
+   * getCallSheetStats). MANAGER and ADMIN are unrestricted. No `sakhiId`
+   * filter at all is unscoped for every role, same as listEvents.
    */
-  listGatherings(filters?: ListGatheringsQuery) {
+  async listGatherings(
+    caller: CallerIdentity,
+    authorizationHeader: string,
+    filters?: ListGatheringsQuery,
+  ) {
+    if (filters?.sakhiId && !isPrivileged(caller)) {
+      const sakhi = await this.sakhiClient.findById(filters.sakhiId, authorizationHeader);
+      if (!sakhi) throw notFound('Sakhi not found.');
+      if (sakhi.supervisorId !== caller.id) {
+        throw forbidden('You do not have access to this Sakhi.');
+      }
+    }
     return this.repository.findGatherings(filters);
   }
 

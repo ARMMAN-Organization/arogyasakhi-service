@@ -264,19 +264,50 @@ describe('OperationsService — Meeting & Training flow', () => {
   describe('listGatherings', () => {
     it('lists recent gatherings via repository when no filter is given', async () => {
       repository.findGatherings.mockResolvedValue([gatheringRow]);
-      await expect(service.listGatherings()).resolves.toEqual([gatheringRow]);
+      await expect(
+        service.listGatherings(supervisorCaller, 'Bearer token'),
+      ).resolves.toEqual([gatheringRow]);
       expect(repository.findGatherings).toHaveBeenCalledWith(undefined);
+      expect(sakhiClient.findById).not.toHaveBeenCalled();
     });
 
-    it('passes a sakhiId filter through to the repository', async () => {
+    it("passes a sakhiId filter through to the repository when it's the caller's own Sakhi", async () => {
+      const sakhi = { sakhiId: 'sakhi-1', supervisorId: supervisorCaller.id, primaryProjectId: 'p1' };
+      sakhiClient.findById.mockResolvedValue(sakhi);
       repository.findGatherings.mockResolvedValue([gatheringRow]);
-      await service.listGatherings({ sakhiId: 'sakhi-1' });
+
+      await service.listGatherings(supervisorCaller, 'Bearer token', { sakhiId: 'sakhi-1' });
+
       expect(repository.findGatherings).toHaveBeenCalledWith({ sakhiId: 'sakhi-1' });
     });
 
     it('returns an empty list when no gathering matches', async () => {
+      const sakhi = { sakhiId: 'sakhi-none', supervisorId: supervisorCaller.id, primaryProjectId: 'p1' };
+      sakhiClient.findById.mockResolvedValue(sakhi);
       repository.findGatherings.mockResolvedValue([]);
-      await expect(service.listGatherings({ sakhiId: 'sakhi-none' })).resolves.toEqual([]);
+
+      await expect(
+        service.listGatherings(supervisorCaller, 'Bearer token', { sakhiId: 'sakhi-none' }),
+      ).resolves.toEqual([]);
+    });
+
+    it("403s when a SUPERVISOR's sakhiId filter is not on their own roster", async () => {
+      const sakhi = { sakhiId: 'sakhi-1', supervisorId: otherSupervisorCaller.id, primaryProjectId: 'p1' };
+      sakhiClient.findById.mockResolvedValue(sakhi);
+
+      await expect(
+        service.listGatherings(supervisorCaller, 'Bearer token', { sakhiId: 'sakhi-1' }),
+      ).rejects.toThrow('You do not have access to this Sakhi.');
+      expect(repository.findGatherings).not.toHaveBeenCalled();
+    });
+
+    it('leaves an ADMIN caller unscoped even with a sakhiId filter', async () => {
+      repository.findGatherings.mockResolvedValue([gatheringRow]);
+
+      await service.listGatherings(adminCaller, 'Bearer token', { sakhiId: 'sakhi-1' });
+
+      expect(sakhiClient.findById).not.toHaveBeenCalled();
+      expect(repository.findGatherings).toHaveBeenCalledWith({ sakhiId: 'sakhi-1' });
     });
   });
 
