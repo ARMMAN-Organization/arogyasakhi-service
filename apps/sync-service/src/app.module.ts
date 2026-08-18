@@ -24,9 +24,11 @@ export {
   requireRoles,
   trustGatewayIdentity,
   unauthorized,
+  forbidden,
   createDocumentedRouter,
   HttpError,
   ErrorCode,
+  type AuthenticatedUser,
   type DocumentedRouter,
 } from '@armman/service-commons';
 

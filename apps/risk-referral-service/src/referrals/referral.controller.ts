@@ -3,6 +3,8 @@ import { z } from 'zod';
 import type { ReferralService } from './referral.service';
 import { createReferralSchema } from './dto/create-referral.dto';
 import { decideReferralSchema } from './dto/decide-referral.dto';
+import { countByBeneficiarySchema } from './dto/count-by-beneficiary.dto';
+import { followupsByBeneficiarySchema } from './dto/followups-by-beneficiary.dto';
 import {
   asyncHandler,
   createDocumentedRouter,
@@ -15,6 +17,9 @@ import {
 } from '../app.module';
 
 extendZodWithOpenApi(z);
+
+/** Query params for GET /referrals/referral-summary — see referral.service.ts's getSummary. */
+const referralSummaryQuerySchema = z.object({ sakhiId: z.string().uuid().optional() }).strict();
 
 // Request DTO annotated with examples for Swagger UI; validation behavior is
 // unchanged (`.openapi()` only attaches documentation metadata).
@@ -63,6 +68,19 @@ const decideReferralRequestSchema = decideReferralSchema.extend({
   decision: decideReferralSchema.shape.decision.openapi({ example: 'LAPSE' }),
 });
 
+const referralSummarySchema = z.object({
+  accompaniedReferralsCount: z.number().int(),
+  pendingFollowUpsCount: z.number().int(),
+});
+
+const pendingFollowupsByBeneficiaryResponseSchema = z.record(
+  z.string(),
+  z.object({
+    pendingCount: z.number().int(),
+    overdueCount: z.number().int(),
+  }),
+);
+
 const apiErrorSchema = z.object({
   success: z.literal(false),
   message: z.string(),
@@ -100,6 +118,118 @@ export function createReferralRouter(service: ReferralService) {
     requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER'),
     asyncHandler(async (_req, res) => {
       res.json(ok(await service.list()));
+    }),
+  );
+
+  doc.get(
+    '/referrals/referral-summary',
+    {
+      summary:
+        'Referral Summary widget — accompaniedReferralsCount/pendingFollowUpsCount for the ' +
+        "caller's in-scope beneficiaries (SAKHI: own; SUPERVISOR: roster; MANAGER/ADMIN: " +
+        'unscoped), resolved via beneficiary-service since referrals carries no sakhiId ' +
+        'column. Optional `sakhiId` narrows further to one Sakhi within that scope — used ' +
+        "by the Sakhi dashboard to get one specific Sakhi's counts.",
+      tags: ['Referrals'],
+      responses: {
+        200: { description: 'Referral counts', schema: envelope(referralSummarySchema) },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(referralSummaryQuerySchema, 'query'),
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const { sakhiId } = req.query as unknown as z.infer<typeof referralSummaryQuerySchema>;
+      res.json(ok(await service.getSummary(req.user, authorizationHeader, sakhiId)));
+    }),
+  );
+
+  doc.post(
+    '/referrals/pending-followups-by-beneficiary',
+    {
+      summary:
+        'Pending-follow-up counts per beneficiaryId, for the Pada Breakdown widget — the ' +
+        "caller (api-gateway) sums these per pada using beneficiary-service's own " +
+        'beneficiaryId -> padaId grouping. `beneficiaryIds` is intersected server-side with ' +
+        "the caller's own scope (SAKHI: own; SUPERVISOR: roster; MANAGER/ADMIN: unscoped), " +
+        'resolved via beneficiary-service since referrals carries no sakhiId column — never ' +
+        'trusted as pre-scoped; an out-of-scope id is silently excluded from the result. ' +
+        'Internal use only, not part of the public API surface.',
+      tags: ['Referrals'],
+      responses: {
+        200: {
+          description: 'Pending follow-up counts keyed by beneficiaryId',
+          schema: envelope(pendingFollowupsByBeneficiaryResponseSchema),
+        },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validateBody(countByBeneficiarySchema),
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const { beneficiaryIds } = req.body as { beneficiaryIds: string[] };
+      const result = await service.getPendingFollowupsByBeneficiary(
+        beneficiaryIds,
+        req.user,
+        authorizationHeader,
+      );
+      res.json(ok(Object.fromEntries(result)));
+    }),
+  );
+
+  doc.post(
+    '/referrals/followups-by-beneficiary',
+    {
+      summary:
+        'Full PENDING follow-up cards (followupId, followupDate) for the Pada visit-list ' +
+        'screen\'s "referral_follow_up" tab. Unfiltered by date — a pending follow-up doesn\'t ' +
+        "disappear from this list just because its date passed or hasn't arrived. " +
+        "`beneficiaryIds` is intersected server-side with the caller's own scope (SAKHI: own; " +
+        'SUPERVISOR: roster; MANAGER/ADMIN: unscoped), resolved via beneficiary-service since ' +
+        'referrals carries no sakhiId column — never trusted as pre-scoped. Internal use ' +
+        'only, not part of the public API surface.',
+      tags: ['Referrals'],
+      responses: {
+        200: {
+          description: 'Pending follow-up cards',
+          schema: envelope(
+            z.array(
+              z.object({
+                followupId: z.string().uuid(),
+                beneficiaryId: z.string().uuid(),
+                followupDate: z.string().openapi({ example: '2026-08-20' }),
+              }),
+            ),
+          ),
+        },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validateBody(followupsByBeneficiarySchema),
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const { beneficiaryIds } = req.body as { beneficiaryIds: string[] };
+      res.json(
+        ok(await service.getFollowupsByBeneficiary(beneficiaryIds, req.user, authorizationHeader)),
+      );
     }),
   );
 

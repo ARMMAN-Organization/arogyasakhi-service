@@ -6,9 +6,11 @@ import { createSyncBatchSchema } from './dto/create-syncBatch.dto';
 import {
   requireRoles,
   trustGatewayIdentity,
+  validate,
   validateBody,
   type DocumentedRouter,
 } from '../app.module';
+import { lastSyncedQuerySchema } from './dto/last-synced-query.dto';
 
 extendZodWithOpenApi(z);
 
@@ -47,6 +49,10 @@ const apiErrorSchema = z.object({
   details: z.record(z.unknown()).optional(),
 });
 
+const lastSyncedResponseSchema = z.object({
+  lastSyncedAt: z.string().datetime().nullable(),
+});
+
 function envelope<T extends z.ZodTypeAny>(data: T) {
   return z.object({ success: z.literal(true), message: z.string(), data });
 }
@@ -79,6 +85,30 @@ export function registerSyncBatchRoutes(doc: DocumentedRouter, service: SyncBatc
     trustGatewayIdentity,
     requireRoles('SAKHI', 'SUPERVISOR'),
     controller.list,
+  );
+
+  doc.get(
+    '/sync/last-synced',
+    {
+      summary:
+        "The Sakhi dashboard's last-synced timestamp — the most recent COMPLETED sync batch's " +
+        'completedAt for the given userId, or null if never synced. A SAKHI caller may only ' +
+        'query their own userId; a SUPERVISOR only a Sakhi in their own roster; MANAGER/ADMIN ' +
+        'unscoped.',
+      tags: ['Sync'],
+      responses: {
+        200: { description: 'Last-synced timestamp', schema: envelope(lastSyncedResponseSchema) },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: {
+          description: "Caller role not permitted, or userId is not this Supervisor's own",
+          schema: apiErrorSchema,
+        },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(lastSyncedQuerySchema, 'query'),
+    controller.getLastSyncedAt,
   );
 
   doc.post(

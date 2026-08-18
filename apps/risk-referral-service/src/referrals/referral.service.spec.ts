@@ -5,8 +5,10 @@ import type { CreateReferralInput } from './dto/create-referral.dto';
 import type { DecideReferralInput } from './dto/decide-referral.dto';
 import { BeneficiaryClient } from './beneficiary.client';
 import { listSakhiIdsForSupervisor } from './sakhi.client';
+import { resolveReferralTypeLookupId } from './lookup.client';
 
 jest.mock('./sakhi.client');
+jest.mock('./lookup.client');
 
 const AUTH_HEADER = 'Bearer test-token';
 
@@ -50,11 +52,16 @@ describe('ReferralService', () => {
     findById: jest.fn(),
     create: jest.fn(),
     updateStatus: jest.fn(),
+    countSummary: jest.fn(),
+    countPendingFollowupsByBeneficiary: jest.fn(),
+    findFollowupsByBeneficiary: jest.fn(),
   } as unknown as jest.Mocked<ReferralRepository>;
   const beneficiaryClient = {
     getById: jest.fn(),
+    getIds: jest.fn(),
   } as unknown as jest.Mocked<BeneficiaryClient>;
   const listSakhiIdsForSupervisorMock = jest.mocked(listSakhiIdsForSupervisor);
+  const resolveReferralTypeLookupIdMock = jest.mocked(resolveReferralTypeLookupId);
   let service: ReferralService;
 
   beforeEach(() => {
@@ -316,5 +323,244 @@ describe('ReferralService', () => {
       supervisorApprovalStatus: 'NOT_REQUIRED',
     };
     await expect(service.create(dto)).rejects.toThrow('db down');
+  });
+
+  describe('getSummary', () => {
+    it('resolves the caller-scoped beneficiary ids for a SAKHI caller', async () => {
+      beneficiaryClient.getIds.mockResolvedValue(['ben-1', 'ben-2']);
+      resolveReferralTypeLookupIdMock.mockResolvedValue('lookup-accompanied');
+      repository.countSummary.mockResolvedValue({
+        accompaniedReferralsCount: 3,
+        pendingFollowUpsCount: 2,
+      });
+
+      const result = await service.getSummary(caller({ roles: ['SAKHI'] }), AUTH_HEADER);
+
+      expect(beneficiaryClient.getIds).toHaveBeenCalledWith(AUTH_HEADER, undefined);
+      expect(repository.countSummary).toHaveBeenCalledWith(
+        ['ben-1', 'ben-2'],
+        'lookup-accompanied',
+      );
+      expect(result).toEqual({ accompaniedReferralsCount: 3, pendingFollowUpsCount: 2 });
+    });
+
+    it('resolves the roster beneficiary ids for a SUPERVISOR caller', async () => {
+      beneficiaryClient.getIds.mockResolvedValue(['ben-1']);
+      resolveReferralTypeLookupIdMock.mockResolvedValue('lookup-accompanied');
+      repository.countSummary.mockResolvedValue({
+        accompaniedReferralsCount: 1,
+        pendingFollowUpsCount: 0,
+      });
+
+      await service.getSummary(caller({ roles: ['SUPERVISOR'] }), AUTH_HEADER);
+
+      expect(beneficiaryClient.getIds).toHaveBeenCalledWith(AUTH_HEADER, undefined);
+      expect(repository.countSummary).toHaveBeenCalledWith(['ben-1'], 'lookup-accompanied');
+    });
+
+    it('leaves a MANAGER/ADMIN caller unscoped — no beneficiary-ids lookup made', async () => {
+      resolveReferralTypeLookupIdMock.mockResolvedValue('lookup-accompanied');
+      repository.countSummary.mockResolvedValue({
+        accompaniedReferralsCount: 10,
+        pendingFollowUpsCount: 4,
+      });
+
+      await service.getSummary(caller({ roles: ['MANAGER'] }), AUTH_HEADER);
+
+      expect(beneficiaryClient.getIds).not.toHaveBeenCalled();
+      expect(repository.countSummary).toHaveBeenCalledWith(undefined, 'lookup-accompanied');
+    });
+
+    it('treats an unseeded ACCOMPANIED lookup value as zero matches, not a crash', async () => {
+      beneficiaryClient.getIds.mockResolvedValue([]);
+      resolveReferralTypeLookupIdMock.mockResolvedValue(null);
+      repository.countSummary.mockResolvedValue({
+        accompaniedReferralsCount: 0,
+        pendingFollowUpsCount: 0,
+      });
+
+      const result = await service.getSummary(caller({ roles: ['SAKHI'] }), AUTH_HEADER);
+
+      expect(repository.countSummary).toHaveBeenCalledWith([], null);
+      expect(result).toEqual({ accompaniedReferralsCount: 0, pendingFollowUpsCount: 0 });
+    });
+
+    it(
+      'narrows a SUPERVISOR caller to one Sakhi within their roster when sakhiId is given ' +
+        "— regression: the Sakhi dashboard must get one Sakhi's counts, not the whole roster",
+      async () => {
+        beneficiaryClient.getIds.mockResolvedValue(['ben-1']);
+        resolveReferralTypeLookupIdMock.mockResolvedValue('lookup-accompanied');
+        repository.countSummary.mockResolvedValue({
+          accompaniedReferralsCount: 1,
+          pendingFollowUpsCount: 0,
+        });
+
+        await service.getSummary(caller({ roles: ['SUPERVISOR'] }), AUTH_HEADER, 'sakhi-1');
+
+        expect(beneficiaryClient.getIds).toHaveBeenCalledWith(AUTH_HEADER, 'sakhi-1');
+      },
+    );
+
+    it(
+      'narrows a MANAGER/ADMIN caller to one Sakhi when sakhiId is given — regression: a ' +
+        "MANAGER opening a specific Sakhi's dashboard must not get system-wide counts",
+      async () => {
+        beneficiaryClient.getIds.mockResolvedValue(['ben-1']);
+        resolveReferralTypeLookupIdMock.mockResolvedValue('lookup-accompanied');
+        repository.countSummary.mockResolvedValue({
+          accompaniedReferralsCount: 1,
+          pendingFollowUpsCount: 0,
+        });
+
+        await service.getSummary(caller({ roles: ['MANAGER'] }), AUTH_HEADER, 'sakhi-1');
+
+        expect(beneficiaryClient.getIds).toHaveBeenCalledWith(AUTH_HEADER, 'sakhi-1');
+        expect(repository.countSummary).toHaveBeenCalledWith(['ben-1'], 'lookup-accompanied');
+      },
+    );
+  });
+
+  describe('getPendingFollowupsByBeneficiary', () => {
+    it('scopes a SAKHI caller to their own ids before querying the repository', async () => {
+      beneficiaryClient.getIds.mockResolvedValue(['ben-1', 'ben-2']);
+      repository.countPendingFollowupsByBeneficiary.mockResolvedValue(
+        new Map([
+          ['ben-1', { pendingCount: 2, overdueCount: 1 }],
+          ['ben-2', { pendingCount: 0, overdueCount: 0 }],
+        ]),
+      );
+
+      const result = await service.getPendingFollowupsByBeneficiary(
+        ['ben-1', 'ben-2'],
+        caller({ roles: ['SAKHI'] }),
+        AUTH_HEADER,
+      );
+
+      expect(beneficiaryClient.getIds).toHaveBeenCalledWith(AUTH_HEADER);
+      expect(repository.countPendingFollowupsByBeneficiary).toHaveBeenCalledWith(
+        ['ben-1', 'ben-2'],
+        expect.any(Date),
+      );
+      expect(result).toEqual(
+        new Map([
+          ['ben-1', { pendingCount: 2, overdueCount: 1 }],
+          ['ben-2', { pendingCount: 0, overdueCount: 0 }],
+        ]),
+      );
+    });
+
+    it('silently excludes an out-of-scope beneficiaryId not returned by beneficiary-service', async () => {
+      beneficiaryClient.getIds.mockResolvedValue(['ben-1']);
+      repository.countPendingFollowupsByBeneficiary.mockResolvedValue(new Map());
+
+      await service.getPendingFollowupsByBeneficiary(
+        ['ben-1', 'some-other-sakhis-ben'],
+        caller({ roles: ['SAKHI'] }),
+        AUTH_HEADER,
+      );
+
+      expect(repository.countPendingFollowupsByBeneficiary).toHaveBeenCalledWith(
+        ['ben-1'],
+        expect.any(Date),
+      );
+    });
+
+    it('leaves a MANAGER/ADMIN caller unscoped, without calling beneficiary-service', async () => {
+      repository.countPendingFollowupsByBeneficiary.mockResolvedValue(new Map());
+
+      await service.getPendingFollowupsByBeneficiary(
+        ['ben-1', 'ben-2'],
+        caller({ roles: ['MANAGER'] }),
+        AUTH_HEADER,
+      );
+
+      expect(beneficiaryClient.getIds).not.toHaveBeenCalled();
+      expect(repository.countPendingFollowupsByBeneficiary).toHaveBeenCalledWith(
+        ['ben-1', 'ben-2'],
+        expect.any(Date),
+      );
+    });
+
+    it('returns an empty map for an empty beneficiaryIds list, without erroring', async () => {
+      beneficiaryClient.getIds.mockResolvedValue([]);
+      repository.countPendingFollowupsByBeneficiary.mockResolvedValue(new Map());
+
+      const result = await service.getPendingFollowupsByBeneficiary(
+        [],
+        caller({ roles: ['SAKHI'] }),
+        AUTH_HEADER,
+      );
+
+      expect(repository.countPendingFollowupsByBeneficiary).toHaveBeenCalledWith(
+        [],
+        expect.any(Date),
+      );
+      expect(result).toEqual(new Map());
+    });
+  });
+
+  describe('getFollowupsByBeneficiary', () => {
+    it('scopes a SAKHI caller to their own ids before querying the repository', async () => {
+      beneficiaryClient.getIds.mockResolvedValue(['ben-1']);
+      repository.findFollowupsByBeneficiary.mockResolvedValue([
+        {
+          id: 'followup-1',
+          followupDate: new Date('2026-08-15T00:00:00.000Z'),
+          referral: { beneficiaryId: 'ben-1' },
+        },
+      ]);
+
+      const result = await service.getFollowupsByBeneficiary(
+        ['ben-1'],
+        caller({ roles: ['SAKHI'] }),
+        AUTH_HEADER,
+      );
+
+      expect(beneficiaryClient.getIds).toHaveBeenCalledWith(AUTH_HEADER);
+      expect(repository.findFollowupsByBeneficiary).toHaveBeenCalledWith(['ben-1']);
+      expect(result).toEqual([
+        { followupId: 'followup-1', beneficiaryId: 'ben-1', followupDate: '2026-08-15' },
+      ]);
+    });
+
+    it('silently excludes an out-of-scope beneficiaryId not returned by beneficiary-service', async () => {
+      beneficiaryClient.getIds.mockResolvedValue(['ben-1']);
+      repository.findFollowupsByBeneficiary.mockResolvedValue([]);
+
+      await service.getFollowupsByBeneficiary(
+        ['ben-1', 'some-other-sakhis-ben'],
+        caller({ roles: ['SAKHI'] }),
+        AUTH_HEADER,
+      );
+
+      expect(repository.findFollowupsByBeneficiary).toHaveBeenCalledWith(['ben-1']);
+    });
+
+    it('leaves a MANAGER/ADMIN caller unscoped, without calling beneficiary-service', async () => {
+      repository.findFollowupsByBeneficiary.mockResolvedValue([]);
+
+      await service.getFollowupsByBeneficiary(
+        ['ben-1'],
+        caller({ roles: ['MANAGER'] }),
+        AUTH_HEADER,
+      );
+
+      expect(beneficiaryClient.getIds).not.toHaveBeenCalled();
+      expect(repository.findFollowupsByBeneficiary).toHaveBeenCalledWith(['ben-1']);
+    });
+
+    it('returns an empty list for an empty beneficiaryIds list, without erroring', async () => {
+      beneficiaryClient.getIds.mockResolvedValue([]);
+      repository.findFollowupsByBeneficiary.mockResolvedValue([]);
+
+      const result = await service.getFollowupsByBeneficiary(
+        [],
+        caller({ roles: ['SAKHI'] }),
+        AUTH_HEADER,
+      );
+
+      expect(result).toEqual([]);
+    });
   });
 });

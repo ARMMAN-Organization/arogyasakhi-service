@@ -5,6 +5,8 @@ import { createVisitInstanceController } from './visitInstance.controller';
 import { createVisitInstanceSchema } from './dto/create-visitInstance.dto';
 import { updateVisitInstanceSchema } from './dto/update-visitInstance.dto';
 import { visitSummaryQuerySchema } from './dto/visit-summary-query.dto';
+import { countByBeneficiarySchema } from './dto/count-by-beneficiary.dto';
+import { byPadaSchema } from './dto/by-pada.dto';
 import {
   errorResponse,
   requireRoles,
@@ -71,7 +73,17 @@ const visitInstanceSchema = z.object({
 const visitSummarySchema = z.object({
   total: z.number().int(),
   byStatus: z.record(z.string(), z.number().int()),
+  endingSoonVisitsCount: z.number().int(),
 });
+
+const countByBeneficiaryResponseSchema = z.record(
+  z.string(),
+  z.object({
+    dueVisitsCount: z.number().int(),
+    overdueVisitsCount: z.number().int(),
+    dueTodayCount: z.number().int(),
+  }),
+);
 
 function envelope<T extends z.ZodTypeAny>(data: T) {
   return z.object({ success: z.literal(true), message: z.string(), data });
@@ -110,9 +122,10 @@ export function registerVisitInstanceRoutes(doc: DocumentedRouter, service: Visi
     {
       summary:
         'Visit Summary widget — counts of in-scope visits grouped by status, filtered by ' +
-        'VisitSchedule.scheduledDate (when due, not when it happened). Same role-scoping as ' +
-        'PATCH /visits/:id: SAKHI sees own visits, SUPERVISOR sees roster visits, ' +
-        'MANAGER/ADMIN unscoped.',
+        'VisitSchedule.scheduledDate (when due, not when it happened), plus ' +
+        'endingSoonVisitsCount: a sub-count of due/overdue visits whose window closes within ' +
+        '3 days. Same role-scoping as PATCH /visits/:id: SAKHI sees own visits, SUPERVISOR ' +
+        'sees roster visits, MANAGER/ADMIN unscoped.',
       tags: ['Visits'],
       responses: {
         200: { description: 'Visit status counts', schema: envelope(visitSummarySchema) },
@@ -152,6 +165,70 @@ export function registerVisitInstanceRoutes(doc: DocumentedRouter, service: Visi
     requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER'),
     validate(beneficiaryIdParamsSchema, 'params'),
     controller.listByBeneficiary,
+  );
+
+  doc.post(
+    '/visits/count-by-beneficiary',
+    {
+      summary:
+        'Due/overdue visit counts per beneficiaryId, for the Pada Breakdown widget — the ' +
+        "caller (api-gateway) sums these per pada using beneficiary-service's own " +
+        'beneficiaryId -> padaId grouping. `beneficiaryIds` is intersected server-side with ' +
+        "the caller's own scope (SAKHI: own; SUPERVISOR: roster; MANAGER/ADMIN: unscoped) — " +
+        'never trusted as pre-scoped; an out-of-scope id is silently excluded from the ' +
+        'result. Internal use only, not part of the public API surface.',
+      tags: ['Visits'],
+      responses: {
+        200: {
+          description: 'Due/overdue counts keyed by beneficiaryId',
+          schema: envelope(countByBeneficiaryResponseSchema),
+        },
+        400: errorResponse(400, { message: 'beneficiaryIds.0: Invalid uuid' }),
+        401: errorResponse(401),
+        403: errorResponse(403),
+        500: errorResponse(500),
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validateBody(countByBeneficiarySchema),
+    controller.getCountByBeneficiary,
+  );
+
+  doc.post(
+    '/visits/by-pada',
+    {
+      summary:
+        "Full visit cards (visitId, visitType, dueDate) for the Pada visit-list screen's " +
+        '"open" tab — due (PENDING) or overdue (MISSED) visits scheduled on `date` for the ' +
+        "given beneficiaryIds, intersected server-side with the caller's own scope (SAKHI: " +
+        'own; SUPERVISOR: roster; MANAGER/ADMIN: unscoped) — never trusted as pre-scoped. ' +
+        'Internal use only, not part of the public API surface.',
+      tags: ['Visits'],
+      responses: {
+        200: {
+          description: 'Visit cards due/overdue on the given date',
+          schema: envelope(
+            z.array(
+              z.object({
+                visitId: z.string().uuid(),
+                beneficiaryId: z.string().uuid(),
+                visitType: z.string().openapi({ example: 'ANC 3' }),
+                dueDate: z.string().openapi({ example: '2026-08-20' }),
+              }),
+            ),
+          ),
+        },
+        400: errorResponse(400, { message: 'date: must be a date-only string (YYYY-MM-DD)' }),
+        401: errorResponse(401),
+        403: errorResponse(403),
+        500: errorResponse(500),
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validateBody(byPadaSchema),
+    controller.getByPada,
   );
 
   doc.post(

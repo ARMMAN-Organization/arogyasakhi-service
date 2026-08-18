@@ -77,7 +77,27 @@ export class SakhiService {
     return mapped.filter((s) => s.supervisorId === caller.id);
   }
 
+  /**
+   * A SAKHI caller may only fetch their own record — this route otherwise
+   * backs the Supervisor's Sakhi picker/detail header (see this class's doc
+   * comment), not a Sakhi looking up another Sakhi. Added for the Sakhi
+   * dashboard (api-gateway's GET /sakhi/:sakhiId/dashboard), which needs a
+   * Sakhi's own displayName and the JWT carries no such field. Returns
+   * immediately once the self-check passes — the SUPERVISOR project-scope
+   * check below must NOT also run for a SAKHI caller: every Sakhi's own JWT
+   * carries a projectId too, so without this early return a Sakhi whose own
+   * `sakhi_profiles.primaryProjectId` doesn't happen to equal their JWT's
+   * projectId claim would be wrongly 403'd fetching their own record.
+   */
   async getById(id: string, caller: CallerScope) {
+    if (!isPrivileged(caller) && caller.roles.includes('SAKHI')) {
+      if (caller.id !== id) {
+        throw forbidden('A Sakhi may only view their own profile.');
+      }
+      const ownProfile = await this.repository.findById(id);
+      if (!ownProfile) throw notFound('Sakhi not found.');
+      return toApiSakhi(ownProfile as unknown as Record<string, unknown>);
+    }
     const profile = await this.repository.findById(id);
     if (!profile) throw notFound('Sakhi not found.');
     if (caller.projectId && caller.projectId !== profile.primaryProjectId) {

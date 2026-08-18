@@ -1,5 +1,6 @@
 import { asyncHandler, ok, unauthorized } from '../app.module';
 import type { FormService } from './form.service';
+import { VISIT_CODE_TO_FORM_CODE } from './visit-code-form-map';
 
 /**
  * Form request handlers. Mounted under the global `api/v1` prefix by
@@ -7,6 +8,10 @@ import type { FormService } from './form.service';
  */
 export function createFormController(service: FormService) {
   return {
+    getVisitCodeFormMap: asyncHandler(async (_req, res) => {
+      res.json(ok(VISIT_CODE_TO_FORM_CODE));
+    }),
+
     getActiveVersion: asyncHandler(async (req, res, next) => {
       // trustGatewayIdentity runs first and calls next(unauthorized()) if it
       // fails, so req.user is always populated by the time this handler runs.

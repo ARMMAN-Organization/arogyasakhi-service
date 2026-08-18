@@ -60,7 +60,7 @@ export function registerRegistrationTargetRoutes(
         },
         400: errorResponse(400, { message: 'sakhiId: Required' }),
         401: errorResponse(401),
-        403: errorResponse(403, { message: "You do not have access to this Sakhi." }),
+        403: errorResponse(403, { message: 'You do not have access to this Sakhi.' }),
         500: errorResponse(500),
       },
     },

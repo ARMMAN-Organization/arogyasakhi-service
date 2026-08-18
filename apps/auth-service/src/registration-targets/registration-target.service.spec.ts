@@ -96,10 +96,7 @@ describe('RegistrationTargetService', () => {
       sakhiRepository.findById.mockResolvedValue({ supervisorId: 'supervisor-1' } as never);
       repository.findBySakhiId.mockResolvedValue([]);
 
-      await service.list(
-        'sakhi-1',
-        caller({ id: 'supervisor-1', roles: ['SUPERVISOR'] }),
-      );
+      await service.list('sakhi-1', caller({ id: 'supervisor-1', roles: ['SUPERVISOR'] }));
 
       expect(repository.findBySakhiId).toHaveBeenCalledWith('sakhi-1');
     });

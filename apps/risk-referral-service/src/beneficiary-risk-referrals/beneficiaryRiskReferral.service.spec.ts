@@ -108,7 +108,11 @@ describe('BeneficiaryRiskReferralService', () => {
       } as never);
 
       await expect(
-        service.listReferrals(BENEFICIARY_ID, caller({ id: 'sakhi-1', roles: ['SAKHI'] }), AUTH_HEADER),
+        service.listReferrals(
+          BENEFICIARY_ID,
+          caller({ id: 'sakhi-1', roles: ['SAKHI'] }),
+          AUTH_HEADER,
+        ),
       ).rejects.toThrow('You do not have access to this beneficiary.');
       expect(repository.findHeadersByBeneficiary).not.toHaveBeenCalled();
     });
@@ -178,7 +182,7 @@ describe('BeneficiaryRiskReferralService', () => {
       expect(repository.findDetailsById).toHaveBeenCalledWith('other-beneficiary', REFERRAL_ID);
     });
 
-    it('403s when a SUPERVISOR caller\'s roster does not include the beneficiary\'s Sakhi', async () => {
+    it("403s when a SUPERVISOR caller's roster does not include the beneficiary's Sakhi", async () => {
       beneficiaryClient.getById.mockResolvedValue({
         id: BENEFICIARY_ID,
         sakhiId: 'some-other-sakhi',

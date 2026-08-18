@@ -82,7 +82,7 @@ export function registerBeneficiaryRiskRoutes(
         "A beneficiary's risk profile: currentState (most recent RiskStateSnapshot per " +
         'phase) plus assessments (full RiskAssessment history, each with its RiskFlag rows ' +
         'and their human-readable RiskCondition code/name). A SAKHI may only read her own ' +
-        "beneficiary; a SUPERVISOR only a beneficiary on their own roster (resolved via " +
+        'beneficiary; a SUPERVISOR only a beneficiary on their own roster (resolved via ' +
         'beneficiary-service). MANAGER/ADMIN are unscoped.',
       tags: ['Beneficiary Risk'],
       params: beneficiaryRiskParamsSchema,

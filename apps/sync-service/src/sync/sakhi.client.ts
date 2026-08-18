@@ -12,6 +12,36 @@ interface ApiSakhi {
 }
 
 /**
+ * Resolves the Sakhi ids reporting to a given Supervisor, via auth-service's
+ * existing `GET /projects/:projectId/sakhis`, called through the gateway.
+ * Used to scope `GET /sync/last-synced` to a Supervisor's own roster.
+ * Duplicated from risk-referral-service's identical helper — this service
+ * has no shared client library to import it from (forklift rule: no
+ * cross-service imports).
+ */
+export async function listSakhiIdsForSupervisor(
+  projectId: string,
+  supervisorId: string,
+  authorizationHeader: string,
+): Promise<string[]> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_GATEWAY_BASE_URL}/api/v1/projects/${projectId}/sakhis`, {
+      headers: { Authorization: authorizationHeader },
+    });
+  } catch {
+    throw badGateway('Unable to resolve Sakhis — the auth service is unreachable.');
+  }
+
+  if (!res.ok) {
+    throw badGateway('Unable to resolve Sakhis — the auth service returned an error.');
+  }
+
+  const body = (await res.json()) as { data: ApiSakhi[] };
+  return body.data.filter((sakhi) => sakhi.supervisorId === supervisorId).map((s) => s.sakhiId);
+}
+
+/**
  * Resolves a single Sakhi's own record via auth-service's
  * `GET /sakhis/:sakhiId`, called through the gateway forwarding the
  * caller's own Authorization header. Used to check whether a `userId` a

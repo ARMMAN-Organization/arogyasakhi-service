@@ -1,4 +1,8 @@
-import { resolveHealthBlockIdFromPhc, resolveVillageNames } from './geography.client';
+import {
+  resolveHealthBlockIdFromPhc,
+  resolvePadaUnits,
+  resolveVillageNames,
+} from './geography.client';
 
 /** Builds a fetch mock Response for a list of geography units. */
 function listResponse(data: Record<string, unknown>[]) {
@@ -204,6 +208,69 @@ describe('resolveVillageNames', () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining('geoType=VILLAGE'),
+      expect.objectContaining({ headers: { Authorization: 'Bearer test-token' } }),
+    );
+  });
+});
+
+describe('resolvePadaUnits', () => {
+  const originalFetch = global.fetch;
+  const fetchMock = jest.fn();
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    global.fetch = fetchMock as unknown as typeof fetch;
+  });
+
+  afterAll(() => {
+    global.fetch = originalFetch;
+  });
+
+  it('returns a geographyUnitId -> {name, parentId} map for every PADA unit', async () => {
+    fetchMock.mockResolvedValue(
+      listResponse([
+        { geographyUnitId: 'pada-1', name: 'Sample Pada', parentId: 'village-1', geoType: 'PADA' },
+        { geographyUnitId: 'pada-2', name: 'Other Pada', parentId: 'village-2', geoType: 'PADA' },
+      ]),
+    );
+
+    const result = await resolvePadaUnits('Bearer test-token');
+
+    expect(result).toEqual(
+      new Map([
+        ['pada-1', { name: 'Sample Pada', parentId: 'village-1' }],
+        ['pada-2', { name: 'Other Pada', parentId: 'village-2' }],
+      ]),
+    );
+  });
+
+  it('a padaId absent from the response is simply absent from the map', async () => {
+    fetchMock.mockResolvedValue(listResponse([]));
+
+    const result = await resolvePadaUnits('Bearer test-token');
+
+    expect(result.get('unknown-pada')).toBeUndefined();
+  });
+
+  it('throws 502 when the auth-service call rejects (network error/timeout)', async () => {
+    fetchMock.mockRejectedValue(new Error('ECONNREFUSED'));
+
+    await expect(resolvePadaUnits('Bearer test-token')).rejects.toMatchObject({ status: 502 });
+  });
+
+  it('throws 502 when the auth-service call fails with a non-2xx response', async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 500 });
+
+    await expect(resolvePadaUnits('Bearer test-token')).rejects.toMatchObject({ status: 502 });
+  });
+
+  it('filters by geoType=PADA', async () => {
+    fetchMock.mockResolvedValue(listResponse([]));
+
+    await resolvePadaUnits('Bearer test-token');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('geoType=PADA'),
       expect.objectContaining({ headers: { Authorization: 'Bearer test-token' } }),
     );
   });

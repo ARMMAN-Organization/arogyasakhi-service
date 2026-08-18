@@ -73,6 +73,31 @@ const FORMS: FormDraft[] = [
     versionNo: 'v1',
     payload: infantVisitPayload,
   },
+  // Alias of INFANT_VISIT under the SRS's own name for the 0-12m phase (per
+  // SRS v3.0 §"Home Visit Forms": ANC, PP, NN, INC, CCV, Delivery are each
+  // distinct forms). Same schema content as INFANT_VISIT — kept as a
+  // separate form_definitions row (not a rename) so any existing caller of
+  // GET /forms/INFANT_VISIT/active-version is unaffected; INC_VISIT is the
+  // name new client code should move to.
+  {
+    formCode: 'INC_VISIT',
+    formName: 'Infant Care Visit (INC)',
+    entityType: 'CHILD',
+    versionNo: 'v1',
+    payload: infantVisitPayload,
+  },
+  // CCV (13-24m) is confirmed in SRS v3.0 to reuse INC's clinical fields and
+  // HR thresholds verbatim — "No separate CCV-specific guidelines required"
+  // (Niharika Vyas, May 2026). Same schema content as INC_VISIT/INFANT_VISIT
+  // until ARMMAN provides CCV-specific fields, at which point only this one
+  // form_definitions row needs a new version — INC_VISIT stays unaffected.
+  {
+    formCode: 'CCV_VISIT',
+    formName: 'Child Care Visit (CCV)',
+    entityType: 'CHILD',
+    versionNo: 'v1',
+    payload: infantVisitPayload,
+  },
   {
     formCode: 'DELIVERY_VISIT',
     formName: 'Delivery Visit',

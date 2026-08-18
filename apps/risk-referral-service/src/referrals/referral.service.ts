@@ -4,6 +4,7 @@ import type { CreateReferralInput } from './dto/create-referral.dto';
 import type { DecideReferralInput } from './dto/decide-referral.dto';
 import { BeneficiaryClient } from './beneficiary.client';
 import { listSakhiIdsForSupervisor } from './sakhi.client';
+import { resolveReferralTypeLookupId } from './lookup.client';
 
 /** Referral domain logic. Data access is delegated to the repository. */
 export class ReferralService {
@@ -18,6 +19,95 @@ export class ReferralService {
 
   create(dto: CreateReferralInput) {
     return this.repository.create(dto);
+  }
+
+  /**
+   * Referral Summary widget — accompaniedReferralsCount/pendingFollowUpsCount
+   * for the caller's in-scope beneficiaries, optionally narrowed to one
+   * Sakhi via `sakhiId` (the Sakhi dashboard passes their own sakhiId, same
+   * as the sibling registration-summary/visit-summary widgets). Scoping
+   * itself happens entirely in beneficiary-service's GET /beneficiaries/ids
+   * (SAKHI -> own, SUPERVISOR -> roster — optionally narrowed further to
+   * one in-roster sakhiId, MANAGER/ADMIN -> unscoped unless sakhiId given,
+   * an empty array back for MANAGER/ADMIN with no sakhiId meaning
+   * "unscoped" is not distinguishable from "no beneficiaries exist" — see
+   * BeneficiaryClient.getIds) — this service only forwards the caller's own
+   * token + sakhiId and filters its own tables by whatever id set comes
+   * back. MANAGER/ADMIN with no sakhiId get an unfiltered count instead of
+   * the (possibly huge) full id list, since beneficiary-service returns
+   * "all ids unscoped" for them in that case, not an empty list.
+   */
+  async getSummary(caller: AuthenticatedUser, authorizationHeader: string, sakhiId?: string) {
+    const isUnscoped =
+      !sakhiId && (caller.roles.includes('MANAGER') || caller.roles.includes('ADMIN'));
+    const beneficiaryIds = isUnscoped
+      ? undefined
+      : await this.beneficiaryClient.getIds(authorizationHeader, sakhiId);
+    const accompaniedLookupValueId = await resolveReferralTypeLookupId(
+      'ACCOMPANIED',
+      authorizationHeader,
+    );
+    return this.repository.countSummary(beneficiaryIds, accompaniedLookupValueId);
+  }
+
+  /**
+   * Intersects a caller-supplied beneficiaryIds list with the caller's own
+   * scope, resolved via beneficiary-service's GET /beneficiaries/ids (same
+   * helper getSummary uses) — referrals carries no sakhiId column of its
+   * own, so this is the only way to scope these endpoints. Never trust
+   * `beneficiaryIds` as pre-scoped: without this, any authenticated caller
+   * could pass an arbitrary id list and read another Sakhi's follow-ups
+   * (IDOR). MANAGER/ADMIN are unscoped (getIds returns "all ids" for them,
+   * so the intersection is a no-op).
+   */
+  private async scopeToCaller(
+    beneficiaryIds: string[],
+    caller: AuthenticatedUser,
+    authorizationHeader: string,
+  ): Promise<string[]> {
+    const isUnscoped = caller.roles.includes('MANAGER') || caller.roles.includes('ADMIN');
+    if (isUnscoped) return beneficiaryIds;
+    const allowedIds = new Set(await this.beneficiaryClient.getIds(authorizationHeader));
+    return beneficiaryIds.filter((id) => allowedIds.has(id));
+  }
+
+  /**
+   * Pending/overdue follow-up counts per beneficiaryId, for the
+   * pada-breakdown widget — the caller (api-gateway) sums these per pada
+   * using beneficiary-service's own beneficiaryId -> padaId grouping.
+   * "Overdue" = a PENDING follow-up whose followupDate has already passed.
+   * `beneficiaryIds` is intersected with the caller's own scope via
+   * scopeToCaller — an out-of-scope id is silently excluded, not a 403.
+   */
+  async getPendingFollowupsByBeneficiary(
+    beneficiaryIds: string[],
+    caller: AuthenticatedUser,
+    authorizationHeader: string,
+  ) {
+    const scopedIds = await this.scopeToCaller(beneficiaryIds, caller, authorizationHeader);
+    const today = new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00.000Z');
+    return this.repository.countPendingFollowupsByBeneficiary(scopedIds, today);
+  }
+
+  /**
+   * Full PENDING follow-up cards (followupId, beneficiaryId, followupDate)
+   * for the pada visit-list screen's "referral_follow_up" tab.
+   * `beneficiaryIds` is intersected with the caller's own scope via
+   * scopeToCaller — an out-of-scope id is silently excluded, not a 403.
+   * Unfiltered by date, per findFollowupsByBeneficiary's doc comment.
+   */
+  async getFollowupsByBeneficiary(
+    beneficiaryIds: string[],
+    caller: AuthenticatedUser,
+    authorizationHeader: string,
+  ) {
+    const scopedIds = await this.scopeToCaller(beneficiaryIds, caller, authorizationHeader);
+    const rows = await this.repository.findFollowupsByBeneficiary(scopedIds);
+    return rows.map((row) => ({
+      followupId: row.id,
+      beneficiaryId: row.referral.beneficiaryId,
+      followupDate: row.followupDate.toISOString().slice(0, 10),
+    }));
   }
 
   /**

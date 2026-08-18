@@ -73,7 +73,7 @@ describe('SyncPendingService', () => {
     expect(repository.findPending).not.toHaveBeenCalled();
   });
 
-  it("allows a SUPERVISOR to request a userId belonging to a Sakhi on their own roster", async () => {
+  it('allows a SUPERVISOR to request a userId belonging to a Sakhi on their own roster', async () => {
     sakhiClient.findById.mockResolvedValue({ sakhiId: otherUserId, supervisorId: callerId });
     repository.findPending.mockResolvedValue([pendingRow]);
 
@@ -88,11 +88,15 @@ describe('SyncPendingService', () => {
     expect(result).toEqual([pendingRow]);
   });
 
-  it("403s a SUPERVISOR requesting a userId not on their own roster", async () => {
+  it('403s a SUPERVISOR requesting a userId not on their own roster', async () => {
     sakhiClient.findById.mockResolvedValue({ sakhiId: otherUserId, supervisorId: 'someone-else' });
 
     await expect(
-      service.listPending(otherUserId, caller({ id: callerId, roles: ['SUPERVISOR'] }), AUTH_HEADER),
+      service.listPending(
+        otherUserId,
+        caller({ id: callerId, roles: ['SUPERVISOR'] }),
+        AUTH_HEADER,
+      ),
     ).rejects.toThrow('You do not have access to this user.');
     expect(repository.findPending).not.toHaveBeenCalled();
   });
@@ -101,7 +105,11 @@ describe('SyncPendingService', () => {
     sakhiClient.findById.mockResolvedValue(null);
 
     await expect(
-      service.listPending(otherUserId, caller({ id: callerId, roles: ['SUPERVISOR'] }), AUTH_HEADER),
+      service.listPending(
+        otherUserId,
+        caller({ id: callerId, roles: ['SUPERVISOR'] }),
+        AUTH_HEADER,
+      ),
     ).rejects.toThrow('You do not have access to this user.');
   });
 

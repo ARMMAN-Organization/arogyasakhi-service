@@ -129,7 +129,8 @@ export function registerBeneficiaryRiskReferralRoutes(
           schema: apiErrorSchema,
         },
         404: {
-          description: 'Beneficiary not found, or referral not found/not owned by this beneficiaryId',
+          description:
+            'Beneficiary not found, or referral not found/not owned by this beneficiaryId',
           schema: apiErrorSchema,
         },
       },

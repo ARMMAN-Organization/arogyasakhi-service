@@ -190,7 +190,11 @@ describe('BeneficiaryRiskService', () => {
       } as never);
 
       await expect(
-        service.getRiskProfile(BENEFICIARY_ID, caller({ id: 'sakhi-1', roles: ['SAKHI'] }), AUTH_HEADER),
+        service.getRiskProfile(
+          BENEFICIARY_ID,
+          caller({ id: 'sakhi-1', roles: ['SAKHI'] }),
+          AUTH_HEADER,
+        ),
       ).rejects.toThrow('You do not have access to this beneficiary.');
       expect(repository.findStateSnapshots).not.toHaveBeenCalled();
     });
@@ -243,7 +247,11 @@ describe('BeneficiaryRiskService', () => {
       beneficiaryClient.getById.mockResolvedValue(null);
 
       await expect(
-        service.getRiskProfile(BENEFICIARY_ID, caller({ id: 'sakhi-1', roles: ['SAKHI'] }), AUTH_HEADER),
+        service.getRiskProfile(
+          BENEFICIARY_ID,
+          caller({ id: 'sakhi-1', roles: ['SAKHI'] }),
+          AUTH_HEADER,
+        ),
       ).rejects.toThrow('Beneficiary not found.');
       expect(repository.findStateSnapshots).not.toHaveBeenCalled();
     });
