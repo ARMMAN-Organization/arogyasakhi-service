@@ -1,5 +1,11 @@
 import { badGateway, HttpError } from '@armman/service-commons';
-import { appConfig } from '../config/app-config';
+
+// Read directly (not via appConfig) so importing this client doesn't pull in
+// app-config's full schema (requires DATABASE_URL etc. with no defaults),
+// which process.exit(1)s at module-load time in any test that never
+// otherwise loads config — matches every other service's HTTP-only client
+// convention (e.g. visit-form-service's create-child.client.ts).
+const API_GATEWAY_BASE_URL = process.env.API_GATEWAY_BASE_URL ?? 'http://localhost:3000';
 
 export interface BeneficiaryCaseRecord {
   id: string;
@@ -22,7 +28,7 @@ export class BeneficiaryClient {
     let res: Response;
     try {
       res = await fetch(
-        `${appConfig.API_GATEWAY_BASE_URL}/api/v1/beneficiaries/${beneficiaryId}/reactivate`,
+        `${API_GATEWAY_BASE_URL}/api/v1/beneficiaries/${beneficiaryId}/reactivate`,
         {
           method: 'PATCH',
           headers: { Authorization: authorizationHeader, 'Content-Type': 'application/json' },
@@ -63,14 +69,11 @@ export class BeneficiaryClient {
   ): Promise<BeneficiaryCaseRecord> {
     let res: Response;
     try {
-      res = await fetch(
-        `${appConfig.API_GATEWAY_BASE_URL}/api/v1/beneficiaries/${beneficiaryId}/close`,
-        {
-          method: 'PATCH',
-          headers: { Authorization: authorizationHeader, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ reasonCode }),
-        },
-      );
+      res = await fetch(`${API_GATEWAY_BASE_URL}/api/v1/beneficiaries/${beneficiaryId}/close`, {
+        method: 'PATCH',
+        headers: { Authorization: authorizationHeader, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reasonCode }),
+      });
     } catch {
       throw badGateway('Unable to close the beneficiary — beneficiary-service is unreachable.');
     }
@@ -102,7 +105,7 @@ export class BeneficiaryClient {
   ): Promise<BeneficiaryCaseRecord> {
     let res: Response;
     try {
-      res = await fetch(`${appConfig.API_GATEWAY_BASE_URL}/api/v1/beneficiaries/${beneficiaryId}`, {
+      res = await fetch(`${API_GATEWAY_BASE_URL}/api/v1/beneficiaries/${beneficiaryId}`, {
         headers: { Authorization: authorizationHeader },
       });
     } catch {
