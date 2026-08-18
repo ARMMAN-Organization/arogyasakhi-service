@@ -23,21 +23,26 @@ export class ReferralService {
 
   /**
    * Referral Summary widget — accompaniedReferralsCount/pendingFollowUpsCount
-   * for the caller's in-scope beneficiaries. Scoping itself happens entirely
-   * in beneficiary-service's GET /beneficiaries/ids (SAKHI -> own,
-   * SUPERVISOR -> roster, MANAGER/ADMIN -> unscoped, an empty array back for
-   * MANAGER/ADMIN meaning "unscoped" is not distinguishable from "no
-   * beneficiaries exist" — see BeneficiaryClient.getIds) — this service only
-   * forwards the caller's own token and filters its own tables by whatever
-   * id set comes back. MANAGER/ADMIN get an unfiltered count instead of the
-   * (possibly huge) full id list, since beneficiary-service returns "all ids
-   * unscoped" for them, not an empty list.
+   * for the caller's in-scope beneficiaries, optionally narrowed to one
+   * Sakhi via `sakhiId` (the Sakhi dashboard passes their own sakhiId, same
+   * as the sibling registration-summary/visit-summary widgets). Scoping
+   * itself happens entirely in beneficiary-service's GET /beneficiaries/ids
+   * (SAKHI -> own, SUPERVISOR -> roster — optionally narrowed further to
+   * one in-roster sakhiId, MANAGER/ADMIN -> unscoped unless sakhiId given,
+   * an empty array back for MANAGER/ADMIN with no sakhiId meaning
+   * "unscoped" is not distinguishable from "no beneficiaries exist" — see
+   * BeneficiaryClient.getIds) — this service only forwards the caller's own
+   * token + sakhiId and filters its own tables by whatever id set comes
+   * back. MANAGER/ADMIN with no sakhiId get an unfiltered count instead of
+   * the (possibly huge) full id list, since beneficiary-service returns
+   * "all ids unscoped" for them in that case, not an empty list.
    */
-  async getSummary(caller: AuthenticatedUser, authorizationHeader: string) {
-    const isUnscoped = caller.roles.includes('MANAGER') || caller.roles.includes('ADMIN');
+  async getSummary(caller: AuthenticatedUser, authorizationHeader: string, sakhiId?: string) {
+    const isUnscoped =
+      !sakhiId && (caller.roles.includes('MANAGER') || caller.roles.includes('ADMIN'));
     const beneficiaryIds = isUnscoped
       ? undefined
-      : await this.beneficiaryClient.getIds(authorizationHeader);
+      : await this.beneficiaryClient.getIds(authorizationHeader, sakhiId);
     const accompaniedLookupValueId = await resolveReferralTypeLookupId(
       'ACCOMPANIED',
       authorizationHeader,

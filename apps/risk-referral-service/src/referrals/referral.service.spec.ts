@@ -336,7 +336,7 @@ describe('ReferralService', () => {
 
       const result = await service.getSummary(caller({ roles: ['SAKHI'] }), AUTH_HEADER);
 
-      expect(beneficiaryClient.getIds).toHaveBeenCalledWith(AUTH_HEADER);
+      expect(beneficiaryClient.getIds).toHaveBeenCalledWith(AUTH_HEADER, undefined);
       expect(repository.countSummary).toHaveBeenCalledWith(
         ['ben-1', 'ben-2'],
         'lookup-accompanied',
@@ -354,7 +354,7 @@ describe('ReferralService', () => {
 
       await service.getSummary(caller({ roles: ['SUPERVISOR'] }), AUTH_HEADER);
 
-      expect(beneficiaryClient.getIds).toHaveBeenCalledWith(AUTH_HEADER);
+      expect(beneficiaryClient.getIds).toHaveBeenCalledWith(AUTH_HEADER, undefined);
       expect(repository.countSummary).toHaveBeenCalledWith(['ben-1'], 'lookup-accompanied');
     });
 
@@ -384,6 +384,41 @@ describe('ReferralService', () => {
       expect(repository.countSummary).toHaveBeenCalledWith([], null);
       expect(result).toEqual({ accompaniedReferralsCount: 0, pendingFollowUpsCount: 0 });
     });
+
+    it(
+      'narrows a SUPERVISOR caller to one Sakhi within their roster when sakhiId is given ' +
+        "— regression: the Sakhi dashboard must get one Sakhi's counts, not the whole roster",
+      async () => {
+        beneficiaryClient.getIds.mockResolvedValue(['ben-1']);
+        resolveReferralTypeLookupIdMock.mockResolvedValue('lookup-accompanied');
+        repository.countSummary.mockResolvedValue({
+          accompaniedReferralsCount: 1,
+          pendingFollowUpsCount: 0,
+        });
+
+        await service.getSummary(caller({ roles: ['SUPERVISOR'] }), AUTH_HEADER, 'sakhi-1');
+
+        expect(beneficiaryClient.getIds).toHaveBeenCalledWith(AUTH_HEADER, 'sakhi-1');
+      },
+    );
+
+    it(
+      'narrows a MANAGER/ADMIN caller to one Sakhi when sakhiId is given — regression: a ' +
+        "MANAGER opening a specific Sakhi's dashboard must not get system-wide counts",
+      async () => {
+        beneficiaryClient.getIds.mockResolvedValue(['ben-1']);
+        resolveReferralTypeLookupIdMock.mockResolvedValue('lookup-accompanied');
+        repository.countSummary.mockResolvedValue({
+          accompaniedReferralsCount: 1,
+          pendingFollowUpsCount: 0,
+        });
+
+        await service.getSummary(caller({ roles: ['MANAGER'] }), AUTH_HEADER, 'sakhi-1');
+
+        expect(beneficiaryClient.getIds).toHaveBeenCalledWith(AUTH_HEADER, 'sakhi-1');
+        expect(repository.countSummary).toHaveBeenCalledWith(['ben-1'], 'lookup-accompanied');
+      },
+    );
   });
 
   describe('getPendingFollowupsByBeneficiary', () => {

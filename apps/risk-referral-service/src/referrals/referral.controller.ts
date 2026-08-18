@@ -18,6 +18,9 @@ import {
 
 extendZodWithOpenApi(z);
 
+/** Query params for GET /referrals/referral-summary — see referral.service.ts's getSummary. */
+const referralSummaryQuerySchema = z.object({ sakhiId: z.string().uuid().optional() }).strict();
+
 // Request DTO annotated with examples for Swagger UI; validation behavior is
 // unchanged (`.openapi()` only attaches documentation metadata).
 const createReferralRequestSchema = createReferralSchema.extend({
@@ -124,21 +127,26 @@ export function createReferralRouter(service: ReferralService) {
       summary:
         'Referral Summary widget — accompaniedReferralsCount/pendingFollowUpsCount for the ' +
         "caller's in-scope beneficiaries (SAKHI: own; SUPERVISOR: roster; MANAGER/ADMIN: " +
-        'unscoped), resolved via beneficiary-service since referrals carries no sakhiId column.',
+        'unscoped), resolved via beneficiary-service since referrals carries no sakhiId ' +
+        'column. Optional `sakhiId` narrows further to one Sakhi within that scope — used ' +
+        "by the Sakhi dashboard to get one specific Sakhi's counts.",
       tags: ['Referrals'],
       responses: {
         200: { description: 'Referral counts', schema: envelope(referralSummarySchema) },
+        400: { description: 'Validation error', schema: apiErrorSchema },
         401: { description: 'Unauthenticated', schema: apiErrorSchema },
         403: { description: 'Caller role not permitted', schema: apiErrorSchema },
       },
     },
     trustGatewayIdentity,
     requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(referralSummaryQuerySchema, 'query'),
     asyncHandler(async (req, res, next) => {
       if (!req.user) return next(unauthorized());
       const authorizationHeader = req.header('authorization');
       if (!authorizationHeader) return next(unauthorized());
-      res.json(ok(await service.getSummary(req.user, authorizationHeader)));
+      const { sakhiId } = req.query as unknown as z.infer<typeof referralSummaryQuerySchema>;
+      res.json(ok(await service.getSummary(req.user, authorizationHeader, sakhiId)));
     }),
   );
 
