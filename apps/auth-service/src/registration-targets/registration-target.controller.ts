@@ -1,4 +1,4 @@
-import { asyncHandler, ok } from '../app.module';
+import { asyncHandler, ok, unauthorized } from '../app.module';
 import type { RegistrationTargetService } from './registration-target.service';
 import type { ListRegistrationTargetsQuery } from './dto/list-registration-targets.dto';
 
@@ -8,9 +8,10 @@ import type { ListRegistrationTargetsQuery } from './dto/list-registration-targe
  */
 export function createRegistrationTargetController(service: RegistrationTargetService) {
   return {
-    list: asyncHandler(async (req, res) => {
+    list: asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
       const { sakhiId } = req.query as unknown as ListRegistrationTargetsQuery;
-      res.json(ok(await service.list(sakhiId)));
+      res.json(ok(await service.list(sakhiId, req.user)));
     }),
   };
 }

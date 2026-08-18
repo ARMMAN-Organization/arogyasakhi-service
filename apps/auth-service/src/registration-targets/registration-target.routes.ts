@@ -4,7 +4,13 @@ import type { TokenSigner } from '@armman/service-commons';
 import type { RegistrationTargetService } from './registration-target.service';
 import { createRegistrationTargetController } from './registration-target.controller';
 import { listRegistrationTargetsQuerySchema } from './dto/list-registration-targets.dto';
-import { authenticate, errorResponse, validate, type DocumentedRouter } from '../app.module';
+import {
+  authenticate,
+  errorResponse,
+  requireRoles,
+  validate,
+  type DocumentedRouter,
+} from '../app.module';
 
 extendZodWithOpenApi(z);
 
@@ -27,9 +33,11 @@ function envelope<T extends z.ZodTypeAny>(data: T) {
  * "Beneficiary/Master Data Download" screen — the ERD's
  * `ProjectRegistrationTarget` is project-grain only (no sakhiId), so this
  * reads the new `SakhiRegistrationTarget` model instead (see schema.prisma's
- * comment on that model). Read-only master-data download, open to any
- * authenticated role, matching `/project-geography` and
- * `/application-parameters`.
+ * comment on that model). Unlike `/project-geography` and
+ * `/application-parameters` (broad master-data reads with no identity
+ * dimension), `sakhiId` names a specific Sakhi's data, so this is scoped
+ * per-caller: a SAKHI may only read her own row, a SUPERVISOR only a Sakhi
+ * assigned to them, MANAGER/ADMIN unscoped — same rule as `/sakhis/:id`.
  */
 export function registerRegistrationTargetRoutes(
   doc: DocumentedRouter,
@@ -41,7 +49,9 @@ export function registerRegistrationTargetRoutes(
   doc.get(
     '/registration-targets',
     {
-      summary: "List a Sakhi's registration targets",
+      summary:
+        "List a Sakhi's registration targets. A SAKHI may only request her own sakhiId; a " +
+        'SUPERVISOR only a Sakhi assigned to them. MANAGER/ADMIN are unscoped.',
       tags: ['Registration Targets'],
       responses: {
         200: {
@@ -50,10 +60,12 @@ export function registerRegistrationTargetRoutes(
         },
         400: errorResponse(400, { message: 'sakhiId: Required' }),
         401: errorResponse(401),
+        403: errorResponse(403, { message: "You do not have access to this Sakhi." }),
         500: errorResponse(500),
       },
     },
     authenticate(signer),
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
     validate(listRegistrationTargetsQuerySchema, 'query'),
     controller.list,
   );
