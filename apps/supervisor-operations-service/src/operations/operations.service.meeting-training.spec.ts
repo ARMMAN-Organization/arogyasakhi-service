@@ -184,6 +184,33 @@ describe('OperationsService — Meeting & Training flow', () => {
       ).resolves.toEqual(photoRow);
     });
 
+    it('sets the new photo as the completion photo when the event has none yet', async () => {
+      repository.findEventById.mockResolvedValue({ ...trainingEventRow, photoMediaId: null });
+      repository.createEventPhoto.mockResolvedValue(photoRow as never);
+      await service.addEventPhoto('event-1', { mediaId: 'media-1' }, supervisorCaller);
+      expect(repository.createEventPhoto).toHaveBeenCalledWith(
+        'event-1',
+        'media-1',
+        supervisorCaller.id,
+        true,
+      );
+    });
+
+    it('does not overwrite an already-set completion photo', async () => {
+      repository.findEventById.mockResolvedValue({
+        ...trainingEventRow,
+        photoMediaId: 'existing-media',
+      });
+      repository.createEventPhoto.mockResolvedValue(photoRow as never);
+      await service.addEventPhoto('event-1', { mediaId: 'media-2' }, supervisorCaller);
+      expect(repository.createEventPhoto).toHaveBeenCalledWith(
+        'event-1',
+        'media-2',
+        supervisorCaller.id,
+        false,
+      );
+    });
+
     it('throws 404 when the event does not exist', async () => {
       repository.findEventById.mockResolvedValue(null);
       await expect(
@@ -264,15 +291,19 @@ describe('OperationsService — Meeting & Training flow', () => {
   describe('listGatherings', () => {
     it('lists recent gatherings via repository when no filter is given', async () => {
       repository.findGatherings.mockResolvedValue([gatheringRow]);
-      await expect(
-        service.listGatherings(supervisorCaller, 'Bearer token'),
-      ).resolves.toEqual([gatheringRow]);
+      await expect(service.listGatherings(supervisorCaller, 'Bearer token')).resolves.toEqual([
+        gatheringRow,
+      ]);
       expect(repository.findGatherings).toHaveBeenCalledWith(undefined);
       expect(sakhiClient.findById).not.toHaveBeenCalled();
     });
 
     it("passes a sakhiId filter through to the repository when it's the caller's own Sakhi", async () => {
-      const sakhi = { sakhiId: 'sakhi-1', supervisorId: supervisorCaller.id, primaryProjectId: 'p1' };
+      const sakhi = {
+        sakhiId: 'sakhi-1',
+        supervisorId: supervisorCaller.id,
+        primaryProjectId: 'p1',
+      };
       sakhiClient.findById.mockResolvedValue(sakhi);
       repository.findGatherings.mockResolvedValue([gatheringRow]);
 
@@ -282,7 +313,11 @@ describe('OperationsService — Meeting & Training flow', () => {
     });
 
     it('returns an empty list when no gathering matches', async () => {
-      const sakhi = { sakhiId: 'sakhi-none', supervisorId: supervisorCaller.id, primaryProjectId: 'p1' };
+      const sakhi = {
+        sakhiId: 'sakhi-none',
+        supervisorId: supervisorCaller.id,
+        primaryProjectId: 'p1',
+      };
       sakhiClient.findById.mockResolvedValue(sakhi);
       repository.findGatherings.mockResolvedValue([]);
 
@@ -292,7 +327,11 @@ describe('OperationsService — Meeting & Training flow', () => {
     });
 
     it("403s when a SUPERVISOR's sakhiId filter is not on their own roster", async () => {
-      const sakhi = { sakhiId: 'sakhi-1', supervisorId: otherSupervisorCaller.id, primaryProjectId: 'p1' };
+      const sakhi = {
+        sakhiId: 'sakhi-1',
+        supervisorId: otherSupervisorCaller.id,
+        primaryProjectId: 'p1',
+      };
       sakhiClient.findById.mockResolvedValue(sakhi);
 
       await expect(

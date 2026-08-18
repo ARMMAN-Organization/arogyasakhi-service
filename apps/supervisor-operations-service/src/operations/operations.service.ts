@@ -508,6 +508,12 @@ export class OperationsService {
    * added any time before completion — COMPLETED/CANCELLED events are
    * closed to further edits, matching every other post-terminal-status rule
    * in this service.
+   *
+   * The first photo added to an event also becomes its `photoMediaId` —
+   * completeEvent's photo-required check reads that column, so without this
+   * an event created without a photo could never satisfy completion no
+   * matter how many photos were added to its gallery. A later photo never
+   * overwrites an already-set `photoMediaId` (from this or from creation).
    */
   async addEventPhoto(id: string, dto: CreateEventPhotoInput, caller: CallerIdentity) {
     const event = await this.repository.findEventById(id);
@@ -518,7 +524,7 @@ export class OperationsService {
     if (event.status !== 'SCHEDULED') {
       throw conflict(`Cannot add a photo to an event with status ${event.status}.`);
     }
-    return this.repository.createEventPhoto(id, dto.mediaId, caller.id);
+    return this.repository.createEventPhoto(id, dto.mediaId, caller.id, !event.photoMediaId);
   }
 
   /**

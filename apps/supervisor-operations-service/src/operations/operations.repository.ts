@@ -327,10 +327,30 @@ export class OperationsRepository {
     });
   }
 
-  createEventPhoto(eventId: string, mediaId: string, createdByUserId: string) {
-    return this.prisma.eventPhoto.create({
-      data: { eventId, mediaId, createdByUserId },
-    });
+  /**
+   * Creates the gallery row and, when the event has no completion photo yet,
+   * also sets `photoMediaId` on the event in the same transaction — so the
+   * gallery and the event's completion-eligibility flag can never disagree
+   * from a partial write (see addEventPhoto's doc comment).
+   */
+  async createEventPhoto(
+    eventId: string,
+    mediaId: string,
+    createdByUserId: string,
+    setAsCompletionPhoto: boolean,
+  ) {
+    const [photo] = await this.prisma.$transaction([
+      this.prisma.eventPhoto.create({ data: { eventId, mediaId, createdByUserId } }),
+      ...(setAsCompletionPhoto
+        ? [
+            this.prisma.supervisorEvent.update({
+              where: { id: eventId },
+              data: { photoMediaId: mediaId, updatedByUserId: createdByUserId },
+            }),
+          ]
+        : []),
+    ]);
+    return photo;
   }
 
   /**

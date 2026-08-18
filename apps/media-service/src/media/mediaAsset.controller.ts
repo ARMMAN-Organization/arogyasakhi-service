@@ -17,7 +17,11 @@ import type { MediaAsset } from '../../../../node_modules/.prisma/client-media-s
  * ("BigInt serialized as string").
  */
 function toResponse(asset: MediaAsset) {
-  return { ...asset, sizeBytes: asset.sizeBytes.toString() };
+  return {
+    ...asset,
+    sizeBytes: asset.sizeBytes.toString(),
+    checksum: asset.checksum.toString('hex'),
+  };
 }
 
 /**
@@ -45,7 +49,7 @@ function toFinalizeResponse(asset: MediaAsset) {
     id,
     assetType,
     storageUri,
-    checksum,
+    checksum: checksum.toString('hex'),
     mimeType,
     sizeBytes: asset.sizeBytes.toString(),
     uploadedByUserId,

@@ -233,6 +233,30 @@ export function registerInventoryRoutes(doc: DocumentedRouter, service: Operatio
     controller.getTransactionById,
   );
 
+  // Second dedicated-path alias for GET /inventory-transactions/:id — same
+  // handler, same response — for consumers that expect the detail row
+  // nested under the /inventory-transactions collection path instead of
+  // /item-transactions.
+  doc.get(
+    '/inventory-transactions/:id/details',
+    {
+      summary:
+        'Fetch a single inventory transaction by id (alias for GET /inventory-transactions/:id)',
+      tags: ['Supervisor Operations'],
+      params: transactionIdParamsSchema,
+      responses: {
+        200: { description: 'Inventory transaction', schema: envelope(inventoryTransactionSchema) },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller does not own this transaction', schema: apiErrorSchema },
+        404: { description: 'Transaction not found', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(transactionIdParamsSchema, 'params'),
+    controller.getTransactionById,
+  );
+
   doc.put(
     '/inventory-transactions/:id',
     {
