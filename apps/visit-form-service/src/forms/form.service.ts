@@ -15,6 +15,7 @@ import { syncSocioDemographics } from '../beneficiaries/socio-demographics.clien
 import { syncHealthHistory } from '../beneficiaries/health-history.client';
 import { findBeneficiaryById } from '../beneficiaries/beneficiary.client';
 import { createChildBeneficiary } from '../beneficiaries/create-child.client';
+import { updateBeneficiaryPhase } from '../beneficiaries/update-phase.client';
 import { getAncestorChain } from '../geography/geography.client';
 import { triggerRiskAssessment } from '../risk-assessments/riskAssessment.client';
 
@@ -233,7 +234,7 @@ export class FormService {
             const birthWeightKg = dto.formData[`${prefix}_birth_weight_kg`];
             const birthLengthCm = dto.formData[`${prefix}_birth_length_cm`];
 
-            await createChildBeneficiary(
+            const childId = await createChildBeneficiary(
               {
                 motherCase,
                 // Deterministic per child so a dropped-connection retry of
@@ -255,8 +256,21 @@ export class FormService {
               },
               authorizationHeader,
             );
+
+            // Only for a child that actually got created — a failed
+            // createChildBeneficiary call above already logged its own
+            // warning; there is no case here to advance.
+            if (childId) {
+              await updateBeneficiaryPhase(childId, 'NN', authorizationHeader);
+            }
           }),
         );
+
+        // Mother's phase always advances once a DELIVERY_VISIT is recorded,
+        // independent of whether any child case above succeeded — the
+        // mother's own journey (ANC -> PP) doesn't depend on a child profile
+        // existing (CR-041).
+        await updateBeneficiaryPhase(dto.beneficiaryId, 'PP', authorizationHeader);
       }
     }
 

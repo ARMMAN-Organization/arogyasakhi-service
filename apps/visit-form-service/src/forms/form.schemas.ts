@@ -63,4 +63,14 @@ export const formSubmissionSchema = z.object({
   validationStatus: z.enum(['VALID', 'INVALID', 'WARNING']).openapi({ example: 'VALID' }),
   createdAt: z.string().datetime().openapi({ example: '2026-07-20T10:15:00.000Z' }),
   updatedAt: z.string().datetime().openapi({ example: '2026-07-20T10:15:00.000Z' }),
+  childBeneficiaryIds: z
+    .array(z.string().uuid())
+    .optional()
+    .openapi({
+      description:
+        'Ids of the CHILD beneficiary cases auto-created from this submission, in ' +
+        'child1/child2/child3 order — present only for a DELIVERY_VISIT submission ' +
+        'with at least one live birth. Omitted (not an empty array) otherwise.',
+      example: ['34197cd7-7a54-4e7f-885c-f297313b9e81'],
+    }),
 });

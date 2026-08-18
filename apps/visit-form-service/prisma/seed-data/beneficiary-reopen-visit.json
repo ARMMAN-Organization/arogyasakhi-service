@@ -1,0 +1,36 @@
+{
+  "schemaJson": [
+    {
+      "label": "Date of request",
+      "section": "Reopen",
+      "required": true,
+      "input_type": "date",
+      "question_code": "date_of_request",
+      "dateRule": { "notFuture": true }
+    },
+    {
+      "label": "Do you want to reopen this case?",
+      "options": [
+        { "label": "Yes", "sort_order": 0, "value_code": "yes" },
+        { "label": "No", "sort_order": 1, "value_code": "no" }
+      ],
+      "section": "Reopen",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "want_to_reopen"
+    },
+    {
+      "label": "Reason for reopening",
+      "options": [
+        { "label": "Migrated back", "sort_order": 0, "value_code": "migrated_back" },
+        { "label": "Closed by mistake", "sort_order": 1, "value_code": "closed_by_mistake" }
+      ],
+      "section": "Reopen",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "reopen_reason",
+      "visibleWhen": { "field": "want_to_reopen", "operator": "eq", "value": "yes" }
+    }
+  ],
+  "validationJson": []
+}

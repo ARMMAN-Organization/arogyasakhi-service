@@ -5,12 +5,14 @@ import { syncSocioDemographics } from '../beneficiaries/socio-demographics.clien
 import { syncHealthHistory } from '../beneficiaries/health-history.client';
 import { findBeneficiaryById } from '../beneficiaries/beneficiary.client';
 import { createChildBeneficiary } from '../beneficiaries/create-child.client';
+import { updateBeneficiaryPhase } from '../beneficiaries/update-phase.client';
 
 jest.mock('../geography/geography.client');
 jest.mock('../beneficiaries/socio-demographics.client');
 jest.mock('../beneficiaries/health-history.client');
 jest.mock('../beneficiaries/beneficiary.client');
 jest.mock('../beneficiaries/create-child.client');
+jest.mock('../beneficiaries/update-phase.client');
 
 describe('FormService', () => {
   const repository = {
@@ -774,6 +776,7 @@ describe('FormService', () => {
         repository.findVersionById.mockResolvedValue(deliveryVersion as never);
         repository.createSubmission.mockResolvedValue({ id: 'sub-1' } as never);
         jest.mocked(findBeneficiaryById).mockResolvedValue(motherCase);
+        jest.mocked(createChildBeneficiary).mockResolvedValue('child-1');
       });
 
       it('creates a child beneficiary for a single live birth', async () => {
@@ -920,6 +923,185 @@ describe('FormService', () => {
 
         expect(result).toEqual({ id: 'sub-1' });
         expect(jest.mocked(createChildBeneficiary)).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('DELIVERY_VISIT currentPhase advance (CR-041)', () => {
+      const motherCase = {
+        id: 'b1',
+        sakhiId: 'sakhi-1',
+        projectId: 'project-1',
+        beneficiaryTypeLookupId: 'type-1',
+        caseTypeLookupId: 'case-type-1',
+        villageId: 'village-1',
+        padaId: 'pada-1',
+        healthSubCentreId: 'sc-1',
+        phcId: 'phc-1',
+        stateId: 'state-1',
+        districtId: 'district-1',
+      };
+
+      const deliveryVersion = {
+        id: 'version-1',
+        status: 'PUBLISHED',
+        formDefinition: { formCode: 'DELIVERY_VISIT' },
+        schemaJson: [
+          { question_code: 'date_of_delivery', label: 'x', input_type: 'date', required: false },
+          ...['child1', 'child2'].flatMap((prefix) => [
+            {
+              question_code: `${prefix}_delivery_outcome`,
+              label: 'x',
+              input_type: 'dropdown',
+              required: false,
+            },
+          ]),
+        ],
+        validationJson: [],
+      };
+
+      beforeEach(() => {
+        repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+        repository.findVersionById.mockResolvedValue(deliveryVersion as never);
+        repository.createSubmission.mockResolvedValue({ id: 'sub-1' } as never);
+        jest.mocked(findBeneficiaryById).mockResolvedValue(motherCase);
+      });
+
+      it("advances the mother's phase to PP after a successful submission", async () => {
+        jest.mocked(createChildBeneficiary).mockResolvedValue(null);
+
+        await service.createSubmission(
+          'DELIVERY_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: { date_of_delivery: '2026-08-01' },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(updateBeneficiaryPhase)).toHaveBeenCalledWith(
+          'b1',
+          'PP',
+          'Bearer test-token',
+        );
+      });
+
+      it('advances each successfully created child to NN', async () => {
+        jest
+          .mocked(createChildBeneficiary)
+          .mockResolvedValueOnce('child-1')
+          .mockResolvedValueOnce('child-2');
+
+        await service.createSubmission(
+          'DELIVERY_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {
+              date_of_delivery: '2026-08-01',
+              child1_delivery_outcome: 'live_birth',
+              child2_delivery_outcome: 'live_birth',
+            },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(updateBeneficiaryPhase)).toHaveBeenCalledWith(
+          'child-1',
+          'NN',
+          'Bearer test-token',
+        );
+        expect(jest.mocked(updateBeneficiaryPhase)).toHaveBeenCalledWith(
+          'child-2',
+          'NN',
+          'Bearer test-token',
+        );
+        expect(jest.mocked(updateBeneficiaryPhase)).toHaveBeenCalledWith(
+          'b1',
+          'PP',
+          'Bearer test-token',
+        );
+      });
+
+      it('only advances a child that was actually created — a failed creation is skipped', async () => {
+        jest
+          .mocked(createChildBeneficiary)
+          .mockResolvedValueOnce('child-1')
+          .mockResolvedValueOnce(null);
+
+        await service.createSubmission(
+          'DELIVERY_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {
+              date_of_delivery: '2026-08-01',
+              child1_delivery_outcome: 'live_birth',
+              child2_delivery_outcome: 'live_birth',
+            },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(updateBeneficiaryPhase)).toHaveBeenCalledWith(
+          'child-1',
+          'NN',
+          'Bearer test-token',
+        );
+        expect(jest.mocked(updateBeneficiaryPhase)).not.toHaveBeenCalledWith(
+          null,
+          'NN',
+          'Bearer test-token',
+        );
+      });
+
+      it('still advances the mother even if child auto-creation fails entirely', async () => {
+        jest.mocked(createChildBeneficiary).mockResolvedValue(null);
+
+        await service.createSubmission(
+          'DELIVERY_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: { date_of_delivery: '2026-08-01', child1_delivery_outcome: 'live_birth' },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(updateBeneficiaryPhase)).toHaveBeenCalledWith(
+          'b1',
+          'PP',
+          'Bearer test-token',
+        );
+      });
+
+      it('does not call updateBeneficiaryPhase for a non-DELIVERY_VISIT form', async () => {
+        repository.findVersionById.mockResolvedValue({
+          ...publishedVersion,
+          formDefinition: { formCode: 'MOTHER_REGISTRATION' },
+        } as never);
+
+        await service.createSubmission(
+          'MOTHER_REGISTRATION',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: { phone_owner: 'SELF' },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(updateBeneficiaryPhase)).not.toHaveBeenCalled();
       });
     });
   });

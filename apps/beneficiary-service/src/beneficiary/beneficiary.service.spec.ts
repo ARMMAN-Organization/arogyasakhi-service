@@ -30,6 +30,8 @@ describe('BeneficiaryService', () => {
     findDuplicateCandidate: jest.fn(),
     createEnrollment: jest.fn(),
     updateMotherLmp: jest.fn(),
+    updatePhase: jest.fn(),
+    closeCase: jest.fn(),
     reactivateCase: jest.fn(),
     countByCaseType: jest.fn(),
     countByRiskGrade: jest.fn(),
@@ -232,6 +234,354 @@ describe('BeneficiaryService', () => {
       );
 
       expect(repository.updateMotherLmp).toHaveBeenCalled();
+    });
+  });
+
+  describe('applyPhaseChange', () => {
+    const beneficiaryId = '22222222-2222-2222-2222-222222222222';
+    const sakhiId = '55555555-5555-5555-5555-555555555555';
+    const otherSakhiId = '66666666-6666-6666-6666-666666666666';
+
+    function caseRow(overrides: Partial<Record<string, unknown>> = {}) {
+      return {
+        id: beneficiaryId,
+        sakhiId,
+        caseType: 'MOTHER',
+        currentPhase: 'ANC',
+        pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
+        ...overrides,
+      };
+    }
+
+    it('advances a MOTHER case from ANC to PP', async () => {
+      repository.findById.mockResolvedValue(caseRow() as never);
+      repository.updatePhase.mockResolvedValue(true);
+
+      await service.applyPhaseChange(
+        beneficiaryId,
+        'PP',
+        caller({ id: sakhiId, roles: ['SAKHI'] }),
+        AUTH_HEADER,
+      );
+
+      expect(repository.updatePhase).toHaveBeenCalledWith(beneficiaryId, 'ANC', 'PP');
+    });
+
+    it('advances a CHILD case to NN', async () => {
+      repository.findById.mockResolvedValue(
+        caseRow({ caseType: 'CHILD', currentPhase: 'ANC' }) as never,
+      );
+      repository.updatePhase.mockResolvedValue(true);
+
+      await service.applyPhaseChange(
+        beneficiaryId,
+        'NN',
+        caller({ id: sakhiId, roles: ['SAKHI'] }),
+        AUTH_HEADER,
+      );
+
+      expect(repository.updatePhase).toHaveBeenCalledWith(beneficiaryId, 'ANC', 'NN');
+    });
+
+    it('returns the updated case via getById', async () => {
+      repository.findById.mockResolvedValue(caseRow() as never);
+      repository.updatePhase.mockResolvedValue(true);
+
+      const result = await service.applyPhaseChange(
+        beneficiaryId,
+        'PP',
+        caller({ id: sakhiId, roles: ['SAKHI'] }),
+        AUTH_HEADER,
+      );
+      expect(result).toMatchObject({ id: beneficiaryId });
+    });
+
+    it('404s on an unknown beneficiary id', async () => {
+      repository.findById.mockResolvedValue(null);
+
+      await expect(
+        service.applyPhaseChange(
+          beneficiaryId,
+          'PP',
+          caller({ id: sakhiId, roles: ['SAKHI'] }),
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 404 });
+      expect(repository.updatePhase).not.toHaveBeenCalled();
+    });
+
+    it('409s on a regressive transition (PP back to ANC)', async () => {
+      repository.findById.mockResolvedValue(caseRow({ currentPhase: 'PP' }) as never);
+
+      await expect(
+        service.applyPhaseChange(
+          beneficiaryId,
+          'ANC',
+          caller({ id: sakhiId, roles: ['SAKHI'] }),
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 409 });
+      expect(repository.updatePhase).not.toHaveBeenCalled();
+    });
+
+    it('409s on an unsupported forward jump (MOTHER case ANC -> NN)', async () => {
+      repository.findById.mockResolvedValue(caseRow({ currentPhase: 'ANC' }) as never);
+
+      await expect(
+        service.applyPhaseChange(
+          beneficiaryId,
+          'NN',
+          caller({ id: sakhiId, roles: ['SAKHI'] }),
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 409 });
+      expect(repository.updatePhase).not.toHaveBeenCalled();
+    });
+
+    it('is idempotent when the case is already at the target phase', async () => {
+      repository.findById.mockResolvedValue(caseRow({ currentPhase: 'PP' }) as never);
+
+      const result = await service.applyPhaseChange(
+        beneficiaryId,
+        'PP',
+        caller({ id: sakhiId, roles: ['SAKHI'] }),
+        AUTH_HEADER,
+      );
+
+      expect(repository.updatePhase).not.toHaveBeenCalled();
+      expect(result).toMatchObject({ id: beneficiaryId });
+    });
+
+    it('403s when a SAKHI targets a case outside their own roster', async () => {
+      repository.findById.mockResolvedValue(caseRow() as never);
+
+      await expect(
+        service.applyPhaseChange(
+          beneficiaryId,
+          'PP',
+          caller({ id: otherSakhiId, roles: ['SAKHI'] }),
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(repository.updatePhase).not.toHaveBeenCalled();
+    });
+
+    it('allows a SAKHI to advance their own case', async () => {
+      repository.findById.mockResolvedValue(caseRow() as never);
+      repository.updatePhase.mockResolvedValue(true);
+
+      await service.applyPhaseChange(
+        beneficiaryId,
+        'PP',
+        caller({ id: sakhiId, roles: ['SAKHI'] }),
+        AUTH_HEADER,
+      );
+
+      expect(repository.updatePhase).toHaveBeenCalled();
+    });
+
+    it('409s when the conditional update races with a concurrent phase change', async () => {
+      repository.findById.mockResolvedValue(caseRow() as never);
+      repository.updatePhase.mockResolvedValue(false);
+
+      await expect(
+        service.applyPhaseChange(
+          beneficiaryId,
+          'PP',
+          caller({ id: sakhiId, roles: ['SAKHI'] }),
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 409 });
+    });
+  });
+
+  describe('applyClosure', () => {
+    const beneficiaryId = '22222222-2222-2222-2222-222222222222';
+    const sakhiId = '55555555-5555-5555-5555-555555555555';
+    const otherSakhiId = '66666666-6666-6666-6666-666666666666';
+
+    function caseRow(overrides: Partial<Record<string, unknown>> = {}) {
+      return {
+        id: beneficiaryId,
+        sakhiId,
+        caseType: 'MOTHER',
+        currentStatus: 'ACTIVE',
+        pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
+        ...overrides,
+      };
+    }
+
+    it('closes an ACTIVE case', async () => {
+      repository.findById.mockResolvedValue(caseRow() as never);
+      repository.closeCase.mockResolvedValue(true);
+
+      await service.applyClosure(
+        beneficiaryId,
+        'MEDICAL',
+        caller({ id: sakhiId, roles: ['SAKHI'] }),
+        AUTH_HEADER,
+      );
+
+      expect(repository.closeCase).toHaveBeenCalledWith(beneficiaryId, sakhiId, 'MEDICAL');
+    });
+
+    it('returns the closed case via getById', async () => {
+      repository.findById.mockResolvedValue(caseRow() as never);
+      repository.closeCase.mockResolvedValue(true);
+
+      const result = await service.applyClosure(
+        beneficiaryId,
+        'MEDICAL',
+        caller({ id: sakhiId, roles: ['SAKHI'] }),
+        AUTH_HEADER,
+      );
+      expect(result).toMatchObject({ id: beneficiaryId });
+    });
+
+    it('404s on an unknown beneficiary id', async () => {
+      repository.findById.mockResolvedValue(null);
+
+      await expect(
+        service.applyClosure(
+          beneficiaryId,
+          'MEDICAL',
+          caller({ id: sakhiId, roles: ['SAKHI'] }),
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 404 });
+      expect(repository.closeCase).not.toHaveBeenCalled();
+    });
+
+    it('is idempotent when the case is already CLOSED — no repository write, no error', async () => {
+      repository.findById.mockResolvedValue(caseRow({ currentStatus: 'CLOSED' }) as never);
+
+      const result = await service.applyClosure(
+        beneficiaryId,
+        'MEDICAL',
+        caller({ id: sakhiId, roles: ['SAKHI'] }),
+        AUTH_HEADER,
+      );
+
+      expect(repository.closeCase).not.toHaveBeenCalled();
+      expect(result).toMatchObject({ id: beneficiaryId });
+    });
+
+    it('403s when a SAKHI targets a case outside their own roster', async () => {
+      repository.findById.mockResolvedValue(caseRow() as never);
+
+      await expect(
+        service.applyClosure(
+          beneficiaryId,
+          'MEDICAL',
+          caller({ id: otherSakhiId, roles: ['SAKHI'] }),
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(repository.closeCase).not.toHaveBeenCalled();
+    });
+
+    it('allows a SAKHI to close their own case', async () => {
+      repository.findById.mockResolvedValue(caseRow() as never);
+      repository.closeCase.mockResolvedValue(true);
+
+      await service.applyClosure(
+        beneficiaryId,
+        'MEDICAL',
+        caller({ id: sakhiId, roles: ['SAKHI'] }),
+        AUTH_HEADER,
+      );
+
+      expect(repository.closeCase).toHaveBeenCalled();
+    });
+
+    it('403s when a SUPERVISOR targets a case outside their own roster', async () => {
+      repository.findById.mockResolvedValue(caseRow() as never);
+      listSakhiIdsForSupervisorMock.mockResolvedValue(['some-other-sakhi']);
+
+      await expect(
+        service.applyClosure(
+          beneficiaryId,
+          'MIGRATION',
+          caller({ roles: ['SUPERVISOR'] }),
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(repository.closeCase).not.toHaveBeenCalled();
+    });
+
+    it('allows a SUPERVISOR to close a case in their own roster', async () => {
+      repository.findById.mockResolvedValue(caseRow() as never);
+      repository.closeCase.mockResolvedValue(true);
+      listSakhiIdsForSupervisorMock.mockResolvedValue([sakhiId]);
+
+      await service.applyClosure(
+        beneficiaryId,
+        'MIGRATION',
+        caller({ roles: ['SUPERVISOR'] }),
+        AUTH_HEADER,
+      );
+
+      expect(repository.closeCase).toHaveBeenCalled();
+    });
+
+    it('allows a MANAGER/ADMIN unrestricted', async () => {
+      repository.findById.mockResolvedValue(caseRow() as never);
+      repository.closeCase.mockResolvedValue(true);
+
+      await service.applyClosure(
+        beneficiaryId,
+        'MIGRATION',
+        caller({ roles: ['ADMIN'] }),
+        AUTH_HEADER,
+      );
+
+      expect(repository.closeCase).toHaveBeenCalled();
+    });
+
+    it('re-reads and returns success when closeCase races and the case is already CLOSED', async () => {
+      repository.findById
+        .mockResolvedValueOnce(caseRow() as never)
+        .mockResolvedValueOnce(caseRow({ currentStatus: 'CLOSED' }) as never);
+      repository.closeCase.mockResolvedValue(false);
+
+      const result = await service.applyClosure(
+        beneficiaryId,
+        'MEDICAL',
+        caller({ id: sakhiId, roles: ['SAKHI'] }),
+        AUTH_HEADER,
+      );
+
+      expect(result).toMatchObject({ id: beneficiaryId });
+    });
+
+    it('409s when closeCase fails and the case is still not CLOSED on re-read', async () => {
+      repository.findById
+        .mockResolvedValueOnce(caseRow() as never)
+        .mockResolvedValueOnce(caseRow({ currentStatus: 'ACTIVE' }) as never);
+      repository.closeCase.mockResolvedValue(false);
+
+      await expect(
+        service.applyClosure(
+          beneficiaryId,
+          'MEDICAL',
+          caller({ id: sakhiId, roles: ['SAKHI'] }),
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 409 });
+    });
+
+    it('404s when closeCase fails because the case was deleted mid-request', async () => {
+      repository.findById.mockResolvedValueOnce(caseRow() as never).mockResolvedValueOnce(null);
+      repository.closeCase.mockResolvedValue(false);
+
+      await expect(
+        service.applyClosure(
+          beneficiaryId,
+          'MEDICAL',
+          caller({ id: sakhiId, roles: ['SAKHI'] }),
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 404 });
     });
   });
 

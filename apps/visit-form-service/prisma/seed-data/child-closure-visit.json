@@ -1,0 +1,130 @@
+{
+  "schemaJson": [
+    {
+      "label": "Closure visit date",
+      "section": "Closure",
+      "required": true,
+      "input_type": "date",
+      "question_code": "closure_visit_date",
+      "dateRule": { "notFuture": true }
+    },
+    {
+      "label": "Do you want to continue with the beneficiary closure?",
+      "options": [
+        { "label": "Yes", "sort_order": 0, "value_code": "yes" },
+        { "label": "No", "sort_order": 1, "value_code": "no" }
+      ],
+      "section": "Closure",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "continue_with_closure"
+    },
+    {
+      "label": "If yes, Why do you want to close/deactivate this beneficiary?",
+      "options": [
+        {
+          "label": "Withdrawal of consent",
+          "sort_order": 0,
+          "value_code": "withdrawal_of_consent"
+        },
+        { "label": "Migration", "sort_order": 1, "value_code": "migration" },
+        {
+          "label": "Program cycle completed",
+          "sort_order": 2,
+          "value_code": "program_cycle_completed"
+        },
+        { "label": "Infant/Child death", "sort_order": 3, "value_code": "infant_child_death" }
+      ],
+      "section": "Closure",
+      "required": true,
+      "input_type": "dropdown",
+      "question_code": "closure_reason",
+      "visibleWhen": { "field": "continue_with_closure", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Date of event",
+      "section": "Closure",
+      "required": true,
+      "input_type": "date",
+      "question_code": "date_of_event",
+      "dateRule": { "notFuture": true },
+      "visibleWhen": { "field": "continue_with_closure", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "If infant death, time of death",
+      "section": "Closure",
+      "required": true,
+      "input_type": "time",
+      "question_code": "infant_death_time",
+      "visibleWhen": { "field": "closure_reason", "operator": "eq", "value": "infant_child_death" }
+    },
+    {
+      "label": "If infant death, cause of death",
+      "options": [
+        { "label": "Infections", "sort_order": 0, "value_code": "infections" },
+        { "label": "Diarrhea", "sort_order": 1, "value_code": "diarrhea" },
+        { "label": "Dehydration", "sort_order": 2, "value_code": "dehydration" },
+        {
+          "label": "Malnourished Children (Grade 3 and 4)",
+          "sort_order": 3,
+          "value_code": "malnourished_grade_3_4"
+        },
+        { "label": "Congenital defects", "sort_order": 4, "value_code": "congenital_defects" },
+        { "label": "Accidental", "sort_order": 5, "value_code": "accidental" },
+        {
+          "label": "Delay in reaching the health centre",
+          "sort_order": 6,
+          "value_code": "delay_reaching_health_centre"
+        },
+        {
+          "label": "Delay in provision of services at the health centre",
+          "sort_order": 7,
+          "value_code": "delay_in_services_at_health_centre"
+        },
+        { "label": "Other (specify)", "sort_order": 8, "value_code": "other" }
+      ],
+      "section": "Closure",
+      "required": true,
+      "input_type": "multiselect",
+      "question_code": "infant_death_cause",
+      "visibleWhen": { "field": "closure_reason", "operator": "eq", "value": "infant_child_death" }
+    },
+    {
+      "label": "If other, specify",
+      "section": "Closure",
+      "required": true,
+      "input_type": "text",
+      "question_code": "infant_death_cause_other_specify",
+      "visibleWhen": { "field": "infant_death_cause", "operator": "contains", "value": "other" }
+    },
+    {
+      "label": "If infant death, place of death",
+      "options": [
+        { "label": "Home", "sort_order": 0, "value_code": "home" },
+        { "label": "Health facility", "sort_order": 1, "value_code": "health_facility" },
+        { "label": "Other", "sort_order": 2, "value_code": "other" }
+      ],
+      "section": "Closure",
+      "required": true,
+      "input_type": "dropdown",
+      "question_code": "infant_death_place",
+      "visibleWhen": { "field": "closure_reason", "operator": "eq", "value": "infant_child_death" }
+    },
+    {
+      "label": "Remark",
+      "section": "Closure",
+      "required": false,
+      "input_type": "text",
+      "question_code": "remarks"
+    }
+  ],
+  "validationJson": [
+    {
+      "rule": "REQUIRED_IF_SELECTED",
+      "field": "infant_death_cause",
+      "optionFieldMap": {
+        "other": "infant_death_cause_other_specify"
+      }
+    }
+  ]
+}

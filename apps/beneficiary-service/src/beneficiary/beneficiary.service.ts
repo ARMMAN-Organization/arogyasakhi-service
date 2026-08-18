@@ -16,7 +16,7 @@ import type {
   BeneficiaryStatusHistory,
   Prisma,
 } from '../../../../node_modules/.prisma/client-beneficiary-service';
-import type { BeneficiaryStatus, CaseType } from './beneficiary.constants';
+import type { BeneficiaryStatus, CasePhase, CaseType } from './beneficiary.constants';
 import { buildSearchTokens, evaluateDuplicateMatch } from './beneficiary.duplicate-detection';
 import { computeBmi, withDecryptedName } from './beneficiary.mapper';
 import type { BeneficiaryListFilters, BeneficiaryRepository } from './beneficiary.repository';
@@ -698,6 +698,125 @@ export class BeneficiaryService {
     const eddDate = addDays(lmpDate, GESTATION_DAYS);
     const updated = await this.repository.updateMotherLmp(beneficiaryId, lmpDate, eddDate);
     if (!updated) throw notFound('Beneficiary case not found.');
+    return this.projectCase(beneficiaryId, authorizationHeader);
+  }
+
+  /**
+   * Advances currentPhase after a DELIVERY_VISIT submission (CR-041):
+   * ANC->PP for the mother, or ->NN for an auto-created child. Called
+   * server-to-server by visit-form-service, forwarding the submitting
+   * SAKHI's own token — this codebase has no machine/service-account
+   * identity (same pattern as upsertRiskConditionSummary). Only these two
+   * transitions are accepted; anything else 409s rather than silently
+   * moving a case backward or into an unrelated phase.
+   *
+   * Idempotent for a same-value "transition" (e.g. a child case already at
+   * NN from creation, or a retried delivery submission) — repository
+   * updatePhase's guard is `currentPhase = fromPhase`, and fromPhase here is
+   * derived from the target itself for the child leg / from the case's own
+   * current value when it already matches, so a repeat call is a no-op
+   * success rather than a spurious 409.
+   *
+   * A SAKHI caller may only apply this to their own case (same ownership
+   * check as upsertRiskConditionSummary) — assertCallerCanTouchCase alone
+   * doesn't cover this route, since it only scopes SUPERVISOR callers.
+   */
+  async applyPhaseChange(
+    beneficiaryId: string,
+    toPhase: CasePhase,
+    caller: AuthenticatedUser,
+    authorizationHeader: string,
+  ) {
+    const existing = await this.repository.findById(beneficiaryId);
+    if (!existing) throw notFound('Beneficiary case not found.');
+
+    if (caller.roles.includes('SAKHI')) {
+      if (existing.sakhiId !== caller.id) {
+        throw forbidden('This beneficiary case is outside your own roster.');
+      }
+    } else {
+      await assertCallerCanTouchCase(existing.sakhiId, caller, authorizationHeader);
+    }
+
+    const fromPhase = existing.currentPhase as CasePhase;
+    if (fromPhase === toPhase) {
+      return this.projectCase(beneficiaryId, authorizationHeader, existing);
+    }
+
+    const isValidTransition =
+      (existing.caseType === 'MOTHER' && fromPhase === 'ANC' && toPhase === 'PP') ||
+      (existing.caseType === 'CHILD' && toPhase === 'NN');
+    if (!isValidTransition) {
+      throw conflict(`Cannot move a ${existing.caseType} case from ${fromPhase} to ${toPhase}.`);
+    }
+
+    const updated = await this.repository.updatePhase(beneficiaryId, fromPhase, toPhase);
+    if (!updated) {
+      // Raced with another phase change between the read above and the
+      // conditional update — same outcome as the check above, just caught a
+      // beat later instead of trusting a stale read.
+      throw conflict(`Cannot move a ${existing.caseType} case from ${fromPhase} to ${toPhase}.`);
+    }
+
+    return this.projectCase(beneficiaryId, authorizationHeader);
+  }
+
+  /**
+   * Closes a beneficiary case after a closure submission (ANC_CLOSURE_VISIT
+   * / CHILD_CLOSURE_VISIT) — the "beneficiary moves to the Closed list"
+   * consequence closure-reopen-service's own ClosureService is documented
+   * as NOT owning (forklift rule). Called server-to-server by
+   * closure-reopen-service, forwarding the submitting SAKHI's own token for
+   * an immediate (non-reviewed) closure, or the deciding Supervisor's token
+   * for an approved MIGRATION closure — this codebase has no
+   * machine/service-account identity (same pattern as
+   * upsertRiskConditionSummary/applyPhaseChange).
+   *
+   * Idempotent by design (mobile is offline-first and may retry this call
+   * after a dropped connection): closing an already-CLOSED case is a
+   * no-op success, not a 409 — repository.closeCase returning true for
+   * "already CLOSED" and this method short-circuiting on that read both
+   * exist for the same reason, so a retry never fails just because the
+   * first attempt actually succeeded.
+   *
+   * A SAKHI caller may only apply this to their own case (same ownership
+   * check as applyPhaseChange) — assertCallerCanTouchCase alone doesn't
+   * cover this route, since it only scopes SUPERVISOR callers.
+   */
+  async applyClosure(
+    beneficiaryId: string,
+    reasonCode: string,
+    caller: AuthenticatedUser,
+    authorizationHeader: string,
+  ) {
+    const existing = await this.repository.findById(beneficiaryId);
+    if (!existing) throw notFound('Beneficiary case not found.');
+
+    if (caller.roles.includes('SAKHI')) {
+      if (existing.sakhiId !== caller.id) {
+        throw forbidden('This beneficiary case is outside your own roster.');
+      }
+    } else {
+      await assertCallerCanTouchCase(existing.sakhiId, caller, authorizationHeader);
+    }
+
+    if (existing.currentStatus === 'CLOSED') {
+      return this.projectCase(beneficiaryId, authorizationHeader, existing);
+    }
+
+    const closed = await this.repository.closeCase(beneficiaryId, caller.id, reasonCode);
+    if (!closed) {
+      // Either the case was deleted between the read above and this call,
+      // or (per closeCase's own doc comment) it raced to CLOSED via another
+      // path in that same window — re-read rather than assuming either.
+      const recheck = await this.repository.findById(beneficiaryId);
+      if (!recheck) throw notFound('Beneficiary case not found.');
+      if (recheck.currentStatus === 'CLOSED') {
+        return this.projectCase(beneficiaryId, authorizationHeader, recheck);
+      }
+      throw conflict('Unable to close this beneficiary case.');
+    }
+
     return this.projectCase(beneficiaryId, authorizationHeader);
   }
 
