@@ -332,23 +332,22 @@ export class OperationsRepository {
    * also sets `photoMediaId` on the event in the same transaction — so the
    * gallery and the event's completion-eligibility flag can never disagree
    * from a partial write (see addEventPhoto's doc comment).
+   *
+   * The "no completion photo yet" check is the `updateMany`'s own `WHERE
+   * photoMediaId IS NULL`, not a boolean decided from a read before this
+   * transaction started — two concurrent calls on the same photo-less event
+   * would otherwise both see `null` and both attempt the write, with the
+   * second silently overwriting the first (PR #165 review). Row-level
+   * locking on the `UPDATE` serializes concurrent attempts, so only the
+   * first to actually commit ever changes 1 row; every later call affects 0.
    */
-  async createEventPhoto(
-    eventId: string,
-    mediaId: string,
-    createdByUserId: string,
-    setAsCompletionPhoto: boolean,
-  ) {
+  async createEventPhoto(eventId: string, mediaId: string, createdByUserId: string) {
     const [photo] = await this.prisma.$transaction([
       this.prisma.eventPhoto.create({ data: { eventId, mediaId, createdByUserId } }),
-      ...(setAsCompletionPhoto
-        ? [
-            this.prisma.supervisorEvent.update({
-              where: { id: eventId },
-              data: { photoMediaId: mediaId, updatedByUserId: createdByUserId },
-            }),
-          ]
-        : []),
+      this.prisma.supervisorEvent.updateMany({
+        where: { id: eventId, photoMediaId: null },
+        data: { photoMediaId: mediaId, updatedByUserId: createdByUserId },
+      }),
     ]);
     return photo;
   }

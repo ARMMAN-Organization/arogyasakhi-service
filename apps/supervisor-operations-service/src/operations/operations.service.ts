@@ -513,7 +513,9 @@ export class OperationsService {
    * completeEvent's photo-required check reads that column, so without this
    * an event created without a photo could never satisfy completion no
    * matter how many photos were added to its gallery. A later photo never
-   * overwrites an already-set `photoMediaId` (from this or from creation).
+   * overwrites an already-set `photoMediaId` (from this or from creation) —
+   * enforced by the repository's own conditional `UPDATE`, not a check here,
+   * so two concurrent calls can't both win (PR #165 review).
    */
   async addEventPhoto(id: string, dto: CreateEventPhotoInput, caller: CallerIdentity) {
     const event = await this.repository.findEventById(id);
@@ -524,7 +526,7 @@ export class OperationsService {
     if (event.status !== 'SCHEDULED') {
       throw conflict(`Cannot add a photo to an event with status ${event.status}.`);
     }
-    return this.repository.createEventPhoto(id, dto.mediaId, caller.id, !event.photoMediaId);
+    return this.repository.createEventPhoto(id, dto.mediaId, caller.id);
   }
 
   /**
