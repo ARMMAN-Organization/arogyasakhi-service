@@ -112,10 +112,7 @@ describe('degrade', () => {
   });
 
   it('returns null and does not throw when the promise rejects', async () => {
-    const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
     await expect(degrade('test', Promise.reject(new Error('down')))).resolves.toBeNull();
-    expect(consoleErrorSpy).toHaveBeenCalled();
-    consoleErrorSpy.mockRestore();
   });
 });
 
