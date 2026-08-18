@@ -176,5 +176,22 @@ describe('SyncBatchService', () => {
       expect(listSakhiIdsForSupervisorMock).not.toHaveBeenCalled();
       expect(repository.findLastSyncedAt).toHaveBeenCalledWith('any-user');
     });
+
+    it(
+      'leaves a caller holding both MANAGER and SAKHI unscoped — regression: the SAKHI ' +
+        'branch must not run ahead of the privileged-role check',
+      async () => {
+        repository.findLastSyncedAt.mockResolvedValue(null);
+
+        await service.getLastSyncedAt(
+          'some-other-user',
+          caller({ id: 'sakhi-1', roles: ['MANAGER', 'SAKHI'] }),
+          AUTH_HEADER,
+        );
+
+        expect(listSakhiIdsForSupervisorMock).not.toHaveBeenCalled();
+        expect(repository.findLastSyncedAt).toHaveBeenCalledWith('some-other-user');
+      },
+    );
   });
 });

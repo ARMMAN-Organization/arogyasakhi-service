@@ -3,6 +3,11 @@ import type { SyncBatchRepository } from './syncBatch.repository';
 import type { CreateSyncBatchInput } from './dto/create-syncBatch.dto';
 import { listSakhiIdsForSupervisor } from './sakhi.client';
 
+/** MANAGER and ADMIN are unrestricted — same convention as every other service. */
+function isPrivileged(caller: AuthenticatedUser): boolean {
+  return caller.roles.includes('MANAGER') || caller.roles.includes('ADMIN');
+}
+
 /** Sync-batch domain logic. Data access is delegated to the repository. */
 export class SyncBatchService {
   constructor(private readonly repository: SyncBatchRepository) {}
@@ -26,21 +31,23 @@ export class SyncBatchService {
     caller: AuthenticatedUser,
     authorizationHeader: string,
   ): Promise<Date | null> {
-    if (caller.roles.includes('SAKHI')) {
-      if (userId !== caller.id) {
-        throw forbidden('A Sakhi may only view their own last-synced time.');
-      }
-    } else if (caller.roles.includes('SUPERVISOR')) {
-      if (!caller.projectId) {
-        throw forbidden('Supervisor caller has no project scope.');
-      }
-      const roster = await listSakhiIdsForSupervisor(
-        caller.projectId,
-        caller.id,
-        authorizationHeader,
-      );
-      if (!roster.includes(userId)) {
-        throw forbidden("userId is not in this Supervisor's roster.");
+    if (!isPrivileged(caller)) {
+      if (caller.roles.includes('SAKHI')) {
+        if (userId !== caller.id) {
+          throw forbidden('A Sakhi may only view their own last-synced time.');
+        }
+      } else if (caller.roles.includes('SUPERVISOR')) {
+        if (!caller.projectId) {
+          throw forbidden('Supervisor caller has no project scope.');
+        }
+        const roster = await listSakhiIdsForSupervisor(
+          caller.projectId,
+          caller.id,
+          authorizationHeader,
+        );
+        if (!roster.includes(userId)) {
+          throw forbidden("userId is not in this Supervisor's roster.");
+        }
       }
     }
     return this.repository.findLastSyncedAt(userId);
