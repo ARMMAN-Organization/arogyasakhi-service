@@ -81,19 +81,25 @@ export function registerBeneficiaryRiskReferralRoutes(
     {
       summary:
         "A beneficiary's risk referrals, most recent referralDate first — header rows only " +
-        '(no followups/triggerSources; see the /details endpoint for those).',
+        '(no followups/triggerSources; see the /details endpoint for those). A SAKHI may ' +
+        'only read her own beneficiary; a SUPERVISOR only a beneficiary on their own roster ' +
+        '(resolved via beneficiary-service). MANAGER/ADMIN are unscoped.',
       tags: ['Beneficiary Risk Referrals'],
       params: beneficiaryRiskReferralsParamsSchema,
       responses: {
         200: {
           description:
             'Referral headers for the beneficiary. Empty array (not a 404) when the ' +
-            'beneficiaryId has no referrals in this service.',
+            'beneficiaryId has no referrals, but the beneficiary itself exists and is in scope.',
           schema: envelope(z.array(referralHeaderSchema)),
         },
         400: { description: 'Malformed beneficiaryId', schema: apiErrorSchema },
         401: { description: 'Unauthenticated', schema: apiErrorSchema },
-        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+        403: {
+          description: "Caller role not permitted, or beneficiary outside the caller's scope",
+          schema: apiErrorSchema,
+        },
+        404: { description: 'Beneficiary not found', schema: apiErrorSchema },
       },
     },
     trustGatewayIdentity,
@@ -107,7 +113,8 @@ export function registerBeneficiaryRiskReferralRoutes(
     {
       summary:
         "One referral's followups and trigger sources. 404s when the referral doesn't " +
-        'exist, or exists but belongs to a different beneficiaryId than the one in the path.',
+        'exist, or exists but belongs to a different beneficiaryId than the one in the path. ' +
+        'Same beneficiary-ownership scoping as the list endpoint above.',
       tags: ['Beneficiary Risk Referrals'],
       params: beneficiaryRiskReferralDetailsParamsSchema,
       responses: {
@@ -117,9 +124,12 @@ export function registerBeneficiaryRiskReferralRoutes(
         },
         400: { description: 'Malformed beneficiaryId/referralId', schema: apiErrorSchema },
         401: { description: 'Unauthenticated', schema: apiErrorSchema },
-        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+        403: {
+          description: "Caller role not permitted, or beneficiary outside the caller's scope",
+          schema: apiErrorSchema,
+        },
         404: {
-          description: 'Referral not found, or not owned by this beneficiaryId',
+          description: 'Beneficiary not found, or referral not found/not owned by this beneficiaryId',
           schema: apiErrorSchema,
         },
       },

@@ -1,4 +1,7 @@
+import { forbidden, notFound, type AuthenticatedUser } from '@armman/service-commons';
 import type { BeneficiaryRiskRepository } from './beneficiaryRisk.repository';
+import { BeneficiaryClient } from './beneficiary.client';
+import { listSakhiIdsForSupervisor } from './sakhi.client';
 
 type StateSnapshotRow = Awaited<
   ReturnType<BeneficiaryRiskRepository['findStateSnapshots']>
@@ -10,23 +13,55 @@ type AssessmentWithFlagsRow = Awaited<
 
 /**
  * Assembles a beneficiary's risk profile for the reference Android app's
- * "Beneficiary Data Download" screen — a pure read projection over this
- * service's own risk_state_snapshots/risk_assessments/risk_flags tables, no
- * writes and no cross-service calls. Not part of the SRS/ERD/HLD; reverse
- * engineered from that reference app.
+ * "Beneficiary Data Download" screen — a read projection over this
+ * service's own risk_state_snapshots/risk_assessments/risk_flags tables,
+ * plus one cross-service call to beneficiary-service to enforce ownership
+ * (see getRiskProfile). Not part of the SRS/ERD/HLD; reverse engineered
+ * from that reference app.
  */
 export class BeneficiaryRiskService {
-  constructor(private readonly repository: BeneficiaryRiskRepository) {}
+  constructor(
+    private readonly repository: BeneficiaryRiskRepository,
+    private readonly beneficiaryClient: BeneficiaryClient = new BeneficiaryClient(),
+  ) {}
 
   /**
-   * Returns `{ beneficiaryId, currentState, assessments }`. Does not check
-   * whether the beneficiary itself exists (this service owns no
-   * beneficiary_cases row to check against, and querying beneficiary-service
-   * for that alone would add a cross-service call this endpoint doesn't
-   * otherwise need) — an unknown/foreign beneficiaryId simply yields empty
-   * `currentState`/`assessments` arrays rather than a 404.
+   * Returns `{ beneficiaryId, currentState, assessments }`. A SAKHI caller
+   * may only read her own beneficiary's risk profile; a SUPERVISOR only a
+   * beneficiary whose assigned Sakhi is on their own roster. MANAGER/ADMIN
+   * are unscoped. Resolves ownership via beneficiary-service (this service
+   * owns no beneficiary_cases row of its own) — same IDOR guard
+   * `referrals/referral.service.ts`'s `decide` applies to its single-record
+   * mutation, applied here to a single-record read instead. A beneficiaryId
+   * beneficiary-service doesn't recognize 404s rather than silently
+   * returning empty arrays, since an unscoped caller could otherwise use an
+   * all-empty response to distinguish "no risk data" from "not mine to see."
    */
-  async getRiskProfile(beneficiaryId: string) {
+  async getRiskProfile(
+    beneficiaryId: string,
+    caller: AuthenticatedUser,
+    authorizationHeader: string,
+  ) {
+    const isUnscoped = caller.roles.includes('MANAGER') || caller.roles.includes('ADMIN');
+    if (!isUnscoped) {
+      const beneficiary = await this.beneficiaryClient.getById(beneficiaryId, authorizationHeader);
+      if (!beneficiary) throw notFound('Beneficiary not found.');
+
+      if (caller.roles.includes('SUPERVISOR')) {
+        if (!caller.projectId) throw forbidden('Supervisor caller has no project scope.');
+        const roster = await listSakhiIdsForSupervisor(
+          caller.projectId,
+          caller.id,
+          authorizationHeader,
+        );
+        if (!roster.includes(beneficiary.sakhiId)) {
+          throw forbidden("This beneficiary is outside this Supervisor's roster.");
+        }
+      } else if (beneficiary.sakhiId !== caller.id) {
+        throw forbidden('You do not have access to this beneficiary.');
+      }
+    }
+
     const [snapshots, assessments] = await Promise.all([
       this.repository.findStateSnapshots(beneficiaryId),
       this.repository.findAssessmentsWithFlags(beneficiaryId),

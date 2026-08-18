@@ -81,19 +81,26 @@ export function registerBeneficiaryRiskRoutes(
       summary:
         "A beneficiary's risk profile: currentState (most recent RiskStateSnapshot per " +
         'phase) plus assessments (full RiskAssessment history, each with its RiskFlag rows ' +
-        'and their human-readable RiskCondition code/name).',
+        'and their human-readable RiskCondition code/name). A SAKHI may only read her own ' +
+        "beneficiary; a SUPERVISOR only a beneficiary on their own roster (resolved via " +
+        'beneficiary-service). MANAGER/ADMIN are unscoped.',
       tags: ['Beneficiary Risk'],
       params: beneficiaryRiskParamsSchema,
       responses: {
         200: {
           description:
             'Risk profile for the beneficiary. Both arrays are empty (not a 404) when the ' +
-            'beneficiaryId has no risk data in this service.',
+            'beneficiaryId has risk-relevant data missing, but the beneficiary itself exists ' +
+            'and is in scope.',
           schema: envelope(beneficiaryRiskProfileSchema),
         },
         400: { description: 'Malformed beneficiaryId', schema: apiErrorSchema },
         401: { description: 'Unauthenticated', schema: apiErrorSchema },
-        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+        403: {
+          description: "Caller role not permitted, or beneficiary outside the caller's scope",
+          schema: apiErrorSchema,
+        },
+        404: { description: 'Beneficiary not found', schema: apiErrorSchema },
       },
     },
     trustGatewayIdentity,
