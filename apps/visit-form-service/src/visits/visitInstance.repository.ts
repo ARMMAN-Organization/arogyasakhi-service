@@ -180,33 +180,63 @@ export class VisitInstanceRepository {
 
   /**
    * Full visit rows (id, beneficiaryId, visitCode, scheduledDate) for
-   * beneficiaries in `beneficiaryIds` whose VisitSchedule.scheduledDate
-   * falls on `date` and are still in one of
-   * `dueOrOverdueStatusLookupValueIds` (PENDING/MISSED, resolved by the
-   * service layer) — for the pada visit-list screen's "open" tab. Unlike
-   * countDueTodayByBeneficiary, this is a LIST endpoint (one card per
-   * visit), not a count — a beneficiary with 2 due visits that date
-   * returns 2 rows, not deduped. An empty `beneficiaryIds` or empty
-   * `dueOrOverdueStatusLookupValueIds` returns an empty list (not an error).
+   * beneficiaries in `beneficiaryIds` — for the pada visit-list screen's
+   * "open" tab. A PENDING visit only counts if it's due exactly on `date`
+   * (it isn't "open" before its scheduled date). A MISSED visit counts if
+   * its scheduledDate falls on or BEFORE `date` — once a visit is marked
+   * MISSED it has no actualVisitDate, but per countByStatus's documented
+   * semantics it must still be countable/visible within the period it was
+   * due in, so an overdue MISSED visit from an earlier date must not
+   * disappear from today's "open" tab just because `date` defaults to
+   * today. Unlike countDueTodayByBeneficiary, this is a LIST endpoint (one
+   * card per visit), not a count — a beneficiary with 2 due visits that
+   * date returns 2 rows, not deduped. Empty `beneficiaryIds` or empty
+   * `pendingStatusLookupValueIds`+`missedStatusLookupValueIds` returns an
+   * empty list (not an error).
    */
   async findByPada(
     beneficiaryIds: string[],
-    dueOrOverdueStatusLookupValueIds: string[],
+    pendingStatusLookupValueIds: string[],
+    missedStatusLookupValueIds: string[],
     date: Date,
     scoping: { sakhiId?: string; sakhiIds?: string[] },
   ) {
-    if (beneficiaryIds.length === 0 || dueOrOverdueStatusLookupValueIds.length === 0) {
+    if (
+      beneficiaryIds.length === 0 ||
+      (pendingStatusLookupValueIds.length === 0 && missedStatusLookupValueIds.length === 0)
+    ) {
       return [];
     }
+
+    const sakhiScope = scoping.sakhiId
+      ? { sakhiId: scoping.sakhiId }
+      : scoping.sakhiIds
+        ? { sakhiId: { in: scoping.sakhiIds } }
+        : {};
 
     return this.prisma.visitInstance.findMany({
       where: {
         isDeleted: false,
         beneficiaryId: { in: beneficiaryIds },
-        statusLookupValueId: { in: dueOrOverdueStatusLookupValueIds },
-        schedule: { scheduledDate: date },
-        ...(scoping.sakhiId ? { sakhiId: scoping.sakhiId } : {}),
-        ...(scoping.sakhiIds ? { sakhiId: { in: scoping.sakhiIds } } : {}),
+        ...sakhiScope,
+        OR: [
+          ...(pendingStatusLookupValueIds.length > 0
+            ? [
+                {
+                  statusLookupValueId: { in: pendingStatusLookupValueIds },
+                  schedule: { scheduledDate: date },
+                },
+              ]
+            : []),
+          ...(missedStatusLookupValueIds.length > 0
+            ? [
+                {
+                  statusLookupValueId: { in: missedStatusLookupValueIds },
+                  schedule: { scheduledDate: { lte: date } },
+                },
+              ]
+            : []),
+        ],
       },
       select: {
         id: true,

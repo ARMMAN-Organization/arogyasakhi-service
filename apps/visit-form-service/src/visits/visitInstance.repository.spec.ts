@@ -197,7 +197,7 @@ describe('VisitInstanceRepository', () => {
       ];
       findMany.mockResolvedValue(rows);
 
-      const result = await repository.findByPada(['ben-1'], [PENDING_ID, MISSED_ID], TODAY, {
+      const result = await repository.findByPada(['ben-1'], [PENDING_ID], [MISSED_ID], TODAY, {
         sakhiId: 'sakhi-1',
       });
 
@@ -205,9 +205,14 @@ describe('VisitInstanceRepository', () => {
         where: {
           isDeleted: false,
           beneficiaryId: { in: ['ben-1'] },
-          statusLookupValueId: { in: [PENDING_ID, MISSED_ID] },
-          schedule: { scheduledDate: TODAY },
           sakhiId: 'sakhi-1',
+          OR: [
+            { statusLookupValueId: { in: [PENDING_ID] }, schedule: { scheduledDate: TODAY } },
+            {
+              statusLookupValueId: { in: [MISSED_ID] },
+              schedule: { scheduledDate: { lte: TODAY } },
+            },
+          ],
         },
         select: {
           id: true,
@@ -232,20 +237,59 @@ describe('VisitInstanceRepository', () => {
         },
       ]);
 
-      const result = await repository.findByPada(['ben-1'], [PENDING_ID], TODAY, {});
+      const result = await repository.findByPada(['ben-1'], [PENDING_ID], [], TODAY, {});
 
       expect(result).toHaveLength(2);
     });
 
+    it('includes a MISSED visit scheduled BEFORE the given date (still overdue today)', async () => {
+      const overdueRow = {
+        id: 'visit-1',
+        beneficiaryId: 'ben-1',
+        schedule: { visitCode: 'ANC3', scheduledDate: END_BOUNDARY },
+      };
+      findMany.mockResolvedValue([overdueRow]);
+
+      const result = await repository.findByPada(['ben-1'], [], [MISSED_ID], TODAY, {});
+
+      expect(findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            OR: [
+              {
+                statusLookupValueId: { in: [MISSED_ID] },
+                schedule: { scheduledDate: { lte: TODAY } },
+              },
+            ],
+          }),
+        }),
+      );
+      expect(result).toEqual([overdueRow]);
+    });
+
+    it('omits the PENDING/MISSED OR branch entirely when its status id list is empty', async () => {
+      findMany.mockResolvedValue([]);
+
+      await repository.findByPada(['ben-1'], [PENDING_ID], [], TODAY, {});
+
+      expect(findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            OR: [{ statusLookupValueId: { in: [PENDING_ID] }, schedule: { scheduledDate: TODAY } }],
+          }),
+        }),
+      );
+    });
+
     it('returns an empty list without querying when beneficiaryIds is empty', async () => {
-      const result = await repository.findByPada([], [PENDING_ID], TODAY, {});
+      const result = await repository.findByPada([], [PENDING_ID], [MISSED_ID], TODAY, {});
 
       expect(findMany).not.toHaveBeenCalled();
       expect(result).toEqual([]);
     });
 
-    it('returns an empty list without querying when dueOrOverdueStatusLookupValueIds is empty', async () => {
-      const result = await repository.findByPada(['ben-1'], [], TODAY, {});
+    it('returns an empty list without querying when both status id lists are empty', async () => {
+      const result = await repository.findByPada(['ben-1'], [], [], TODAY, {});
 
       expect(findMany).not.toHaveBeenCalled();
       expect(result).toEqual([]);

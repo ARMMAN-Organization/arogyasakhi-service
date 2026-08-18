@@ -30,22 +30,18 @@ async function resolveCallerScoping(
   caller: CallerIdentity,
   authorizationHeader: string,
 ): Promise<{ sakhiId?: string; sakhiIds?: string[] }> {
+  if (isPrivileged(caller)) {
+    return {};
+  }
   if (caller.roles.includes('SAKHI')) {
     return { sakhiId: caller.id };
   }
-  if (!isPrivileged(caller)) {
-    // SUPERVISOR
-    if (!caller.projectId) {
-      throw forbidden('Supervisor caller has no project scope.');
-    }
-    const roster = await listSakhiIdsForSupervisor(
-      caller.projectId,
-      caller.id,
-      authorizationHeader,
-    );
-    return { sakhiIds: roster };
+  // SUPERVISOR
+  if (!caller.projectId) {
+    throw forbidden('Supervisor caller has no project scope.');
   }
-  return {};
+  const roster = await listSakhiIdsForSupervisor(caller.projectId, caller.id, authorizationHeader);
+  return { sakhiIds: roster };
 }
 
 /** Visit instance domain logic. Data access is delegated to the repository. */
@@ -337,14 +333,18 @@ export class VisitInstanceService {
     // before querying, never trusted as pre-scoped.
     const scoping = await resolveCallerScoping(caller, authorizationHeader);
     const statusCodes = await resolveVisitStatusCodes(authorizationHeader);
-    const dueOrOverdueStatusLookupValueIds = [...statusCodes.entries()]
-      .filter(([, code]) => code === 'PENDING' || code === 'MISSED')
+    const pendingStatusLookupValueIds = [...statusCodes.entries()]
+      .filter(([, code]) => code === 'PENDING')
+      .map(([id]) => id);
+    const missedStatusLookupValueIds = [...statusCodes.entries()]
+      .filter(([, code]) => code === 'MISSED')
       .map(([id]) => id);
     const dateOnly = new Date(`${date}T00:00:00.000Z`);
 
     const rows = await this.repository.findByPada(
       beneficiaryIds,
-      dueOrOverdueStatusLookupValueIds,
+      pendingStatusLookupValueIds,
+      missedStatusLookupValueIds,
       dateOnly,
       scoping,
     );

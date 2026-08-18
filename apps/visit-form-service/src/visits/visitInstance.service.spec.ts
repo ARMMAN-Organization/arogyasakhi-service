@@ -573,6 +573,21 @@ describe('VisitInstanceService', () => {
 
       expect(repository.countByBeneficiary).toHaveBeenCalledWith(['ben-1'], {});
     });
+
+    it(
+      'leaves a caller holding both MANAGER and SAKHI unscoped — regression: the SAKHI ' +
+        'branch must not run ahead of the privileged-role check',
+      async () => {
+        const DUAL_ROLE_CALLER = { id: 'sakhi-1', roles: ['MANAGER', 'SAKHI'] };
+        repository.countByBeneficiary.mockResolvedValue([]);
+        resolveVisitStatusCodesMock.mockResolvedValue(new Map());
+        repository.countDueTodayByBeneficiary.mockResolvedValue(new Map());
+
+        await service.getCountByBeneficiary(['ben-1'], DUAL_ROLE_CALLER, AUTH_HEADER);
+
+        expect(repository.countByBeneficiary).toHaveBeenCalledWith(['ben-1'], {});
+      },
+    );
   });
 
   describe('getByPada', () => {
@@ -594,6 +609,7 @@ describe('VisitInstanceService', () => {
       expect(repository.findByPada).toHaveBeenCalledWith(
         ['ben-1'],
         [PENDING_ID],
+        [],
         new Date('2026-08-20T00:00:00.000Z'),
         expect.objectContaining({ sakhiId: SAKHI_CALLER.id }),
       );
@@ -660,6 +676,7 @@ describe('VisitInstanceService', () => {
       expect(repository.findByPada).toHaveBeenCalledWith(
         ['some-other-sakhis-ben'],
         [PENDING_ID],
+        [],
         new Date('2026-08-20T00:00:00.000Z'),
         { sakhiId: SAKHI_CALLER.id },
       );
@@ -676,6 +693,7 @@ describe('VisitInstanceService', () => {
       expect(repository.findByPada).toHaveBeenCalledWith(
         ['ben-1'],
         [PENDING_ID],
+        [],
         new Date('2026-08-20T00:00:00.000Z'),
         { sakhiIds: ['sakhi-a', 'sakhi-b'] },
       );
@@ -691,9 +709,35 @@ describe('VisitInstanceService', () => {
       expect(repository.findByPada).toHaveBeenCalledWith(
         ['ben-1'],
         [PENDING_ID],
+        [],
         new Date('2026-08-20T00:00:00.000Z'),
         {},
       );
     });
+
+    it(
+      'passes PENDING and MISSED status ids to the repository separately — regression: MISSED ' +
+        'visits must use an overdue (<=date) window, not an exact-date match like PENDING',
+      async () => {
+        const MISSED_ID = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+        resolveVisitStatusCodesMock.mockResolvedValue(
+          new Map([
+            [PENDING_ID, 'PENDING'],
+            [MISSED_ID, 'MISSED'],
+          ]),
+        );
+        repository.findByPada.mockResolvedValue([]);
+
+        await service.getByPada(['ben-1'], '2026-08-20', SAKHI_CALLER, AUTH_HEADER);
+
+        expect(repository.findByPada).toHaveBeenCalledWith(
+          ['ben-1'],
+          [PENDING_ID],
+          [MISSED_ID],
+          new Date('2026-08-20T00:00:00.000Z'),
+          expect.objectContaining({ sakhiId: SAKHI_CALLER.id }),
+        );
+      },
+    );
   });
 });
