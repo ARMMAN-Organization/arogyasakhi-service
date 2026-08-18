@@ -59,7 +59,10 @@ export function registerSyncPendingRoutes(doc: DocumentedRouter, service: SyncPe
   doc.get(
     '/sync/pending',
     {
-      summary: "List a user's outstanding (not-yet-synced) sync items",
+      summary:
+        "List a user's outstanding (not-yet-synced) sync items. `userId` defaults to the " +
+        "caller's own id. A SAKHI may only request her own id; a SUPERVISOR may also " +
+        'request a `userId` belonging to a Sakhi on their own roster.',
       tags: ['Sync'],
       responses: {
         200: {
@@ -70,7 +73,10 @@ export function registerSyncPendingRoutes(doc: DocumentedRouter, service: SyncPe
         },
         400: { description: 'Validation error', schema: apiErrorSchema },
         401: { description: 'Unauthenticated', schema: apiErrorSchema },
-        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+        403: {
+          description: "Caller role not permitted, or userId outside the caller's scope",
+          schema: apiErrorSchema,
+        },
       },
     },
     trustGatewayIdentity,

@@ -14,8 +14,10 @@ export function createSyncPendingController(service: SyncPendingService) {
       // the time this handler runs; the check here is belt-and-braces so a
       // future route wiring change can't silently drop it.
       if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
       const { userId } = req.query as unknown as SyncPendingQuery;
-      res.json(ok(await service.listPending(userId, req.user.id)));
+      res.json(ok(await service.listPending(userId, req.user, authorizationHeader)));
     }),
   };
 }
