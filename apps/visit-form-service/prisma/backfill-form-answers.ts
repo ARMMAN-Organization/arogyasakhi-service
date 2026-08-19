@@ -11,7 +11,10 @@
  *
  * Idempotent: for each submission processed, this replaces (not appends to)
  * its form_answers rows with a fresh decomposition, in one transaction per
- * submission — re-running twice in a row produces the same end state.
+ * submission — re-running twice in a row produces the same end state. The
+ * prior rows are soft-deleted (isDeleted/deletedAt), not hard-deleted — this
+ * table exists for reporting/audit, so a run's own history stays recoverable
+ * rather than being permanently erased on every reconciliation.
  *
  * Usage:
  *   npx ts-node prisma/backfill-form-answers.ts [--form-version-id=<uuid>]
@@ -23,9 +26,16 @@
  */
 import { PrismaClient } from '../../../node_modules/.prisma/client-visit-form-service';
 import { buildFormAnswers } from '../src/forms/form.mapper';
-import { schemaJsonSchema } from '../src/forms/dto/form-field.dto';
+import { schemaJsonSchema, type FormField } from '../src/forms/dto/form-field.dto';
 
 const prisma = new PrismaClient();
+
+// Rows are processed in fixed-size concurrent batches — each row's own
+// transaction is already independent, so bounded concurrency cuts run time
+// on a large table without changing per-row atomicity or the summary's
+// correctness (still one outcome per row, still fully awaited before the
+// script exits).
+const CONCURRENCY = 15;
 
 export interface BackfillSummary {
   processed: number;
@@ -40,26 +50,34 @@ export interface BackfillSummary {
  * historical schema" contract createSubmission relies on. Returns
  * `{ skipped }` (and leaves existing form_answers untouched) when the version
  * can't be resolved/parsed, rather than guessing or dropping good data.
+ *
+ * `resolvedSchema` is passed in (not re-fetched/re-parsed here) so a caller
+ * processing many submissions against the same small set of form versions
+ * can resolve+parse each version once and reuse it, instead of repeating
+ * that DB round-trip and zod parse on every row.
  */
 export async function backfillSubmission(
-  client: Pick<PrismaClient, 'formVersion' | 'formAnswer'>,
-  submission: { id: string; formVersionId: string; formDataJson: unknown },
-): Promise<{ answersWritten: number } | { skipped: string }> {
-  const version = await client.formVersion.findUnique({ where: { id: submission.formVersionId } });
-  if (!version) return { skipped: 'form_version_id no longer resolves to a form_versions row' };
-
-  const parsed = schemaJsonSchema.safeParse(version.schemaJson);
-  if (!parsed.success) {
-    return { skipped: 'schemaJson failed to parse against the current field schema' };
-  }
-
+  client: Pick<PrismaClient, 'formAnswer'>,
+  submission: { id: string; formDataJson: unknown },
+  resolvedSchema: FormField[],
+): Promise<{ answersWritten: number }> {
+  // Arrays pass `typeof === 'object' && !== null` too — without this guard,
+  // a legacy row with form_data_json stored as a JSON array would get cast
+  // to Record<string, unknown> and buildFormAnswers would Object.entries()
+  // its numeric indices as if they were question codes, instead of being
+  // treated as unparseable.
   const formData =
-    typeof submission.formDataJson === 'object' && submission.formDataJson !== null
+    typeof submission.formDataJson === 'object' &&
+    submission.formDataJson !== null &&
+    !Array.isArray(submission.formDataJson)
       ? (submission.formDataJson as Record<string, unknown>)
       : {};
-  const answers = buildFormAnswers(parsed.data, formData);
+  const answers = buildFormAnswers(resolvedSchema, formData);
 
-  await client.formAnswer.deleteMany({ where: { submissionId: submission.id } });
+  await client.formAnswer.updateMany({
+    where: { submissionId: submission.id, isDeleted: false },
+    data: { isDeleted: true, deletedAt: new Date() },
+  });
   if (answers.length) {
     await client.formAnswer.createMany({
       data: answers.map((a) => ({
@@ -78,6 +96,13 @@ export async function backfillSubmission(
   return { answersWritten: answers.length };
 }
 
+/** Splits an array into fixed-size chunks, preserving order. */
+function chunk<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) chunks.push(items.slice(i, i + size));
+  return chunks;
+}
+
 async function main(): Promise<void> {
   const formVersionIdArg = process.argv
     .find((a) => a.startsWith('--form-version-id='))
@@ -88,16 +113,47 @@ async function main(): Promise<void> {
     select: { id: true, formVersionId: true, formDataJson: true },
   });
 
+  // Resolved once per distinct formVersionId, not once per submission — the
+  // number of form versions touched in a run is typically far smaller than
+  // the number of submissions against them.
+  const resolvedSchemas = new Map<string, FormField[] | null>();
+  async function resolveSchema(formVersionId: string): Promise<FormField[] | null> {
+    if (resolvedSchemas.has(formVersionId)) return resolvedSchemas.get(formVersionId) ?? null;
+    const version = await prisma.formVersion.findUnique({ where: { id: formVersionId } });
+    if (!version) {
+      resolvedSchemas.set(formVersionId, null);
+      return null;
+    }
+    const parsed = schemaJsonSchema.safeParse(version.schemaJson);
+    const resolved = parsed.success ? parsed.data : null;
+    resolvedSchemas.set(formVersionId, resolved);
+    return resolved;
+  }
+
   const summary: BackfillSummary = { processed: 0, answersWritten: 0, skipped: [] };
 
-  for (const submission of submissions) {
-    const result = await prisma.$transaction((tx) => backfillSubmission(tx, submission));
-    summary.processed += 1;
-    if ('skipped' in result) {
-      summary.skipped.push({ submissionId: submission.id, reason: result.skipped });
-    } else {
-      summary.answersWritten += result.answersWritten;
-    }
+  for (const batch of chunk(submissions, CONCURRENCY)) {
+    await Promise.all(
+      batch.map(async (submission) => {
+        const schema = await resolveSchema(submission.formVersionId);
+        if (!schema) {
+          summary.processed += 1;
+          summary.skipped.push({
+            submissionId: submission.id,
+            reason:
+              resolvedSchemas.get(submission.formVersionId) === null
+                ? 'form_version_id no longer resolves to a form_versions row, or its schemaJson failed to parse'
+                : 'unknown',
+          });
+          return;
+        }
+        const result = await prisma.$transaction((tx) =>
+          backfillSubmission(tx, submission, schema),
+        );
+        summary.processed += 1;
+        summary.answersWritten += result.answersWritten;
+      }),
+    );
   }
 
   console.log('Backfill summary:', {
@@ -107,6 +163,7 @@ async function main(): Promise<void> {
   });
   if (summary.skipped.length > 0) {
     console.log('Skipped submissions:', summary.skipped);
+    await prisma.$disconnect();
     throw new Error(
       `${summary.skipped.length} submission(s) could not be reprocessed — see the list above.`,
     );
@@ -119,9 +176,14 @@ async function main(): Promise<void> {
 // only running this file directly as a script does.
 if (require.main === module) {
   main()
-    .catch((err) => {
+    .catch(async (err) => {
       console.error(err);
+      // process.exit terminates synchronously before a chained .finally
+      // would run — disconnect explicitly here (and on the thrown-skip path
+      // above) so a failure doesn't leak the connection instead of relying
+      // on a .finally that never gets to fire.
+      await prisma.$disconnect();
       process.exit(1);
     })
-    .finally(() => prisma.$disconnect());
+    .then(() => prisma.$disconnect());
 }

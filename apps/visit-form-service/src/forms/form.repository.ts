@@ -125,13 +125,22 @@ export class FormRepository {
   }
 
   /**
-   * Existence check for a visit-linked submission's visitId, before the
-   * insert — visit_instances is owned by this same service (unlike
-   * beneficiary_cases/form_versions' cross-service equivalents), so this is a
-   * direct query, not an HTTP call.
+   * Existence + ownership check for a visit-linked submission's visitId,
+   * before the insert — visit_instances is owned by this same service
+   * (unlike beneficiary_cases/form_versions' cross-service equivalents), so
+   * this is a direct query, not an HTTP call. Filters on beneficiaryId too,
+   * not just id — without it, a client could submit beneficiaryId "A" with a
+   * real, non-deleted visitId that actually belongs to a different
+   * beneficiary "B", and this check would wrongly pass.
+   *
+   * Duplicates VisitInstanceRepository.findById's shape (same table, same
+   * isDeleted convention) rather than importing that repository — this
+   * service composes one FormRepository per its own doc comment ("the only
+   * tables this repository touches"), and introducing a cross-repository
+   * dependency for one extra filter isn't worth breaking that.
    */
-  findVisitById(id: string) {
-    return this.prisma.visitInstance.findFirst({ where: { id, isDeleted: false } });
+  findVisitById(id: string, beneficiaryId: string) {
+    return this.prisma.visitInstance.findFirst({ where: { id, beneficiaryId, isDeleted: false } });
   }
 
   /**
