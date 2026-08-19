@@ -18,6 +18,8 @@ import { byIdsWithRiskQuerySchema } from './dto/by-ids-with-risk-query.dto';
 import { upsertSocioDemographicsSchema } from './dto/upsert-socio-demographics.dto';
 import { upsertRiskConditionSummarySchema } from './dto/upsert-risk-condition-summary.dto';
 import { applyLmpChangeSchema } from './dto/apply-lmp-change.dto';
+import { updatePhaseSchema } from './dto/update-phase.dto';
+import { applyClosureSchema } from './dto/apply-closure.dto';
 import {
   errorResponse,
   requireRoles,
@@ -554,6 +556,74 @@ export function registerBeneficiaryRoutes(doc: DocumentedRouter, service: Benefi
     validate(idParamsSchema, 'params'),
     validateBody(applyLmpChangeSchema),
     controller.applyLmpChange,
+  );
+
+  doc.patch(
+    '/beneficiaries/:id/phase',
+    {
+      summary:
+        'Advance currentPhase after a DELIVERY_VISIT submission (CR-041) — ' +
+        "gated by requireRoles('SAKHI') since this codebase has no machine/service-account " +
+        "identity: the call chain originates from a SAKHI's DELIVERY_VISIT form submission " +
+        "(visit-form-service -> here), forwarding the SAKHI's own token. Only ANC->PP (mother) " +
+        'and *->NN (child) are accepted; any other transition 409s.',
+      tags: ['Beneficiaries'],
+      params: idParamsSchema,
+      responses: {
+        200: {
+          description: 'currentPhase updated; the updated case is returned',
+          schema: envelope(beneficiaryCaseDetailSchema),
+        },
+        400: errorResponse(400, { message: 'phase: Invalid enum value' }),
+        401: errorResponse(401),
+        403: errorResponse(403, { message: 'This beneficiary case is outside your own roster.' }),
+        404: errorResponse(404, { message: 'Beneficiary case not found.' }),
+        409: errorResponse(409, { message: 'Cannot move a MOTHER case from PP to ANC.' }),
+        500: errorResponse(500),
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI'),
+    validate(idParamsSchema, 'params'),
+    validateBody(updatePhaseSchema),
+    controller.applyPhaseChange,
+  );
+
+  doc.patch(
+    '/beneficiaries/:id/close',
+    {
+      summary:
+        'Close a beneficiary case after a closure submission (ANC_CLOSURE_VISIT / ' +
+        'CHILD_CLOSURE_VISIT) — intended to be called server-to-server by ' +
+        "closure-reopen-service, forwarding the submitting SAKHI's own token for a " +
+        "non-reviewed closure, or the deciding Supervisor's token once a MIGRATION closure " +
+        'is approved. KNOWN GAP: this codebase has no machine/service-account identity, so ' +
+        'this is also reachable directly by a SAKHI who owns the case, bypassing the ' +
+        'closures audit row and any required supervisor review (see BeneficiaryService.' +
+        'applyClosure doc comment) — tracked as a follow-up, not enforced here. Idempotent: ' +
+        'closing an already-CLOSED case with the same reasonCode is a no-op success, not a ' +
+        '409, since the mobile app may retry this call offline; a genuinely different ' +
+        'reasonCode 409s instead of silently overwriting the audit trail.',
+      tags: ['Beneficiaries'],
+      params: idParamsSchema,
+      responses: {
+        200: {
+          description: 'Case closed (or already CLOSED); the current case is returned',
+          schema: envelope(beneficiaryCaseDetailSchema),
+        },
+        400: errorResponse(400, { message: 'reasonCode: Required' }),
+        401: errorResponse(401),
+        403: errorResponse(403, { message: 'This beneficiary case is outside your own roster.' }),
+        404: errorResponse(404, { message: 'Beneficiary case not found.' }),
+        409: errorResponse(409, { message: 'Unable to close this beneficiary case.' }),
+        500: errorResponse(500),
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(idParamsSchema, 'params'),
+    validateBody(applyClosureSchema),
+    controller.applyClosure,
   );
 
   doc.patch(

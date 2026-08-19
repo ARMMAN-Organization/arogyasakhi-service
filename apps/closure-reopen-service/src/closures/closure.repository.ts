@@ -14,8 +14,22 @@ export class ClosureRepository {
     return this.prisma.closure.findFirst({ where: { id, isDeleted: false } });
   }
 
-  create(data: CreateClosureInput) {
-    return this.prisma.closure.create({ data });
+  /**
+   * Finds a closure previously created from this exact client-generated
+   * localClosureUuid — lets create() treat a dropped-connection retry as an
+   * idempotent replay instead of a new closure.
+   */
+  findByLocalClosureUuid(localClosureUuid: string) {
+    return this.prisma.closure.findFirst({ where: { localClosureUuid, isDeleted: false } });
+  }
+
+  /**
+   * supervisorStatus is a server-derived value (see ClosureService.create),
+   * never client-suppliable — passed explicitly here rather than as part of
+   * CreateClosureInput, which no longer carries it.
+   */
+  create(data: CreateClosureInput, supervisorStatus: 'PENDING' | null) {
+    return this.prisma.closure.create({ data: { ...data, supervisorStatus } });
   }
 
   /**

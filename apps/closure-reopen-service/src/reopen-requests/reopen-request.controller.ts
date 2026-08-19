@@ -7,6 +7,15 @@ import type { ReopenRequestService } from './reopen-request.service';
  */
 export function createReopenRequestController(service: ReopenRequestService) {
   return {
+    listByBeneficiaryId: asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const results = await service.listByBeneficiaryId(
+        req.query.beneficiaryId as string,
+        req.headers.authorization ?? '',
+      );
+      res.json(ok(results));
+    }),
+
     create: asyncHandler(async (req, res, next) => {
       if (!req.user) return next(unauthorized());
       const created = await service.create(req.body, req.user.id, req.headers.authorization ?? '');

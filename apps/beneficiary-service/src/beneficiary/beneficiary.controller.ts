@@ -114,6 +114,32 @@ export function createBeneficiaryController(service: BeneficiaryService) {
       res.json(ok(updated));
     }),
 
+    applyClosure: asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const updated = await service.applyClosure(
+        req.params.id,
+        req.body.reasonCode,
+        req.user,
+        authorizationHeader,
+      );
+      res.json(ok(updated));
+    }),
+
+    applyPhaseChange: asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const updated = await service.applyPhaseChange(
+        req.params.id,
+        req.body.phase,
+        req.user,
+        authorizationHeader,
+      );
+      res.json(ok(updated));
+    }),
+
     upsertRiskConditionSummary: asyncHandler(async (req, res, next) => {
       if (!req.user) return next(unauthorized());
       const authorizationHeader = req.header('authorization');

@@ -5,12 +5,16 @@ import { syncSocioDemographics } from '../beneficiaries/socio-demographics.clien
 import { syncHealthHistory } from '../beneficiaries/health-history.client';
 import { findBeneficiaryById } from '../beneficiaries/beneficiary.client';
 import { createChildBeneficiary } from '../beneficiaries/create-child.client';
+import { updateBeneficiaryPhase } from '../beneficiaries/update-phase.client';
+import { createClosure, resolveClosureReasonLookupId } from '../closures/closure.client';
 
 jest.mock('../geography/geography.client');
 jest.mock('../beneficiaries/socio-demographics.client');
 jest.mock('../beneficiaries/health-history.client');
 jest.mock('../beneficiaries/beneficiary.client');
 jest.mock('../beneficiaries/create-child.client');
+jest.mock('../beneficiaries/update-phase.client');
+jest.mock('../closures/closure.client');
 
 describe('FormService', () => {
   const repository = {
@@ -774,6 +778,7 @@ describe('FormService', () => {
         repository.findVersionById.mockResolvedValue(deliveryVersion as never);
         repository.createSubmission.mockResolvedValue({ id: 'sub-1' } as never);
         jest.mocked(findBeneficiaryById).mockResolvedValue(motherCase);
+        jest.mocked(createChildBeneficiary).mockResolvedValue('child-1');
       });
 
       it('creates a child beneficiary for a single live birth', async () => {
@@ -920,6 +925,846 @@ describe('FormService', () => {
 
         expect(result).toEqual({ id: 'sub-1' });
         expect(jest.mocked(createChildBeneficiary)).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('DELIVERY_VISIT currentPhase advance (CR-041)', () => {
+      const motherCase = {
+        id: 'b1',
+        sakhiId: 'sakhi-1',
+        projectId: 'project-1',
+        beneficiaryTypeLookupId: 'type-1',
+        caseTypeLookupId: 'case-type-1',
+        villageId: 'village-1',
+        padaId: 'pada-1',
+        healthSubCentreId: 'sc-1',
+        phcId: 'phc-1',
+        stateId: 'state-1',
+        districtId: 'district-1',
+      };
+
+      const deliveryVersion = {
+        id: 'version-1',
+        status: 'PUBLISHED',
+        formDefinition: { formCode: 'DELIVERY_VISIT' },
+        schemaJson: [
+          { question_code: 'date_of_delivery', label: 'x', input_type: 'date', required: false },
+          ...['child1', 'child2'].flatMap((prefix) => [
+            {
+              question_code: `${prefix}_delivery_outcome`,
+              label: 'x',
+              input_type: 'dropdown',
+              required: false,
+            },
+          ]),
+        ],
+        validationJson: [],
+      };
+
+      beforeEach(() => {
+        repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+        repository.findVersionById.mockResolvedValue(deliveryVersion as never);
+        repository.createSubmission.mockResolvedValue({ id: 'sub-1' } as never);
+        jest.mocked(findBeneficiaryById).mockResolvedValue(motherCase);
+      });
+
+      it("advances the mother's phase to PP after a successful submission", async () => {
+        jest.mocked(createChildBeneficiary).mockResolvedValue(null);
+
+        await service.createSubmission(
+          'DELIVERY_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: { date_of_delivery: '2026-08-01' },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(updateBeneficiaryPhase)).toHaveBeenCalledWith(
+          'b1',
+          'PP',
+          'Bearer test-token',
+        );
+      });
+
+      it('advances each successfully created child to NN', async () => {
+        jest
+          .mocked(createChildBeneficiary)
+          .mockResolvedValueOnce('child-1')
+          .mockResolvedValueOnce('child-2');
+
+        await service.createSubmission(
+          'DELIVERY_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {
+              date_of_delivery: '2026-08-01',
+              child1_delivery_outcome: 'live_birth',
+              child2_delivery_outcome: 'live_birth',
+            },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(updateBeneficiaryPhase)).toHaveBeenCalledWith(
+          'child-1',
+          'NN',
+          'Bearer test-token',
+        );
+        expect(jest.mocked(updateBeneficiaryPhase)).toHaveBeenCalledWith(
+          'child-2',
+          'NN',
+          'Bearer test-token',
+        );
+        expect(jest.mocked(updateBeneficiaryPhase)).toHaveBeenCalledWith(
+          'b1',
+          'PP',
+          'Bearer test-token',
+        );
+      });
+
+      it('only advances a child that was actually created — a failed creation is skipped', async () => {
+        jest
+          .mocked(createChildBeneficiary)
+          .mockResolvedValueOnce('child-1')
+          .mockResolvedValueOnce(null);
+
+        await service.createSubmission(
+          'DELIVERY_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {
+              date_of_delivery: '2026-08-01',
+              child1_delivery_outcome: 'live_birth',
+              child2_delivery_outcome: 'live_birth',
+            },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(updateBeneficiaryPhase)).toHaveBeenCalledWith(
+          'child-1',
+          'NN',
+          'Bearer test-token',
+        );
+        expect(jest.mocked(updateBeneficiaryPhase)).not.toHaveBeenCalledWith(
+          null,
+          'NN',
+          'Bearer test-token',
+        );
+      });
+
+      it('still advances the mother even if child auto-creation fails entirely', async () => {
+        jest.mocked(createChildBeneficiary).mockResolvedValue(null);
+
+        await service.createSubmission(
+          'DELIVERY_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: { date_of_delivery: '2026-08-01', child1_delivery_outcome: 'live_birth' },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(updateBeneficiaryPhase)).toHaveBeenCalledWith(
+          'b1',
+          'PP',
+          'Bearer test-token',
+        );
+      });
+
+      it('does not call updateBeneficiaryPhase for a non-DELIVERY_VISIT form', async () => {
+        repository.findVersionById.mockResolvedValue({
+          ...publishedVersion,
+          formDefinition: { formCode: 'MOTHER_REGISTRATION' },
+        } as never);
+
+        await service.createSubmission(
+          'MOTHER_REGISTRATION',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: { phone_owner: 'SELF' },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(updateBeneficiaryPhase)).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('DELIVERY_VISIT childBeneficiaryIds in response', () => {
+      const motherCase = {
+        id: 'b1',
+        sakhiId: 'sakhi-1',
+        projectId: 'project-1',
+        beneficiaryTypeLookupId: 'type-1',
+        caseTypeLookupId: 'case-type-1',
+        villageId: 'village-1',
+        padaId: 'pada-1',
+        healthSubCentreId: 'sc-1',
+        phcId: 'phc-1',
+        stateId: 'state-1',
+        districtId: 'district-1',
+      };
+
+      const deliveryVersion = {
+        id: 'version-1',
+        status: 'PUBLISHED',
+        formDefinition: { formCode: 'DELIVERY_VISIT' },
+        schemaJson: [
+          { question_code: 'date_of_delivery', label: 'x', input_type: 'date', required: false },
+          ...['child1', 'child2', 'child3'].flatMap((prefix) => [
+            {
+              question_code: `${prefix}_delivery_outcome`,
+              label: 'x',
+              input_type: 'dropdown',
+              required: false,
+            },
+          ]),
+        ],
+        validationJson: [],
+      };
+
+      const deliveryFormData = {
+        date_of_delivery: '2026-08-01',
+        child1_delivery_outcome: 'live_birth',
+        child2_delivery_outcome: 'live_birth',
+        child3_delivery_outcome: 'live_birth',
+      };
+
+      beforeEach(() => {
+        repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+        repository.findVersionById.mockResolvedValue(deliveryVersion as never);
+        repository.createSubmission.mockResolvedValue({ id: 'sub-1' } as never);
+        jest.mocked(findBeneficiaryById).mockResolvedValue(motherCase);
+      });
+
+      it('includes a single child id for a single live birth', async () => {
+        jest.mocked(createChildBeneficiary).mockResolvedValue('child-1');
+
+        const result = await service.createSubmission(
+          'DELIVERY_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: { date_of_delivery: '2026-08-01', child1_delivery_outcome: 'live_birth' },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(result).toEqual(expect.objectContaining({ childBeneficiaryIds: ['child-1'] }));
+      });
+
+      it('includes both child ids, in order, for twins', async () => {
+        jest
+          .mocked(createChildBeneficiary)
+          .mockImplementation(async (input) =>
+            input.localCaseUuid === 'uuid-1-child1' ? 'child-1' : 'child-2',
+          );
+
+        const result = await service.createSubmission(
+          'DELIVERY_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {
+              date_of_delivery: '2026-08-01',
+              child1_delivery_outcome: 'live_birth',
+              child2_delivery_outcome: 'live_birth',
+            },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(result).toEqual(
+          expect.objectContaining({ childBeneficiaryIds: ['child-1', 'child-2'] }),
+        );
+      });
+
+      it('includes all three child ids, in order, for triplets', async () => {
+        jest.mocked(createChildBeneficiary).mockImplementation(async (input) => {
+          if (input.localCaseUuid === 'uuid-1-child1') return 'child-1';
+          if (input.localCaseUuid === 'uuid-1-child2') return 'child-2';
+          return 'child-3';
+        });
+
+        const result = await service.createSubmission(
+          'DELIVERY_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: deliveryFormData,
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(result).toEqual(
+          expect.objectContaining({ childBeneficiaryIds: ['child-1', 'child-2', 'child-3'] }),
+        );
+      });
+
+      it('omits childBeneficiaryIds entirely when there is no live birth', async () => {
+        jest.mocked(createChildBeneficiary).mockResolvedValue(null);
+
+        const result = await service.createSubmission(
+          'DELIVERY_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {
+              date_of_delivery: '2026-08-01',
+              child1_delivery_outcome: 'antepartum_still_birth_fresh',
+            },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect('childBeneficiaryIds' in result).toBe(false);
+      });
+
+      it('includes only the live-born child when one of two is stillborn', async () => {
+        jest.mocked(createChildBeneficiary).mockResolvedValue('child-1');
+
+        const result = await service.createSubmission(
+          'DELIVERY_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {
+              date_of_delivery: '2026-08-01',
+              child1_delivery_outcome: 'live_birth',
+              child2_delivery_outcome: 'antepartum_still_birth_fresh',
+            },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(result).toEqual(expect.objectContaining({ childBeneficiaryIds: ['child-1'] }));
+      });
+
+      it('omits a child whose beneficiary-service creation call failed, keeps the others', async () => {
+        jest
+          .mocked(createChildBeneficiary)
+          .mockImplementation(async (input) =>
+            input.localCaseUuid === 'uuid-1-child1' ? 'child-1' : null,
+          );
+
+        const result = await service.createSubmission(
+          'DELIVERY_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {
+              date_of_delivery: '2026-08-01',
+              child1_delivery_outcome: 'live_birth',
+              child2_delivery_outcome: 'live_birth',
+            },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(result).toEqual(expect.objectContaining({ childBeneficiaryIds: ['child-1'] }));
+      });
+
+      it('still returns the child id even when its phase-advance call fails', async () => {
+        jest.mocked(createChildBeneficiary).mockResolvedValue('child-1');
+        jest.mocked(updateBeneficiaryPhase).mockRejectedValue(new Error('network error'));
+
+        const result = await service.createSubmission(
+          'DELIVERY_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: { date_of_delivery: '2026-08-01', child1_delivery_outcome: 'live_birth' },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(result).toEqual(expect.objectContaining({ childBeneficiaryIds: ['child-1'] }));
+      });
+
+      it('omits childBeneficiaryIds for a non-DELIVERY_VISIT form', async () => {
+        repository.findVersionById.mockResolvedValue({
+          ...publishedVersion,
+          formDefinition: { formCode: 'MOTHER_REGISTRATION' },
+        } as never);
+
+        const result = await service.createSubmission(
+          'MOTHER_REGISTRATION',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: { phone_owner: 'SELF' },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect('childBeneficiaryIds' in result).toBe(false);
+      });
+
+      it('omits childBeneficiaryIds when the mother case cannot be found', async () => {
+        jest.mocked(findBeneficiaryById).mockResolvedValue(null);
+
+        const result = await service.createSubmission(
+          'DELIVERY_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: { date_of_delivery: '2026-08-01', child1_delivery_outcome: 'live_birth' },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect('childBeneficiaryIds' in result).toBe(false);
+      });
+
+      describe('idempotent replay', () => {
+        it('re-resolves the same child ids on a retried DELIVERY_VISIT submission', async () => {
+          const existing = { id: 'sub-1' };
+          repository.findSubmissionByLocalUuid.mockResolvedValue(existing as never);
+          jest
+            .mocked(createChildBeneficiary)
+            .mockImplementation(async (input) =>
+              input.localCaseUuid === 'uuid-1-child1' ? 'child-1' : 'child-2',
+            );
+
+          const result = await service.createSubmission(
+            'DELIVERY_VISIT',
+            {
+              formVersionId: 'version-1',
+              beneficiaryId: 'b1',
+              localSubmissionUuid: 'uuid-1',
+              formData: {
+                date_of_delivery: '2026-08-01',
+                child1_delivery_outcome: 'live_birth',
+                child2_delivery_outcome: 'live_birth',
+              },
+            },
+            'u1',
+            'Bearer test-token',
+          );
+
+          expect(jest.mocked(createChildBeneficiary)).toHaveBeenCalledWith(
+            expect.objectContaining({ localCaseUuid: 'uuid-1-child1' }),
+            'Bearer test-token',
+          );
+          expect(jest.mocked(createChildBeneficiary)).toHaveBeenCalledWith(
+            expect.objectContaining({ localCaseUuid: 'uuid-1-child2' }),
+            'Bearer test-token',
+          );
+          expect(result).toEqual(
+            expect.objectContaining({ childBeneficiaryIds: ['child-1', 'child-2'] }),
+          );
+          expect(repository.findVersionById).not.toHaveBeenCalled();
+        });
+
+        it('does not attempt child resolution on replay of a non-DELIVERY_VISIT submission', async () => {
+          const existing = { id: 'sub-1' };
+          repository.findSubmissionByLocalUuid.mockResolvedValue(existing as never);
+
+          const result = await service.createSubmission(
+            'MOTHER_REGISTRATION',
+            {
+              formVersionId: 'version-1',
+              beneficiaryId: 'b1',
+              localSubmissionUuid: 'retry-uuid',
+              formData: {},
+            },
+            'u1',
+            'Bearer test-token',
+          );
+
+          expect(jest.mocked(findBeneficiaryById)).not.toHaveBeenCalled();
+          expect(jest.mocked(createChildBeneficiary)).not.toHaveBeenCalled();
+          expect('childBeneficiaryIds' in result).toBe(false);
+        });
+
+        it('omits childBeneficiaryIds on replay when child resolution now fails', async () => {
+          const existing = { id: 'sub-1' };
+          repository.findSubmissionByLocalUuid.mockResolvedValue(existing as never);
+          jest.mocked(createChildBeneficiary).mockResolvedValue(null);
+
+          const result = await service.createSubmission(
+            'DELIVERY_VISIT',
+            {
+              formVersionId: 'version-1',
+              beneficiaryId: 'b1',
+              localSubmissionUuid: 'uuid-1',
+              formData: { date_of_delivery: '2026-08-01', child1_delivery_outcome: 'live_birth' },
+            },
+            'u1',
+            'Bearer test-token',
+          );
+
+          expect('childBeneficiaryIds' in result).toBe(false);
+        });
+      });
+    });
+
+    describe('ANC_CLOSURE_VISIT / CHILD_CLOSURE_VISIT auto-closure', () => {
+      const ancClosureVersion = {
+        id: 'version-1',
+        status: 'PUBLISHED',
+        formDefinition: { formCode: 'ANC_CLOSURE_VISIT' },
+        schemaJson: [
+          {
+            question_code: 'continue_with_closure',
+            label: 'x',
+            input_type: 'radio',
+            required: false,
+          },
+          { question_code: 'closure_reason', label: 'x', input_type: 'dropdown', required: false },
+          {
+            question_code: 'closure_visit_date',
+            label: 'x',
+            input_type: 'date',
+            required: false,
+          },
+          { question_code: 'date_of_event', label: 'x', input_type: 'date', required: false },
+        ],
+        validationJson: [],
+      };
+
+      const childClosureVersion = {
+        ...ancClosureVersion,
+        formDefinition: { formCode: 'CHILD_CLOSURE_VISIT' },
+      };
+
+      beforeEach(() => {
+        repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+        repository.createSubmission.mockResolvedValue({ id: 'sub-1' } as never);
+        jest.mocked(resolveClosureReasonLookupId).mockResolvedValue('reason-lookup-id');
+      });
+
+      it.each([
+        ['withdrawal_of_consent', 'NON_MEDICAL'],
+        ['miscarriage', 'MEDICAL'],
+        ['abortion_spontaneous_induced_mtp', 'MEDICAL'],
+        ['maternal_death', 'MEDICAL'],
+        ['program_cycle_completed', 'PROGRAM_COMPLETION'],
+      ])('maps closure_reason %s to closureType %s', async (reason, expectedType) => {
+        repository.findVersionById.mockResolvedValue(ancClosureVersion as never);
+
+        await service.createSubmission(
+          'ANC_CLOSURE_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {
+              continue_with_closure: 'yes',
+              closure_reason: reason,
+              closure_visit_date: '2026-08-18',
+              date_of_event: '2026-08-18',
+            },
+          },
+          'sakhi-1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(createClosure)).toHaveBeenCalledWith(
+          expect.objectContaining({ closureType: expectedType }),
+          'Bearer test-token',
+        );
+      });
+
+      it('maps CHILD_CLOSURE_VISIT infant_child_death to MEDICAL', async () => {
+        repository.findVersionById.mockResolvedValue(childClosureVersion as never);
+
+        await service.createSubmission(
+          'CHILD_CLOSURE_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {
+              continue_with_closure: 'yes',
+              closure_reason: 'infant_child_death',
+              closure_visit_date: '2026-08-18',
+            },
+          },
+          'sakhi-1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(createClosure)).toHaveBeenCalledWith(
+          expect.objectContaining({ closureType: 'MEDICAL' }),
+          'Bearer test-token',
+        );
+      });
+
+      it('sets supervisorStatus: PENDING only for migration', async () => {
+        repository.findVersionById.mockResolvedValue(ancClosureVersion as never);
+
+        await service.createSubmission(
+          'ANC_CLOSURE_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {
+              continue_with_closure: 'yes',
+              closure_reason: 'migration',
+              closure_visit_date: '2026-08-18',
+            },
+          },
+          'sakhi-1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(createClosure)).toHaveBeenCalledWith(
+          expect.objectContaining({ supervisorStatus: 'PENDING' }),
+          'Bearer test-token',
+        );
+      });
+
+      it('does not set supervisorStatus for a non-migration reason', async () => {
+        repository.findVersionById.mockResolvedValue(ancClosureVersion as never);
+
+        await service.createSubmission(
+          'ANC_CLOSURE_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {
+              continue_with_closure: 'yes',
+              closure_reason: 'withdrawal_of_consent',
+              closure_visit_date: '2026-08-18',
+            },
+          },
+          'sakhi-1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(createClosure)).toHaveBeenCalledWith(
+          expect.not.objectContaining({ supervisorStatus: expect.anything() }),
+          'Bearer test-token',
+        );
+      });
+
+      it('does not create a closure when continue_with_closure is no', async () => {
+        repository.findVersionById.mockResolvedValue(ancClosureVersion as never);
+
+        await service.createSubmission(
+          'ANC_CLOSURE_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: { continue_with_closure: 'no' },
+          },
+          'sakhi-1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(createClosure)).not.toHaveBeenCalled();
+      });
+
+      it('does not create a closure when continue_with_closure is missing', async () => {
+        repository.findVersionById.mockResolvedValue(ancClosureVersion as never);
+
+        await service.createSubmission(
+          'ANC_CLOSURE_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: { closure_reason: 'migration', closure_visit_date: '2026-08-18' },
+          },
+          'sakhi-1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(createClosure)).not.toHaveBeenCalled();
+      });
+
+      it('does not create a closure when the reason does not resolve to a lookup value', async () => {
+        repository.findVersionById.mockResolvedValue(ancClosureVersion as never);
+        jest.mocked(resolveClosureReasonLookupId).mockResolvedValue(null);
+
+        await service.createSubmission(
+          'ANC_CLOSURE_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {
+              continue_with_closure: 'yes',
+              closure_reason: 'not_a_real_reason',
+              closure_visit_date: '2026-08-18',
+            },
+          },
+          'sakhi-1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(createClosure)).not.toHaveBeenCalled();
+      });
+
+      it('still returns a successful submission when createClosure throws', async () => {
+        repository.findVersionById.mockResolvedValue(ancClosureVersion as never);
+        jest.mocked(createClosure).mockRejectedValue(new Error('down'));
+
+        const result = await service.createSubmission(
+          'ANC_CLOSURE_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {
+              continue_with_closure: 'yes',
+              closure_reason: 'migration',
+              closure_visit_date: '2026-08-18',
+            },
+          },
+          'sakhi-1',
+          'Bearer test-token',
+        );
+
+        expect(result).toEqual({ id: 'sub-1' });
+      });
+
+      it('derives localClosureUuid deterministically from localSubmissionUuid', async () => {
+        repository.findVersionById.mockResolvedValue(ancClosureVersion as never);
+
+        await service.createSubmission(
+          'ANC_CLOSURE_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-42',
+            formData: {
+              continue_with_closure: 'yes',
+              closure_reason: 'migration',
+              closure_visit_date: '2026-08-18',
+            },
+          },
+          'sakhi-1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(createClosure)).toHaveBeenCalledWith(
+          expect.objectContaining({ localClosureUuid: 'uuid-42-closure' }),
+          'Bearer test-token',
+        );
+      });
+
+      it('passes eventDate/closureDate/submittedByUserId/beneficiaryId through', async () => {
+        repository.findVersionById.mockResolvedValue(ancClosureVersion as never);
+
+        await service.createSubmission(
+          'ANC_CLOSURE_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b42',
+            localSubmissionUuid: 'uuid-1',
+            formData: {
+              continue_with_closure: 'yes',
+              closure_reason: 'migration',
+              closure_visit_date: '2026-08-20',
+              date_of_event: '2026-08-15',
+            },
+          },
+          'sakhi-99',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(createClosure)).toHaveBeenCalledWith(
+          expect.objectContaining({
+            beneficiaryId: 'b42',
+            closureDate: '2026-08-20',
+            eventDate: '2026-08-15',
+            submittedByUserId: 'sakhi-99',
+          }),
+          'Bearer test-token',
+        );
+      });
+
+      it('does not call createClosure for a non-closure form', async () => {
+        repository.findVersionById.mockResolvedValue(publishedVersion as never);
+
+        await service.createSubmission(
+          'MOTHER_REGISTRATION',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: { phone_owner: 'SELF' },
+          },
+          'sakhi-1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(createClosure)).not.toHaveBeenCalled();
+      });
+
+      it('re-runs createClosure on an idempotent replay (same localSubmissionUuid)', async () => {
+        const existing = {
+          id: 'sub-1',
+          beneficiaryId: 'b1',
+          ruleVersionId: null,
+          syncBatchId: null,
+        };
+        repository.findSubmissionByLocalUuid.mockResolvedValue(existing as never);
+
+        await service.createSubmission(
+          'ANC_CLOSURE_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {
+              continue_with_closure: 'yes',
+              closure_reason: 'migration',
+              closure_visit_date: '2026-08-18',
+            },
+          },
+          'sakhi-1',
+          'Bearer test-token',
+        );
+
+        // createClosure itself is idempotent downstream (same localClosureUuid
+        // resolves to the same closure via closure-reopen-service), so a
+        // replay re-running this call is safe and matches resolveDeliveryChildren's
+        // own re-run-on-replay behavior.
+        expect(jest.mocked(createClosure)).toHaveBeenCalledWith(
+          expect.objectContaining({ localClosureUuid: 'uuid-1-closure' }),
+          'Bearer test-token',
+        );
       });
     });
   });

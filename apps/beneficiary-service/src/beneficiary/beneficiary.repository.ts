@@ -1,5 +1,5 @@
 import type { PrismaService } from '../prisma/prisma.service';
-import type { CaseType } from './beneficiary.constants';
+import type { CasePhase, CaseType } from './beneficiary.constants';
 import type {
   BeneficiaryListFilters,
   BeneficiarySummaryFilters,
@@ -533,6 +533,63 @@ export class BeneficiaryRepository {
       data: { lmpDate, eddDate },
     });
     return result.count > 0;
+  }
+
+  /**
+   * Advances currentPhase (CR-041) — only if the case is still at
+   * `fromPhase` when this runs. Same optimistic-concurrency shape as
+   * reactivateCase: the `where` clause is the guard (not a separate
+   * read-then-write), so a case whose phase already changed between the
+   * service's findById and this call returns count 0 and the service turns
+   * that into a 409 instead of silently overwriting a since-changed case.
+   */
+  async updatePhase(beneficiaryId: string, fromPhase: CasePhase, toPhase: CasePhase) {
+    const result = await this.prisma.beneficiaryCase.updateMany({
+      where: { id: beneficiaryId, isDeleted: false, currentPhase: fromPhase },
+      data: { currentPhase: toPhase },
+    });
+    return result.count > 0;
+  }
+
+  /**
+   * Closes a beneficiary case after a closure submission (mobile
+   * closure-request backend-needs ticket) — flips currentStatus to CLOSED
+   * and records the transition in beneficiary_status_history for audit, in
+   * one transaction. Only updates a row that isn't already CLOSED —
+   * updateMany's affected count is the concurrency guard, same pattern as
+   * reactivateCase. Unlike reactivateCase, a race here (or a retry landing
+   * after the case is already CLOSED) is NOT reported as a conflict by this
+   * method — it returns false and the service layer re-reads the case to
+   * treat "already CLOSED" as an idempotent success, since the mobile app's
+   * offline sync may retry this call and a second attempt must not error.
+   */
+  async closeCase(beneficiaryId: string, closedByUserId: string, reasonCode: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const existing = await tx.beneficiaryCase.findFirst({
+        where: { id: beneficiaryId, isDeleted: false },
+        select: { currentStatus: true },
+      });
+      if (!existing) return false;
+      if (existing.currentStatus === 'CLOSED') return true;
+
+      const result = await tx.beneficiaryCase.updateMany({
+        where: { id: beneficiaryId, isDeleted: false, currentStatus: { not: 'CLOSED' } },
+        data: { currentStatus: 'CLOSED' },
+      });
+      if (result.count === 0) return false;
+
+      await tx.beneficiaryStatusHistory.create({
+        data: {
+          beneficiaryId,
+          fromStatus: existing.currentStatus,
+          toStatus: 'CLOSED',
+          reasonCode,
+          changedByUserId: closedByUserId,
+          changedAt: new Date(),
+        },
+      });
+      return true;
+    });
   }
 
   /**

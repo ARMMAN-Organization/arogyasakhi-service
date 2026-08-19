@@ -7,6 +7,11 @@ import infantVisitPayload from './seed-data/infant-visit.json';
 import deliveryVisitPayload from './seed-data/delivery-visit.json';
 import postpartumVisitPayload from './seed-data/postpartum-visit.json';
 import neonatalVisitPayload from './seed-data/neonatal-visit.json';
+import referralVisitPayload from './seed-data/referral-visit.json';
+import referralFollowupVisitPayload from './seed-data/referral-followup-visit.json';
+import ancClosureVisitPayload from './seed-data/anc-closure-visit.json';
+import childClosureVisitPayload from './seed-data/child-closure-visit.json';
+import beneficiaryReopenVisitPayload from './seed-data/beneficiary-reopen-visit.json';
 
 const prisma = new PrismaClient();
 
@@ -19,7 +24,7 @@ interface SeedResult {
 interface FormDraft {
   formCode: string;
   formName: string;
-  entityType: 'MOTHER' | 'CHILD';
+  entityType: 'MOTHER' | 'CHILD' | 'REFERRAL' | 'SYSTEM';
   versionNo: string;
   payload: { schemaJson: unknown[]; validationJson: unknown[] };
 }
@@ -118,6 +123,54 @@ const FORMS: FormDraft[] = [
     entityType: 'CHILD',
     versionNo: 'v1',
     payload: neonatalVisitPayload,
+  },
+  // Referral, closure, and reopen workflow forms — transcribed field-for-field
+  // from docs/Revised_App_Form_Final_20.3.26.xlsx.md ("Referral form",
+  // "ANC Closure form _D", "Child Closure form", "Beneficiary reopen form").
+  // Not triggered by a VisitSchedule/VisitCodeType today (same as
+  // MOTHER_REGISTRATION/CHILD_REGISTRATION) — the app calls
+  // GET /forms/:formCode/active-version directly by these codes.
+  {
+    formCode: 'REFERRAL_VISIT',
+    formName: 'Referral',
+    entityType: 'REFERRAL',
+    versionNo: 'v1',
+    payload: referralVisitPayload,
+  },
+  // Distinct form code from REFERRAL_VISIT — SRS treats the initial referral
+  // and its 7-day follow-up as separate entities with separate linelists
+  // (Referral Linelist vs. Referral Follow-up Linelist), not one form with a
+  // mode flag.
+  {
+    formCode: 'REFERRAL_FOLLOWUP_VISIT',
+    formName: 'Referral Follow-up',
+    entityType: 'REFERRAL',
+    versionNo: 'v1',
+    payload: referralFollowupVisitPayload,
+  },
+  {
+    formCode: 'ANC_CLOSURE_VISIT',
+    formName: 'ANC Closure',
+    entityType: 'MOTHER',
+    versionNo: 'v1',
+    payload: ancClosureVisitPayload,
+  },
+  {
+    formCode: 'CHILD_CLOSURE_VISIT',
+    formName: 'Child Closure',
+    entityType: 'CHILD',
+    versionNo: 'v1',
+    payload: childClosureVisitPayload,
+  },
+  // Not MOTHER- or CHILD-specific — a reopen request can target either a
+  // closed ANC or a closed child case, so this uses SYSTEM rather than
+  // defaulting to one entity.
+  {
+    formCode: 'BENEFICIARY_REOPEN_VISIT',
+    formName: 'Beneficiary Reopen',
+    entityType: 'SYSTEM',
+    versionNo: 'v1',
+    payload: beneficiaryReopenVisitPayload,
   },
 ];
 

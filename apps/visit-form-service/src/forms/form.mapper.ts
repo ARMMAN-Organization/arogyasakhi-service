@@ -210,7 +210,10 @@ export function buildFormAnswers(
  * columns ruleVersionId/syncBatchId/createdByUserId/updatedByUserId/
  * isDeleted/deletedAt so they never leak into a response.
  */
-export function toApiFormSubmission<T extends FormSubmissionRow>(s: T) {
+export function toApiFormSubmission<T extends FormSubmissionRow>(
+  s: T,
+  childBeneficiaryIds?: string[],
+) {
   return {
     id: s.id,
     formVersionId: s.formVersionId,
@@ -223,5 +226,6 @@ export function toApiFormSubmission<T extends FormSubmissionRow>(s: T) {
     validationStatus: s.validationStatus,
     createdAt: s.createdAt,
     updatedAt: s.updatedAt,
+    ...(childBeneficiaryIds?.length ? { childBeneficiaryIds } : {}),
   };
 }

@@ -36,11 +36,15 @@ export interface CreateChildBeneficiaryInput {
  * runs. A failure here is logged and swallowed rather than failing the
  * Sakhi's submission — a missing child profile is a follow-up/ops concern,
  * rejecting a completed delivery record in the field is not.
+ *
+ * Returns the created case's id (CR-041: needed to advance its currentPhase
+ * to NN right after), or null on any failure — the caller must only attempt
+ * the phase-advance for a child that actually got created.
  */
 export async function createChildBeneficiary(
   input: CreateChildBeneficiaryInput,
   authorizationHeader: string,
-): Promise<void> {
+): Promise<string | null> {
   const body = {
     // No name/phone is captured on the Delivery form for the newborn — the
     // Infant Registration (CHILD_REGISTRATION) form is where a Sakhi later
@@ -97,12 +101,16 @@ export async function createChildBeneficiary(
         `Failed to auto-create child beneficiary for mother ${input.motherCase.id} ` +
           `(beneficiary-service returned ${res.status}); the Delivery submission itself was still saved.`,
       );
+      return null;
     }
+    const responseBody = (await res.json()) as { data: { id: string } };
+    return responseBody.data.id;
   } catch (err) {
     console.warn(
       `Unable to reach beneficiary-service to auto-create child beneficiary for mother ` +
         `${input.motherCase.id}; the Delivery submission itself was still saved. ` +
         `${err instanceof Error ? err.message : String(err)}`,
     );
+    return null;
   }
 }

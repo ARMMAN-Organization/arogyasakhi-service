@@ -35,7 +35,11 @@ describe('createChildBeneficiary', () => {
   });
 
   it("POSTs a CHILD case to beneficiary-service with the mother's project/lookup context", async () => {
-    fetchMock.mockResolvedValue({ ok: true, status: 201 });
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 201,
+      json: async () => ({ data: { id: 'child-1' } }),
+    });
 
     await createChildBeneficiary(
       {
@@ -80,8 +84,32 @@ describe('createChildBeneficiary', () => {
     );
   });
 
+  it('returns the created case id', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 201,
+      json: async () => ({ data: { id: 'child-42' } }),
+    });
+
+    const id = await createChildBeneficiary(
+      {
+        motherCase,
+        localCaseUuid: 'uuid-1-child1',
+        registrationDate: new Date('2026-08-01T00:00:00.000Z'),
+        dateOfBirth: new Date('2026-08-01T00:00:00.000Z'),
+      },
+      'Bearer test-token',
+    );
+
+    expect(id).toBe('child-42');
+  });
+
   it('acknowledges beneficiary-service duplicate detection — same mother + same DOB is expected for twins/triplets, not a real duplicate', async () => {
-    fetchMock.mockResolvedValue({ ok: true, status: 201 });
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 201,
+      json: async () => ({ data: { id: 'child-1' } }),
+    });
 
     await createChildBeneficiary(
       {
@@ -97,7 +125,7 @@ describe('createChildBeneficiary', () => {
     expect(body.acknowledgeDuplicate).toBe(true);
   });
 
-  it('swallows a non-ok response so the Delivery submission is never failed by it', async () => {
+  it('swallows a non-ok response so the Delivery submission is never failed by it, returning null', async () => {
     fetchMock.mockResolvedValue({ ok: false, status: 500 });
 
     await expect(
@@ -110,11 +138,11 @@ describe('createChildBeneficiary', () => {
         },
         'Bearer test-token',
       ),
-    ).resolves.toBeUndefined();
+    ).resolves.toBeNull();
     expect(warnSpy).toHaveBeenCalled();
   });
 
-  it('swallows a network failure so the Delivery submission is never failed by it', async () => {
+  it('swallows a network failure so the Delivery submission is never failed by it, returning null', async () => {
     fetchMock.mockRejectedValue(new Error('network down'));
 
     await expect(
@@ -127,7 +155,7 @@ describe('createChildBeneficiary', () => {
         },
         'Bearer test-token',
       ),
-    ).resolves.toBeUndefined();
+    ).resolves.toBeNull();
     expect(warnSpy).toHaveBeenCalled();
   });
 });

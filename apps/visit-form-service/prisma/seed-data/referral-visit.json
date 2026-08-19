@@ -1,0 +1,162 @@
+{
+  "schemaJson": [
+    {
+      "label": "Referral visit form filled date",
+      "section": "Referral",
+      "required": true,
+      "input_type": "date",
+      "question_code": "referral_form_filled_date",
+      "dateRule": { "notFuture": true }
+    },
+    {
+      "label": "Visit name",
+      "section": "Referral",
+      "required": true,
+      "input_type": "text",
+      "question_code": "visit_name"
+    },
+    {
+      "label": "Referral visit name",
+      "section": "Referral",
+      "required": true,
+      "input_type": "text",
+      "question_code": "referral_visit_name"
+    },
+    {
+      "label": "Referral needed as this is a new condition",
+      "options": [
+        { "label": "Yes", "sort_order": 0, "value_code": "yes" },
+        { "label": "No", "sort_order": 1, "value_code": "no" }
+      ],
+      "section": "Referral",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "referral_needed_new_condition"
+    },
+    {
+      "label": "Is beneficiary willing to go for the referral?",
+      "options": [
+        { "label": "Yes", "sort_order": 0, "value_code": "yes" },
+        { "label": "No", "sort_order": 1, "value_code": "no" }
+      ],
+      "section": "Referral",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "beneficiary_willing_for_referral",
+      "visibleWhen": { "field": "referral_needed_new_condition", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "If No, state reasons",
+      "options": [
+        {
+          "label": "Belief that the condition is not serious enough to require referral",
+          "sort_order": 0,
+          "value_code": "condition_not_serious_enough"
+        },
+        {
+          "label": "Family opposition to visit health facility",
+          "sort_order": 1,
+          "value_code": "family_opposition"
+        },
+        { "label": "Woman migrating", "sort_order": 2, "value_code": "woman_migrating" },
+        {
+          "label": "Cost of transportation to the facility",
+          "sort_order": 3,
+          "value_code": "cost_of_transportation"
+        },
+        {
+          "label": "Fear of unnecessary procedures and cost of treatment",
+          "sort_order": 4,
+          "value_code": "fear_of_procedures_and_cost"
+        },
+        {
+          "label": "Preference for home remedies or traditional healers",
+          "sort_order": 5,
+          "value_code": "preference_for_home_remedies"
+        },
+        {
+          "label": "Cultural norms restricting women's mobility",
+          "sort_order": 6,
+          "value_code": "cultural_norms_restricting_mobility"
+        },
+        { "label": "Other", "sort_order": 7, "value_code": "other" }
+      ],
+      "section": "Referral",
+      "required": true,
+      "input_type": "dropdown",
+      "question_code": "referral_declined_reason",
+      "visibleWhen": {
+        "field": "beneficiary_willing_for_referral",
+        "operator": "eq",
+        "value": "no"
+      }
+    },
+    {
+      "label": "Is this an accompanied referral?",
+      "options": [
+        { "label": "Yes", "sort_order": 0, "value_code": "yes" },
+        { "label": "No", "sort_order": 1, "value_code": "no" }
+      ],
+      "section": "Referral",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "is_accompanied_referral",
+      "visibleWhen": {
+        "field": "beneficiary_willing_for_referral",
+        "operator": "eq",
+        "value": "yes"
+      }
+    },
+    {
+      "label": "Decided date for visit to health facility",
+      "section": "Referral",
+      "required": true,
+      "input_type": "date",
+      "question_code": "decided_visit_date",
+      "dateRule": { "notBefore": { "field": "referral_form_filled_date" } },
+      "visibleWhen": {
+        "field": "beneficiary_willing_for_referral",
+        "operator": "eq",
+        "value": "yes"
+      }
+    },
+    {
+      "label": "Place of referral",
+      "options": [
+        { "label": "SC", "sort_order": 0, "value_code": "sc" },
+        { "label": "PHC", "sort_order": 1, "value_code": "phc" },
+        { "label": "RH", "sort_order": 2, "value_code": "rh" },
+        { "label": "SDH", "sort_order": 3, "value_code": "sdh" },
+        { "label": "DH", "sort_order": 4, "value_code": "dh" },
+        { "label": "Private clinic", "sort_order": 5, "value_code": "private_clinic" },
+        { "label": "NGO", "sort_order": 6, "value_code": "ngo" },
+        { "label": "Anganwadi Center", "sort_order": 7, "value_code": "anganwadi_center" },
+        { "label": "Private laboratory", "sort_order": 8, "value_code": "private_laboratory" },
+        { "label": "Private hospital", "sort_order": 9, "value_code": "private_hospital" },
+        { "label": "Other", "sort_order": 10, "value_code": "other" }
+      ],
+      "section": "Referral",
+      "required": true,
+      "input_type": "dropdown",
+      "question_code": "place_of_referral",
+      "visibleWhen": {
+        "field": "beneficiary_willing_for_referral",
+        "operator": "eq",
+        "value": "yes"
+      }
+    },
+    {
+      "label": "Name of the health facility",
+      "section": "Referral",
+      "required": true,
+      "input_type": "text",
+      "question_code": "health_facility_name",
+      "visibleWhen": {
+        "field": "beneficiary_willing_for_referral",
+        "operator": "eq",
+        "value": "yes"
+      }
+    }
+  ],
+  "validationJson": []
+}

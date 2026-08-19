@@ -1,0 +1,391 @@
+{
+  "schemaJson": [
+    {
+      "label": "Date of the form filled",
+      "section": "Referral Follow-up",
+      "required": true,
+      "input_type": "date",
+      "question_code": "form_filled_date",
+      "dateRule": { "notFuture": true }
+    },
+    {
+      "label": "Referral visit name",
+      "section": "Referral Follow-up",
+      "required": true,
+      "input_type": "text",
+      "question_code": "referral_visit_name"
+    },
+    {
+      "label": "Referral followup visit name",
+      "section": "Referral Follow-up",
+      "required": true,
+      "input_type": "text",
+      "question_code": "referral_followup_visit_name"
+    },
+    {
+      "label": "How is the information collected?",
+      "options": [
+        { "label": "On call", "sort_order": 0, "value_code": "on_call" },
+        { "label": "In person", "sort_order": 1, "value_code": "in_person" }
+      ],
+      "section": "Referral Follow-up",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "information_collection_mode"
+    },
+    {
+      "label": "Did beneficiary visit any health facility?",
+      "options": [
+        { "label": "Yes", "sort_order": 0, "value_code": "yes" },
+        { "label": "No", "sort_order": 1, "value_code": "no" }
+      ],
+      "section": "Referral Follow-up",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "visited_health_facility"
+    },
+    {
+      "label": "If No, mention reason",
+      "options": [
+        {
+          "label": "Belief that the condition is not serious enough to require referral",
+          "sort_order": 0,
+          "value_code": "condition_not_serious_enough"
+        },
+        {
+          "label": "Family opposition to visit health facility",
+          "sort_order": 1,
+          "value_code": "family_opposition"
+        },
+        {
+          "label": "Cost of transportation to the facility",
+          "sort_order": 2,
+          "value_code": "cost_of_transportation"
+        },
+        {
+          "label": "Fear of unnecessary procedures and cost of treatment",
+          "sort_order": 3,
+          "value_code": "fear_of_procedures_and_cost"
+        },
+        {
+          "label": "Preference for home remedies or traditional healers",
+          "sort_order": 4,
+          "value_code": "preference_for_home_remedies"
+        },
+        {
+          "label": "Cultural norms restricting women's mobility",
+          "sort_order": 5,
+          "value_code": "cultural_norms_restricting_mobility"
+        },
+        { "label": "Woman migrating", "sort_order": 6, "value_code": "woman_migrating" },
+        { "label": "Other", "sort_order": 7, "value_code": "other" }
+      ],
+      "section": "Referral Follow-up",
+      "required": true,
+      "input_type": "dropdown",
+      "question_code": "not_visited_reason",
+      "visibleWhen": { "field": "visited_health_facility", "operator": "eq", "value": "no" }
+    },
+    {
+      "label": "If No, do you want to accompany the beneficiary for the visit?",
+      "options": [
+        { "label": "Yes", "sort_order": 0, "value_code": "yes" },
+        { "label": "No", "sort_order": 1, "value_code": "no" }
+      ],
+      "section": "Referral Follow-up",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "accompany_for_new_referral",
+      "visibleWhen": { "field": "visited_health_facility", "operator": "eq", "value": "no" }
+    },
+    {
+      "label": "Type of the first health facility beneficiary visited for the referral",
+      "options": [
+        { "label": "SC", "sort_order": 0, "value_code": "sc" },
+        { "label": "PHC", "sort_order": 1, "value_code": "phc" },
+        { "label": "RH", "sort_order": 2, "value_code": "rh" },
+        { "label": "SDH", "sort_order": 3, "value_code": "sdh" },
+        { "label": "DH", "sort_order": 4, "value_code": "dh" },
+        { "label": "Private clinic", "sort_order": 5, "value_code": "private_clinic" },
+        { "label": "NGO", "sort_order": 6, "value_code": "ngo" },
+        { "label": "Anganwadi Center", "sort_order": 7, "value_code": "anganwadi_center" },
+        { "label": "Private laboratory", "sort_order": 8, "value_code": "private_laboratory" },
+        { "label": "Private hospital", "sort_order": 9, "value_code": "private_hospital" },
+        { "label": "Other", "sort_order": 10, "value_code": "other" }
+      ],
+      "section": "Referral Follow-up",
+      "required": true,
+      "input_type": "dropdown",
+      "question_code": "first_facility_type",
+      "visibleWhen": { "field": "visited_health_facility", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Name of the first health facility beneficiary visited for the referral",
+      "section": "Referral Follow-up",
+      "required": true,
+      "input_type": "text",
+      "question_code": "first_facility_name",
+      "visibleWhen": { "field": "visited_health_facility", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Date when the beneficiary visited the first health facility?",
+      "section": "Referral Follow-up",
+      "required": true,
+      "input_type": "date",
+      "question_code": "first_facility_visit_date",
+      "dateRule": { "notFuture": true },
+      "visibleWhen": { "field": "visited_health_facility", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Did beneficiary visit multiple health facilities?",
+      "options": [
+        { "label": "Yes", "sort_order": 0, "value_code": "yes" },
+        { "label": "No", "sort_order": 1, "value_code": "no" }
+      ],
+      "section": "Referral Follow-up",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "visited_multiple_facilities",
+      "visibleWhen": { "field": "visited_health_facility", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "If yes, number of health centers visited",
+      "section": "Referral Follow-up",
+      "required": true,
+      "input_type": "number",
+      "question_code": "number_of_facilities_visited",
+      "numericRange": { "min": 1, "max": 9 },
+      "visibleWhen": { "field": "visited_multiple_facilities", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "If yes, Type of the LAST health facility beneficiary visited for the referral",
+      "options": [
+        { "label": "SC", "sort_order": 0, "value_code": "sc" },
+        { "label": "PHC", "sort_order": 1, "value_code": "phc" },
+        { "label": "RH", "sort_order": 2, "value_code": "rh" },
+        { "label": "SDH", "sort_order": 3, "value_code": "sdh" },
+        { "label": "DH", "sort_order": 4, "value_code": "dh" },
+        { "label": "Private clinic", "sort_order": 5, "value_code": "private_clinic" },
+        { "label": "NGO", "sort_order": 6, "value_code": "ngo" },
+        { "label": "Anganwadi Center", "sort_order": 7, "value_code": "anganwadi_center" },
+        { "label": "Private laboratory", "sort_order": 8, "value_code": "private_laboratory" },
+        { "label": "Private hospital", "sort_order": 9, "value_code": "private_hospital" },
+        { "label": "Other", "sort_order": 10, "value_code": "other" }
+      ],
+      "section": "Referral Follow-up",
+      "required": true,
+      "input_type": "dropdown",
+      "question_code": "last_facility_type",
+      "visibleWhen": { "field": "visited_multiple_facilities", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Name of the LAST health facility beneficiary visited for the referral",
+      "section": "Referral Follow-up",
+      "required": true,
+      "input_type": "text",
+      "question_code": "last_facility_name",
+      "visibleWhen": { "field": "visited_multiple_facilities", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Date when the beneficiary visited the LAST referred center?",
+      "section": "Referral Follow-up",
+      "required": true,
+      "input_type": "date",
+      "question_code": "last_facility_visit_date",
+      "dateRule": { "notFuture": true, "notBefore": { "field": "first_facility_visit_date" } },
+      "visibleWhen": { "field": "visited_multiple_facilities", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "What was the final outcome of this referral?",
+      "options": [
+        {
+          "label": "IPD: Still Hospitalized for management",
+          "sort_order": 0,
+          "value_code": "ipd_still_hospitalized"
+        },
+        { "label": "IPD: Delivered", "sort_order": 1, "value_code": "ipd_delivered" },
+        {
+          "label": "IPD: Discharged with management",
+          "sort_order": 2,
+          "value_code": "ipd_discharged_with_management"
+        },
+        {
+          "label": "OPD and given medications",
+          "sort_order": 3,
+          "value_code": "opd_given_medications"
+        },
+        {
+          "label": "Further referral advised",
+          "sort_order": 4,
+          "value_code": "further_referral_advised"
+        },
+        {
+          "label": "Addressed as no high risk and sent back",
+          "sort_order": 5,
+          "value_code": "addressed_no_high_risk_sent_back"
+        },
+        { "label": "Health center closed", "sort_order": 6, "value_code": "health_center_closed" },
+        {
+          "label": "No staff available at the health centre",
+          "sort_order": 7,
+          "value_code": "no_staff_available"
+        }
+      ],
+      "section": "Referral Follow-up",
+      "required": true,
+      "input_type": "dropdown",
+      "question_code": "referral_final_outcome",
+      "visibleWhen": { "field": "visited_health_facility", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Was diagnosis confirmed?",
+      "options": [
+        { "label": "Yes", "sort_order": 0, "value_code": "yes" },
+        { "label": "No", "sort_order": 1, "value_code": "no" }
+      ],
+      "section": "Referral Follow-up",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "diagnosis_confirmed",
+      "visibleWhen": { "field": "visited_health_facility", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Was treatment given?",
+      "options": [
+        { "label": "Yes", "sort_order": 0, "value_code": "yes" },
+        { "label": "No", "sort_order": 1, "value_code": "no" }
+      ],
+      "section": "Referral Follow-up",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "treatment_given",
+      "visibleWhen": { "field": "visited_health_facility", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "If yes, what type of treatment was provided for the HR condition",
+      "options": [
+        { "label": "Injection", "sort_order": 0, "value_code": "injection" },
+        { "label": "Tablet", "sort_order": 1, "value_code": "tablet" },
+        {
+          "label": "Iron sucrose injection",
+          "sort_order": 2,
+          "value_code": "iron_sucrose_injection"
+        },
+        { "label": "Saline injection", "sort_order": 3, "value_code": "saline_injection" },
+        { "label": "Syrup", "sort_order": 4, "value_code": "syrup" },
+        { "label": "Blood transfusion", "sort_order": 5, "value_code": "blood_transfusion" },
+        {
+          "label": "Supplementary feeding to the Mother (shatavari/protein/multivitamin etc.)",
+          "sort_order": 6,
+          "value_code": "supplementary_feeding_mother"
+        },
+        {
+          "label": "Supplementary feeding to the Child (formula milk, etc.)",
+          "sort_order": 7,
+          "value_code": "supplementary_feeding_child"
+        },
+        {
+          "label": "Further investigations advised",
+          "sort_order": 8,
+          "value_code": "further_investigations_advised"
+        },
+        { "label": "Other", "sort_order": 9, "value_code": "other" }
+      ],
+      "section": "Referral Follow-up",
+      "required": true,
+      "input_type": "multiselect",
+      "question_code": "treatment_type",
+      "visibleWhen": { "field": "treatment_given", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Clinical status of beneficiary now?",
+      "options": [
+        { "label": "Resolved", "sort_order": 0, "value_code": "resolved" },
+        { "label": "Improving", "sort_order": 1, "value_code": "improving" },
+        { "label": "Same", "sort_order": 2, "value_code": "same" },
+        { "label": "Worsened", "sort_order": 3, "value_code": "worsened" }
+      ],
+      "section": "Referral Follow-up",
+      "required": false,
+      "input_type": "dropdown",
+      "question_code": "clinical_status_now"
+    },
+    {
+      "label": "Photo of case paper/discharge summary, health facility, and Sakhi photo with the beneficiary",
+      "section": "Referral Follow-up",
+      "required": false,
+      "input_type": "image",
+      "question_code": "case_paper_photo"
+    },
+    {
+      "label": "Is there any further referral/investigation advised and pending?",
+      "options": [
+        { "label": "Yes", "sort_order": 0, "value_code": "yes" },
+        { "label": "No", "sort_order": 1, "value_code": "no" }
+      ],
+      "section": "Referral Follow-up",
+      "required": true,
+      "input_type": "radio",
+      "question_code": "further_referral_pending",
+      "visibleWhen": { "field": "visited_health_facility", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "If yes, Photo of further investigation advised",
+      "section": "Referral Follow-up",
+      "required": true,
+      "input_type": "image",
+      "question_code": "further_investigation_photo",
+      "visibleWhen": { "field": "further_referral_pending", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Date when beneficiary planning to visit further referral center",
+      "section": "Referral Follow-up",
+      "required": true,
+      "input_type": "date",
+      "question_code": "further_referral_planned_date",
+      "visibleWhen": { "field": "further_referral_pending", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Place of further referral",
+      "options": [
+        { "label": "SC", "sort_order": 0, "value_code": "sc" },
+        { "label": "PHC", "sort_order": 1, "value_code": "phc" },
+        { "label": "RH", "sort_order": 2, "value_code": "rh" },
+        { "label": "SDH", "sort_order": 3, "value_code": "sdh" },
+        { "label": "DH", "sort_order": 4, "value_code": "dh" },
+        { "label": "Private clinic", "sort_order": 5, "value_code": "private_clinic" },
+        { "label": "NGO", "sort_order": 6, "value_code": "ngo" },
+        { "label": "Anganwadi Center", "sort_order": 7, "value_code": "anganwadi_center" },
+        { "label": "Private laboratory", "sort_order": 8, "value_code": "private_laboratory" },
+        { "label": "Private hospital", "sort_order": 9, "value_code": "private_hospital" },
+        { "label": "Other", "sort_order": 10, "value_code": "other" }
+      ],
+      "section": "Referral Follow-up",
+      "required": true,
+      "input_type": "dropdown",
+      "question_code": "further_referral_place",
+      "visibleWhen": { "field": "further_referral_pending", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Name of further referral",
+      "section": "Referral Follow-up",
+      "required": true,
+      "input_type": "text",
+      "question_code": "further_referral_name",
+      "visibleWhen": { "field": "further_referral_pending", "operator": "eq", "value": "yes" }
+    },
+    {
+      "label": "Remarks",
+      "section": "Referral Follow-up",
+      "required": false,
+      "input_type": "text",
+      "question_code": "remarks"
+    }
+  ],
+  "validationJson": [
+    {
+      "rule": "ANY_OF_REQUIRED",
+      "fields": ["first_facility_type", "not_visited_reason"]
+    }
+  ]
+}
