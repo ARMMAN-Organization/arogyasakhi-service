@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { ReferralService } from './referral.service';
 import { createReferralSchema } from './dto/create-referral.dto';
 import { decideReferralSchema } from './dto/decide-referral.dto';
+import { decideReferralAliasSchema } from './dto/decide-referral-alias.dto';
 import { countByBeneficiarySchema } from './dto/count-by-beneficiary.dto';
 import { followupsByBeneficiarySchema } from './dto/followups-by-beneficiary.dto';
 import {
@@ -66,6 +67,10 @@ const referralIdParamsSchema = z
 
 const decideReferralRequestSchema = decideReferralSchema.extend({
   decision: decideReferralSchema.shape.decision.openapi({ example: 'LAPSE' }),
+});
+
+const decideReferralAliasRequestSchema = decideReferralAliasSchema.extend({
+  decision: decideReferralAliasSchema.shape.decision.openapi({ example: 'APPROVE' }),
 });
 
 const referralSummarySchema = z.object({
@@ -281,6 +286,47 @@ export function createReferralRouter(service: ReferralService) {
       const authorizationHeader = req.header('authorization');
       if (!authorizationHeader) return next(unauthorized());
       const updated = await service.decide(req.params.id, req.body, req.user, authorizationHeader);
+      res.json(ok(updated));
+    }),
+  );
+
+  doc.post(
+    '/referrals/:id/decision',
+    {
+      summary:
+        'Decide an Accompanied Referral — Supervisor app alias (POST, APPROVE/REJECT) of the ' +
+        'PATCH endpoint above (FR-SV-4.9). Approve completes the referral and triggers the ' +
+        'incentive; reject leaves it Pending, no incentive. SUPERVISOR-only, narrower than the ' +
+        "PATCH endpoint's SUPERVISOR/MANAGER/ADMIN, since this is a new route with no existing " +
+        'callers to preserve compatibility for.',
+      tags: ['Referrals'],
+      params: referralIdParamsSchema,
+      responses: {
+        200: { description: 'Referral decided', schema: envelope(referralSchema) },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: {
+          description: "Caller role not permitted, or outside this Supervisor's roster",
+          schema: apiErrorSchema,
+        },
+        404: { description: 'Referral not found', schema: apiErrorSchema },
+        409: { description: 'Referral is not in PENDING_FOLLOWUP status', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR'),
+    validate(referralIdParamsSchema, 'params'),
+    validateBody(decideReferralAliasRequestSchema),
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const updated = await service.decideAccompanied(
+        req.params.id,
+        req.body.decision,
+        req.user,
+        authorizationHeader,
+      );
       res.json(ok(updated));
     }),
   );

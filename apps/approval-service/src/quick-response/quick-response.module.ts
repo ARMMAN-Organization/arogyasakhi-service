@@ -3,6 +3,7 @@ import type { PrismaService } from '../prisma/prisma.service';
 import { QuickResponseRepository } from './quick-response.repository';
 import { QuickResponseService } from './quick-response.service';
 import { registerQuickResponseRoutes } from './quick-response.routes';
+import { registerLmpChangeRequestRoutes } from '../lmp-change-requests/lmp-change-request.routes';
 import { LookupClient } from './lookup.client';
 import { EscalationClient } from './escalation.client';
 import { ReopenRequestClient } from './reopen-request.client';
@@ -33,5 +34,6 @@ export function createQuickResponseModule(prisma: PrismaService): DocumentedRout
   );
   const doc = createDocumentedRouter();
   registerQuickResponseRoutes(doc, service);
+  registerLmpChangeRequestRoutes(doc, service);
   return doc;
 }

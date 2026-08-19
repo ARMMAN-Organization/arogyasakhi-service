@@ -4,6 +4,7 @@ import type { ReopenRequestService } from './reopen-request.service';
 import { createReopenRequestController } from './reopen-request.controller';
 import { createReopenRequestSchema } from './dto/create-reopen-request.dto';
 import { decideReopenRequestSchema } from './dto/decide-reopen-request.dto';
+import { decideReopenRequestAliasSchema } from './dto/decide-reopen-request-alias.dto';
 import {
   requireRoles,
   trustGatewayIdentity,
@@ -26,6 +27,10 @@ const listByBeneficiaryQuerySchema = z
 
 const decideReopenRequestRequestSchema = decideReopenRequestSchema.extend({
   decision: decideReopenRequestSchema.shape.decision.openapi({ example: 'APPROVED' }),
+});
+
+const decideReopenRequestAliasRequestSchema = decideReopenRequestAliasSchema.extend({
+  decision: decideReopenRequestAliasSchema.shape.decision.openapi({ example: 'APPROVE' }),
 });
 
 // Fields mirror `model ReopenRequest` in prisma/schema.prisma exactly — no
@@ -145,5 +150,31 @@ export function registerReopenRequestRoutes(doc: DocumentedRouter, service: Reop
     validate(reopenRequestIdParamsSchema, 'params'),
     validateBody(decideReopenRequestRequestSchema),
     controller.decide,
+  );
+
+  doc.post(
+    '/reopen-requests/:id/decision',
+    {
+      summary:
+        'Decide a Supervisor-reviewed reopen request — Supervisor app alias (POST, ' +
+        'APPROVE/REJECT) of the PATCH endpoint above. SUPERVISOR-only, narrower than the ' +
+        "PATCH endpoint's SUPERVISOR/MANAGER/ADMIN, since this is a new route with no " +
+        'existing callers to preserve compatibility for.',
+      tags: ['Reopen Requests'],
+      params: reopenRequestIdParamsSchema,
+      responses: {
+        200: { description: 'Reopen request decided', schema: envelope(reopenRequestSchema) },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+        404: { description: 'Reopen request not found', schema: apiErrorSchema },
+        409: { description: 'Already decided', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR'),
+    validate(reopenRequestIdParamsSchema, 'params'),
+    validateBody(decideReopenRequestAliasRequestSchema),
+    controller.decideAlias,
   );
 }

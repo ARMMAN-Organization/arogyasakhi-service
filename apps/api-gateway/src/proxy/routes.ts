@@ -148,6 +148,10 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
   { prefix: '/reopen-requests', target: appConfig.CLOSURE_REOPEN_SERVICE_URL, requiresAuth: true },
   { prefix: '/approvals', target: appConfig.APPROVAL_SERVICE_URL, requiresAuth: true },
   { prefix: '/quick-response', target: appConfig.APPROVAL_SERVICE_URL, requiresAuth: true },
+  // Thin, dedicated-URL wrapper around Quick Response's own LMP_CHANGE card
+  // decision (see approval-service's lmp-change-requests/), not a separate
+  // service or table.
+  { prefix: '/lmp-change-requests', target: appConfig.APPROVAL_SERVICE_URL, requiresAuth: true },
   { prefix: '/incentives', target: appConfig.INCENTIVE_WAGES_SERVICE_URL, requiresAuth: true },
   {
     prefix: '/incentive-rates',

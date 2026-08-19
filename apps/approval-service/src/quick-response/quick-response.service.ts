@@ -11,6 +11,7 @@ import type { IncentiveClient } from './incentive.client';
 import type { UserClient } from './user.client';
 import type { ListQuickResponseInput } from './dto/list-quick-response.dto';
 import type { DecideQuickResponseInput } from './dto/decide-quick-response.dto';
+import type { DecideLmpChangeRequestInput } from '../lmp-change-requests/dto/decide-lmp-change-request.dto';
 
 /**
  * ApprovalRequestTypes surfaced as Quick Response cards — each maps 1:1 to a
@@ -160,6 +161,32 @@ export class QuickResponseService {
       return this.decideEscalationCard(cardId, dto, authorizationHeader);
     }
     return this.decideApprovalRequestCard(cardId, dto, decidedByUserId, authorizationHeader);
+  }
+
+  /**
+   * Decides an LMP_CHANGE card via the Supervisor app's dedicated
+   * POST /lmp-change-requests/:id/decision resource. `id` is the underlying
+   * approval_requests row's own id — resolved and type-checked here (404 if
+   * missing or not actually an LMP_CHANGE row) before delegating to the
+   * existing `decide()`/`decideLmpChangeCard` unchanged, so this route can
+   * never be used to decide a different card type under a mismatched URL.
+   */
+  async decideLmpChangeRequest(
+    id: string,
+    dto: DecideLmpChangeRequestInput,
+    decidedByUserId: string,
+    authorizationHeader: string,
+  ) {
+    const existing = await this.repository.findById(id);
+    if (!existing || existing.requestType !== 'LMP_CHANGE') {
+      throw notFound('LMP change request not found.');
+    }
+    return this.decide(
+      id,
+      { cardSource: 'approval_requests', ...dto },
+      decidedByUserId,
+      authorizationHeader,
+    );
   }
 
   private async decideEscalationCard(

@@ -5,12 +5,14 @@ import type { DecideReferralInput } from './dto/decide-referral.dto';
 import { BeneficiaryClient } from './beneficiary.client';
 import { listSakhiIdsForSupervisor } from './sakhi.client';
 import { resolveReferralTypeLookupId } from './lookup.client';
+import { IncentiveClient } from './incentive.client';
 
 /** Referral domain logic. Data access is delegated to the repository. */
 export class ReferralService {
   constructor(
     private readonly repository: ReferralRepository,
     private readonly beneficiaryClient: BeneficiaryClient = new BeneficiaryClient(),
+    private readonly incentiveClient: IncentiveClient = new IncentiveClient(),
   ) {}
 
   list() {
@@ -181,5 +183,63 @@ export class ReferralService {
     const decided = await this.repository.findById(id);
     if (!decided) throw notFound('Referral not found.');
     return decided;
+  }
+
+  /**
+   * Decides an Accompanied Referral via the Supervisor app's dedicated POST
+   * alias (FR-SV-4.9) — translates APPROVE/REJECT to this service's own
+   * COMPLETE/REFILL vocabulary and delegates to the existing decide()
+   * unchanged, reusing its roster-scoping IDOR check and PENDING_FOLLOWUP-
+   * only guard as-is. Reusing REFILL's existing no-op branch for REJECT is
+   * intentional: both mean "no status change, referral stays
+   * PENDING_FOLLOWUP" — exactly what "Reject → referral stays Pending, no
+   * incentive" asks for.
+   *
+   * On APPROVE only, resolves the beneficiary's assigned Sakhi and triggers
+   * the incentive — best-effort (logged, not thrown), same reasoning as
+   * approval-service's decideAccompaniedReferralCard: by the time this runs
+   * the referral is already committed COMPLETED with no way back, so a
+   * failure here needs manual follow-up, not a failed request that looks
+   * like nothing happened.
+   */
+  async decideAccompanied(
+    id: string,
+    decision: 'APPROVE' | 'REJECT',
+    caller: AuthenticatedUser,
+    authorizationHeader: string,
+  ) {
+    const updated = await this.decide(
+      id,
+      { decision: decision === 'APPROVE' ? 'COMPLETE' : 'REFILL' },
+      caller,
+      authorizationHeader,
+    );
+
+    if (decision === 'APPROVE') {
+      try {
+        const beneficiary = await this.beneficiaryClient.getById(
+          updated.beneficiaryId,
+          authorizationHeader,
+        );
+        if (!beneficiary) {
+          console.error(
+            `Referral ${id} was completed but its beneficiary ${updated.beneficiaryId} was not found — incentive not triggered.`,
+          );
+        } else {
+          await this.incentiveClient.triggerAccompaniedReferral(
+            beneficiary.sakhiId,
+            id,
+            authorizationHeader,
+          );
+        }
+      } catch (err) {
+        console.error(
+          `Referral ${id} was completed but the incentive trigger failed (referral cannot be re-decided to retry — needs manual follow-up):`,
+          err,
+        );
+      }
+    }
+
+    return updated;
   }
 }

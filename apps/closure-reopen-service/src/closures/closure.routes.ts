@@ -4,6 +4,7 @@ import type { ClosureService } from './closure.service';
 import { createClosureController } from './closure.controller';
 import { createClosureSchema } from './dto/create-closure.dto';
 import { decideClosureSchema } from './dto/decide-closure.dto';
+import { decideClosureAliasSchema } from './dto/decide-closure-alias.dto';
 import {
   requireRoles,
   trustGatewayIdentity,
@@ -59,6 +60,10 @@ const closureIdParamsSchema = z
 
 const decideClosureRequestSchema = decideClosureSchema.extend({
   decision: decideClosureSchema.shape.decision.openapi({ example: 'APPROVED' }),
+});
+
+const decideClosureAliasRequestSchema = decideClosureAliasSchema.extend({
+  decision: decideClosureAliasSchema.shape.decision.openapi({ example: 'APPROVE' }),
 });
 
 const apiErrorSchema = z.object({
@@ -138,5 +143,32 @@ export function registerClosureRoutes(doc: DocumentedRouter, service: ClosureSer
     validate(closureIdParamsSchema, 'params'),
     validateBody(decideClosureRequestSchema),
     controller.decide,
+  );
+
+  doc.post(
+    '/closures/:id/decision',
+    {
+      summary:
+        'Decide a pending closure review — Supervisor app alias (POST, APPROVE/REJECT) of the ' +
+        "PATCH endpoint above. SUPERVISOR-only, narrower than the PATCH endpoint's " +
+        'SUPERVISOR/MANAGER/ADMIN, since this is a new route with no existing callers to ' +
+        'preserve compatibility for.',
+      tags: ['Closures'],
+      params: closureIdParamsSchema,
+      responses: {
+        200: { description: 'Closure decided', schema: envelope(closureSchema) },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+        404: { description: 'Closure not found', schema: apiErrorSchema },
+        409: { description: 'Already decided', schema: apiErrorSchema },
+        422: { description: 'Closure does not require supervisor review', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR'),
+    validate(closureIdParamsSchema, 'params'),
+    validateBody(decideClosureAliasRequestSchema),
+    controller.decideAlias,
   );
 }
