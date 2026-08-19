@@ -1,0 +1,86 @@
+[
+  {
+    "conditionCode": "LOW_BIRTH_WEIGHT",
+    "conditionName": "Low Birth Weight",
+    "gradeScale": "BINARY",
+    "referralRequiredDefault": false,
+    "educationRequiredDefault": true
+  },
+  {
+    "conditionCode": "WASTING",
+    "conditionName": "Wasting (MUW/SUW/MAM/SAM)",
+    "gradeScale": "NORMAL_MILD_MODERATE_SEVERE",
+    "referralRequiredDefault": true,
+    "educationRequiredDefault": true
+  },
+  {
+    "conditionCode": "STUNTING_STATUS",
+    "conditionName": "Stunting",
+    "gradeScale": "NORMAL_MILD_MODERATE_SEVERE",
+    "referralRequiredDefault": true,
+    "educationRequiredDefault": true
+  },
+  {
+    "conditionCode": "UNDERWEIGHT",
+    "conditionName": "Underweight (MUW/SUW)",
+    "gradeScale": "NORMAL_MILD_MODERATE_SEVERE",
+    "referralRequiredDefault": true,
+    "educationRequiredDefault": true
+  },
+  {
+    "conditionCode": "MUAC_MALNUTRITION",
+    "conditionName": "MAM/SAM (MUAC)",
+    "gradeScale": "NORMAL_MILD_MODERATE_SEVERE",
+    "referralRequiredDefault": true,
+    "educationRequiredDefault": true
+  },
+  {
+    "conditionCode": "INFANT_HYPOTHERMIA",
+    "conditionName": "Hypothermia (Infant)",
+    "gradeScale": "NORMAL_MILD_MODERATE_SEVERE",
+    "referralRequiredDefault": true,
+    "educationRequiredDefault": true
+  },
+  {
+    "conditionCode": "INFANT_HYPERTHERMIA",
+    "conditionName": "Hyperthermia (Infant)",
+    "gradeScale": "NORMAL_MILD_MODERATE_SEVERE",
+    "referralRequiredDefault": true,
+    "educationRequiredDefault": true
+  },
+  {
+    "conditionCode": "CORD_INFECTION",
+    "conditionName": "Cord infection / omphalitis",
+    "gradeScale": "BINARY",
+    "referralRequiredDefault": true,
+    "educationRequiredDefault": true
+  },
+  {
+    "conditionCode": "RESPIRATORY_DISTRESS",
+    "conditionName": "Respiratory distress",
+    "gradeScale": "BINARY",
+    "referralRequiredDefault": true,
+    "educationRequiredDefault": true
+  },
+  {
+    "conditionCode": "NEURO_DEVELOPMENTAL_STATUS",
+    "conditionName": "Neuro-developmental status",
+    "gradeScale": "BINARY",
+    "referralRequiredDefault": true,
+    "educationRequiredDefault": true
+  },
+  {
+    "conditionCode": "INFANT_DANGER_SIGNS",
+    "conditionName": "Danger Signs (Infant)",
+    "gradeScale": "BINARY",
+    "referralRequiredDefault": true,
+    "educationRequiredDefault": true
+  },
+  {
+    "conditionCode": "FEEDING_ADEQUACY",
+    "conditionName": "Feeding adequacy",
+    "gradeScale": "BINARY",
+    "referralRequiredDefault": true,
+    "educationRequiredDefault": true
+  }
+]

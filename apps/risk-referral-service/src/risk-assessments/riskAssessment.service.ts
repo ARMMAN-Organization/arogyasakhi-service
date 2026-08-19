@@ -94,7 +94,38 @@ export class RiskAssessmentService {
     const existing = await this.repository.findBySubmissionId(dto.submissionId);
     if (existing) return existing;
 
-    const evaluation = await evaluateRuleSet(dto.ruleSetId, dto.answers, authorizationHeader);
+    // Resolve conditionCode -> risk_condition_id (a rule pack's decision
+    // graph output must carry a real DB id, see ruleSet.evaluator.ts's
+    // RiskEvaluationResult contract, but the pack itself only knows portable
+    // condition codes), the "only first instance" flagging history, and the
+    // "3 consecutive visits with no improvement" streak (infant nutrition
+    // conditions, Appendix D §2.4) — all merged into `answers` so the rule
+    // pack sees them as ordinary evaluation inputs (see
+    // anc-risk.rulesJson.ts / infant-risk.rulesJson.ts's `conditionIds`/
+    // `isFirstInstance`/`consecutiveNoImprovementCount`).
+    const conditionIdsByCode = await this.repository.findConditionIdsByPhase(dto.riskPhase);
+    if (conditionIdsByCode.size === 0) {
+      throw badRequest(
+        `No ACTIVE risk_conditions rows are seeded for phase "${dto.riskPhase}" — the rule ` +
+          'pack has no conditionIds to grade against.',
+      );
+    }
+    const conditionCodes = [...conditionIdsByCode.keys()];
+    const [everFlaggedCodes, consecutiveNoImprovementByCode] = await Promise.all([
+      this.repository.findEverFlaggedConditionCodes(dto.beneficiaryId),
+      this.repository.findConsecutiveNoImprovementCount(dto.beneficiaryId, conditionCodes),
+    ]);
+    const conditionIds = Object.fromEntries(conditionIdsByCode);
+    const isFirstInstance = Object.fromEntries(
+      conditionCodes.map((code) => [code, !everFlaggedCodes.has(code)]),
+    );
+    const consecutiveNoImprovementCount = Object.fromEntries(consecutiveNoImprovementByCode);
+
+    const evaluation = await evaluateRuleSet(
+      dto.ruleSetId,
+      { ...dto.answers, conditionIds, isFirstInstance, consecutiveNoImprovementCount },
+      authorizationHeader,
+    );
 
     const flags: RiskFlagCreateData[] = [];
     for (const condition of evaluation.conditions) {
@@ -111,6 +142,7 @@ export class RiskAssessmentService {
       flags.push({
         riskConditionId: condition.riskConditionId,
         riskGradeLookupValueId,
+        gradeRank: condition.gradeRank,
         // Untyped external JSON (from rules-service's evaluate response)
         // crossing into Prisma's InputJsonValue at this one boundary.
         observedValueJson: condition.observedValueJson as Prisma.InputJsonValue | null,

@@ -1,0 +1,135 @@
+[
+  {
+    "conditionCode": "AGE",
+    "conditionName": "Underage/Overage",
+    "gradeScale": "BINARY",
+    "referralRequiredDefault": true,
+    "educationRequiredDefault": true
+  },
+  {
+    "conditionCode": "MUAC_BMI",
+    "conditionName": "MUAC/BMI",
+    "gradeScale": "BINARY",
+    "referralRequiredDefault": true,
+    "educationRequiredDefault": true
+  },
+  {
+    "conditionCode": "STUNTING",
+    "conditionName": "Stunting (height)",
+    "gradeScale": "BINARY",
+    "referralRequiredDefault": true,
+    "educationRequiredDefault": true
+  },
+  {
+    "conditionCode": "BAD_OBSTETRIC_HISTORY",
+    "conditionName": "Bad Obstetric History",
+    "gradeScale": "BINARY",
+    "referralRequiredDefault": true,
+    "educationRequiredDefault": true
+  },
+  {
+    "conditionCode": "ANEMIA",
+    "conditionName": "Anemia",
+    "gradeScale": "NORMAL_MILD_MODERATE_SEVERE",
+    "referralRequiredDefault": true,
+    "educationRequiredDefault": true
+  },
+  {
+    "conditionCode": "HYPERTENSION",
+    "conditionName": "Hypertension",
+    "gradeScale": "NORMAL_MILD_MODERATE_SEVERE",
+    "referralRequiredDefault": true,
+    "educationRequiredDefault": true
+  },
+  {
+    "conditionCode": "HYPOTENSION",
+    "conditionName": "Hypotension",
+    "gradeScale": "BINARY",
+    "referralRequiredDefault": false,
+    "educationRequiredDefault": true
+  },
+  {
+    "conditionCode": "HYPERGLYCEMIA",
+    "conditionName": "Hyperglycemia",
+    "gradeScale": "BINARY",
+    "referralRequiredDefault": true,
+    "educationRequiredDefault": true
+  },
+  {
+    "conditionCode": "HYPOGLYCEMIA",
+    "conditionName": "Hypoglycemia",
+    "gradeScale": "BINARY",
+    "referralRequiredDefault": false,
+    "educationRequiredDefault": true
+  },
+  {
+    "conditionCode": "APH",
+    "conditionName": "Antepartum Hemorrhage (APH)",
+    "gradeScale": "BINARY",
+    "referralRequiredDefault": true,
+    "educationRequiredDefault": true
+  },
+  {
+    "conditionCode": "PPH",
+    "conditionName": "Postpartum Hemorrhage (PPH)",
+    "gradeScale": "BINARY",
+    "referralRequiredDefault": false,
+    "educationRequiredDefault": true
+  },
+  {
+    "conditionCode": "HYPOTHERMIA",
+    "conditionName": "Hypothermia",
+    "gradeScale": "BINARY",
+    "referralRequiredDefault": false,
+    "educationRequiredDefault": true
+  },
+  {
+    "conditionCode": "HYPERTHERMIA",
+    "conditionName": "Hyperthermia",
+    "gradeScale": "BINARY",
+    "referralRequiredDefault": true,
+    "educationRequiredDefault": true
+  },
+  {
+    "conditionCode": "FETAL_HEART_RATE",
+    "conditionName": "Fetal Heart Rate (abnormal)",
+    "gradeScale": "BINARY",
+    "referralRequiredDefault": true,
+    "educationRequiredDefault": true
+  },
+  {
+    "conditionCode": "FUNDAL_HEIGHT",
+    "conditionName": "Fundal Height (deviation)",
+    "gradeScale": "BINARY",
+    "referralRequiredDefault": true,
+    "educationRequiredDefault": true
+  },
+  {
+    "conditionCode": "GESTATIONAL_WEIGHT_GAIN",
+    "conditionName": "Poor Gestational Weight Gain",
+    "gradeScale": "BINARY",
+    "referralRequiredDefault": true,
+    "educationRequiredDefault": true
+  },
+  {
+    "conditionCode": "JAUNDICE",
+    "conditionName": "Jaundice",
+    "gradeScale": "BINARY",
+    "referralRequiredDefault": true,
+    "educationRequiredDefault": true
+  },
+  {
+    "conditionCode": "URINE_ANALYSIS",
+    "conditionName": "Urine Analysis (abnormal)",
+    "gradeScale": "BINARY",
+    "referralRequiredDefault": true,
+    "educationRequiredDefault": true
+  },
+  {
+    "conditionCode": "DANGER_SIGNS",
+    "conditionName": "Danger Signs",
+    "gradeScale": "BINARY",
+    "referralRequiredDefault": true,
+    "educationRequiredDefault": true
+  }
+]

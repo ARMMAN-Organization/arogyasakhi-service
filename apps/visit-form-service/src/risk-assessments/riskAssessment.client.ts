@@ -21,6 +21,12 @@ export async function triggerRiskAssessment(
     visitId: string | null;
     submissionId: string;
     ruleSetId: string;
+    // The RiskCondition.phase this submission's form corresponds to (e.g.
+    // 'ANC' for ANC_VISIT) — risk-referral-service has no other way to know
+    // which risk_conditions rows a given ruleSetId's decision graph refers
+    // to (RuleSet itself carries no phase), so the caller (this service,
+    // which already owns formCode -> phase knowledge) supplies it.
+    riskPhase: string;
     answers: Record<string, unknown>;
   },
   authorizationHeader: string,

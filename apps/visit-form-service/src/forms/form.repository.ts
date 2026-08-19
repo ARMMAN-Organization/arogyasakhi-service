@@ -125,6 +125,22 @@ export class FormRepository {
   }
 
   /**
+   * The most recent submission for `beneficiaryId` against `formCode`'s
+   * form_definition, regardless of which version it was answered under —
+   * used to fetch a one-time form's answers (e.g. MOTHER_REGISTRATION) for
+   * a server-to-server caller that needs data captured outside the
+   * caller's own recurring visit form (see risk-referral-service's ANC
+   * risk grading, which needs Age/Bad-Obstetric-History from registration
+   * alongside the current ANC_VISIT's own vitals).
+   */
+  findLatestSubmissionByBeneficiaryAndFormCode(beneficiaryId: string, formCode: string) {
+    return this.prisma.formSubmission.findFirst({
+      where: { beneficiaryId, isDeleted: false, formVersion: { formDefinition: { formCode } } },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  /**
    * Existence + ownership check for a visit-linked submission's visitId,
    * before the insert — visit_instances is owned by this same service
    * (unlike beneficiary_cases/form_versions' cross-service equivalents), so
