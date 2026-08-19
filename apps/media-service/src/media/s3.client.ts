@@ -1,5 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  GetObjectCommand,
+  HeadObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { badGateway } from '@armman/service-commons';
 import { appConfig } from '../config/app-config';
@@ -45,6 +50,25 @@ export async function getPresignedUploadUrl(input: {
     expiresIn: appConfig.PRESIGNED_URL_EXPIRY_SECONDS,
   });
   return { uploadUrl, expiresInSeconds: appConfig.PRESIGNED_URL_EXPIRY_SECONDS };
+}
+
+/**
+ * Builds a presigned S3 `GetObject` URL so a caller (e.g. a browser) can open
+ * an already-uploaded asset directly, without routing the file bytes through
+ * this service. `storageUri` is the `s3://<bucket>/<key>` value stored on the
+ * `MediaAsset` row (see `mediaAsset.service.ts`'s `create()`); only the
+ * pathname (the key) is used — the bucket segment is informational, since the
+ * client only ever talks to the one bucket this service is configured for.
+ */
+export async function getPresignedViewUrl(
+  storageUri: string,
+): Promise<{ viewUrl: string; expiresInSeconds: number }> {
+  const key = new URL(storageUri).pathname.replace(/^\//, '');
+  const command = new GetObjectCommand({ Bucket: appConfig.S3_BUCKET_NAME, Key: key });
+  const viewUrl = await getSignedUrl(s3Client, command, {
+    expiresIn: appConfig.PRESIGNED_VIEW_URL_EXPIRY_SECONDS,
+  });
+  return { viewUrl, expiresInSeconds: appConfig.PRESIGNED_VIEW_URL_EXPIRY_SECONDS };
 }
 
 /**

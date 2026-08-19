@@ -340,6 +340,18 @@ export class AuthService {
     return toUserProfile(user);
   }
 
+  /**
+   * Resolves a display name for any user id — a narrow, low-sensitivity
+   * lookup (a name only, no PII/contact fields) other services call to
+   * enrich a stored user id without a cross-service DB join (e.g.
+   * media-service resolving `uploadedByUserId`).
+   */
+  async getDisplayName(id: string): Promise<{ id: string; displayName: string }> {
+    const user = await this.repository.findDisplayNameById(id);
+    if (!user || user.isDeleted) throw notFound('User not found.');
+    return { id: user.id, displayName: user.displayName };
+  }
+
   private async issueTokens(
     userId: string,
     userRoles: {

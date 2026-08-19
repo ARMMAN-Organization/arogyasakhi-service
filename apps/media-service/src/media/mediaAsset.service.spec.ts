@@ -7,11 +7,18 @@ jest.mock('../config/app-config', () => ({
 
 const mockGenerateObjectKey = jest.fn();
 const mockGetPresignedUploadUrl = jest.fn();
+const mockGetPresignedViewUrl = jest.fn();
 const mockHeadObject = jest.fn();
 jest.mock('./s3.client', () => ({
   generateObjectKey: (...args: unknown[]) => mockGenerateObjectKey(...args),
   getPresignedUploadUrl: (...args: unknown[]) => mockGetPresignedUploadUrl(...args),
+  getPresignedViewUrl: (...args: unknown[]) => mockGetPresignedViewUrl(...args),
   headObject: (...args: unknown[]) => mockHeadObject(...args),
+}));
+
+const mockGetUserDisplayName = jest.fn();
+jest.mock('./auth.client', () => ({
+  getUserDisplayName: (...args: unknown[]) => mockGetUserDisplayName(...args),
 }));
 
 import { MediaAssetService } from './mediaAsset.service';
@@ -23,6 +30,7 @@ import type { MediaAsset } from '../../../../node_modules/.prisma/client-media-s
 describe('MediaAssetService', () => {
   const repository = {
     findMany: jest.fn(),
+    findById: jest.fn(),
     create: jest.fn(),
   } as unknown as jest.Mocked<MediaAssetRepository>;
   let service: MediaAssetService;
@@ -36,6 +44,76 @@ describe('MediaAssetService', () => {
     repository.findMany.mockResolvedValue([]);
     await expect(service.list()).resolves.toEqual([]);
     expect(repository.findMany).toHaveBeenCalledTimes(1);
+  });
+
+  describe('getById', () => {
+    const asset: MediaAsset = {
+      id: 'asset-1',
+      assetType: 'CONSENT_PHOTO',
+      storageUri: 's3://test-bucket/media/consent_photo/abc-123',
+      checksum: Buffer.from('d41d8cd98f00b204e9800998ecf8427e', 'hex'),
+      mimeType: 'image/jpeg',
+      sizeBytes: 204800n,
+      uploadedByUserId: null,
+      uploadedAt: new Date('2026-07-31T00:00:00Z'),
+      linkedEntityType: null,
+      linkedEntityId: null,
+      encryptedFlag: true,
+      beneficiaryId: null,
+      visitId: null,
+      submissionId: null,
+      referralId: null,
+      followupId: null,
+      eventId: null,
+      createdAt: new Date(),
+      createdByUserId: null,
+      updatedAt: new Date(),
+      updatedByUserId: null,
+      isDeleted: false,
+      deletedAt: null,
+    };
+
+    it('returns uploadedByName: null and skips the name lookup when the asset has no recorded uploader', async () => {
+      repository.findById.mockResolvedValue(asset);
+      mockGetPresignedViewUrl.mockResolvedValue({
+        viewUrl: 'https://signed.example.com/view',
+        expiresInSeconds: 3600,
+      });
+
+      const result = await service.getById('asset-1', 'Bearer token-123');
+
+      expect(repository.findById).toHaveBeenCalledWith('asset-1');
+      expect(mockGetPresignedViewUrl).toHaveBeenCalledWith(asset.storageUri);
+      expect(mockGetUserDisplayName).not.toHaveBeenCalled();
+      expect(result).toEqual({ viewUrl: 'https://signed.example.com/view', uploadedByName: null });
+    });
+
+    it("resolves uploadedByName via auth.client, forwarding the caller's bearer token, when uploadedByUserId is set", async () => {
+      repository.findById.mockResolvedValue({ ...asset, uploadedByUserId: 'user-1' });
+      mockGetPresignedViewUrl.mockResolvedValue({
+        viewUrl: 'https://signed.example.com/view',
+        expiresInSeconds: 3600,
+      });
+      mockGetUserDisplayName.mockResolvedValue('Jane Sakhi');
+
+      const result = await service.getById('asset-1', 'Bearer token-123');
+
+      expect(mockGetUserDisplayName).toHaveBeenCalledWith('user-1', 'Bearer token-123');
+      expect(result).toEqual({
+        viewUrl: 'https://signed.example.com/view',
+        uploadedByName: 'Jane Sakhi',
+      });
+    });
+
+    it('throws notFound (404) when no matching asset exists, without requesting a view URL or name', async () => {
+      repository.findById.mockResolvedValue(null);
+
+      await expect(service.getById('missing-id', 'Bearer token-123')).rejects.toMatchObject({
+        status: 404,
+      });
+      expect(mockGetPresignedViewUrl).not.toHaveBeenCalled();
+      expect(mockGetUserDisplayName).not.toHaveBeenCalled();
+    });
   });
 
   describe('createUploadUrl', () => {

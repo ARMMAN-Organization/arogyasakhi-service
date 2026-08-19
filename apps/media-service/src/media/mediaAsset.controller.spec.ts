@@ -79,4 +79,48 @@ describe('createMediaAssetController', () => {
     expect(data[0].checksum).toBe('bf48f6236dae5154c342cf06397b396e');
     expect(typeof data[0].checksum).toBe('string');
   });
+
+  it('returns only viewUrl + uploadedByName on getById (GET /media/:id) — no id/mimeType/other metadata, forwarding the bearer token', async () => {
+    const service = {
+      getById: jest
+        .fn()
+        .mockResolvedValue({
+          viewUrl: 'https://signed.example.com/view',
+          uploadedByName: 'Jane Sakhi',
+        }),
+    } as unknown as jest.Mocked<MediaAssetService>;
+    const controller = createMediaAssetController(service);
+    const { json, res } = mockRes();
+    const req = {
+      params: { id: 'asset-1' },
+      header: jest.fn().mockReturnValue('Bearer token-123'),
+    } as unknown as Request;
+
+    await controller.getById(req, res, jest.fn());
+
+    expect(service.getById).toHaveBeenCalledWith('asset-1', 'Bearer token-123');
+    const [{ data }] = json.mock.calls[0];
+    expect(data).toEqual({
+      viewUrl: 'https://signed.example.com/view',
+      uploadedByName: 'Jane Sakhi',
+    });
+  });
+
+  it('rejects with 401 on getById when the Authorization header is missing, without calling the service', async () => {
+    const service = {
+      getById: jest.fn(),
+    } as unknown as jest.Mocked<MediaAssetService>;
+    const controller = createMediaAssetController(service);
+    const { res } = mockRes();
+    const req = {
+      params: { id: 'asset-1' },
+      header: jest.fn().mockReturnValue(undefined),
+    } as unknown as Request;
+    const next = jest.fn();
+
+    await controller.getById(req, res, next);
+
+    expect(service.getById).not.toHaveBeenCalled();
+    expect(next).toHaveBeenCalledWith(expect.objectContaining({ status: 401 }));
+  });
 });

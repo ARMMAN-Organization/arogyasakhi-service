@@ -49,5 +49,9 @@ export function createAuthController(service: AuthService) {
       if (!profile) return next(unauthorized());
       res.json(ok(profile));
     }),
+
+    getUserName: asyncHandler(async (req, res) => {
+      res.json(ok(await service.getDisplayName(req.params.id)));
+    }),
   };
 }

@@ -1,9 +1,15 @@
-import { badRequest, unprocessable } from '@armman/service-commons';
+import { badRequest, notFound, unprocessable } from '@armman/service-commons';
 import type { MediaAssetRepository } from './mediaAsset.repository';
 import type { CreateMediaAssetInput } from './dto/create-mediaAsset.dto';
 import type { CreateUploadUrlInput } from './dto/create-upload-url.dto';
-import { generateObjectKey, getPresignedUploadUrl, headObject } from './s3.client';
+import {
+  generateObjectKey,
+  getPresignedUploadUrl,
+  getPresignedViewUrl,
+  headObject,
+} from './s3.client';
 import { appConfig } from '../config/app-config';
+import { getUserDisplayName } from './auth.client';
 
 /** Media asset domain logic. Data access is delegated to the repository. */
 export class MediaAssetService {
@@ -11,6 +17,30 @@ export class MediaAssetService {
 
   list() {
     return this.repository.findMany();
+  }
+
+  /**
+   * Confirms a media asset was actually finalized (a row exists, i.e.
+   * `POST /media` previously succeeded) and returns a short-lived URL to view
+   * the file itself, plus the uploader's display name — no id/mimeType/other
+   * metadata, since the caller only wants to look at the image and know who
+   * uploaded it, not inspect the full record. `uploadedByName` is `null` when
+   * the asset has no recorded uploader, or when that user could no longer be
+   * resolved (see `auth.client.ts`'s `getUserDisplayName`).
+   */
+  async getById(
+    id: string,
+    authorizationHeader: string,
+  ): Promise<{ viewUrl: string; uploadedByName: string | null }> {
+    const asset = await this.repository.findById(id);
+    if (!asset) {
+      throw notFound('Media asset not found.');
+    }
+    const { viewUrl } = await getPresignedViewUrl(asset.storageUri);
+    const uploadedByName = asset.uploadedByUserId
+      ? await getUserDisplayName(asset.uploadedByUserId, authorizationHeader)
+      : null;
+    return { viewUrl, uploadedByName };
   }
 
   /**

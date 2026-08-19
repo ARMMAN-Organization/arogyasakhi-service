@@ -25,6 +25,10 @@ const schema = z.object({
   // Presigned PUT URL lifetime. Short-lived on purpose — an app that stalls
   // past this window must request a fresh URL rather than retry a stale one.
   PRESIGNED_URL_EXPIRY_SECONDS: z.coerce.number().int().positive().default(900),
+  // Presigned GET (view) URL lifetime — separate from the PUT upload expiry
+  // above since a caller viewing an already-uploaded asset (e.g. opening it
+  // in a UI) has different timing needs than an in-progress upload.
+  PRESIGNED_VIEW_URL_EXPIRY_SECONDS: z.coerce.number().int().positive().default(3600),
   // 25 MB — generous for a consent photo or a scanned discharge summary
   // without letting a single upload consume disproportionate S3 spend.
   MAX_UPLOAD_SIZE_BYTES: z.coerce.number().int().positive().default(26214400),
