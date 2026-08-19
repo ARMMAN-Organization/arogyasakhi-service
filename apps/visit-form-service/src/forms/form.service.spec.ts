@@ -28,6 +28,7 @@ describe('FormService', () => {
     publish: jest.fn(),
     findSubmissionByLocalUuid: jest.fn(),
     createSubmission: jest.fn(),
+    findVisitById: jest.fn(),
   } as unknown as jest.Mocked<FormRepository>;
   let service: FormService;
 
@@ -551,6 +552,218 @@ describe('FormService', () => {
         expect.objectContaining({ validationStatus: 'VALID' }),
       );
       expect(result).toEqual({ id: 'sub-1' });
+    });
+
+    describe('visitId validation', () => {
+      it('proceeds when visitId is omitted — no visit check is attempted', async () => {
+        repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+        repository.findVersionById.mockResolvedValue(publishedVersion as never);
+        repository.createSubmission.mockResolvedValue({ id: 'sub-1' } as never);
+
+        await service.createSubmission(
+          'MOTHER_REGISTRATION',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: { phone_owner: 'SELF' },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(repository.findVisitById).not.toHaveBeenCalled();
+        expect(repository.createSubmission).toHaveBeenCalled();
+      });
+
+      it('proceeds when visitId refers to an existing visit owned by this beneficiary', async () => {
+        repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+        repository.findVersionById.mockResolvedValue(publishedVersion as never);
+        repository.findVisitById.mockResolvedValue({ id: 'visit-1' } as never);
+        repository.createSubmission.mockResolvedValue({ id: 'sub-1' } as never);
+
+        await service.createSubmission(
+          'MOTHER_REGISTRATION',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            visitId: 'visit-1',
+            localSubmissionUuid: 'uuid-1',
+            formData: { phone_owner: 'SELF' },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(repository.findVisitById).toHaveBeenCalledWith('visit-1', 'b1');
+        expect(repository.createSubmission).toHaveBeenCalled();
+      });
+
+      it('runs the visitId check after formData validation, not before', async () => {
+        repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+        repository.findVersionById.mockResolvedValue(publishedVersion as never);
+        repository.findVisitById.mockResolvedValue(null);
+
+        const promise = service.createSubmission(
+          'MOTHER_REGISTRATION',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            visitId: 'missing-visit',
+            localSubmissionUuid: 'uuid-1',
+            // bp_systolic is out of numericRange (70-300) AND visitId is
+            // missing — the formData violation must still be reported, not
+            // masked by the visitId check running first.
+            formData: { phone_owner: 'SELF', bp_systolic: 999 },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        await expect(promise).rejects.toMatchObject({ status: 422 });
+        expect(repository.findVisitById).not.toHaveBeenCalled();
+      });
+
+      it('rejects with 404 when visitId does not refer to an existing visit, without inserting', async () => {
+        repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+        repository.findVersionById.mockResolvedValue(publishedVersion as never);
+        repository.findVisitById.mockResolvedValue(null);
+
+        const promise = service.createSubmission(
+          'MOTHER_REGISTRATION',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            visitId: 'missing-visit',
+            localSubmissionUuid: 'uuid-1',
+            formData: { phone_owner: 'SELF' },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        await expect(promise).rejects.toMatchObject({ status: 404, message: 'Visit not found.' });
+        expect(repository.createSubmission).not.toHaveBeenCalled();
+      });
+
+      it('translates a foreign-key-violation race on the visit_id constraint into the same 404', async () => {
+        repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+        repository.findVersionById.mockResolvedValue(publishedVersion as never);
+        repository.findVisitById.mockResolvedValue({ id: 'visit-1' } as never);
+        repository.createSubmission.mockRejectedValue({
+          code: 'P2003',
+          meta: { field_name: 'form_submissions_visit_id_fkey (index)' },
+        });
+
+        const promise = service.createSubmission(
+          'MOTHER_REGISTRATION',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            visitId: 'visit-1',
+            localSubmissionUuid: 'uuid-1',
+            formData: { phone_owner: 'SELF' },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        await expect(promise).rejects.toMatchObject({ status: 404, message: 'Visit not found.' });
+      });
+
+      it('does not report "Visit not found" for a P2003 on an unrelated FK (e.g. form_version_id)', async () => {
+        repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+        repository.findVersionById.mockResolvedValue(publishedVersion as never);
+        const fkError = {
+          code: 'P2003',
+          meta: { field_name: 'form_submissions_form_version_id_fkey (index)' },
+        };
+        repository.createSubmission.mockRejectedValue(fkError);
+
+        const promise = service.createSubmission(
+          'MOTHER_REGISTRATION',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: { phone_owner: 'SELF' },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        await expect(promise).rejects.toBe(fkError);
+      });
+
+      it('does not translate an unrelated createSubmission error', async () => {
+        repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+        repository.findVersionById.mockResolvedValue(publishedVersion as never);
+        repository.findVisitById.mockResolvedValue({ id: 'visit-1' } as never);
+        const originalError = new Error('some other db failure');
+        repository.createSubmission.mockRejectedValue(originalError);
+
+        const promise = service.createSubmission(
+          'MOTHER_REGISTRATION',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            visitId: 'visit-1',
+            localSubmissionUuid: 'uuid-1',
+            formData: { phone_owner: 'SELF' },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        await expect(promise).rejects.toBe(originalError);
+      });
+
+      it('replays the winning row on a concurrent P2002 race on localSubmissionUuid', async () => {
+        repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+        repository.findVersionById.mockResolvedValue(publishedVersion as never);
+        repository.createSubmission.mockRejectedValue({ code: 'P2002' });
+        const winningRow = { id: 'sub-winner', beneficiaryId: 'b1' };
+        // Re-queried after the race is detected — this second call simulates
+        // the concurrent request's row having since committed.
+        repository.findSubmissionByLocalUuid
+          .mockResolvedValueOnce(null)
+          .mockResolvedValueOnce(winningRow as never);
+
+        const result = await service.createSubmission(
+          'MOTHER_REGISTRATION',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: { phone_owner: 'SELF' },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(result).toMatchObject({ id: 'sub-winner' });
+      });
+
+      it('rethrows a P2002 when no winning row can be found on re-query', async () => {
+        repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+        repository.findVersionById.mockResolvedValue(publishedVersion as never);
+        const p2002Error = { code: 'P2002' };
+        repository.createSubmission.mockRejectedValue(p2002Error);
+
+        const promise = service.createSubmission(
+          'MOTHER_REGISTRATION',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: { phone_owner: 'SELF' },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        await expect(promise).rejects.toBe(p2002Error);
+      });
     });
 
     it('syncs socio-demographic answers to beneficiary-service for MOTHER_REGISTRATION', async () => {

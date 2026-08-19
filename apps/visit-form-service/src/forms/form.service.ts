@@ -95,7 +95,7 @@ export class FormService {
       // pick the same versionNo. The @@unique([formDefinitionId, versionNo])
       // constraint keeps the data safe — surface the loser as a graceful 409
       // (retryable) rather than an unhandled 500.
-      if (isUniqueConstraintViolation(err)) {
+      if (isPrismaErrorCode(err, 'P2002')) {
         throw conflict('A form version with this number is being created concurrently. Retry.');
       }
       throw err;
@@ -196,21 +196,70 @@ export class FormService {
       throw unprocessable('Submission failed validation.', { violations });
     }
 
+    // Client-supplied visitId can be stale (a race between the visit's own
+    // POST /visits and this submission, or a bad replay) — check before the
+    // insert so this fails as a clean, named 404 instead of an unhandled FK
+    // violation. Checked with beneficiaryId, not just id — otherwise a real,
+    // non-deleted visitId belonging to a different beneficiary would wrongly
+    // pass. Run after validateSubmission (not before) so a request that's
+    // wrong in both ways reports the formData violations too, not just this
+    // 404 — the client shouldn't have to fix one error at a time across two
+    // round trips when both are already knowable in this same request.
+    if (dto.visitId) {
+      const visit = await this.repository.findVisitById(dto.visitId, dto.beneficiaryId);
+      if (!visit) throw notFound('Visit not found.');
+    }
+
     // Decompose the validated payload into normalized per-question rows so
     // every submitted field is individually queryable (ERD design stance,
     // line 19), driven by each field's declared input_type — no hardcoding.
     const formAnswers = buildFormAnswers(fields, dto.formData);
 
-    const created = await this.repository.createSubmission({
-      formVersionId: dto.formVersionId,
-      beneficiaryId: dto.beneficiaryId,
-      visitId: dto.visitId ?? null,
-      submittedByUserId,
-      localSubmissionUuid: dto.localSubmissionUuid,
-      formDataJson: dto.formData,
-      validationStatus: 'VALID',
-      formAnswers,
-    });
+    let created;
+    try {
+      created = await this.repository.createSubmission({
+        formVersionId: dto.formVersionId,
+        beneficiaryId: dto.beneficiaryId,
+        visitId: dto.visitId ?? null,
+        submittedByUserId,
+        localSubmissionUuid: dto.localSubmissionUuid,
+        formDataJson: dto.formData,
+        validationStatus: 'VALID',
+        formAnswers,
+      });
+    } catch (err) {
+      // A double-submit racing on the same localSubmissionUuid can slip past
+      // the findSubmissionByLocalUuid check above and hit the unique
+      // constraint here instead — same race shape createDraft already
+      // handles. The loser just replays the winner's row rather than
+      // erroring, same idempotent-replay contract as a sequential retry.
+      if (isPrismaErrorCode(err, 'P2002')) {
+        const existingRow = await this.repository.findSubmissionByLocalUuid(
+          dto.localSubmissionUuid,
+        );
+        if (existingRow) return toApiFormSubmission(existingRow);
+        throw err;
+      }
+      // Backstop for the race the visitId check above can't close on its
+      // own: the visit existed at check time but was gone by the time this
+      // insert ran (see that check's own comment on the pre-condition
+      // needed for this to actually fire today). form_submissions has two
+      // FK columns (form_version_id, visit_id) — only rewrite this to a
+      // "Visit not found" 404 if the failing constraint is actually the
+      // visit one; anything else (e.g. a form_version_id race) falls
+      // through to the generic handler below instead of reporting the
+      // wrong resource as missing.
+      if (isPrismaErrorCode(err, 'P2003') && failingConstraintIsVisitId(err)) {
+        console.warn(
+          `Submission insert hit a visit_id FK violation for a visitId that passed the ` +
+            `pre-insert check (localSubmissionUuid ${dto.localSubmissionUuid}) — the visit was ` +
+            `removed in the window between the check and this insert:`,
+          err,
+        );
+        throw notFound('Visit not found.');
+      }
+      throw err;
+    }
 
     // Promote the socio-demographic answers into beneficiary-service, which
     // owns them as structured columns (the registration form re-asks them so
@@ -472,12 +521,29 @@ async function toleratePhaseAdvance(call: Promise<void>): Promise<void> {
   await Promise.resolve(call).catch(() => undefined);
 }
 
-/** Narrows a caught Prisma error to a unique-constraint violation (P2002). */
-function isUniqueConstraintViolation(err: unknown): boolean {
+/** Narrows a caught error to a specific Prisma error code (e.g. 'P2002', 'P2003'). */
+function isPrismaErrorCode(err: unknown, code: string): boolean {
   return (
     typeof err === 'object' &&
     err !== null &&
     'code' in err &&
-    (err as { code: unknown }).code === 'P2002'
+    (err as { code: unknown }).code === code
   );
+}
+
+/**
+ * Disambiguates which FK a P2003 actually violated — form_submissions has
+ * two (form_version_id, visit_id), and only the visit one should be rewritten
+ * to "Visit not found." Prisma's P2003 sets meta.field_name to the
+ * constraint name (e.g. "form_submissions_visit_id_fkey" on Postgres);
+ * checking for the column name substring is more robust than an exact match
+ * against a constraint name whose exact string isn't guaranteed stable
+ * across migrations.
+ */
+function failingConstraintIsVisitId(err: unknown): boolean {
+  if (typeof err !== 'object' || err === null || !('meta' in err)) return false;
+  const meta = (err as { meta?: unknown }).meta;
+  if (typeof meta !== 'object' || meta === null || !('field_name' in meta)) return false;
+  const fieldName = (meta as { field_name?: unknown }).field_name;
+  return typeof fieldName === 'string' && fieldName.includes('visit_id');
 }
