@@ -188,6 +188,16 @@ export class FormService {
       throw badRequest('Form version is not published.');
     }
 
+    // Client-supplied visitId can be stale (a race between the visit's own
+    // POST /visits and this submission, or a bad replay) — check before the
+    // insert so this fails as a clean, named 404 instead of an unhandled FK
+    // violation. See createSubmission's P2003 catch below for the remaining
+    // check-then-insert race window this can't close on its own.
+    if (dto.visitId) {
+      const visit = await this.repository.findVisitById(dto.visitId);
+      if (!visit) throw notFound('Visit not found.');
+    }
+
     const fields = schemaJsonSchema.parse(version.schemaJson);
     const crossFieldRules = validationJsonSchema.parse(version.validationJson ?? []);
     const violations = validateSubmission(fields, crossFieldRules, dto.formData);
@@ -201,16 +211,25 @@ export class FormService {
     // line 19), driven by each field's declared input_type — no hardcoding.
     const formAnswers = buildFormAnswers(fields, dto.formData);
 
-    const created = await this.repository.createSubmission({
-      formVersionId: dto.formVersionId,
-      beneficiaryId: dto.beneficiaryId,
-      visitId: dto.visitId ?? null,
-      submittedByUserId,
-      localSubmissionUuid: dto.localSubmissionUuid,
-      formDataJson: dto.formData,
-      validationStatus: 'VALID',
-      formAnswers,
-    });
+    let created;
+    try {
+      created = await this.repository.createSubmission({
+        formVersionId: dto.formVersionId,
+        beneficiaryId: dto.beneficiaryId,
+        visitId: dto.visitId ?? null,
+        submittedByUserId,
+        localSubmissionUuid: dto.localSubmissionUuid,
+        formDataJson: dto.formData,
+        validationStatus: 'VALID',
+        formAnswers,
+      });
+    } catch (err) {
+      // Backstop for the race the check above can't close on its own: the
+      // visit existed at check time but was gone by the time this insert ran.
+      // Same "fail loud, named 404" contract either way, not a 500.
+      if (isForeignKeyViolation(err)) throw notFound('Visit not found.');
+      throw err;
+    }
 
     // Promote the socio-demographic answers into beneficiary-service, which
     // owns them as structured columns (the registration form re-asks them so
@@ -479,5 +498,15 @@ function isUniqueConstraintViolation(err: unknown): boolean {
     err !== null &&
     'code' in err &&
     (err as { code: unknown }).code === 'P2002'
+  );
+}
+
+/** Narrows a caught Prisma error to a foreign-key violation (P2003). */
+function isForeignKeyViolation(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'code' in err &&
+    (err as { code: unknown }).code === 'P2003'
   );
 }

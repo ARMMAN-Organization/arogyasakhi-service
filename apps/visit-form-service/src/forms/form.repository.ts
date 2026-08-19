@@ -125,6 +125,16 @@ export class FormRepository {
   }
 
   /**
+   * Existence check for a visit-linked submission's visitId, before the
+   * insert — visit_instances is owned by this same service (unlike
+   * beneficiary_cases/form_versions' cross-service equivalents), so this is a
+   * direct query, not an HTTP call.
+   */
+  findVisitById(id: string) {
+    return this.prisma.visitInstance.findFirst({ where: { id, isDeleted: false } });
+  }
+
+  /**
    * Persists the submission and its normalized form_answers rows atomically:
    * the submission and every answer row commit together or not at all, so the
    * raw form_data_json and its per-question projection can never diverge.

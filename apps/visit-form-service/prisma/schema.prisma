@@ -334,5 +334,9 @@ model FormAnswer {
 
   formSubmission FormSubmission @relation(fields: [submissionId], references: [id])
 
+  // ERD's design stance (line 19): fields extracted for reporting/query must
+  // be indexed, not require a full scan — this supports both "all answers for
+  // a submission" and "this question across submissions" lookups.
+  @@index([submissionId, fieldCode])
   @@map("form_answers")
 }
