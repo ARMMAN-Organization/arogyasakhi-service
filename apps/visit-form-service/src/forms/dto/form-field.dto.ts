@@ -53,7 +53,16 @@ export const visibleWhenConditionSchema = z.object({
  */
 export const formFieldSchema = z
   .object({
-    question_code: z.string().trim().min(1),
+    // Max 120 matches form_answers.field_code's DB column (VarChar(120), see
+    // prisma/schema.prisma) — question_code is written there verbatim on
+    // every submission (see buildFormAnswers). Enforced here, at
+    // draft-save/publish time, so an over-length code is rejected as a
+    // clean validation error immediately, rather than surfacing as a
+    // Prisma P2000 500 the first time a real Sakhi submits an answer for
+    // it (this happened in production-equivalent testing: a 135-char
+    // question_code on MOTHER_REGISTRATION passed schema validation
+    // uncaught and only failed at submission time).
+    question_code: z.string().trim().min(1).max(120),
     label: z.string().trim().min(1),
     input_type: z.string().trim().min(1),
     required: z.boolean(),
