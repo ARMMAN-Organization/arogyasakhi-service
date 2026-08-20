@@ -7,6 +7,8 @@ import {
   BENEFICIARY_STATUSES,
   CASE_PHASES,
   CASE_TYPES,
+  CCV_OPENING_RISK_STATES,
+  CHILD_CASE_PHASES,
   SEXES,
   SUMMARY_PHASES,
 } from './beneficiary.constants';
@@ -68,6 +70,16 @@ const riskConditionSummarySchema = z.object({
   everAtRiskFlag: z.boolean(),
   currentReferralTriggerFlag: z.boolean(),
   currentHrVisitTriggerFlag: z.boolean(),
+  // Resolved server-side from risk-referral-service's risk_conditions (owned
+  // by that service — no cross-service joins, per the forklift rule). Null
+  // when the id doesn't resolve to an ACTIVE condition, or when
+  // risk-referral-service is unreachable — see
+  // BeneficiaryService.withResolvedRiskConditionNames.
+  conditionCode: z.string().nullable().openapi({ example: 'HYPERTENSION_HIGH_BP' }),
+  conditionName: z.string().nullable().openapi({ example: 'Hypertension / High BP' }),
+  gradeScale: z
+    .enum(['BINARY', 'NORMAL_MILD_MODERATE_SEVERE', 'NORMAL_LOW_MEDIUM_HIGH'])
+    .nullable(),
 });
 
 const statusHistoryEntrySchema = z.object({
@@ -96,6 +108,8 @@ const childCaseDetailsSchema = z.object({
   birthLengthCm: z.number().nullable(),
   prematureFlag: z.boolean().nullable(),
   linkedAncCase: z.boolean(),
+  currentPhase: z.enum(CHILD_CASE_PHASES),
+  ccvOpeningRiskState: z.enum(CCV_OPENING_RISK_STATES).nullable(),
 });
 
 // A *LookupId field resolved against auth-service's lookup_values, for

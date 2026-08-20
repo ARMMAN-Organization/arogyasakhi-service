@@ -36,6 +36,7 @@ import {
   listSakhiNamesForSupervisor,
 } from '../sakhi/sakhi.client';
 import { resolveProjectNames } from '../projects/project.client';
+import { resolveRiskConditions } from '../risk-conditions/riskCondition.client';
 
 /**
  * Maps each socioDemographics *LookupId field to the lookup_categories
@@ -85,6 +86,54 @@ async function withResolvedSocioDemographics<T extends Record<string, unknown>>(
   }
 
   return { ...caseDetail, socioDemographics: withResolved };
+}
+
+/**
+ * Resolves each riskConditionSummaries entry's riskConditionId to a display-
+ * ready conditionCode/conditionName/gradeScale via risk-referral-service
+ * (the owner of risk_conditions — no cross-service joins, per this service's
+ * forklift rule). Ids are deduped before the batch call. An id with no
+ * matching ACTIVE row (retired condition, or a stale id) leaves that entry's
+ * three fields `null`.
+ *
+ * If risk-referral-service is unreachable or errors, this degrades to
+ * leaving every entry's fields `null` rather than failing the whole
+ * `GET /beneficiaries/:id` request — the beneficiary's own case/PII/risk-flag
+ * data is still valid and more load-bearing than the condition's display
+ * name. The failure is logged so it's visible without paging anyone.
+ */
+async function withResolvedRiskConditionNames<T extends Record<string, unknown>>(
+  caseDetail: T,
+  authorizationHeader: string,
+): Promise<T> {
+  const risks = caseDetail.riskConditionSummaries as Record<string, unknown>[] | undefined;
+  if (!risks || risks.length === 0) return caseDetail;
+
+  const ids = [...new Set(risks.map((r) => r.riskConditionId as string))];
+
+  let resolved: Map<string, { conditionCode: string; conditionName: string; gradeScale: string }>;
+  try {
+    resolved = await resolveRiskConditions(ids, authorizationHeader);
+  } catch (err) {
+    console.error(
+      `Failed to resolve risk condition names for ids [${ids.join(', ')}] — ` +
+        'returning riskConditionSummaries with null conditionCode/conditionName/gradeScale.',
+      err,
+    );
+    return caseDetail;
+  }
+
+  const withNames = risks.map((r) => {
+    const match = resolved.get(r.riskConditionId as string);
+    return {
+      ...r,
+      conditionCode: match?.conditionCode ?? null,
+      conditionName: match?.conditionName ?? null,
+      gradeScale: match?.gradeScale ?? null,
+    };
+  });
+
+  return { ...caseDetail, riskConditionSummaries: withNames };
 }
 
 const GESTATION_DAYS = 280;
@@ -597,7 +646,8 @@ export class BeneficiaryService {
     const found = prefetched ?? (await this.repository.findById(id));
     if (!found) throw notFound('Beneficiary case not found.');
     const projected = withDecryptedName(found);
-    return withResolvedSocioDemographics(projected, authorizationHeader);
+    const withSocio = await withResolvedSocioDemographics(projected, authorizationHeader);
+    return withResolvedRiskConditionNames(withSocio, authorizationHeader);
   }
 
   /**

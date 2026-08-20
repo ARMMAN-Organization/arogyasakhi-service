@@ -15,11 +15,13 @@ import {
   listSakhiNamesForSupervisor,
 } from '../sakhi/sakhi.client';
 import { resolveProjectNames } from '../projects/project.client';
+import { resolveRiskConditions } from '../risk-conditions/riskCondition.client';
 
 jest.mock('../geography/geography.client');
 jest.mock('../lookups/lookup.client');
 jest.mock('../sakhi/sakhi.client');
 jest.mock('../projects/project.client');
+jest.mock('../risk-conditions/riskCondition.client');
 
 describe('BeneficiaryService', () => {
   const originalEnv = { ...process.env };
@@ -52,6 +54,7 @@ describe('BeneficiaryService', () => {
   const resolveVillageNamesMock = jest.mocked(resolveVillageNames);
   const resolvePadaUnitsMock = jest.mocked(resolvePadaUnits);
   const resolveProjectNamesMock = jest.mocked(resolveProjectNames);
+  const resolveRiskConditionsMock = jest.mocked(resolveRiskConditions);
 
   function caller(overrides: Partial<AuthenticatedUser> = {}): AuthenticatedUser {
     return {
@@ -127,6 +130,7 @@ describe('BeneficiaryService', () => {
     resolveVillageNamesMock.mockResolvedValue(new Map());
     getSakhiNameMock.mockResolvedValue(null);
     listSakhiNamesForSupervisorMock.mockResolvedValue(new Map());
+    resolveRiskConditionsMock.mockResolvedValue(new Map());
     service = new BeneficiaryService(repository);
   });
 
@@ -1170,7 +1174,9 @@ describe('BeneficiaryService', () => {
 
       const result = await service.getById('x', caller({ roles: ['ADMIN'] }), AUTH_HEADER);
 
-      expect(result.riskConditionSummaries).toEqual(found.riskConditionSummaries);
+      expect(result.riskConditionSummaries).toEqual([
+        expect.objectContaining({ riskConditionId: 'risk-1', everAtRiskFlag: true }),
+      ]);
       expect(result.statusHistory).toEqual(found.statusHistory);
     });
 
@@ -1346,6 +1352,135 @@ describe('BeneficiaryService', () => {
       const result = await service.getById('x', caller({ roles: ['ADMIN'] }), AUTH_HEADER);
 
       expect(result.socioDemographics).toBeNull();
+    });
+  });
+
+  describe('getById — risk condition name resolution', () => {
+    it('resolves conditionCode/conditionName/gradeScale onto each risk condition summary', async () => {
+      const found = {
+        id: 'x',
+        pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
+        riskConditionSummaries: [{ riskConditionId: 'risk-1', everAtRiskFlag: true }],
+      };
+      repository.findById.mockResolvedValue(found as never);
+      resolveRiskConditionsMock.mockResolvedValue(
+        new Map([
+          [
+            'risk-1',
+            {
+              conditionCode: 'HYPERTENSION_HIGH_BP',
+              conditionName: 'Hypertension / High BP',
+              gradeScale: 'NORMAL_LOW_MEDIUM_HIGH',
+            },
+          ],
+        ]),
+      );
+
+      const result = await service.getById('x', caller({ roles: ['ADMIN'] }), AUTH_HEADER);
+
+      expect(result.riskConditionSummaries).toEqual([
+        expect.objectContaining({
+          riskConditionId: 'risk-1',
+          conditionCode: 'HYPERTENSION_HIGH_BP',
+          conditionName: 'Hypertension / High BP',
+          gradeScale: 'NORMAL_LOW_MEDIUM_HIGH',
+        }),
+      ]);
+      expect(resolveRiskConditionsMock).toHaveBeenCalledWith(['risk-1'], AUTH_HEADER);
+    });
+
+    it('skips the resolver call entirely when riskConditionSummaries is empty', async () => {
+      const found = {
+        id: 'x',
+        pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
+        riskConditionSummaries: [],
+      };
+      repository.findById.mockResolvedValue(found as never);
+
+      await service.getById('x', caller({ roles: ['ADMIN'] }), AUTH_HEADER);
+
+      expect(resolveRiskConditionsMock).not.toHaveBeenCalled();
+    });
+
+    it('dedupes riskConditionId before calling the resolver', async () => {
+      const found = {
+        id: 'x',
+        pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
+        riskConditionSummaries: [
+          { riskConditionId: 'risk-1', phase: 'ANC' },
+          { riskConditionId: 'risk-1', phase: 'PP' },
+        ],
+      };
+      repository.findById.mockResolvedValue(found as never);
+
+      await service.getById('x', caller({ roles: ['ADMIN'] }), AUTH_HEADER);
+
+      expect(resolveRiskConditionsMock).toHaveBeenCalledWith(['risk-1'], AUTH_HEADER);
+    });
+
+    it('degrades to null conditionCode/conditionName/gradeScale, without failing the request, when risk-referral-service is unreachable', async () => {
+      const found = {
+        id: 'x',
+        pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
+        riskConditionSummaries: [{ riskConditionId: 'risk-1', everAtRiskFlag: true }],
+      };
+      repository.findById.mockResolvedValue(found as never);
+      resolveRiskConditionsMock.mockRejectedValue(
+        Object.assign(new Error('bad gateway'), { status: 502 }),
+      );
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+
+      const result = await service.getById('x', caller({ roles: ['ADMIN'] }), AUTH_HEADER);
+
+      expect(result.riskConditionSummaries).toEqual([
+        expect.objectContaining({
+          riskConditionId: 'risk-1',
+          conditionCode: null,
+          conditionName: null,
+          gradeScale: null,
+        }),
+      ]);
+      expect(consoleErrorSpy).toHaveBeenCalled();
+      consoleErrorSpy.mockRestore();
+    });
+
+    it('leaves an unresolved riskConditionId null while resolving sibling entries', async () => {
+      const found = {
+        id: 'x',
+        pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
+        riskConditionSummaries: [
+          { riskConditionId: 'risk-1', phase: 'ANC' },
+          { riskConditionId: 'risk-retired', phase: 'ANC' },
+        ],
+      };
+      repository.findById.mockResolvedValue(found as never);
+      resolveRiskConditionsMock.mockResolvedValue(
+        new Map([
+          [
+            'risk-1',
+            {
+              conditionCode: 'HYPERTENSION_HIGH_BP',
+              conditionName: 'Hypertension / High BP',
+              gradeScale: 'NORMAL_LOW_MEDIUM_HIGH',
+            },
+          ],
+        ]),
+      );
+
+      const result = await service.getById('x', caller({ roles: ['ADMIN'] }), AUTH_HEADER);
+
+      expect(result.riskConditionSummaries).toEqual([
+        expect.objectContaining({
+          riskConditionId: 'risk-1',
+          conditionCode: 'HYPERTENSION_HIGH_BP',
+        }),
+        expect.objectContaining({
+          riskConditionId: 'risk-retired',
+          conditionCode: null,
+          conditionName: null,
+          gradeScale: null,
+        }),
+      ]);
     });
   });
 

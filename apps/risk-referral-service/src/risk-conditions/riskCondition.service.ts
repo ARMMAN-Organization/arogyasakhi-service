@@ -28,4 +28,15 @@ export class RiskConditionService {
       ? this.repository.findByConditionCodes(conditionCodes)
       : this.repository.findAllActive();
   }
+
+  /**
+   * With `ids` given, resolves each riskConditionId to its full row — ids
+   * with no matching ACTIVE row are silently omitted (same "unresolved
+   * entries are skipped, not fatal" contract as listByConditionCodes). An
+   * empty array short-circuits to an empty result without querying.
+   */
+  async listByIds(ids: string[]) {
+    if (ids.length === 0) return [];
+    return this.repository.findByIds(ids);
+  }
 }

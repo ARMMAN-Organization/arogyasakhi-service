@@ -29,6 +29,7 @@ export {
   requireRoles,
   trustGatewayIdentity,
   unauthorized,
+  badRequest,
   createDocumentedRouter,
   HttpError,
   ErrorCode,

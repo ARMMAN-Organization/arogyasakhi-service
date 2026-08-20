@@ -135,4 +135,65 @@ describe('withDecryptedName', () => {
 
     expect(result).not.toHaveProperty('socioDemographics');
   });
+
+  it('projects currentPhase and ccvOpeningRiskState on childCaseDetails', () => {
+    const result = withDecryptedName({
+      id: 'x',
+      pii: basePii(),
+      childCaseDetails: {
+        motherBeneficiaryId: 'mother-1',
+        dateOfBirth: new Date('2026-01-01'),
+        sex: 'FEMALE',
+        birthWeightKg: 3.1,
+        birthLengthCm: 49,
+        prematureFlag: false,
+        linkedAncCase: true,
+        currentPhase: 'CCV',
+        ccvOpeningRiskState: 'STABLE_LOW_RISK',
+      },
+    } as never);
+
+    expect(result.childCaseDetails).toMatchObject({
+      currentPhase: 'CCV',
+      ccvOpeningRiskState: 'STABLE_LOW_RISK',
+    });
+  });
+
+  it('leaves childCaseDetails null for a mother case', () => {
+    const result = withDecryptedName({
+      id: 'x',
+      pii: basePii(),
+      childCaseDetails: null,
+    } as never);
+
+    expect(result.childCaseDetails).toBeNull();
+  });
+
+  it('projects riskConditionSummaries with null conditionCode/conditionName/gradeScale placeholders', () => {
+    const result = withDecryptedName({
+      id: 'x',
+      pii: basePii(),
+      riskConditionSummaries: [
+        {
+          riskConditionId: 'rc-1',
+          phase: 'ANC',
+          latestGrade: 'SEVERE',
+          latestAssessedAt: new Date('2026-01-01'),
+          everHighestGrade: 'SEVERE',
+          everAtRiskFlag: true,
+          currentReferralTriggerFlag: true,
+          currentHrVisitTriggerFlag: false,
+        },
+      ],
+    } as never);
+
+    expect(result.riskConditionSummaries).toEqual([
+      expect.objectContaining({
+        riskConditionId: 'rc-1',
+        conditionCode: null,
+        conditionName: null,
+        gradeScale: null,
+      }),
+    ]);
+  });
 });
