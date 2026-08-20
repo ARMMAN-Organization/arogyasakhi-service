@@ -21,6 +21,7 @@ import { upsertSocioDemographicsSchema } from './dto/upsert-socio-demographics.d
 import { upsertRiskConditionSummarySchema } from './dto/upsert-risk-condition-summary.dto';
 import { applyLmpChangeSchema } from './dto/apply-lmp-change.dto';
 import { updatePhaseSchema } from './dto/update-phase.dto';
+import { setCcvOpeningRiskStateSchema } from './dto/set-ccv-opening-risk-state.dto';
 import { applyClosureSchema } from './dto/apply-closure.dto';
 import {
   errorResponse,
@@ -180,14 +181,43 @@ const beneficiaryCaseSchema = z.object({
   updatedAt: z.string().datetime(),
 });
 
+// Resolved server-side from visit-form-service's most recent visit-linked
+// clinical submission (owned by that service — no cross-service joins per
+// the forklift rule). Every field is null when the beneficiary has never
+// had a qualifying visit, or when visit-form-service is unreachable — see
+// BeneficiaryService.getById's own comment on the degrade-not-fail stance.
+const lastVisitVitalsSchema = z
+  .object({
+    visitId: z.string().uuid().nullable(),
+    submittedAt: z.string().datetime().nullable(),
+    weightKg: z.number().nullable(),
+    systolicBp: z.number().nullable(),
+    diastolicBp: z.number().nullable(),
+    temperatureF: z.number().nullable(),
+    hemoglobinGDl: z.number().nullable(),
+    muacCm: z.number().nullable(),
+    respiratoryRate: z.number().nullable(),
+  })
+  .nullable();
+
 const beneficiaryCaseDetailSchema = beneficiaryCaseSchema.extend({
   pii: piiResponseSchema,
   motherCaseDetails: motherCaseDetailsSchema.nullable(),
   childCaseDetails: childCaseDetailsSchema.nullable(),
   consentRecords: z.array(consentRecordSchema),
   riskConditionSummaries: z.array(riskConditionSummarySchema),
+  // Worst (highest-severity) grade among riskConditionSummaries, collapsed to
+  // the same 4-bucket vocabulary GET /beneficiaries/by-ids-with-risk's
+  // riskLevel badge uses — 'none' when there are no summaries or none are
+  // graded.
+  riskLevel: z.enum(['none', 'mild', 'moderate', 'high']),
+  // Display color derived 1:1 from riskLevel (none->GREEN, mild/moderate->
+  // YELLOW, high->RED) — a convention introduced for the mobile/Supervisor
+  // UI, not an existing backend rule confirmed elsewhere.
+  riskColor: z.enum(['GREEN', 'YELLOW', 'RED']),
   statusHistory: z.array(statusHistoryEntrySchema),
   socioDemographics: socioDemographicsSchema.nullable(),
+  lastVisitVitals: lastVisitVitalsSchema,
 });
 
 // List rows carry PII (decrypted name) and mother-or-child details (EDD/LMP/
@@ -488,6 +518,40 @@ export function registerBeneficiaryRoutes(doc: DocumentedRouter, service: Benefi
     controller.getById,
   );
 
+  doc.get(
+    '/beneficiaries/:id/ownership',
+    {
+      summary:
+        'Bare {id, sakhiId, caseType} ownership check — for a server-to-server caller (e.g. ' +
+        "visit-form-service's latest-visit-vitals resolver) that needs to verify whether this " +
+        'caller may see this beneficiary without the full GET /beneficiaries/:id response, ' +
+        'whose own enrichment (lastVisitVitals) calls back into visit-form-service — using ' +
+        'GET /beneficiaries/:id here instead would recreate that same request cycle.',
+      tags: ['Beneficiaries'],
+      responses: {
+        200: {
+          description: 'Ownership fields retrieved',
+          schema: envelope(
+            z.object({
+              id: z.string().uuid(),
+              sakhiId: z.string().uuid(),
+              caseType: z.enum(CASE_TYPES),
+            }),
+          ),
+        },
+        400: errorResponse(400, { message: 'id: Invalid uuid' }),
+        401: errorResponse(401),
+        403: errorResponse(403),
+        404: errorResponse(404, { message: 'Beneficiary case not found.' }),
+        500: errorResponse(500),
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER'),
+    validate(idParamsSchema, 'params'),
+    controller.getOwnership,
+  );
+
   doc.post(
     '/beneficiaries',
     {
@@ -576,11 +640,11 @@ export function registerBeneficiaryRoutes(doc: DocumentedRouter, service: Benefi
     '/beneficiaries/:id/phase',
     {
       summary:
-        'Advance currentPhase after a DELIVERY_VISIT submission (CR-041) — ' +
+        'Advance currentPhase after a visit submission (CR-041) — ' +
         "gated by requireRoles('SAKHI') since this codebase has no machine/service-account " +
-        "identity: the call chain originates from a SAKHI's DELIVERY_VISIT form submission " +
-        "(visit-form-service -> here), forwarding the SAKHI's own token. Only ANC->PP (mother) " +
-        'and *->NN (child) are accepted; any other transition 409s.',
+        "identity: the call chain originates from a SAKHI's visit form submission " +
+        "(visit-form-service -> here), forwarding the SAKHI's own token. Only ANC->PP (mother); " +
+        'NN->NN, NN->INC, and INC->CCV (child) are accepted; any other transition 409s.',
       tags: ['Beneficiaries'],
       params: idParamsSchema,
       responses: {
@@ -601,6 +665,38 @@ export function registerBeneficiaryRoutes(doc: DocumentedRouter, service: Benefi
     validate(idParamsSchema, 'params'),
     validateBody(updatePhaseSchema),
     controller.applyPhaseChange,
+  );
+
+  doc.patch(
+    '/beneficiaries/:id/ccv-opening-risk-state',
+    {
+      summary:
+        'Write ChildCaseDetails.ccvOpeningRiskState once, at the INC->CCV transition (BR-13) — ' +
+        "gated by requireRoles('SAKHI') since this codebase has no machine/service-account " +
+        'identity: the call chain originates from visitFormService right after its own ' +
+        "PATCH .../phase call lands the case at CCV, forwarding the submitting SAKHI's own " +
+        'token. 404s if no ChildCaseDetails row exists for this beneficiary.',
+      tags: ['Beneficiaries'],
+      params: idParamsSchema,
+      responses: {
+        200: {
+          description: 'ccvOpeningRiskState updated; the updated case is returned',
+          schema: envelope(beneficiaryCaseDetailSchema),
+        },
+        400: errorResponse(400, { message: 'ccvOpeningRiskState: Invalid enum value' }),
+        401: errorResponse(401),
+        403: errorResponse(403, { message: 'This beneficiary case is outside your own roster.' }),
+        404: errorResponse(404, {
+          message: 'No ChildCaseDetails row exists for this beneficiary.',
+        }),
+        500: errorResponse(500),
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI'),
+    validate(idParamsSchema, 'params'),
+    validateBody(setCcvOpeningRiskStateSchema),
+    controller.setCcvOpeningRiskState,
   );
 
   doc.patch(

@@ -16,18 +16,21 @@ import {
 } from '../sakhi/sakhi.client';
 import { resolveProjectNames } from '../projects/project.client';
 import { resolveRiskConditions } from '../risk-conditions/riskCondition.client';
+import { resolveLatestVisitVitals } from '../visits/visitVitals.client';
 
 jest.mock('../geography/geography.client');
 jest.mock('../lookups/lookup.client');
 jest.mock('../sakhi/sakhi.client');
 jest.mock('../projects/project.client');
 jest.mock('../risk-conditions/riskCondition.client');
+jest.mock('../visits/visitVitals.client');
 
 describe('BeneficiaryService', () => {
   const originalEnv = { ...process.env };
   const repository = {
     findMany: jest.fn(),
     findById: jest.fn(),
+    findOwnershipById: jest.fn(),
     findByLocalCaseUuid: jest.fn(),
     findDuplicateCandidate: jest.fn(),
     createEnrollment: jest.fn(),
@@ -55,6 +58,7 @@ describe('BeneficiaryService', () => {
   const resolvePadaUnitsMock = jest.mocked(resolvePadaUnits);
   const resolveProjectNamesMock = jest.mocked(resolveProjectNames);
   const resolveRiskConditionsMock = jest.mocked(resolveRiskConditions);
+  const resolveLatestVisitVitalsMock = jest.mocked(resolveLatestVisitVitals);
 
   function caller(overrides: Partial<AuthenticatedUser> = {}): AuthenticatedUser {
     return {
@@ -131,6 +135,7 @@ describe('BeneficiaryService', () => {
     getSakhiNameMock.mockResolvedValue(null);
     listSakhiNamesForSupervisorMock.mockResolvedValue(new Map());
     resolveRiskConditionsMock.mockResolvedValue(new Map());
+    resolveLatestVisitVitalsMock.mockResolvedValue(null);
     service = new BeneficiaryService(repository);
   });
 
@@ -268,7 +273,7 @@ describe('BeneficiaryService', () => {
         AUTH_HEADER,
       );
 
-      expect(repository.updatePhase).toHaveBeenCalledWith(beneficiaryId, 'ANC', 'PP');
+      expect(repository.updatePhase).toHaveBeenCalledWith(beneficiaryId, 'MOTHER', 'ANC', 'PP');
     });
 
     it('is a no-op when a CHILD case is already at NN (its creation default)', async () => {
@@ -287,7 +292,7 @@ describe('BeneficiaryService', () => {
       expect(result).toMatchObject({ id: beneficiaryId });
     });
 
-    it('409s a CHILD case transition from any phase other than NN — regression: the CHILD branch must validate fromPhase, not just toPhase', async () => {
+    it('409s a CHILD case transition to NN from any phase other than NN — regression: the CHILD branch must validate fromPhase, not just toPhase', async () => {
       repository.findById.mockResolvedValue(
         caseRow({ caseType: 'CHILD', currentPhase: 'INC' }) as never,
       );
@@ -296,6 +301,70 @@ describe('BeneficiaryService', () => {
         service.applyPhaseChange(
           beneficiaryId,
           'NN',
+          caller({ id: sakhiId, roles: ['SAKHI'] }),
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 409 });
+      expect(repository.updatePhase).not.toHaveBeenCalled();
+    });
+
+    it('advances a CHILD case from NN to INC', async () => {
+      repository.findById.mockResolvedValue(
+        caseRow({ caseType: 'CHILD', currentPhase: 'NN' }) as never,
+      );
+      repository.updatePhase.mockResolvedValue(true);
+
+      await service.applyPhaseChange(
+        beneficiaryId,
+        'INC',
+        caller({ id: sakhiId, roles: ['SAKHI'] }),
+        AUTH_HEADER,
+      );
+
+      expect(repository.updatePhase).toHaveBeenCalledWith(beneficiaryId, 'CHILD', 'NN', 'INC');
+    });
+
+    it('advances a CHILD case from INC to CCV', async () => {
+      repository.findById.mockResolvedValue(
+        caseRow({ caseType: 'CHILD', currentPhase: 'INC' }) as never,
+      );
+      repository.updatePhase.mockResolvedValue(true);
+
+      await service.applyPhaseChange(
+        beneficiaryId,
+        'CCV',
+        caller({ id: sakhiId, roles: ['SAKHI'] }),
+        AUTH_HEADER,
+      );
+
+      expect(repository.updatePhase).toHaveBeenCalledWith(beneficiaryId, 'CHILD', 'INC', 'CCV');
+    });
+
+    it('409s a CHILD case skipping INC (NN directly to CCV)', async () => {
+      repository.findById.mockResolvedValue(
+        caseRow({ caseType: 'CHILD', currentPhase: 'NN' }) as never,
+      );
+
+      await expect(
+        service.applyPhaseChange(
+          beneficiaryId,
+          'CCV',
+          caller({ id: sakhiId, roles: ['SAKHI'] }),
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 409 });
+      expect(repository.updatePhase).not.toHaveBeenCalled();
+    });
+
+    it('409s a regressive CHILD transition (CCV back to INC)', async () => {
+      repository.findById.mockResolvedValue(
+        caseRow({ caseType: 'CHILD', currentPhase: 'CCV' }) as never,
+      );
+
+      await expect(
+        service.applyPhaseChange(
+          beneficiaryId,
+          'INC',
           caller({ id: sakhiId, roles: ['SAKHI'] }),
           AUTH_HEADER,
         ),
@@ -1481,6 +1550,236 @@ describe('BeneficiaryService', () => {
           gradeScale: null,
         }),
       ]);
+    });
+  });
+
+  describe('getById — overall riskLevel', () => {
+    it("is 'none' when riskConditionSummaries is empty", async () => {
+      const found = {
+        id: 'x',
+        pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
+        riskConditionSummaries: [],
+      };
+      repository.findById.mockResolvedValue(found as never);
+
+      const result = await service.getById('x', caller({ roles: ['ADMIN'] }), AUTH_HEADER);
+
+      expect(result.riskLevel).toBe('none');
+    });
+
+    it("is 'mild' when the only summary is graded MILD", async () => {
+      const found = {
+        id: 'x',
+        pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
+        riskConditionSummaries: [{ riskConditionId: 'risk-1', latestGrade: 'MILD' }],
+      };
+      repository.findById.mockResolvedValue(found as never);
+
+      const result = await service.getById('x', caller({ roles: ['ADMIN'] }), AUTH_HEADER);
+
+      expect(result.riskLevel).toBe('mild');
+    });
+
+    it("takes the worst grade across multiple summaries — any SEVERE anywhere yields 'high'", async () => {
+      const found = {
+        id: 'x',
+        pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
+        riskConditionSummaries: [
+          { riskConditionId: 'risk-1', latestGrade: 'MILD' },
+          { riskConditionId: 'risk-2', latestGrade: 'SEVERE' },
+          { riskConditionId: 'risk-3', latestGrade: 'MODERATE' },
+        ],
+      };
+      repository.findById.mockResolvedValue(found as never);
+
+      const result = await service.getById('x', caller({ roles: ['ADMIN'] }), AUTH_HEADER);
+
+      expect(result.riskLevel).toBe('high');
+    });
+
+    it("treats HIGH and CRITICAL grades as 'high', same as the pada visit-list badge", async () => {
+      const found = {
+        id: 'x',
+        pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
+        riskConditionSummaries: [{ riskConditionId: 'risk-1', latestGrade: 'CRITICAL' }],
+      };
+      repository.findById.mockResolvedValue(found as never);
+
+      const result = await service.getById('x', caller({ roles: ['ADMIN'] }), AUTH_HEADER);
+
+      expect(result.riskLevel).toBe('high');
+    });
+
+    it("is 'none' when every summary has a null latestGrade (ungraded/self-reported)", async () => {
+      const found = {
+        id: 'x',
+        pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
+        riskConditionSummaries: [{ riskConditionId: 'risk-1', latestGrade: null }],
+      };
+      repository.findById.mockResolvedValue(found as never);
+
+      const result = await service.getById('x', caller({ roles: ['ADMIN'] }), AUTH_HEADER);
+
+      expect(result.riskLevel).toBe('none');
+    });
+  });
+
+  describe('getById — riskColor derived from riskLevel', () => {
+    it("is GREEN when riskLevel is 'none'", async () => {
+      const found = {
+        id: 'x',
+        pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
+        riskConditionSummaries: [],
+      };
+      repository.findById.mockResolvedValue(found as never);
+
+      const result = await service.getById('x', caller({ roles: ['ADMIN'] }), AUTH_HEADER);
+
+      expect(result.riskColor).toBe('GREEN');
+    });
+
+    it.each([['mild'], ['moderate']])("is YELLOW when riskLevel is '%s'", async (grade) => {
+      const found = {
+        id: 'x',
+        pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
+        riskConditionSummaries: [
+          { riskConditionId: 'risk-1', latestGrade: grade === 'mild' ? 'MILD' : 'MODERATE' },
+        ],
+      };
+      repository.findById.mockResolvedValue(found as never);
+
+      const result = await service.getById('x', caller({ roles: ['ADMIN'] }), AUTH_HEADER);
+
+      expect(result.riskColor).toBe('YELLOW');
+    });
+
+    it("is RED when riskLevel is 'high'", async () => {
+      const found = {
+        id: 'x',
+        pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
+        riskConditionSummaries: [{ riskConditionId: 'risk-1', latestGrade: 'SEVERE' }],
+      };
+      repository.findById.mockResolvedValue(found as never);
+
+      const result = await service.getById('x', caller({ roles: ['ADMIN'] }), AUTH_HEADER);
+
+      expect(result.riskColor).toBe('RED');
+    });
+  });
+
+  describe('getById — lastVisitVitals', () => {
+    it('attaches the resolved vitals snapshot to the response', async () => {
+      const found = {
+        id: 'x',
+        pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
+        riskConditionSummaries: [],
+      };
+      repository.findById.mockResolvedValue(found as never);
+      const vitals = {
+        visitId: 'visit-1',
+        submittedAt: '2026-08-01T00:00:00.000Z',
+        weightKg: 58.5,
+        systolicBp: 120,
+        diastolicBp: 80,
+        temperatureF: 98.6,
+        hemoglobinGDl: 11.2,
+        muacCm: 24.5,
+        respiratoryRate: null,
+      };
+      resolveLatestVisitVitalsMock.mockResolvedValue(vitals);
+
+      const result = await service.getById('x', caller({ roles: ['ADMIN'] }), AUTH_HEADER);
+
+      expect(result.lastVisitVitals).toEqual(vitals);
+      expect(resolveLatestVisitVitalsMock).toHaveBeenCalledWith('x', AUTH_HEADER);
+    });
+
+    it('is null when the beneficiary has never had a qualifying visit, or visit-form-service is unreachable', async () => {
+      const found = {
+        id: 'x',
+        pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
+        riskConditionSummaries: [],
+      };
+      repository.findById.mockResolvedValue(found as never);
+      resolveLatestVisitVitalsMock.mockResolvedValue(null);
+
+      const result = await service.getById('x', caller({ roles: ['ADMIN'] }), AUTH_HEADER);
+
+      expect(result.lastVisitVitals).toBeNull();
+    });
+  });
+
+  describe('getOwnership', () => {
+    it('returns bare {id, sakhiId, caseType} for a SAKHI caller who owns the case', async () => {
+      repository.findOwnershipById.mockResolvedValue({
+        id: 'x',
+        sakhiId: CALLER_ID,
+        caseType: 'MOTHER',
+      } as never);
+
+      const result = await service.getOwnership('x', caller({ roles: ['SAKHI'] }), AUTH_HEADER);
+
+      expect(result).toEqual({ id: 'x', sakhiId: CALLER_ID, caseType: 'MOTHER' });
+    });
+
+    it('never triggers projectCase enrichment (no lastVisitVitals/riskLevel/etc.)', async () => {
+      repository.findOwnershipById.mockResolvedValue({
+        id: 'x',
+        sakhiId: CALLER_ID,
+        caseType: 'MOTHER',
+      } as never);
+
+      const result = await service.getOwnership('x', caller({ roles: ['SAKHI'] }), AUTH_HEADER);
+
+      expect(result).not.toHaveProperty('lastVisitVitals');
+      expect(result).not.toHaveProperty('riskLevel');
+      expect(repository.findById).not.toHaveBeenCalled();
+      expect(resolveLatestVisitVitalsMock).not.toHaveBeenCalled();
+    });
+
+    it('404s on an unknown beneficiary id', async () => {
+      repository.findOwnershipById.mockResolvedValue(null);
+
+      await expect(
+        service.getOwnership('missing', caller({ roles: ['SAKHI'] }), AUTH_HEADER),
+      ).rejects.toMatchObject({ status: 404 });
+    });
+
+    it("403s a SAKHI caller reading another beneficiary's ownership", async () => {
+      repository.findOwnershipById.mockResolvedValue({
+        id: 'x',
+        sakhiId: 'some-other-sakhi',
+        caseType: 'MOTHER',
+      } as never);
+
+      await expect(
+        service.getOwnership('x', caller({ roles: ['SAKHI'] }), AUTH_HEADER),
+      ).rejects.toMatchObject({ status: 403 });
+    });
+
+    it('403s a SUPERVISOR caller whose roster does not include the beneficiary sakhi', async () => {
+      repository.findOwnershipById.mockResolvedValue({
+        id: 'x',
+        sakhiId: 'some-other-sakhi',
+        caseType: 'MOTHER',
+      } as never);
+      listSakhiIdsForSupervisorMock.mockResolvedValue(['a-different-sakhi']);
+
+      await expect(
+        service.getOwnership('x', caller({ roles: ['SUPERVISOR'] }), AUTH_HEADER),
+      ).rejects.toMatchObject({ status: 403 });
+    });
+
+    it('allows a MANAGER/ADMIN caller unrestricted', async () => {
+      repository.findOwnershipById.mockResolvedValue({
+        id: 'x',
+        sakhiId: 'some-other-sakhi',
+        caseType: 'MOTHER',
+      } as never);
+
+      await expect(
+        service.getOwnership('x', caller({ roles: ['ADMIN'] }), AUTH_HEADER),
+      ).resolves.toEqual({ id: 'x', sakhiId: 'some-other-sakhi', caseType: 'MOTHER' });
     });
   });
 

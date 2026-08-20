@@ -16,7 +16,12 @@ import type {
   BeneficiaryStatusHistory,
   Prisma,
 } from '../../../../node_modules/.prisma/client-beneficiary-service';
-import type { BeneficiaryStatus, CasePhase, CaseType } from './beneficiary.constants';
+import type {
+  BeneficiaryStatus,
+  CasePhase,
+  CaseType,
+  CcvOpeningRiskState,
+} from './beneficiary.constants';
 import { buildSearchTokens, evaluateDuplicateMatch } from './beneficiary.duplicate-detection';
 import { computeBmi, withDecryptedName } from './beneficiary.mapper';
 import type { BeneficiaryListFilters, BeneficiaryRepository } from './beneficiary.repository';
@@ -37,6 +42,7 @@ import {
 } from '../sakhi/sakhi.client';
 import { resolveProjectNames } from '../projects/project.client';
 import { resolveRiskConditions } from '../risk-conditions/riskCondition.client';
+import { resolveLatestVisitVitals } from '../visits/visitVitals.client';
 
 /**
  * Maps each socioDemographics *LookupId field to the lookup_categories
@@ -134,6 +140,53 @@ async function withResolvedRiskConditionNames<T extends Record<string, unknown>>
   });
 
   return { ...caseDetail, riskConditionSummaries: withNames };
+}
+
+/**
+ * Maps `riskLevel` to a display color. This is a convention introduced here
+ * — no color mapping exists anywhere else in the codebase — not a
+ * confirmation of an existing backend rule. Kept as a pure function of
+ * `riskLevel` (not its own independent grade-scan) so it can never disagree
+ * with the riskLevel badge computed alongside it.
+ */
+function riskLevelToColor(
+  level: 'none' | 'mild' | 'moderate' | 'high',
+): 'GREEN' | 'YELLOW' | 'RED' {
+  switch (level) {
+    case 'mild':
+    case 'moderate':
+      return 'YELLOW';
+    case 'high':
+      return 'RED';
+    default:
+      return 'GREEN';
+  }
+}
+
+/**
+ * Aggregates `riskConditionSummaries` down to one overall `riskLevel` badge
+ * for the whole case — the worst (highest-severity) grade among all
+ * conditions wins, same "any SEVERE anywhere -> high" rule
+ * `findByIdsWithRisk`/`getByIdsWithRisk` already use for the pada
+ * visit-list's badge, just computed here from the full summary list instead
+ * of a single pre-picked "worst" row. Reuses `gradeToRiskLevel` so this
+ * detail-view badge and the list-view badge can never drift out of sync. A
+ * case with no risk-condition-summary rows (or only ungraded ones,
+ * latestGrade null) is `'none'`. `riskColor` is derived 1:1 from the
+ * resulting `riskLevel` — see `riskLevelToColor`.
+ */
+function withOverallRiskLevel<T extends Record<string, unknown>>(caseDetail: T): T {
+  const risks = caseDetail.riskConditionSummaries as { latestGrade: string | null }[] | undefined;
+  if (!risks) return caseDetail;
+
+  const RISK_LEVEL_RANK = { none: 0, mild: 1, moderate: 2, high: 3 } as const;
+  let riskLevel: 'none' | 'mild' | 'moderate' | 'high' = 'none';
+  for (const r of risks) {
+    const level = gradeToRiskLevel(r.latestGrade);
+    if (RISK_LEVEL_RANK[level] > RISK_LEVEL_RANK[riskLevel]) riskLevel = level;
+  }
+
+  return { ...caseDetail, riskLevel, riskColor: riskLevelToColor(riskLevel) };
 }
 
 const GESTATION_DAYS = 280;
@@ -622,7 +675,41 @@ export class BeneficiaryService {
       await assertCallerCanTouchCase(found.sakhiId, caller, authorizationHeader);
     }
 
-    return this.projectCase(id, authorizationHeader, found);
+    const projected = await this.projectCase(id, authorizationHeader, found);
+    // Only fetched for the single-case detail view — projectCase is also
+    // reused by write-path re-fetches (applyLmpChange/reactivateCase/etc.),
+    // which don't need an extra cross-service round trip to visit-form-
+    // service just to return a response the caller already knows the
+    // outcome of. Degrades to null on any failure (see
+    // resolveLatestVisitVitals) rather than failing the whole request.
+    const lastVisitVitals = await resolveLatestVisitVitals(id, authorizationHeader);
+    return Object.assign(projected, { lastVisitVitals });
+  }
+
+  /**
+   * Bare `{id, sakhiId, caseType}` ownership check, same role/roster rules
+   * as getById but with none of its enrichment (pii/risk/socio/vitals) —
+   * for a caller that only needs to verify "may this caller see this
+   * beneficiary," not fetch the full profile. Exists specifically so
+   * visit-form-service's latest-visit-vitals resolver can verify ownership
+   * without calling back into getById itself, which would recreate the
+   * exact request cycle this method exists to avoid (getById ->
+   * resolveLatestVisitVitals -> visit-form-service ->
+   * this-service-again-via-getById -> resolveLatestVisitVitals -> ...).
+   */
+  async getOwnership(id: string, caller: AuthenticatedUser, authorizationHeader: string) {
+    const found = await this.repository.findOwnershipById(id);
+    if (!found) throw notFound('Beneficiary case not found.');
+
+    if (caller.roles.includes('SAKHI')) {
+      if (found.sakhiId !== caller.id) {
+        throw forbidden('This beneficiary case is outside your own roster.');
+      }
+    } else {
+      await assertCallerCanTouchCase(found.sakhiId, caller, authorizationHeader);
+    }
+
+    return found;
   }
 
   /**
@@ -647,7 +734,8 @@ export class BeneficiaryService {
     if (!found) throw notFound('Beneficiary case not found.');
     const projected = withDecryptedName(found);
     const withSocio = await withResolvedSocioDemographics(projected, authorizationHeader);
-    return withResolvedRiskConditionNames(withSocio, authorizationHeader);
+    const withRiskLevel = withOverallRiskLevel(withSocio);
+    return withResolvedRiskConditionNames(withRiskLevel, authorizationHeader);
   }
 
   /**
@@ -795,18 +883,73 @@ export class BeneficiaryService {
 
     const isValidTransition =
       (existing.caseType === 'MOTHER' && fromPhase === 'ANC' && toPhase === 'PP') ||
-      (existing.caseType === 'CHILD' && fromPhase === 'NN' && toPhase === 'NN');
+      (existing.caseType === 'CHILD' &&
+        // NN->NN is a no-op already short-circuited above; NN->INC and
+        // INC->CCV are the two real forward transitions a CHILD case makes,
+        // triggered by the first INC-type / CCV-type visit submission (see
+        // visit-form-service's form.service.ts). CCV->CLOSED goes through
+        // applyClosure, not this method.
+        ((fromPhase === 'NN' && toPhase === 'NN') ||
+          (fromPhase === 'NN' && toPhase === 'INC') ||
+          (fromPhase === 'INC' && toPhase === 'CCV')));
     if (!isValidTransition) {
       throw conflict(`Cannot move a ${existing.caseType} case from ${fromPhase} to ${toPhase}.`);
     }
 
-    const updated = await this.repository.updatePhase(beneficiaryId, fromPhase, toPhase);
+    const updated = await this.repository.updatePhase(
+      beneficiaryId,
+      existing.caseType as CaseType,
+      fromPhase,
+      toPhase,
+    );
     if (!updated) {
       // Raced with another phase change between the read above and the
       // conditional update — same outcome as the check above, just caught a
       // beat later instead of trusting a stale read.
       throw conflict(`Cannot move a ${existing.caseType} case from ${fromPhase} to ${toPhase}.`);
     }
+
+    return this.projectCase(beneficiaryId, authorizationHeader);
+  }
+
+  /**
+   * Writes ChildCaseDetails.ccvOpeningRiskState once, at the INC->CCV
+   * transition (BR-13). Called server-to-server by visit-form-service right
+   * after its own PATCH .../phase call lands the case at CCV — same
+   * no-machine-identity stance as applyPhaseChange, so gated by the same
+   * requireRoles('SAKHI') and ownership check.
+   *
+   * Deliberately does NOT re-check `currentPhase === 'CCV'` — BR-13's
+   * computation (last-3-INC-visits scan) is itself only triggered by
+   * visit-form-service's own INC->CCV transition, and re-validating the
+   * phase here would just be trusting the same caller's own prior call
+   * twice. A MOTHER case (no ChildCaseDetails row) or a beneficiary with no
+   * row yet 404s rather than silently no-op'ing, since this method is only
+   * ever called right after a real CCV transition — an unexpected 404 here
+   * signals a caller-side sequencing bug worth surfacing, not swallowing.
+   */
+  async setCcvOpeningRiskState(
+    beneficiaryId: string,
+    ccvOpeningRiskState: CcvOpeningRiskState,
+    caller: AuthenticatedUser,
+    authorizationHeader: string,
+  ) {
+    const existing = await this.repository.findById(beneficiaryId);
+    if (!existing) throw notFound('Beneficiary case not found.');
+
+    if (caller.roles.includes('SAKHI')) {
+      if (existing.sakhiId !== caller.id) {
+        throw forbidden('This beneficiary case is outside your own roster.');
+      }
+    } else {
+      await assertCallerCanTouchCase(existing.sakhiId, caller, authorizationHeader);
+    }
+
+    const updated = await this.repository.setCcvOpeningRiskState(
+      beneficiaryId,
+      ccvOpeningRiskState,
+    );
+    if (!updated) throw notFound('No ChildCaseDetails row exists for this beneficiary.');
 
     return this.projectCase(beneficiaryId, authorizationHeader);
   }

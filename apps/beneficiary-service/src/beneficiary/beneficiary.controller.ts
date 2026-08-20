@@ -82,6 +82,13 @@ export function createBeneficiaryController(service: BeneficiaryService) {
       res.json(ok(await service.getById(req.params.id, req.user, authorizationHeader)));
     }),
 
+    getOwnership: asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      res.json(ok(await service.getOwnership(req.params.id, req.user, authorizationHeader)));
+    }),
+
     create: asyncHandler(async (req, res, next) => {
       if (!req.user) return next(unauthorized());
       const authorizationHeader = req.header('authorization');
@@ -134,6 +141,19 @@ export function createBeneficiaryController(service: BeneficiaryService) {
       const updated = await service.applyPhaseChange(
         req.params.id,
         req.body.phase,
+        req.user,
+        authorizationHeader,
+      );
+      res.json(ok(updated));
+    }),
+
+    setCcvOpeningRiskState: asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const updated = await service.setCcvOpeningRiskState(
+        req.params.id,
+        req.body.ccvOpeningRiskState,
         req.user,
         authorizationHeader,
       );

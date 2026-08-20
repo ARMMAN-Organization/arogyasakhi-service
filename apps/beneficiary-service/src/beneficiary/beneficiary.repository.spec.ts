@@ -106,4 +106,74 @@ describe('BeneficiaryRepository', () => {
       expect(result.activeMothersHighRiskCount).toBe(0);
     });
   });
+
+  describe('updatePhase', () => {
+    function buildTxMock(caseUpdateCount: number) {
+      const beneficiaryCaseUpdateMany = jest.fn().mockResolvedValue({ count: caseUpdateCount });
+      const childCaseDetailsUpdateMany = jest.fn().mockResolvedValue({ count: 1 });
+      const tx = {
+        beneficiaryCase: { updateMany: beneficiaryCaseUpdateMany },
+        childCaseDetails: { updateMany: childCaseDetailsUpdateMany },
+      };
+      const $transaction = jest.fn((fn: (tx: unknown) => unknown) => fn(tx));
+      return { $transaction, beneficiaryCaseUpdateMany, childCaseDetailsUpdateMany };
+    }
+
+    it('also advances ChildCaseDetails.currentPhase for a CHILD case, in the same transaction', async () => {
+      const { $transaction, beneficiaryCaseUpdateMany, childCaseDetailsUpdateMany } =
+        buildTxMock(1);
+      const txRepository = new BeneficiaryRepository({ $transaction } as never);
+
+      const result = await txRepository.updatePhase('ben-1', 'CHILD', 'NN', 'INC');
+
+      expect(result).toBe(true);
+      expect(beneficiaryCaseUpdateMany).toHaveBeenCalledWith({
+        where: { id: 'ben-1', isDeleted: false, currentPhase: 'NN' },
+        data: { currentPhase: 'INC' },
+      });
+      expect(childCaseDetailsUpdateMany).toHaveBeenCalledWith({
+        where: { beneficiaryId: 'ben-1' },
+        data: { currentPhase: 'INC' },
+      });
+    });
+
+    it('does not touch ChildCaseDetails for a MOTHER case', async () => {
+      const { $transaction, childCaseDetailsUpdateMany } = buildTxMock(1);
+      const txRepository = new BeneficiaryRepository({ $transaction } as never);
+
+      const result = await txRepository.updatePhase('ben-1', 'MOTHER', 'ANC', 'PP');
+
+      expect(result).toBe(true);
+      expect(childCaseDetailsUpdateMany).not.toHaveBeenCalled();
+    });
+
+    it('skips the ChildCaseDetails write when the case-level update raced to 0 rows', async () => {
+      const { $transaction, childCaseDetailsUpdateMany } = buildTxMock(0);
+      const txRepository = new BeneficiaryRepository({ $transaction } as never);
+
+      const result = await txRepository.updatePhase('ben-1', 'CHILD', 'NN', 'INC');
+
+      expect(result).toBe(false);
+      expect(childCaseDetailsUpdateMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('findOwnershipById', () => {
+    it('selects only id/sakhiId/caseType, not the full enriched projection', async () => {
+      const findFirst = jest
+        .fn()
+        .mockResolvedValue({ id: 'ben-1', sakhiId: 'sakhi-1', caseType: 'MOTHER' });
+      const txRepository = new BeneficiaryRepository({
+        beneficiaryCase: { findFirst },
+      } as never);
+
+      const result = await txRepository.findOwnershipById('ben-1');
+
+      expect(findFirst).toHaveBeenCalledWith({
+        where: { id: 'ben-1', isDeleted: false },
+        select: { id: true, sakhiId: true, caseType: true },
+      });
+      expect(result).toEqual({ id: 'ben-1', sakhiId: 'sakhi-1', caseType: 'MOTHER' });
+    });
+  });
 });

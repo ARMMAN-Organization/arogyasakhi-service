@@ -1,5 +1,10 @@
 import type { PrismaService } from '../prisma/prisma.service';
-import type { CasePhase, CaseType } from './beneficiary.constants';
+import type {
+  CasePhase,
+  CaseType,
+  CcvOpeningRiskState,
+  ChildCasePhase,
+} from './beneficiary.constants';
 import type {
   BeneficiaryListFilters,
   BeneficiarySummaryFilters,
@@ -361,6 +366,24 @@ export class BeneficiaryRepository {
     });
   }
 
+  /**
+   * Bare `{id, sakhiId, caseType}` for an ownership check — deliberately NOT
+   * `findById`'s full projection (pii/risk/socio/status enrichment), which
+   * would pull in `GET /beneficiaries/:id`'s own cross-service calls (e.g.
+   * visit-form-service's latest-visit-vitals resolver, which itself calls
+   * back into THIS lookup to verify ownership — see
+   * form.service.ts/beneficiary.client.ts's own comment on the loop this
+   * exists to break). Any caller doing only an ownership check must use
+   * this, never findById, or a caller that itself triggers vitals
+   * resolution recreates the same infinite request cycle.
+   */
+  findOwnershipById(id: string) {
+    return this.prisma.beneficiaryCase.findFirst({
+      where: { id, isDeleted: false },
+      select: { id: true, sakhiId: true, caseType: true },
+    });
+  }
+
   findById(id: string) {
     return this.prisma.beneficiaryCase.findFirst({
       where: { id, isDeleted: false },
@@ -542,11 +565,56 @@ export class BeneficiaryRepository {
    * read-then-write), so a case whose phase already changed between the
    * service's findById and this call returns count 0 and the service turns
    * that into a 409 instead of silently overwriting a since-changed case.
+   *
+   * For a CHILD case, also advances `ChildCaseDetails.currentPhase` to the
+   * same value in the same transaction — the two columns must never drift:
+   * `BeneficiaryCase.currentPhase` is the case-level phase every case type
+   * shares, `ChildCaseDetails.currentPhase` is the CHILD-specific mirror the
+   * detail API (`GET /beneficiaries/:id`) actually returns. A MOTHER case
+   * has no `ChildCaseDetails` row, so this second write is skipped for
+   * `caseType !== 'CHILD'`.
    */
-  async updatePhase(beneficiaryId: string, fromPhase: CasePhase, toPhase: CasePhase) {
-    const result = await this.prisma.beneficiaryCase.updateMany({
-      where: { id: beneficiaryId, isDeleted: false, currentPhase: fromPhase },
-      data: { currentPhase: toPhase },
+  async updatePhase(
+    beneficiaryId: string,
+    caseType: CaseType,
+    fromPhase: CasePhase,
+    toPhase: CasePhase,
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      const result = await tx.beneficiaryCase.updateMany({
+        where: { id: beneficiaryId, isDeleted: false, currentPhase: fromPhase },
+        data: { currentPhase: toPhase },
+      });
+      if (result.count === 0) return false;
+
+      if (caseType === 'CHILD') {
+        // CasePhase (7 values, shared by every case type) is a strict
+        // superset of ChildCasePhase (NN/INC/CCV/CLOSED) — the cast is safe
+        // here because applyPhaseChange's own transition table never allows
+        // a CHILD case's toPhase to be ANC/DELIVERY/PP, only the 4 values
+        // both enums share.
+        await tx.childCaseDetails.updateMany({
+          where: { beneficiaryId },
+          data: { currentPhase: toPhase as ChildCasePhase },
+        });
+      }
+
+      return true;
+    });
+  }
+
+  /**
+   * Writes ChildCaseDetails.ccvOpeningRiskState (BR-13) — a plain
+   * updateMany (not conditioned on the current value) since this is a
+   * write-once field at the INC->CCV transition, not a state machine with
+   * its own guarded transitions like currentPhase. Returns false when no
+   * ChildCaseDetails row exists for this beneficiary (a MOTHER case, or a
+   * beneficiary id the caller sequenced this call against out of order).
+   */
+  async setCcvOpeningRiskState(beneficiaryId: string, ccvOpeningRiskState: CcvOpeningRiskState) {
+    const result = await this.prisma.childCaseDetails.updateMany({
+      where: { beneficiaryId },
+      data: { ccvOpeningRiskState },
     });
     return result.count > 0;
   }
