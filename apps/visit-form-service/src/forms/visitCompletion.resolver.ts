@@ -66,8 +66,15 @@ export async function resolveVisitCompletion(
       existing.statusLookupValueId,
       {
         statusLookupValueId: completedStatusId,
+        // actualVisitDate defaults to now — the visit demonstrably happened
+        // (its form was just submitted), so "when" is a safe inference.
+        // meetBeneficiaryFlag is left null rather than defaulted to true —
+        // meetBeneficiaryFlag is nullable (schema.prisma), and "was the
+        // beneficiary met" is a clinical fact the Sakhi never asserted via
+        // this auto-completion path; defaulting it would write an assertion
+        // no one made.
         actualVisitDate: existing.actualVisitDate ?? new Date(),
-        meetBeneficiaryFlag: existing.meetBeneficiaryFlag ?? true,
+        meetBeneficiaryFlag: existing.meetBeneficiaryFlag ?? undefined,
         notMetReason: existing.notMetReason ?? undefined,
         completedAt: new Date(),
       },

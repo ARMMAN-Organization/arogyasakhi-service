@@ -11,16 +11,16 @@ function vitalsResponse(data: Record<string, unknown>) {
 describe('resolveLatestVisitVitals', () => {
   const originalFetch = global.fetch;
   const fetchMock = jest.fn();
-  let consoleErrorSpy: jest.SpyInstance;
+  let consoleWarnSpy: jest.SpyInstance;
 
   beforeEach(() => {
     jest.clearAllMocks();
     global.fetch = fetchMock as unknown as typeof fetch;
-    consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
   });
 
   afterEach(() => {
-    consoleErrorSpy.mockRestore();
+    consoleWarnSpy.mockRestore();
   });
 
   afterAll(() => {
@@ -56,7 +56,7 @@ describe('resolveLatestVisitVitals', () => {
     const result = await resolveLatestVisitVitals('ben-1', 'Bearer test-token');
 
     expect(result).toBeNull();
-    expect(consoleErrorSpy).toHaveBeenCalled();
+    expect(consoleWarnSpy).toHaveBeenCalled();
   });
 
   it('returns null (not a throw) when visit-form-service is unreachable', async () => {
@@ -65,6 +65,6 @@ describe('resolveLatestVisitVitals', () => {
     const result = await resolveLatestVisitVitals('ben-1', 'Bearer test-token');
 
     expect(result).toBeNull();
-    expect(consoleErrorSpy).toHaveBeenCalled();
+    expect(consoleWarnSpy).toHaveBeenCalled();
   });
 });

@@ -39,7 +39,7 @@ export async function resolveLatestVisitVitals(
       { headers: { Authorization: authorizationHeader } },
     );
     if (!res.ok) {
-      console.error(
+      console.warn(
         `Failed to resolve latest-visit-vitals for beneficiary ${beneficiaryId} — ` +
           `visit-form-service returned ${res.status}.`,
       );
@@ -48,7 +48,7 @@ export async function resolveLatestVisitVitals(
     const body = (await res.json()) as { data: VitalsSnapshot };
     return body.data;
   } catch (err) {
-    console.error(
+    console.warn(
       `Unable to reach visit-form-service to resolve latest-visit-vitals for beneficiary ` +
         `${beneficiaryId}.`,
       err,

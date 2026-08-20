@@ -6,9 +6,9 @@ import type { VisitSummaryQueryInput } from './dto/visit-summary-query.dto';
 import type { VisitHistoryQueryInput } from './dto/visit-history-query.dto';
 import { findSakhiById, listSakhiIdsForSupervisor } from '../sakhis/sakhi.client';
 import { resolveVisitStatusCode, resolveVisitStatusCodes } from '../lookups/lookup.client';
-import { findBeneficiaryOwnership } from '../beneficiaries/beneficiary.client';
+import { assertCallerOwnsBeneficiary } from '../beneficiaries/beneficiaryOwnership.guard';
 import { resolveFormCodeForVisitType } from '../forms/visit-code-form-map';
-import { extractVisitHistoryVitals } from '../forms/vitalsExtractor';
+import { EMPTY_VISIT_HISTORY_VITALS, extractVisitHistoryVitals } from '../forms/vitalsExtractor';
 
 /** The calling principal's own identity, as carried on their trusted-identity headers. */
 export interface CallerIdentity {
@@ -364,11 +364,12 @@ export class VisitInstanceService {
   /**
    * FR-S-4.6 — a beneficiary's last `limit` (default 2) COMPLETED visits'
    * key vitals, shown before the Sakhi starts her next visit. IDOR scoping
-   * mirrors form.service.ts's getLatestVisitVitals exactly (ownership check
-   * via findBeneficiaryOwnership, not a sakhiId-on-visit filter): a case's
-   * current owning Sakhi can differ from who conducted a past visit (case
-   * reassignment), so "does the caller own this beneficiary case today" is
-   * the correct check, not "did the caller conduct this visit".
+   * mirrors form.service.ts's getLatestVisitVitals exactly (shared via
+   * assertCallerOwnsBeneficiary — ownership check, not a sakhiId-on-visit
+   * filter): a case's current owning Sakhi can differ from who conducted a
+   * past visit (case reassignment), so "does the caller own this
+   * beneficiary case today" is the correct check, not "did the caller
+   * conduct this visit".
    *
    * `formCode`/`visitType` narrow which visits are eligible before `limit`
    * is applied — a beneficiary with 3 completed ANC visits and a
@@ -385,26 +386,7 @@ export class VisitInstanceService {
     caller: CallerIdentity,
     authorizationHeader: string,
   ) {
-    const beneficiary = await findBeneficiaryOwnership(beneficiaryId, authorizationHeader);
-    if (!beneficiary) throw notFound('Beneficiary case not found.');
-
-    if (caller.roles.includes('SAKHI')) {
-      if (beneficiary.sakhiId !== caller.id) {
-        throw forbidden('This beneficiary case is outside your own roster.');
-      }
-    } else if (caller.roles.includes('SUPERVISOR')) {
-      if (!caller.projectId) {
-        throw forbidden('Supervisor caller has no project scope.');
-      }
-      const roster = await listSakhiIdsForSupervisor(
-        caller.projectId,
-        caller.id,
-        authorizationHeader,
-      );
-      if (!roster.includes(beneficiary.sakhiId)) {
-        throw forbidden("This beneficiary case is outside this Supervisor's roster.");
-      }
-    }
+    await assertCallerOwnsBeneficiary(beneficiaryId, caller, authorizationHeader);
 
     const formCodes = resolveFormCodes(query);
     const visits = await this.repository.findRecentCompletedVisits(
@@ -425,7 +407,7 @@ export class VisitInstanceService {
                 submission.formVersion.formDefinition.formCode,
                 submission.formDataJson as Record<string, unknown>,
               )
-            : extractVisitHistoryVitals('', {}),
+            : EMPTY_VISIT_HISTORY_VITALS,
         };
       }),
     };

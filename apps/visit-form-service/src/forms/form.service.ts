@@ -1,4 +1,4 @@
-import { badRequest, conflict, forbidden, notFound, unprocessable } from '@armman/service-commons';
+import { badRequest, conflict, notFound, unprocessable } from '@armman/service-commons';
 import type { FormRepository } from './form.repository';
 import { schemaJsonSchema, validationJsonSchema } from './dto/form-field.dto';
 import type { CreateDraftVersionInput } from './dto/create-draft-version.dto';
@@ -13,7 +13,8 @@ import {
 import { validateSubmission } from './form-validation';
 import { syncSocioDemographics } from '../beneficiaries/socio-demographics.client';
 import { syncHealthHistory } from '../beneficiaries/health-history.client';
-import { findBeneficiaryById, findBeneficiaryOwnership } from '../beneficiaries/beneficiary.client';
+import { findBeneficiaryById } from '../beneficiaries/beneficiary.client';
+import { assertCallerOwnsBeneficiary } from '../beneficiaries/beneficiaryOwnership.guard';
 import { createChildBeneficiary } from '../beneficiaries/create-child.client';
 import { updateBeneficiaryPhase } from '../beneficiaries/update-phase.client';
 import { createClosure, resolveClosureReasonLookupId } from '../closures/closure.client';
@@ -22,8 +23,7 @@ import { triggerRiskAssessment } from '../risk-assessments/riskAssessment.client
 import type { VisitInstanceRepository } from '../visits/visitInstance.repository';
 import { resolveAndWriteCcvOpeningRiskState } from './ccvOpeningRiskState.resolver';
 import { resolveVisitCompletion } from './visitCompletion.resolver';
-import { extractVitals } from './vitalsExtractor';
-import { listSakhiIdsForSupervisor } from '../sakhis/sakhi.client';
+import { EMPTY_VITALS, extractVitals } from './vitalsExtractor';
 
 /**
  * Maps this service's own formCode to risk-referral-service's RiskCondition
@@ -691,45 +691,26 @@ export class FormService {
    *
    * IDOR guard: beneficiaryId is caller-supplied — without this check any
    * authenticated SAKHI could read any beneficiary's vitals regardless of
-   * whose case it is. Resolves ownership via beneficiary-service's
-   * `GET /beneficiaries/:id/ownership` — deliberately NOT findBeneficiaryById
-   * (the full `GET /beneficiaries/:id`), whose own lastVisitVitals
-   * enrichment calls back into THIS endpoint; using it here would recreate
-   * that exact request cycle (getById -> resolveLatestVisitVitals -> here
-   * -> findBeneficiaryById -> getById -> ... forever, timing out on both
-   * sides — see findBeneficiaryOwnership's own doc comment). Same
-   * ownership rule as visitInstance.service.ts's own resolveCallerScoping:
-   * SAKHI own-case only, SUPERVISOR own-roster only, MANAGER/ADMIN
-   * unrestricted.
+   * whose case it is. assertCallerOwnsBeneficiary resolves ownership via
+   * beneficiary-service's `GET /beneficiaries/:id/ownership` — deliberately
+   * NOT findBeneficiaryById (the full `GET /beneficiaries/:id`), whose own
+   * lastVisitVitals enrichment calls back into THIS endpoint; using it here
+   * would recreate that exact request cycle (getById ->
+   * resolveLatestVisitVitals -> here -> findBeneficiaryById -> getById ->
+   * ... forever, timing out on both sides — see findBeneficiaryOwnership's
+   * own doc comment). Same shared check as visitInstance.service.ts's
+   * getVisitHistory: SAKHI own-case only, SUPERVISOR own-roster only,
+   * MANAGER/ADMIN unrestricted.
    */
   async getLatestVisitVitals(
     beneficiaryId: string,
     caller: { id: string; roles: readonly string[]; projectId?: string | null },
     authorizationHeader: string,
   ) {
-    const beneficiary = await findBeneficiaryOwnership(beneficiaryId, authorizationHeader);
-    if (!beneficiary) throw notFound('Beneficiary case not found.');
-
-    if (caller.roles.includes('SAKHI')) {
-      if (beneficiary.sakhiId !== caller.id) {
-        throw forbidden('This beneficiary case is outside your own roster.');
-      }
-    } else if (caller.roles.includes('SUPERVISOR')) {
-      if (!caller.projectId) {
-        throw forbidden('Supervisor caller has no project scope.');
-      }
-      const roster = await listSakhiIdsForSupervisor(
-        caller.projectId,
-        caller.id,
-        authorizationHeader,
-      );
-      if (!roster.includes(beneficiary.sakhiId)) {
-        throw forbidden("This beneficiary case is outside this Supervisor's roster.");
-      }
-    }
+    await assertCallerOwnsBeneficiary(beneficiaryId, caller, authorizationHeader);
 
     const submission = await this.repository.findLatestVisitSubmission(beneficiaryId);
-    if (!submission) return { visitId: null, submittedAt: null, ...extractVitals('', {}) };
+    if (!submission) return { visitId: null, submittedAt: null, ...EMPTY_VITALS };
 
     return {
       visitId: submission.visitId,

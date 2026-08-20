@@ -102,6 +102,26 @@ describe('resolveVisitCompletion', () => {
     expect(repository.updateStatus).not.toHaveBeenCalled();
   });
 
+  it('leaves meetBeneficiaryFlag null rather than defaulting it to true — that is a clinical fact the Sakhi never asserted via this auto-completion path', async () => {
+    repository.findById.mockResolvedValue({
+      id: 'visit-1',
+      statusLookupValueId: PENDING_ID,
+      completedAt: null,
+      actualVisitDate: null,
+      meetBeneficiaryFlag: null,
+      notMetReason: null,
+    } as never);
+
+    await resolveVisitCompletion('ANC_VISIT', 'visit-1', 'sakhi-1', repository, AUTH_HEADER);
+
+    expect(repository.updateStatus).toHaveBeenCalledWith(
+      'visit-1',
+      PENDING_ID,
+      expect.objectContaining({ meetBeneficiaryFlag: undefined }),
+      'sakhi-1',
+    );
+  });
+
   it('never throws when the completion write fails — the submission must still succeed', async () => {
     repository.findById.mockResolvedValue({
       id: 'visit-1',

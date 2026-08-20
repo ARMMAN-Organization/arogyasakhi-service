@@ -25,7 +25,13 @@ export interface VitalsSnapshot {
   bloodSugarMgDl: number | null;
 }
 
-const EMPTY_VITALS: VitalsSnapshot = {
+/**
+ * An all-null VitalsSnapshot — exported so a caller with no submission to
+ * extract from (e.g. a beneficiary with no qualifying visit yet) can use
+ * this directly instead of relying on `extractVitals('', {})`'s lookup-miss
+ * fallback as an empty-value sentinel.
+ */
+export const EMPTY_VITALS: VitalsSnapshot = {
   weightKg: null,
   systolicBp: null,
   diastolicBp: null,
@@ -149,3 +155,12 @@ export function extractVisitHistoryVitals(
     temperature: { value: toDecimalStringOrNull(snapshot.temperatureF), unit: '°F' },
   };
 }
+
+/** An all-null VisitHistoryVitals — see EMPTY_VITALS's own doc comment. */
+export const EMPTY_VISIT_HISTORY_VITALS: VisitHistoryVitals = {
+  hemoglobin: { value: null, unit: 'g/dl' },
+  bloodPressure: { systolic: null, diastolic: null, unit: 'mmHg' },
+  weight: { value: null, unit: 'kg' },
+  bloodSugar: { value: null, unit: 'mg/dl' },
+  temperature: { value: null, unit: '°F' },
+};

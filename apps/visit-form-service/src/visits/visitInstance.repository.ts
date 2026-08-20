@@ -44,7 +44,12 @@ export class VisitInstanceRepository {
    * not just any 3 visits. "Completed" means `completedAt` is set — a
    * scheduled-but-not-yet-submitted visit row doesn't count. Joins through
    * VisitSchedule for visitType since VisitInstance itself carries no
-   * phase/type column of its own.
+   * phase/type column of its own. Ordered by completedAt (not
+   * actualVisitDate) — the same "completed" column the where clause filters
+   * on, and the convention findRecentCompletedVisits below uses; a visit
+   * conducted earlier but submitted/completed later must not outrank a more
+   * recently completed one, since recentIncVisits[0] is treated as *the
+   * most recent* completed INC visit for mostRecentIncVisitHrType.
    */
   findRecentCompletedIncVisits(beneficiaryId: string, limit: number) {
     return this.prisma.visitInstance.findMany({
@@ -54,7 +59,7 @@ export class VisitInstanceRepository {
         completedAt: { not: null },
         schedule: { visitType: { in: ['INC', 'INC_HR'] } },
       },
-      orderBy: { actualVisitDate: { sort: 'desc', nulls: 'last' } },
+      orderBy: { completedAt: 'desc' },
       take: limit,
     });
   }
