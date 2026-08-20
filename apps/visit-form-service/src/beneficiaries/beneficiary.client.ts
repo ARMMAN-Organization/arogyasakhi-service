@@ -1,4 +1,4 @@
-import { badGateway } from '@armman/service-commons';
+import { badGateway, forbidden } from '@armman/service-commons';
 
 // Read directly (not via appConfig) so importing this client doesn't pull in
 // app-config's full schema — mirrors geography.client.ts. Despite the name,
@@ -119,6 +119,15 @@ export interface BeneficiaryOwnership {
  * that endpoint; findBeneficiaryById remains correct for every other caller
  * (create-child.client.ts, visitSchedule.service.ts) that needs the full
  * case detail and is never itself in that cycle.
+ *
+ * `GET /beneficiaries/:id/ownership` does its own SAKHI/SUPERVISOR
+ * roster check server-side and returns 403 directly when the caller isn't
+ * permitted — that 403 is forwarded here as a real `forbidden()`, not
+ * treated as an upstream failure, so a caller's own scoping check still
+ * sees a 403 (not a 502) for the case that matters most: a SAKHI/SUPERVISOR
+ * outside their own roster. Confirmed live: before this fix, that exact
+ * case surfaced as a 502 "beneficiary-service unreachable" instead of the
+ * intended 403.
  */
 export async function findBeneficiaryOwnership(
   beneficiaryId: string,
@@ -133,6 +142,10 @@ export async function findBeneficiaryOwnership(
   }
 
   if (res.status === 404) return null;
+  if (res.status === 403) {
+    const body = (await res.json().catch(() => null)) as { message?: string } | null;
+    throw forbidden(body?.message ?? 'You do not have access to this beneficiary case.');
+  }
   if (!res.ok) {
     throw badGateway('Unable to verify the beneficiary — beneficiary-service returned an error.');
   }

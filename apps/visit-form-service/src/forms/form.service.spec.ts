@@ -21,6 +21,7 @@ import { updateBeneficiaryPhase } from '../beneficiaries/update-phase.client';
 import { createClosure, resolveClosureReasonLookupId } from '../closures/closure.client';
 import { triggerRiskAssessment } from '../risk-assessments/riskAssessment.client';
 import { resolveAndWriteCcvOpeningRiskState } from './ccvOpeningRiskState.resolver';
+import { resolveVisitCompletion } from './visitCompletion.resolver';
 
 jest.mock('../geography/geography.client');
 jest.mock('../beneficiaries/socio-demographics.client');
@@ -31,6 +32,7 @@ jest.mock('../beneficiaries/update-phase.client');
 jest.mock('../closures/closure.client');
 jest.mock('../risk-assessments/riskAssessment.client');
 jest.mock('./ccvOpeningRiskState.resolver');
+jest.mock('./visitCompletion.resolver');
 
 describe('FormService', () => {
   const repository = {
@@ -51,6 +53,8 @@ describe('FormService', () => {
   const visitInstanceRepository = {
     findRecentCompletedIncVisits: jest.fn(),
     findAllCompletedInfantVisitIds: jest.fn(),
+    findById: jest.fn(),
+    updateStatus: jest.fn(),
   } as unknown as jest.Mocked<VisitInstanceRepository>;
   let service: FormService;
 
@@ -574,6 +578,90 @@ describe('FormService', () => {
         expect.objectContaining({ validationStatus: 'VALID' }),
       );
       expect(result).toEqual({ id: 'sub-1' });
+    });
+
+    describe('visit completion on submission', () => {
+      it('attempts to complete the linked visit after a successful visit-linked submission', async () => {
+        repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+        repository.findVersionById.mockResolvedValue(publishedVersion as never);
+        repository.findVisitById.mockResolvedValue({ id: 'visit-1' } as never);
+        repository.createSubmission.mockResolvedValue({ id: 'sub-1' } as never);
+
+        await service.createSubmission(
+          'MOTHER_REGISTRATION',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            visitId: 'visit-1',
+            localSubmissionUuid: 'uuid-1',
+            formData: { phone_owner: 'SELF' },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(resolveVisitCompletion)).toHaveBeenCalledWith(
+          'MOTHER_REGISTRATION',
+          'visit-1',
+          'u1',
+          visitInstanceRepository,
+          'Bearer test-token',
+        );
+      });
+
+      it('still attempts completion (with visitId undefined) for a submission with no visitId', async () => {
+        repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+        repository.findVersionById.mockResolvedValue(publishedVersion as never);
+        repository.createSubmission.mockResolvedValue({ id: 'sub-1' } as never);
+
+        await service.createSubmission(
+          'MOTHER_REGISTRATION',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: { phone_owner: 'SELF' },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        // resolveVisitCompletion itself no-ops on an undefined visitId — the
+        // service always calls it, the resolver decides whether there's
+        // anything to complete (same "always call, resolver no-ops" shape
+        // as the other best-effort calls in this function).
+        expect(jest.mocked(resolveVisitCompletion)).toHaveBeenCalledWith(
+          'MOTHER_REGISTRATION',
+          undefined,
+          'u1',
+          visitInstanceRepository,
+          'Bearer test-token',
+        );
+      });
+
+      it('is awaited after the submission already committed, so its own best-effort tolerance (see visitCompletion.resolver.spec.ts) is what protects the submission, not an extra guard here', async () => {
+        repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+        repository.findVersionById.mockResolvedValue(publishedVersion as never);
+        repository.findVisitById.mockResolvedValue({ id: 'visit-1' } as never);
+        repository.createSubmission.mockResolvedValue({ id: 'sub-1' } as never);
+        jest.mocked(resolveVisitCompletion).mockResolvedValue(undefined);
+
+        const result = await service.createSubmission(
+          'MOTHER_REGISTRATION',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            visitId: 'visit-1',
+            localSubmissionUuid: 'uuid-1',
+            formData: { phone_owner: 'SELF' },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(result).toEqual({ id: 'sub-1' });
+        expect(repository.createSubmission).toHaveBeenCalled();
+      });
     });
 
     describe('visitId validation', () => {
@@ -2525,6 +2613,7 @@ describe('FormService', () => {
         hemoglobinGDl: null,
         muacCm: null,
         respiratoryRate: null,
+        bloodSugarMgDl: null,
       });
     });
 

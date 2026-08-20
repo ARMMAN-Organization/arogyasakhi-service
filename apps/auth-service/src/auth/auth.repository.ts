@@ -126,7 +126,16 @@ export class AuthRepository {
     return this.prisma.role.findUnique({ where: { roleCode } });
   }
 
-  /** Creates the user and their initial role assignment atomically. */
+  /**
+   * Creates the user and their initial role assignment atomically. When
+   * `sakhiProfile` is supplied (roleCode SAKHI — see AuthService.createUser),
+   * the sakhi_profiles row is created in the same transaction, so a SAKHI
+   * user can never exist without one: previously POST /users only wrote
+   * users/user_roles, leaving a newly-created SAKHI unable to be found by
+   * any endpoint that resolves identity via sakhi_profiles (e.g.
+   * GET /sakhi/:id/dashboard) until a follow-up PATCH supplied a
+   * profile field. Mirrors updateUserTransaction's `create` branch.
+   */
   createUserWithRole(data: {
     username: string;
     mobileNumber: string;
@@ -136,6 +145,7 @@ export class AuthRepository {
     roleId: string;
     projectId: string | null;
     geographyUnitId: string | null;
+    sakhiProfile?: { primaryProjectId: string; phoneNumber: string };
   }) {
     return this.prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
@@ -156,6 +166,16 @@ export class AuthRepository {
           effectiveFrom: new Date(),
         },
       });
+      if (data.sakhiProfile) {
+        await tx.sakhiProfile.create({
+          data: {
+            userId: user.id,
+            primaryProjectId: data.sakhiProfile.primaryProjectId,
+            phoneNumber: data.sakhiProfile.phoneNumber,
+            activeFrom: new Date(),
+          },
+        });
+      }
       return user;
     });
   }

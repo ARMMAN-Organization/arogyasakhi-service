@@ -22,6 +22,7 @@ export interface VitalsSnapshot {
   hemoglobinGDl: number | null;
   muacCm: number | null;
   respiratoryRate: number | null;
+  bloodSugarMgDl: number | null;
 }
 
 const EMPTY_VITALS: VitalsSnapshot = {
@@ -32,6 +33,7 @@ const EMPTY_VITALS: VitalsSnapshot = {
   hemoglobinGDl: null,
   muacCm: null,
   respiratoryRate: null,
+  bloodSugarMgDl: null,
 };
 
 /**
@@ -50,6 +52,7 @@ const FORM_CODE_TO_VITALS_MAPPING: Record<string, Partial<Record<keyof VitalsSna
     temperatureF: 'body_temperature_in_f',
     hemoglobinGDl: 'haemoglobin_hb_g_dl',
     muacCm: 'mid_upper_arm_circumference_in_cm',
+    bloodSugarMgDl: 'blood_glucose_in_mg_dl',
   },
   POSTPARTUM_VISIT: {
     weightKg: 'current_weight_kg',
@@ -58,6 +61,7 @@ const FORM_CODE_TO_VITALS_MAPPING: Record<string, Partial<Record<keyof VitalsSna
     temperatureF: 'body_temperature_f',
     hemoglobinGDl: 'haemoglobin_g_dl',
     muacCm: 'current_muac_cm',
+    bloodSugarMgDl: 'random_blood_glucose_mg_dl',
   },
   NEONATAL_VISIT: {
     weightKg: 'current_weight_kg',
@@ -104,4 +108,44 @@ export function extractVitals(
     }
   }
   return result;
+}
+
+function toDecimalStringOrNull(value: number | null): string | null {
+  return value === null ? null : String(value);
+}
+
+/** Vitals shaped for GET /beneficiaries/:beneficiaryId/visit-history (FR-S-4.6) — each field is
+ * `{ value, unit }` (or `{ systolic, diastolic, unit }` for blood pressure), with `unit` always
+ * present even when the value is null, so the mobile client never has to hardcode units itself.
+ * `value` is stringified (matching the sample response in the SRS) rather than a raw number, to
+ * avoid float-precision surprises on decimal vitals like hemoglobin (9.4) — same rationale as
+ * Prisma's own Decimal columns being read out as strings elsewhere in this codebase.
+ *
+ * Temperature is reported in °F, the unit every seeded form actually captures it in (see
+ * FORM_CODE_TO_VITALS_MAPPING) — this endpoint does not convert to °C.
+ */
+export interface VisitHistoryVitals {
+  hemoglobin: { value: string | null; unit: 'g/dl' };
+  bloodPressure: { systolic: number | null; diastolic: number | null; unit: 'mmHg' };
+  weight: { value: string | null; unit: 'kg' };
+  bloodSugar: { value: string | null; unit: 'mg/dl' };
+  temperature: { value: string | null; unit: '°F' };
+}
+
+export function extractVisitHistoryVitals(
+  formCode: string,
+  formDataJson: Record<string, unknown>,
+): VisitHistoryVitals {
+  const snapshot = extractVitals(formCode, formDataJson);
+  return {
+    hemoglobin: { value: toDecimalStringOrNull(snapshot.hemoglobinGDl), unit: 'g/dl' },
+    bloodPressure: {
+      systolic: snapshot.systolicBp,
+      diastolic: snapshot.diastolicBp,
+      unit: 'mmHg',
+    },
+    weight: { value: toDecimalStringOrNull(snapshot.weightKg), unit: 'kg' },
+    bloodSugar: { value: toDecimalStringOrNull(snapshot.bloodSugarMgDl), unit: 'mg/dl' },
+    temperature: { value: toDecimalStringOrNull(snapshot.temperatureF), unit: '°F' },
+  };
 }

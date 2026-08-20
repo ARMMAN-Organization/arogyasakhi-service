@@ -115,6 +115,18 @@ export class AuthService {
     const role = await this.repository.findRoleByCode(input.roleCode);
     if (!role || !role.isActive) throw notFound(`Unknown role code: ${input.roleCode}`);
 
+    // A SAKHI has no usable identity without a sakhi_profiles row — every
+    // endpoint that resolves "this Sakhi" (e.g. GET /sakhi/:id/dashboard)
+    // queries that table, not users/user_roles. Created atomically below
+    // rather than requiring a separate PATCH afterward, which previously
+    // left a newly-created SAKHI 404ing until someone remembered to patch
+    // in a phoneNumber. projectId is required here (not merely optional, as
+    // it is for other roles) because sakhi_profiles.primary_project_id is
+    // NOT NULL.
+    if (input.roleCode === 'SAKHI' && !input.projectId) {
+      throw badRequest('projectId: Required to create a SAKHI user.');
+    }
+
     const passwordHash = await hashPassword(input.password);
 
     try {
@@ -127,6 +139,10 @@ export class AuthService {
         roleId: role.id,
         projectId: input.projectId ?? null,
         geographyUnitId: input.geographyUnitId ?? null,
+        sakhiProfile:
+          input.roleCode === 'SAKHI'
+            ? { primaryProjectId: input.projectId as string, phoneNumber: input.mobileNumber }
+            : undefined,
       });
       return {
         id: user.id,

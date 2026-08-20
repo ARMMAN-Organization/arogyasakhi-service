@@ -295,4 +295,58 @@ describe('VisitInstanceRepository', () => {
       expect(result).toEqual([]);
     });
   });
+
+  describe('findRecentCompletedVisits', () => {
+    it('queries completed visits for the beneficiary, newest completedAt first, limited and with no formCode filter when none is given', async () => {
+      findMany.mockResolvedValue([]);
+
+      await repository.findRecentCompletedVisits('ben-1', undefined, 2);
+
+      expect(findMany).toHaveBeenCalledWith({
+        where: { beneficiaryId: 'ben-1', isDeleted: false, completedAt: { not: null } },
+        orderBy: { completedAt: 'desc' },
+        take: 2,
+        include: {
+          schedule: { select: { visitCode: true } },
+          formSubmissions: {
+            where: { isDeleted: false },
+            orderBy: { submittedAt: 'desc' },
+            take: 1,
+            include: { formVersion: { include: { formDefinition: true } } },
+          },
+        },
+      });
+    });
+
+    it('narrows to the given formCodes via the linked submission when provided', async () => {
+      findMany.mockResolvedValue([]);
+
+      await repository.findRecentCompletedVisits('ben-1', ['ANC_VISIT'], 2);
+
+      expect(findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            formSubmissions: {
+              some: {
+                isDeleted: false,
+                formVersion: { formDefinition: { formCode: { in: ['ANC_VISIT'] } } },
+              },
+            },
+          }),
+        }),
+      );
+    });
+
+    it('applies no formCode filter when given an empty formCodes array', async () => {
+      findMany.mockResolvedValue([]);
+
+      await repository.findRecentCompletedVisits('ben-1', [], 2);
+
+      expect(findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { beneficiaryId: 'ben-1', isDeleted: false, completedAt: { not: null } },
+        }),
+      );
+    });
+  });
 });

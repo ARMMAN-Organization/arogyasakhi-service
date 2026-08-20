@@ -157,6 +157,35 @@ describe('findBeneficiaryOwnership', () => {
     });
   });
 
+  it('forwards a 403 from the ownership endpoint as a real 403, not a 502 — beneficiary-service already ran its own SAKHI/SUPERVISOR roster check', async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 403,
+      json: () =>
+        Promise.resolve({
+          success: false,
+          message: 'This beneficiary case is outside your own roster.',
+        }),
+    });
+
+    await expect(findBeneficiaryOwnership('ben-1', 'Bearer test-token')).rejects.toMatchObject({
+      status: 403,
+      message: 'This beneficiary case is outside your own roster.',
+    });
+  });
+
+  it('still throws a 403 with a generic message if the 403 response body cannot be parsed', async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 403,
+      json: () => Promise.reject(new Error('not json')),
+    });
+
+    await expect(findBeneficiaryOwnership('ben-1', 'Bearer test-token')).rejects.toMatchObject({
+      status: 403,
+    });
+  });
+
   it('throws a 502 when beneficiary-service is unreachable', async () => {
     fetchMock.mockRejectedValue(new Error('network down'));
 

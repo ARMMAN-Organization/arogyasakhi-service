@@ -117,6 +117,14 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
     target: appConfig.VISIT_FORM_SERVICE_URL,
     requiresAuth: true,
   },
+  // GET /beneficiaries/:beneficiaryId/visit-history (FR-S-4.6) — same
+  // ownership as latest-visit-vitals above: owned by visit-form-service
+  // (it owns visit_instances/form_submissions), not beneficiary-service.
+  {
+    prefix: '/beneficiaries/:beneficiaryId/visit-history',
+    target: appConfig.VISIT_FORM_SERVICE_URL,
+    requiresAuth: true,
+  },
   { prefix: '/beneficiaries', target: appConfig.BENEFICIARY_SERVICE_URL, requiresAuth: true },
   // UNCONFIRMED alias for GET /beneficiaries/risk-summary — see the route's
   // own doc comment in beneficiary.routes.ts for why this is a best guess.

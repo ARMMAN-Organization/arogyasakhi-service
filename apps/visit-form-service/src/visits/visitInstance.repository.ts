@@ -290,6 +290,52 @@ export class VisitInstanceRepository {
     });
   }
 
+  /**
+   * The beneficiary's `limit` most-recently-completed visits (newest
+   * `completedAt` first), for GET /beneficiaries/:beneficiaryId/visit-history
+   * (FR-S-4.6 — pre-visit vitals). "Completed" means `completedAt` is set,
+   * same convention as findRecentCompletedIncVisits — a scheduled-but-not-
+   * yet-submitted or in-progress visit doesn't count. Optionally narrowed to
+   * a set of formCodes (resolved by the service layer from the caller's own
+   * formCode/visitType query params via visit-code-form-map.ts) via the
+   * linked FormSubmission's own formVersion.formDefinition.formCode — this
+   * table has no formCode column of its own. Includes each visit's most
+   * recent non-deleted FormSubmission (there is normally exactly one per
+   * visit; `take: 1` + `orderBy submittedAt desc` guards against a
+   * theoretical resubmission leaving more than one row) so the service
+   * layer can extract vitals without a second round trip.
+   */
+  findRecentCompletedVisits(beneficiaryId: string, formCodes: string[] | undefined, limit: number) {
+    return this.prisma.visitInstance.findMany({
+      where: {
+        beneficiaryId,
+        isDeleted: false,
+        completedAt: { not: null },
+        ...(formCodes && formCodes.length > 0
+          ? {
+              formSubmissions: {
+                some: {
+                  isDeleted: false,
+                  formVersion: { formDefinition: { formCode: { in: formCodes } } },
+                },
+              },
+            }
+          : {}),
+      },
+      orderBy: { completedAt: 'desc' },
+      take: limit,
+      include: {
+        schedule: { select: { visitCode: true } },
+        formSubmissions: {
+          where: { isDeleted: false },
+          orderBy: { submittedAt: 'desc' },
+          take: 1,
+          include: { formVersion: { include: { formDefinition: true } } },
+        },
+      },
+    });
+  }
+
   findScheduleById(scheduleId: string) {
     return this.prisma.visitSchedule.findFirst({
       where: { id: scheduleId, isDeleted: false },

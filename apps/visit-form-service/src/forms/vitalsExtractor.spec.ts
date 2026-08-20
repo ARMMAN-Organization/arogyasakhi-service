@@ -1,4 +1,4 @@
-import { extractVitals } from './vitalsExtractor';
+import { extractVisitHistoryVitals, extractVitals } from './vitalsExtractor';
 
 describe('extractVitals', () => {
   it('extracts ANC_VISIT vitals from their own question_codes', () => {
@@ -9,6 +9,7 @@ describe('extractVitals', () => {
       body_temperature_in_f: 98.6,
       haemoglobin_hb_g_dl: 11.2,
       mid_upper_arm_circumference_in_cm: 24.5,
+      blood_glucose_in_mg_dl: 95,
     });
 
     expect(result).toEqual({
@@ -19,6 +20,7 @@ describe('extractVitals', () => {
       hemoglobinGDl: 11.2,
       muacCm: 24.5,
       respiratoryRate: null,
+      bloodSugarMgDl: 95,
     });
   });
 
@@ -30,6 +32,7 @@ describe('extractVitals', () => {
       body_temperature_f: 98.4,
       haemoglobin_g_dl: 12.1,
       current_muac_cm: 25,
+      random_blood_glucose_mg_dl: 88,
     });
 
     expect(result).toEqual({
@@ -40,10 +43,11 @@ describe('extractVitals', () => {
       hemoglobinGDl: 12.1,
       muacCm: 25,
       respiratoryRate: null,
+      bloodSugarMgDl: 88,
     });
   });
 
-  it('extracts INC_VISIT vitals (weight/MUAC/respiratory rate, no BP/hemoglobin)', () => {
+  it('extracts INC_VISIT vitals (weight/MUAC/respiratory rate, no BP/hemoglobin/blood sugar)', () => {
     const result = extractVitals('INC_VISIT', {
       current_weight_in_kg: 8.2,
       muac_in_cms: 13.5,
@@ -58,6 +62,7 @@ describe('extractVitals', () => {
       hemoglobinGDl: null,
       muacCm: 13.5,
       respiratoryRate: 32,
+      bloodSugarMgDl: null,
     });
   });
 
@@ -73,7 +78,7 @@ describe('extractVitals', () => {
     );
   });
 
-  it('extracts only weightKg for NEONATAL_VISIT (its schema has no BP/hemoglobin/MUAC/respiratory-rate questions)', () => {
+  it('extracts only weightKg for NEONATAL_VISIT (its schema has no BP/hemoglobin/MUAC/respiratory-rate/blood-sugar questions)', () => {
     const result = extractVitals('NEONATAL_VISIT', { current_weight_kg: 3.1 });
 
     expect(result).toEqual({
@@ -84,6 +89,7 @@ describe('extractVitals', () => {
       hemoglobinGDl: null,
       muacCm: null,
       respiratoryRate: null,
+      bloodSugarMgDl: null,
     });
   });
 
@@ -98,6 +104,7 @@ describe('extractVitals', () => {
       hemoglobinGDl: null,
       muacCm: null,
       respiratoryRate: null,
+      bloodSugarMgDl: null,
     });
   });
 
@@ -113,5 +120,49 @@ describe('extractVitals', () => {
     const result = extractVitals('ANC_VISIT', { blood_pressure_bp_systolic: '' });
 
     expect(result.systolicBp).toBeNull();
+  });
+});
+
+describe('extractVisitHistoryVitals', () => {
+  it('shapes an ANC_VISIT submission into unit-wrapped vitals, values as strings', () => {
+    const result = extractVisitHistoryVitals('ANC_VISIT', {
+      current_weight_of_the_woman_in_kg: 60.2,
+      blood_pressure_bp_systolic: 120,
+      blood_pressure_bp_diastolic: 80,
+      body_temperature_in_f: 98.6,
+      haemoglobin_hb_g_dl: 9.4,
+      blood_glucose_in_mg_dl: 95,
+    });
+
+    expect(result).toEqual({
+      hemoglobin: { value: '9.4', unit: 'g/dl' },
+      bloodPressure: { systolic: 120, diastolic: 80, unit: 'mmHg' },
+      weight: { value: '60.2', unit: 'kg' },
+      bloodSugar: { value: '95', unit: 'mg/dl' },
+      temperature: { value: '98.6', unit: '°F' },
+    });
+  });
+
+  it('nulls a vital not captured by the visit form, unit still present (e.g. PP visit has no blood-sugar question in this payload)', () => {
+    const result = extractVisitHistoryVitals('POSTPARTUM_VISIT', {
+      current_weight_kg: 55,
+      bp_systolic: 118,
+      bp_diastolic: 76,
+    });
+
+    expect(result.bloodSugar).toEqual({ value: null, unit: 'mg/dl' });
+    expect(result.hemoglobin).toEqual({ value: null, unit: 'g/dl' });
+  });
+
+  it('nulls both systolic and diastolic (but keeps the unit) for a formCode with no BP questions at all', () => {
+    const result = extractVisitHistoryVitals('NEONATAL_VISIT', { current_weight_kg: 3.1 });
+
+    expect(result.bloodPressure).toEqual({ systolic: null, diastolic: null, unit: 'mmHg' });
+  });
+
+  it('never converts temperature to Celsius — reports the stored °F value as-is', () => {
+    const result = extractVisitHistoryVitals('ANC_VISIT', { body_temperature_in_f: 98.6 });
+
+    expect(result.temperature).toEqual({ value: '98.6', unit: '°F' });
   });
 });

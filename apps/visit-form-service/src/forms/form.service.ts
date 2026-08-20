@@ -21,6 +21,7 @@ import { getAncestorChain } from '../geography/geography.client';
 import { triggerRiskAssessment } from '../risk-assessments/riskAssessment.client';
 import type { VisitInstanceRepository } from '../visits/visitInstance.repository';
 import { resolveAndWriteCcvOpeningRiskState } from './ccvOpeningRiskState.resolver';
+import { resolveVisitCompletion } from './visitCompletion.resolver';
 import { extractVitals } from './vitalsExtractor';
 import { listSakhiIdsForSupervisor } from '../sakhis/sakhi.client';
 
@@ -315,6 +316,18 @@ export class FormService {
       }
       throw err;
     }
+
+    // Marks the linked VisitInstance COMPLETED — without this, a visit only
+    // reaches COMPLETED via a second, separate PATCH /visits/:id call the
+    // client has to remember to make. Best-effort, same tolerance as every
+    // other post-submission side effect below.
+    await resolveVisitCompletion(
+      formCode,
+      dto.visitId,
+      submittedByUserId,
+      this.visitInstanceRepository,
+      authorizationHeader,
+    );
 
     // Promote the socio-demographic answers into beneficiary-service, which
     // owns them as structured columns (the registration form re-asks them so
