@@ -1,3 +1,14 @@
+/**
+ * ccvOpeningRiskState.resolver.ts (jest.mock()'d below) imports appConfig
+ * from ../config/app-config, which calls process.exit(1) at module-load
+ * time if DATABASE_URL isn't a valid URL — jest.mock() still requires the
+ * real module once to build its automatic mock, so this must be set before
+ * any import below (see reporting-etl-service's info.controller.spec.ts and
+ * risk-referral-service's riskCondition.controller.spec.ts for the same
+ * workaround).
+ */
+process.env.DATABASE_URL ??= 'postgresql://user:pass@localhost:5432/test';
+
 import { FormService } from './form.service';
 import type { FormRepository } from './form.repository';
 import type { VisitInstanceRepository } from '../visits/visitInstance.repository';
