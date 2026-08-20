@@ -7,6 +7,7 @@ import { findBeneficiaryById } from '../beneficiaries/beneficiary.client';
 import { createChildBeneficiary } from '../beneficiaries/create-child.client';
 import { updateBeneficiaryPhase } from '../beneficiaries/update-phase.client';
 import { createClosure, resolveClosureReasonLookupId } from '../closures/closure.client';
+import { triggerRiskAssessment } from '../risk-assessments/riskAssessment.client';
 
 jest.mock('../geography/geography.client');
 jest.mock('../beneficiaries/socio-demographics.client');
@@ -15,6 +16,7 @@ jest.mock('../beneficiaries/beneficiary.client');
 jest.mock('../beneficiaries/create-child.client');
 jest.mock('../beneficiaries/update-phase.client');
 jest.mock('../closures/closure.client');
+jest.mock('../risk-assessments/riskAssessment.client');
 
 describe('FormService', () => {
   const repository = {
@@ -29,6 +31,7 @@ describe('FormService', () => {
     findSubmissionByLocalUuid: jest.fn(),
     createSubmission: jest.fn(),
     findVisitById: jest.fn(),
+    findLatestSubmissionByBeneficiaryAndFormCode: jest.fn(),
   } as unknown as jest.Mocked<FormRepository>;
   let service: FormService;
 
@@ -1317,6 +1320,227 @@ describe('FormService', () => {
         );
 
         expect(jest.mocked(updateBeneficiaryPhase)).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('ANC_VISIT risk assessment trigger with registration-derived answers', () => {
+      const ancVersion = {
+        id: 'version-1',
+        status: 'PUBLISHED',
+        formDefinition: { formCode: 'ANC_VISIT', riskRuleSetId: 'rule-set-1' },
+        schemaJson: [
+          {
+            question_code: 'haemoglobin_hb_g_dl',
+            label: 'x',
+            input_type: 'number',
+            required: false,
+          },
+        ],
+        validationJson: [],
+      };
+
+      beforeEach(() => {
+        repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+        repository.findVersionById.mockResolvedValue(ancVersion as never);
+        repository.createSubmission.mockResolvedValue({ id: 'sub-1' } as never);
+        repository.findVisitById.mockResolvedValue({ id: 'visit-1' } as never);
+      });
+
+      it("merges age and badObstetricHistoryFlag from the beneficiary's MOTHER_REGISTRATION submission", async () => {
+        repository.findLatestSubmissionByBeneficiaryAndFormCode.mockResolvedValue({
+          formDataJson: {
+            age_of_the_beneficiary: 22,
+            gravida_total_number_of_pregnancies: 2,
+            living_children: 2,
+            abortions_pregnancy_losses_before_24_weeks: 0,
+            did_you_experience_any_complications_during_birth_delivery_in_previous_pregnancies: [
+              'no_complications',
+            ],
+          },
+        } as never);
+
+        await service.createSubmission(
+          'ANC_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            visitId: 'visit-1',
+            localSubmissionUuid: 'uuid-1',
+            formData: { haemoglobin_hb_g_dl: 9.5 },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(repository.findLatestSubmissionByBeneficiaryAndFormCode).toHaveBeenCalledWith(
+          'b1',
+          'MOTHER_REGISTRATION',
+        );
+        expect(jest.mocked(triggerRiskAssessment)).toHaveBeenCalledWith(
+          expect.objectContaining({
+            answers: {
+              haemoglobin_hb_g_dl: 9.5,
+              age: 22,
+              badObstetricHistoryFlag: false,
+            },
+          }),
+          'Bearer test-token',
+        );
+      });
+
+      it('flags badObstetricHistoryFlag true when gravida exceeds 4', async () => {
+        repository.findLatestSubmissionByBeneficiaryAndFormCode.mockResolvedValue({
+          formDataJson: { age_of_the_beneficiary: 30, gravida_total_number_of_pregnancies: 5 },
+        } as never);
+
+        await service.createSubmission(
+          'ANC_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            visitId: 'visit-1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {},
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(triggerRiskAssessment)).toHaveBeenCalledWith(
+          expect.objectContaining({
+            answers: expect.objectContaining({ badObstetricHistoryFlag: true }),
+          }),
+          'Bearer test-token',
+        );
+      });
+
+      it('flags badObstetricHistoryFlag true when livingChildren is less than gravida', async () => {
+        repository.findLatestSubmissionByBeneficiaryAndFormCode.mockResolvedValue({
+          formDataJson: {
+            gravida_total_number_of_pregnancies: 3,
+            living_children: 1,
+          },
+        } as never);
+
+        await service.createSubmission(
+          'ANC_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            visitId: 'visit-1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {},
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(triggerRiskAssessment)).toHaveBeenCalledWith(
+          expect.objectContaining({
+            answers: expect.objectContaining({ badObstetricHistoryFlag: true }),
+          }),
+          'Bearer test-token',
+        );
+      });
+
+      it('flags badObstetricHistoryFlag true when abortions >= 2', async () => {
+        repository.findLatestSubmissionByBeneficiaryAndFormCode.mockResolvedValue({
+          formDataJson: { abortions_pregnancy_losses_before_24_weeks: 2 },
+        } as never);
+
+        await service.createSubmission(
+          'ANC_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            visitId: 'visit-1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {},
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(triggerRiskAssessment)).toHaveBeenCalledWith(
+          expect.objectContaining({
+            answers: expect.objectContaining({ badObstetricHistoryFlag: true }),
+          }),
+          'Bearer test-token',
+        );
+      });
+
+      it('flags badObstetricHistoryFlag true when a non-"no_complications" answer is present', async () => {
+        repository.findLatestSubmissionByBeneficiaryAndFormCode.mockResolvedValue({
+          formDataJson: {
+            did_you_experience_any_complications_during_birth_delivery_in_previous_pregnancies: [
+              'yes_miscarriage',
+            ],
+          },
+        } as never);
+
+        await service.createSubmission(
+          'ANC_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            visitId: 'visit-1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {},
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(triggerRiskAssessment)).toHaveBeenCalledWith(
+          expect.objectContaining({
+            answers: expect.objectContaining({ badObstetricHistoryFlag: true }),
+          }),
+          'Bearer test-token',
+        );
+      });
+
+      it('proceeds without registration-derived answers when no MOTHER_REGISTRATION submission exists', async () => {
+        repository.findLatestSubmissionByBeneficiaryAndFormCode.mockResolvedValue(null);
+
+        await service.createSubmission(
+          'ANC_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            visitId: 'visit-1',
+            localSubmissionUuid: 'uuid-1',
+            formData: { haemoglobin_hb_g_dl: 9.5 },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(triggerRiskAssessment)).toHaveBeenCalledWith(
+          expect.objectContaining({ answers: { haemoglobin_hb_g_dl: 9.5 } }),
+          'Bearer test-token',
+        );
+      });
+
+      it('does not look up MOTHER_REGISTRATION for a form other than ANC_VISIT', async () => {
+        repository.findVersionById.mockResolvedValue({
+          ...ancVersion,
+          formDefinition: { formCode: 'CHILD_REGISTRATION', riskRuleSetId: 'rule-set-1' },
+        } as never);
+
+        await service.createSubmission(
+          'CHILD_REGISTRATION',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            visitId: 'visit-1',
+            localSubmissionUuid: 'uuid-1',
+            formData: { some_field: 'x' },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(repository.findLatestSubmissionByBeneficiaryAndFormCode).not.toHaveBeenCalled();
       });
     });
 

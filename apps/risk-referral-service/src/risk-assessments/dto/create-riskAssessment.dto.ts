@@ -23,12 +23,22 @@ const nestedJsonValueSchema: z.ZodType<NestedJsonValue> = z.lazy(() =>
  * its own to derive it. `visitId` is nullable since a submission need not
  * always be visit-linked (mirrors form_submissions.visitId).
  */
+// Mirrors risk-referral-service's own Prisma RiskPhase enum — kept as a
+// literal list (not imported from the generated Prisma client) since DTOs
+// in this service validate the wire shape independently of the ORM layer,
+// same convention as this file's other enum-like fields.
+const riskPhaseSchema = z.enum(['REGISTRATION', 'ANC', 'DELIVERY', 'PP', 'NN', 'INC', 'CCV']);
+
 export const createRiskAssessmentSchema = z
   .object({
     beneficiaryId: z.string().uuid(),
     visitId: z.string().uuid().nullable(),
     submissionId: z.string().uuid(),
     ruleSetId: z.string().uuid(),
+    // The caller's own formCode -> phase knowledge, needed to resolve this
+    // rule pack's conditionCode -> risk_condition_id map (see
+    // riskAssessment.service.ts's create()).
+    riskPhase: riskPhaseSchema,
     answers: z.record(nestedJsonValueSchema),
   })
   .strict();

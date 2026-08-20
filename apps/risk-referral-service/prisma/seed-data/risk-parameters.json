@@ -56,6 +56,83 @@
     "dataType": "BOOLEAN"
   },
   {
+    "parameterCode": "MOTHER_AGE_YEARS",
+    "parameterName": "Age (Mother, at registration)",
+    "entityType": "MOTHER",
+    "unit": "years",
+    "dataType": "NUMERIC"
+  },
+  {
+    "parameterCode": "MUAC_CM",
+    "parameterName": "Mid-Upper Arm Circumference",
+    "entityType": "MOTHER",
+    "unit": "cm",
+    "dataType": "NUMERIC"
+  },
+  {
+    "parameterCode": "BAD_OBSTETRIC_HISTORY_FLAG",
+    "parameterName": "Bad Obstetric History",
+    "entityType": "MOTHER",
+    "unit": null,
+    "dataType": "BOOLEAN"
+  },
+  {
+    "parameterCode": "BLOOD_GLUCOSE_MG_DL",
+    "parameterName": "Random Blood Sugar",
+    "entityType": "MOTHER",
+    "unit": "mg/dL",
+    "dataType": "NUMERIC"
+  },
+  {
+    "parameterCode": "BLEEDING_TYPE",
+    "parameterName": "Vaginal Bleeding (type/severity)",
+    "entityType": "MOTHER",
+    "unit": null,
+    "dataType": "CATEGORICAL"
+  },
+  {
+    "parameterCode": "PPH_HEAVY_BLEEDING_FLAG",
+    "parameterName": "Postpartum Hemorrhage — Heavy Bleeding",
+    "entityType": "MOTHER",
+    "unit": null,
+    "dataType": "BOOLEAN"
+  },
+  {
+    "parameterCode": "FETAL_HEART_RATE_BPM",
+    "parameterName": "Fetal Heart Rate",
+    "entityType": "MOTHER",
+    "unit": "bpm",
+    "dataType": "NUMERIC"
+  },
+  {
+    "parameterCode": "FUNDAL_HEIGHT_DEVIATION_CM",
+    "parameterName": "Fundal Height Deviation from Gestational Age",
+    "entityType": "MOTHER",
+    "unit": "cm",
+    "dataType": "NUMERIC"
+  },
+  {
+    "parameterCode": "GESTATIONAL_WEIGHT_GAIN_KG",
+    "parameterName": "Gestational Weight Gain",
+    "entityType": "MOTHER",
+    "unit": "kg",
+    "dataType": "NUMERIC"
+  },
+  {
+    "parameterCode": "JAUNDICE_POSITIVE_COUNT",
+    "parameterName": "Jaundice Signs Positive Count (Palm/Sclera/Skin)",
+    "entityType": "MOTHER",
+    "unit": null,
+    "dataType": "NUMERIC"
+  },
+  {
+    "parameterCode": "URINE_ABNORMAL_FLAG",
+    "parameterName": "Urine Analysis Abnormal",
+    "entityType": "MOTHER",
+    "unit": null,
+    "dataType": "BOOLEAN"
+  },
+  {
     "parameterCode": "CHILD_BIRTH_WEIGHT_KG",
     "parameterName": "Birth Weight",
     "entityType": "CHILD",

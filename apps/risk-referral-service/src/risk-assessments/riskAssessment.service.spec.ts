@@ -18,6 +18,9 @@ describe('RiskAssessmentService', () => {
     findBySubmissionId: jest.fn(),
     create: jest.fn(),
     findPhasesByConditionIds: jest.fn(),
+    findConditionIdsByPhase: jest.fn(),
+    findEverFlaggedConditionCodes: jest.fn(),
+    findConsecutiveNoImprovementCount: jest.fn(),
   } as unknown as jest.Mocked<RiskAssessmentRepository>;
   const beneficiaryClient = {
     getById: jest.fn(),
@@ -38,6 +41,7 @@ describe('RiskAssessmentService', () => {
     visitId: '22222222-2222-2222-2222-222222222222',
     submissionId: '33333333-3333-3333-3333-333333333333',
     ruleSetId: '44444444-4444-4444-4444-444444444444',
+    riskPhase: 'ANC',
     answers: { systolicBp: 145 },
   };
 
@@ -59,6 +63,9 @@ describe('RiskAssessmentService', () => {
     service = new RiskAssessmentService(repository, beneficiaryClient);
     beneficiaryClient.getById.mockResolvedValue({ id: BENEFICIARY_ID, sakhiId: CALLER_ID });
     repository.findPhasesByConditionIds.mockResolvedValue(new Map([['cond-1', 'ANC']]));
+    repository.findConditionIdsByPhase.mockResolvedValue(new Map([['ANEMIA', 'cond-1']]));
+    repository.findEverFlaggedConditionCodes.mockResolvedValue(new Set());
+    repository.findConsecutiveNoImprovementCount.mockResolvedValue(new Map([['ANEMIA', 0]]));
     resolveRiskGradeLookupIdMock.mockResolvedValue('grade-lookup-id-1');
     pushRiskConditionSummaryMock.mockResolvedValue({ ok: true });
   });
@@ -154,7 +161,16 @@ describe('RiskAssessmentService', () => {
 
     await service.create(dto, caller(), AUTH_HEADER);
 
-    expect(evaluateRuleSetMock).toHaveBeenCalledWith(dto.ruleSetId, dto.answers, AUTH_HEADER);
+    expect(evaluateRuleSetMock).toHaveBeenCalledWith(
+      dto.ruleSetId,
+      {
+        ...dto.answers,
+        conditionIds: { ANEMIA: 'cond-1' },
+        isFirstInstance: { ANEMIA: true },
+        consecutiveNoImprovementCount: { ANEMIA: 0 },
+      },
+      AUTH_HEADER,
+    );
     expect(resolveRiskGradeLookupIdMock).toHaveBeenCalledWith('HIGH', AUTH_HEADER);
     expect(repository.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -169,6 +185,7 @@ describe('RiskAssessmentService', () => {
           expect.objectContaining({
             riskConditionId: 'cond-1',
             riskGradeLookupValueId: 'grade-lookup-id-1',
+            gradeRank: 3,
             isReferralTrigger: true,
             isHrVisitTrigger: true,
           }),
@@ -311,6 +328,81 @@ describe('RiskAssessmentService', () => {
 
     expect(pushRiskConditionSummaryMock).not.toHaveBeenCalled();
     expect(consoleErrorSpy).toHaveBeenCalled();
+  });
+
+  describe('conditionIds / isFirstInstance / consecutiveNoImprovementCount resolution', () => {
+    beforeEach(() => {
+      repository.findBySubmissionId.mockResolvedValue(null);
+      evaluateRuleSetMock.mockResolvedValue({
+        ruleVersionId: 'rule-version-1',
+        overallRiskCategory: 'NORMAL',
+        conditions: [],
+      });
+      repository.create.mockResolvedValue({ id: 'assessment-1' } as never);
+      repository.findConsecutiveNoImprovementCount.mockResolvedValue(new Map());
+    });
+
+    it('resolves conditionIds from every ACTIVE risk_conditions row in dto.riskPhase', async () => {
+      repository.findConditionIdsByPhase.mockResolvedValue(
+        new Map([
+          ['ANEMIA', 'cond-anemia'],
+          ['HYPERTENSION', 'cond-htn'],
+        ]),
+      );
+      repository.findEverFlaggedConditionCodes.mockResolvedValue(new Set());
+
+      await service.create(dto, caller(), AUTH_HEADER);
+
+      expect(repository.findConditionIdsByPhase).toHaveBeenCalledWith('ANC');
+      expect(evaluateRuleSetMock).toHaveBeenCalledWith(
+        dto.ruleSetId,
+        expect.objectContaining({
+          conditionIds: { ANEMIA: 'cond-anemia', HYPERTENSION: 'cond-htn' },
+        }),
+        AUTH_HEADER,
+      );
+    });
+
+    it('marks a condition as isFirstInstance: false when it was ever flagged before for this beneficiary', async () => {
+      repository.findConditionIdsByPhase.mockResolvedValue(new Map([['AGE', 'cond-age']]));
+      repository.findEverFlaggedConditionCodes.mockResolvedValue(new Set(['AGE']));
+
+      await service.create(dto, caller(), AUTH_HEADER);
+
+      expect(repository.findEverFlaggedConditionCodes).toHaveBeenCalledWith(dto.beneficiaryId);
+      expect(evaluateRuleSetMock).toHaveBeenCalledWith(
+        dto.ruleSetId,
+        expect.objectContaining({ isFirstInstance: { AGE: false } }),
+        AUTH_HEADER,
+      );
+    });
+
+    it('resolves consecutiveNoImprovementCount for every condition in dto.riskPhase and merges it into the evaluation input', async () => {
+      repository.findConditionIdsByPhase.mockResolvedValue(new Map([['WASTING', 'cond-wasting']]));
+      repository.findEverFlaggedConditionCodes.mockResolvedValue(new Set());
+      repository.findConsecutiveNoImprovementCount.mockResolvedValue(new Map([['WASTING', 3]]));
+
+      await service.create(dto, caller(), AUTH_HEADER);
+
+      expect(repository.findConsecutiveNoImprovementCount).toHaveBeenCalledWith(dto.beneficiaryId, [
+        'WASTING',
+      ]);
+      expect(evaluateRuleSetMock).toHaveBeenCalledWith(
+        dto.ruleSetId,
+        expect.objectContaining({ consecutiveNoImprovementCount: { WASTING: 3 } }),
+        AUTH_HEADER,
+      );
+    });
+
+    it('400s when no ACTIVE risk_conditions rows are seeded for dto.riskPhase', async () => {
+      repository.findConditionIdsByPhase.mockResolvedValue(new Map());
+      repository.findEverFlaggedConditionCodes.mockResolvedValue(new Set());
+
+      await expect(service.create(dto, caller(), AUTH_HEADER)).rejects.toMatchObject({
+        status: 400,
+      });
+      expect(evaluateRuleSetMock).not.toHaveBeenCalled();
+    });
   });
 
   it('propagates rules-service evaluation failures (e.g. 422 no published version)', async () => {

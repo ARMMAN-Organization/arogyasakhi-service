@@ -21,6 +21,28 @@ import { getAncestorChain } from '../geography/geography.client';
 import { triggerRiskAssessment } from '../risk-assessments/riskAssessment.client';
 
 /**
+ * Maps this service's own formCode to risk-referral-service's RiskCondition
+ * .phase enum value, for the risk-assessment trigger's `riskPhase` field
+ * (see riskAssessment.client.ts's doc comment on why the caller supplies
+ * this). Only forms with a risk_rule_set_id configured ever reach this map;
+ * a formCode with no entry here falls back to itself unchanged.
+ */
+const FORM_CODE_TO_RISK_PHASE: Record<string, string> = {
+  ANC_VISIT: 'ANC',
+  // NN, INC, and CCV all share one seeded set of risk_conditions rows under
+  // phase 'INC' — per SRS §3A.2.4, CCV reuses INC's HR thresholds verbatim,
+  // and NEONATAL_VISIT's clinical fields (nutrition status, danger signs,
+  // umbilical cord, etc.) grade against the same condition set (see
+  // infant-risk.rulesJson.ts's own doc comment). INFANT_VISIT (the legacy
+  // alias of INC_VISIT — see visit-code-form-map.ts) is intentionally
+  // omitted here: it is never reached by a real visit-schedule submission,
+  // only INC_VISIT is.
+  NEONATAL_VISIT: 'INC',
+  INC_VISIT: 'INC',
+  CCV_VISIT: 'INC',
+};
+
+/**
  * Business logic for the dynamic-forms feature: fetching the active version,
  * the DRAFT -> PUBLISHED lifecycle, and validating/persisting submissions.
  * Data access is delegated to the repository.
@@ -297,13 +319,21 @@ export class FormService {
     // entityType forms) simply has nothing to evaluate. Best-effort, same
     // stance as syncSocioDemographics above.
     if (dto.visitId && version.formDefinition.riskRuleSetId) {
+      const answers =
+        formCode === 'ANC_VISIT'
+          ? {
+              ...dto.formData,
+              ...(await this.resolveAncRiskRegistrationAnswers(dto.beneficiaryId)),
+            }
+          : dto.formData;
       await triggerRiskAssessment(
         {
           beneficiaryId: dto.beneficiaryId,
           visitId: dto.visitId,
           submissionId: created.id,
           ruleSetId: version.formDefinition.riskRuleSetId,
-          answers: dto.formData,
+          riskPhase: FORM_CODE_TO_RISK_PHASE[formCode] ?? formCode,
+          answers,
         },
         authorizationHeader,
       );
@@ -338,6 +368,58 @@ export class FormService {
    * child-creation against a different beneficiary than the one actually
    * recorded.
    */
+  /**
+   * Derives the ANC risk pack's registration-time inputs (age, bad obstetric
+   * history) from this beneficiary's own MOTHER_REGISTRATION submission —
+   * a same-service, same-DB lookup (no cross-service call needed: both
+   * age_of_the_beneficiary and the obstetric-history answers live on this
+   * same form). Appendix D's Bad Obstetric
+   * History condition ("G>4, L<P, Pre-term, LSCS without spacing,
+   * consecutive losses/ABORTIONS >=2, stillbirth, neonatal death, or
+   * recurrent complications") only partially maps onto what
+   * MOTHER_REGISTRATION actually asks — this derivation covers
+   * gravida>4, livingChildren<gravida, abortions>=2, and any
+   * non-"no_complications" answer on the prior-complications question.
+   * Pre-term delivery history and LSCS-without-spacing have no captured
+   * field in this form today and are NOT evaluated — a known gap versus
+   * the full Appendix D definition, not a bug.
+   *
+   * Returns `{}` (no registration answers merged in) if no
+   * MOTHER_REGISTRATION submission exists yet for this beneficiary — the
+   * ANC risk pack's age/BOH conditions are simply skipped for that visit
+   * rather than the whole risk evaluation failing.
+   */
+  private async resolveAncRiskRegistrationAnswers(
+    beneficiaryId: string,
+  ): Promise<Record<string, unknown>> {
+    const registration = await this.repository.findLatestSubmissionByBeneficiaryAndFormCode(
+      beneficiaryId,
+      'MOTHER_REGISTRATION',
+    );
+    if (!registration) return {};
+
+    const answers = registration.formDataJson as Record<string, unknown>;
+    const age = answers.age_of_the_beneficiary;
+    const gravida = answers.gravida_total_number_of_pregnancies;
+    const livingChildren = answers.living_children;
+    const abortions = answers.abortions_pregnancy_losses_before_24_weeks;
+    const complications =
+      answers.did_you_experience_any_complications_during_birth_delivery_in_previous_pregnancies;
+
+    const badObstetricHistoryFlag =
+      (typeof gravida === 'number' && gravida > 4) ||
+      (typeof gravida === 'number' &&
+        typeof livingChildren === 'number' &&
+        livingChildren < gravida) ||
+      (typeof abortions === 'number' && abortions >= 2) ||
+      (Array.isArray(complications) && complications.some((code) => code !== 'no_complications'));
+
+    return {
+      ...(typeof age === 'number' ? { age } : {}),
+      badObstetricHistoryFlag,
+    };
+  }
+
   private async resolveDeliveryChildren(
     dto: CreateSubmissionInput,
     beneficiaryId: string,

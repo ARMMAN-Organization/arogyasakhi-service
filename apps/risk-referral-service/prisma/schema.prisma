@@ -210,6 +210,15 @@ model RiskFlag {
   // lookup_values.lookup_value_id (category RISK_GRADE) — owned by
   // auth-service, no cross-service relation.
   riskGradeLookupValueId String   @map("risk_grade_lookup_value_id")
+  // Severity rank of this flag's grade, as computed by the rule pack at
+  // evaluation time (0=NORMAL..3=SEVERE) — persisted alongside the opaque
+  // riskGradeLookupValueId so a beneficiary's grade trend can be compared
+  // across visits (improvement/deterioration) without resolving each
+  // historic flag's grade via auth-service's RISK_GRADE lookup category.
+  // Feeds findConsecutiveNoImprovementCount (riskAssessment.repository.ts)
+  // and, longer-term, the Part 3 dashboard's progression/deterioration
+  // reports (docs/Appendix_D_High_Risk_Detection_Rules.md).
+  gradeRank              Int      @map("grade_rank")
   observedValueJson      Json?    @map("observed_value_json")
   isReferralTrigger      Boolean  @default(false) @map("is_referral_trigger")
   isEducationTrigger     Boolean  @default(false) @map("is_education_trigger")
