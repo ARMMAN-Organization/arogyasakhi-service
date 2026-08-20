@@ -6,6 +6,7 @@ import type { DecideReferralInput } from './dto/decide-referral.dto';
 import { BeneficiaryClient } from './beneficiary.client';
 import { listSakhiIdsForSupervisor } from './sakhi.client';
 import { resolveReferralTypeLookupId } from './lookup.client';
+import type { IncentiveClient } from './incentive.client';
 
 jest.mock('./sakhi.client');
 jest.mock('./lookup.client');
@@ -50,6 +51,8 @@ describe('ReferralService', () => {
   const repository = {
     findMany: jest.fn(),
     findById: jest.fn(),
+    findManyByIds: jest.fn(),
+    findFollowupSummary: jest.fn(),
     create: jest.fn(),
     updateStatus: jest.fn(),
     countSummary: jest.fn(),
@@ -66,6 +69,14 @@ describe('ReferralService', () => {
 
   beforeEach(() => {
     jest.resetAllMocks();
+    // Default so every decide() test's own type-guard check resolves
+    // against a real id rather than the "lookup unresolvable" 502 branch —
+    // 'lookup-accompanied' matches getSummary's own sentinel for the
+    // Accompanied referral type; the referral() fixture's default type
+    // ('aaaaaaaa-...') deliberately does NOT match it, so LAPSE tests using
+    // the default fixture pass the guard as "not Accompanied" without
+    // needing to override this per test.
+    resolveReferralTypeLookupIdMock.mockResolvedValue('lookup-accompanied');
     service = new ReferralService(repository, beneficiaryClient);
   });
 
@@ -86,8 +97,11 @@ describe('ReferralService', () => {
     });
 
     it('COMPLETE: marks a PENDING_FOLLOWUP referral as COMPLETED', async () => {
-      const pending = referral();
-      const decided = referral({ status: 'COMPLETED' });
+      const pending = referral({ referralTypeLookupValueId: 'lookup-accompanied' });
+      const decided = referral({
+        referralTypeLookupValueId: 'lookup-accompanied',
+        status: 'COMPLETED',
+      });
       repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(decided);
       repository.updateStatus.mockResolvedValue(true);
 
@@ -236,6 +250,136 @@ describe('ReferralService', () => {
       ).rejects.toMatchObject({ status: 404 });
       expect(repository.updateStatus).not.toHaveBeenCalled();
     });
+
+    describe('referral-type guard', () => {
+      it('422s when COMPLETE is applied to a non-Accompanied referral', async () => {
+        repository.findById.mockResolvedValue(referral());
+
+        await expect(
+          service.decide(
+            '11111111-1111-1111-1111-111111111111',
+            { decision: 'COMPLETE' },
+            caller(),
+            AUTH_HEADER,
+          ),
+        ).rejects.toMatchObject({ status: 422 });
+        expect(repository.updateStatus).not.toHaveBeenCalled();
+      });
+
+      it('422s when LAPSE is applied to an Accompanied referral', async () => {
+        repository.findById.mockResolvedValue(
+          referral({ referralTypeLookupValueId: 'lookup-accompanied' }),
+        );
+
+        await expect(
+          service.decide(
+            '11111111-1111-1111-1111-111111111111',
+            { decision: 'LAPSE' },
+            caller(),
+            AUTH_HEADER,
+          ),
+        ).rejects.toMatchObject({ status: 422 });
+        expect(repository.updateStatus).not.toHaveBeenCalled();
+      });
+
+      it('fails closed (502) when the ACCOMPANIED lookup value cannot be resolved', async () => {
+        repository.findById.mockResolvedValue(referral());
+        resolveReferralTypeLookupIdMock.mockResolvedValue(null);
+
+        await expect(
+          service.decide(
+            '11111111-1111-1111-1111-111111111111',
+            { decision: 'COMPLETE' },
+            caller(),
+            AUTH_HEADER,
+          ),
+        ).rejects.toMatchObject({ status: 502 });
+        expect(repository.updateStatus).not.toHaveBeenCalled();
+      });
+
+      it('never checks referral type for REFILL', async () => {
+        repository.findById.mockResolvedValue(referral());
+
+        await service.decide(
+          '11111111-1111-1111-1111-111111111111',
+          { decision: 'REFILL' },
+          caller(),
+          AUTH_HEADER,
+        );
+
+        expect(resolveReferralTypeLookupIdMock).not.toHaveBeenCalled();
+      });
+    });
+  });
+
+  describe('decideAccompanied', () => {
+    const incentiveClient = {
+      triggerAccompaniedReferral: jest.fn(),
+    } as unknown as jest.Mocked<IncentiveClient>;
+    let accompaniedService: ReferralService;
+
+    beforeEach(() => {
+      accompaniedService = new ReferralService(repository, beneficiaryClient, incentiveClient);
+      beneficiaryClient.getById.mockResolvedValue({
+        id: '22222222-2222-2222-2222-222222222222',
+        sakhiId: 'sakhi-a',
+      });
+    });
+
+    it('APPROVE on an Accompanied referral completes it and triggers the incentive', async () => {
+      const pending = referral({ referralTypeLookupValueId: 'lookup-accompanied' });
+      const decided = referral({
+        referralTypeLookupValueId: 'lookup-accompanied',
+        status: 'COMPLETED',
+      });
+      repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(decided);
+      repository.updateStatus.mockResolvedValue(true);
+
+      const result = await accompaniedService.decideAccompanied(
+        pending.id,
+        'APPROVE',
+        caller(),
+        AUTH_HEADER,
+      );
+
+      expect(result).toBe(decided);
+      expect(incentiveClient.triggerAccompaniedReferral).toHaveBeenCalledWith(
+        'sakhi-a',
+        pending.id,
+        AUTH_HEADER,
+      );
+    });
+
+    it('422s APPROVE on a non-Accompanied referral and never triggers the incentive', async () => {
+      repository.findById.mockResolvedValue(referral());
+
+      await expect(
+        accompaniedService.decideAccompanied(
+          '11111111-1111-1111-1111-111111111111',
+          'APPROVE',
+          caller(),
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 422 });
+      expect(repository.updateStatus).not.toHaveBeenCalled();
+      expect(incentiveClient.triggerAccompaniedReferral).not.toHaveBeenCalled();
+    });
+
+    it('REJECT makes no status change and never triggers the incentive, regardless of type', async () => {
+      const pending = referral();
+      repository.findById.mockResolvedValue(pending);
+
+      const result = await accompaniedService.decideAccompanied(
+        pending.id,
+        'REJECT',
+        caller(),
+        AUTH_HEADER,
+      );
+
+      expect(result).toBe(pending);
+      expect(repository.updateStatus).not.toHaveBeenCalled();
+      expect(incentiveClient.triggerAccompaniedReferral).not.toHaveBeenCalled();
+    });
   });
 
   it('lists via repository', async () => {
@@ -323,6 +467,45 @@ describe('ReferralService', () => {
       supervisorApprovalStatus: 'NOT_REQUIRED',
     };
     await expect(service.create(dto)).rejects.toThrow('db down');
+  });
+
+  describe('getDecisionStatusByIds', () => {
+    it('delegates to the repository with the given ids', async () => {
+      const rows = [
+        { id: '11111111-1111-1111-1111-111111111111', status: 'PENDING_FOLLOWUP' as const },
+      ];
+      repository.findManyByIds.mockResolvedValue(rows);
+
+      const ids = ['11111111-1111-1111-1111-111111111111'];
+      await expect(service.getDecisionStatusByIds(ids)).resolves.toBe(rows);
+      expect(repository.findManyByIds).toHaveBeenCalledWith(ids);
+    });
+  });
+
+  describe('getById', () => {
+    it('returns the referral merged with its follow-up summary', async () => {
+      const row = referral();
+      const summary = {
+        incompleteCount: 2,
+        latestFollowup: {
+          followupDate: new Date('2026-07-15'),
+          notVisitedReason: 'Beneficiary unavailable',
+          outcome: null,
+        },
+      };
+      repository.findById.mockResolvedValue(row);
+      repository.findFollowupSummary.mockResolvedValue(summary);
+
+      await expect(service.getById(row.id)).resolves.toEqual({ ...row, ...summary });
+      expect(repository.findFollowupSummary).toHaveBeenCalledWith(row.id);
+    });
+
+    it('404s on an unknown id without computing a follow-up summary', async () => {
+      repository.findById.mockResolvedValue(null);
+
+      await expect(service.getById('unknown-id')).rejects.toMatchObject({ status: 404 });
+      expect(repository.findFollowupSummary).not.toHaveBeenCalled();
+    });
   });
 
   describe('getSummary', () => {

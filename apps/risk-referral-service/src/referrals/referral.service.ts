@@ -1,4 +1,11 @@
-import { conflict, forbidden, notFound, type AuthenticatedUser } from '@armman/service-commons';
+import {
+  badGateway,
+  conflict,
+  forbidden,
+  notFound,
+  unprocessable,
+  type AuthenticatedUser,
+} from '@armman/service-commons';
 import type { ReferralRepository } from './referral.repository';
 import type { CreateReferralInput } from './dto/create-referral.dto';
 import type { DecideReferralInput } from './dto/decide-referral.dto';
@@ -21,6 +28,24 @@ export class ReferralService {
 
   create(dto: CreateReferralInput) {
     return this.repository.create(dto);
+  }
+
+  getDecisionStatusByIds(ids: string[]) {
+    return this.repository.findManyByIds(ids);
+  }
+
+  /**
+   * A referral's own fields plus its follow-up summary (incompleteCount,
+   * latestFollowup) — added for Quick Response's REFERRAL_INCOMPLETE card
+   * enrichment. The summary is always computed (cheap: one count + one
+   * findFirst), not gated by referral type, since ACCOMPANIED_REFERRAL
+   * callers simply ignore it.
+   */
+  async getById(id: string) {
+    const referral = await this.repository.findById(id);
+    if (!referral) throw notFound('Referral not found.');
+    const followupSummary = await this.repository.findFollowupSummary(id);
+    return { ...referral, ...followupSummary };
   }
 
   /**
@@ -171,6 +196,8 @@ export class ReferralService {
       return existing;
     }
 
+    await this.assertDecisionMatchesReferralType(existing, dto.decision, authorizationHeader);
+
     const toStatus = dto.decision === 'LAPSE' ? 'LAPSED' : 'COMPLETED';
     const updated = await this.repository.updateStatus(id, 'PENDING_FOLLOWUP', toStatus);
     if (!updated) {
@@ -183,6 +210,47 @@ export class ReferralService {
     const decided = await this.repository.findById(id);
     if (!decided) throw notFound('Referral not found.');
     return decided;
+  }
+
+  /**
+   * Guards LAPSE/COMPLETE against being applied to the wrong referral type —
+   * COMPLETE (Accompanied Referral's outcome, FR-SV-4.9) must only ever
+   * apply to a referral whose referralTypeLookupValueId resolves to
+   * ACCOMPANIED, and LAPSE (Referral Follow-up Incomplete's outcome,
+   * FR-SV-4.5) must never apply to one. Both PATCH and POST
+   * /referrals/:id/decision only ever check `existing.status ===
+   * 'PENDING_FOLLOWUP'` — without this, a caller could hit either route
+   * directly (bypassing Quick Response's own correct requestType-based
+   * dispatch) and COMPLETE a Follow-up-Incomplete referral, wrongly
+   * triggering its incentive, or LAPSE an Accompanied one.
+   *
+   * Fails closed: an unresolvable ACCOMPANIED lookup value (auth-service
+   * unreachable, or the code un-seeded) throws rather than guessing at the
+   * referral's type — unlike enrichment reads, this guards an incentive-
+   * triggering action, so silently letting it through is the wrong default.
+   */
+  private async assertDecisionMatchesReferralType(
+    referral: { referralTypeLookupValueId: string },
+    decision: 'LAPSE' | 'COMPLETE',
+    authorizationHeader: string,
+  ) {
+    const accompaniedLookupValueId = await resolveReferralTypeLookupId(
+      'ACCOMPANIED',
+      authorizationHeader,
+    );
+    if (!accompaniedLookupValueId) {
+      throw badGateway(
+        'Unable to resolve the ACCOMPANIED referral type — cannot verify this decision applies to the right referral type.',
+      );
+    }
+
+    const isAccompanied = referral.referralTypeLookupValueId === accompaniedLookupValueId;
+    if (decision === 'COMPLETE' && !isAccompanied) {
+      throw unprocessable('COMPLETE can only be applied to an Accompanied Referral.');
+    }
+    if (decision === 'LAPSE' && isAccompanied) {
+      throw unprocessable('LAPSE cannot be applied to an Accompanied Referral.');
+    }
   }
 
   /**

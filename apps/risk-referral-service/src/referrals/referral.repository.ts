@@ -13,6 +13,42 @@ export class ReferralRepository {
     return this.prisma.referral.findFirst({ where: { id, isDeleted: false } });
   }
 
+  /**
+   * Incomplete-followup count and the most recent followup's own
+   * notVisitedReason/outcome for one referral — for Quick Response's
+   * REFERRAL_INCOMPLETE card enrichment ("# referrals missed", "reason").
+   * Returns `latestFollowup: null` when the referral has no followups yet.
+   */
+  async findFollowupSummary(referralId: string) {
+    const [incompleteCount, latest] = await Promise.all([
+      this.prisma.referralFollowup.count({
+        where: { referralId, isDeleted: false, followupStatus: 'INCOMPLETE' },
+      }),
+      this.prisma.referralFollowup.findFirst({
+        where: { referralId, isDeleted: false },
+        orderBy: { followupDate: 'desc' },
+        select: { followupDate: true, notVisitedReason: true, outcome: true },
+      }),
+    ]);
+
+    return { incompleteCount, latestFollowup: latest };
+  }
+
+  /**
+   * Real-time status for a batch of referral ids — lets Quick Response's
+   * list() reconcile against the current decision state instead of
+   * trusting approval_requests' own (possibly stale) copy, since a
+   * referral can also be decided directly via PATCH/POST
+   * /referrals/:id/decision, bypassing approval-service entirely. An id
+   * not found (or soft-deleted) is simply absent from the result.
+   */
+  findManyByIds(ids: string[]) {
+    return this.prisma.referral.findMany({
+      where: { id: { in: ids }, isDeleted: false },
+      select: { id: true, status: true },
+    });
+  }
+
   create(data: CreateReferralInput) {
     return this.prisma.referral.create({ data });
   }

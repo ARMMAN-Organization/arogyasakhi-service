@@ -4,6 +4,39 @@ import riskParameters from './seed-data/risk-parameters.json';
 
 const prisma = new PrismaClient();
 
+// Read directly from process.env (not appConfig) — this script is run standalone via
+// ts-node (see tools/prisma-seed-foreach.js) without the path-alias registration app
+// code relies on to resolve `@armman/*` workspace packages, so this file (and
+// everything it imports) must stay free of any `@armman/*` import — this is also why
+// resolveReferralTypeLookupId/resolveApprovalStatusPendingId below are defined locally
+// rather than imported from src/referrals/lookup.client.ts (which imports
+// `@armman/service-commons`), even though the logic mirrors it exactly.
+const API_GATEWAY_BASE_URL = process.env.API_GATEWAY_BASE_URL ?? 'http://localhost:3000';
+
+/**
+ * Resolves a REFERRAL_TYPE valueCode (STANDARD/ACCOMPANIED) to its lookup_values id via
+ * auth-service's GET /lookups/REFERRAL_TYPE, through the gateway. Mirrors
+ * src/referrals/lookup.client.ts's resolveReferralTypeLookupId — duplicated locally
+ * rather than imported, see the note on API_GATEWAY_BASE_URL above. Returns null (never
+ * throws) on any failure so the caller can skip gracefully instead of aborting the whole
+ * seed run.
+ */
+async function resolveReferralTypeLookupId(
+  valueCode: 'STANDARD' | 'ACCOMPANIED',
+  authorizationHeader: string,
+): Promise<string | null> {
+  try {
+    const res = await fetch(`${API_GATEWAY_BASE_URL}/api/v1/lookups/REFERRAL_TYPE`, {
+      headers: { Authorization: authorizationHeader },
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { data: { values: { id: string; valueCode: string }[] } };
+    return body.data.values.find((v) => v.valueCode === valueCode)?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
 interface SeedResult {
   step: string;
   created: boolean;
@@ -116,8 +149,271 @@ async function seedRiskParameters(): Promise<SeedResult> {
   };
 }
 
+const DEMO_ACCOMPANIED_REFERRAL_TAG = 'DEMO-QR-ACCOMPANIED-REFERRAL';
+const DEMO_REFERRAL_INCOMPLETE_TAG = 'DEMO-QR-REFERRAL-INCOMPLETE';
+
+interface RaiseApprovalRequestInput {
+  requestType: 'ACCOMPANIED_REFERRAL' | 'REFERRAL_INCOMPLETE';
+  beneficiaryId: string;
+  referralId: string;
+  requestedByUserId: string;
+  decisionStatusLookupId: string;
+}
+
+/**
+ * Resolves the APPROVAL_STATUS/PENDING lookup_values id via auth-service's
+ * GET /lookups/APPROVAL_STATUS, through the gateway — mirrors closure-reopen-service's
+ * LookupClient.resolveApprovalStatusId. Kept local to this seed script (not src/) since
+ * raising a Quick Response card from a referral is a seed-only convenience — unlike
+ * ReopenRequestService, nothing in this service's real application code raises an
+ * approval_requests row for a referral today. Returns null (never throws) on any
+ * failure so the caller can skip gracefully instead of aborting the whole seed run.
+ */
+async function resolveApprovalStatusPendingId(authorizationHeader: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${API_GATEWAY_BASE_URL}/api/v1/lookups/APPROVAL_STATUS`, {
+      headers: { Authorization: authorizationHeader },
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { data: { values: { id: string; valueCode: string }[] } };
+    return body.data.values.find((v) => v.valueCode === 'PENDING')?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Raises a Quick Response card by calling approval-service's POST /approvals through the
+ * gateway — mirrors closure-reopen-service's ApprovalClient.create(). Kept local for the
+ * same reason as resolveApprovalStatusPendingId above. Returns whether it succeeded
+ * (never throws) so a card-raise failure degrades to a log line, not a crashed seed run —
+ * the referral row itself is this service's own source of truth and stays committed
+ * either way.
+ */
+async function raiseApprovalRequest(
+  input: RaiseApprovalRequestInput,
+  authorizationHeader: string,
+): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_GATEWAY_BASE_URL}/api/v1/approvals`, {
+      method: 'POST',
+      headers: { Authorization: authorizationHeader, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        requestType: input.requestType,
+        beneficiaryId: input.beneficiaryId,
+        sourceEntityType: 'Referral',
+        sourceEntityId: input.referralId,
+        referralId: input.referralId,
+        requestedByUserId: input.requestedByUserId,
+        decisionStatusLookupId: input.decisionStatusLookupId,
+      }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Common env-var + demo-row-exists guard shared by both referral-backed demo seeds below. */
+async function checkReferralDemoPreconditions(
+  tag: string,
+): Promise<
+  | { proceed: false; result: SeedResult }
+  | { proceed: true; beneficiaryId: string; requestedByUserId: string; authorizationHeader: string }
+> {
+  const beneficiaryId = process.env.SEED_DEMO_BENEFICIARY_ID;
+  const requestedByUserId = process.env.SEED_DEMO_SAKHI_USER_ID;
+  const authToken = process.env.SEED_DEMO_AUTH_TOKEN;
+  if (!beneficiaryId || !requestedByUserId || !authToken) {
+    return {
+      proceed: false,
+      result: {
+        step: tag,
+        created: false,
+        message:
+          'SEED_DEMO_BENEFICIARY_ID / SEED_DEMO_SAKHI_USER_ID / SEED_DEMO_AUTH_TOKEN not set — skipped.',
+      },
+    };
+  }
+
+  const existing = await prisma.referral.findFirst({ where: { facilityName: tag } });
+  if (existing) {
+    return {
+      proceed: false,
+      result: { step: tag, created: false, message: 'Demo referral already exists — skipped.' },
+    };
+  }
+
+  return {
+    proceed: true,
+    beneficiaryId,
+    requestedByUserId,
+    authorizationHeader: `Bearer ${authToken}`,
+  };
+}
+
+/**
+ * Demo ACCOMPANIED_REFERRAL Quick Response card (SRS FR-SV-4.9). Creates a Referral row
+ * (type ACCOMPANIED, status PENDING_FOLLOWUP so the card is decidable) and raises its
+ * linked approval_requests row via approval-service's public POST /approvals — the same
+ * endpoint any authorized SAKHI/SUPERVISOR caller would use.
+ */
+async function seedAccompaniedReferralDemo(): Promise<SeedResult> {
+  const step = 'accompanied-referral-demo';
+  try {
+    const pre = await checkReferralDemoPreconditions(DEMO_ACCOMPANIED_REFERRAL_TAG);
+    if (!pre.proceed) return { ...pre.result, step };
+    const { beneficiaryId, requestedByUserId, authorizationHeader } = pre;
+
+    const referralTypeLookupValueId = await resolveReferralTypeLookupId(
+      'ACCOMPANIED',
+      authorizationHeader,
+    );
+    if (!referralTypeLookupValueId) {
+      return {
+        step,
+        created: false,
+        message:
+          'REFERRAL_TYPE/ACCOMPANIED lookup value not found — is auth-service seeded? Skipped.',
+      };
+    }
+
+    const referral = await prisma.referral.create({
+      data: {
+        beneficiaryId,
+        referralTypeLookupValueId,
+        referralDate: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
+        facilityType: 'PHC',
+        facilityName: DEMO_ACCOMPANIED_REFERRAL_TAG,
+        status: 'PENDING_FOLLOWUP',
+      },
+    });
+
+    const decisionStatusLookupId = await resolveApprovalStatusPendingId(authorizationHeader);
+    if (!decisionStatusLookupId) {
+      return {
+        step,
+        created: true,
+        message: `Seeded referral ${referral.id} but no PENDING APPROVAL_STATUS lookup value was found — Quick Response card not raised.`,
+      };
+    }
+
+    const raised = await raiseApprovalRequest(
+      {
+        requestType: 'ACCOMPANIED_REFERRAL',
+        beneficiaryId,
+        referralId: referral.id,
+        requestedByUserId,
+        decisionStatusLookupId,
+      },
+      authorizationHeader,
+    );
+
+    return {
+      step,
+      created: true,
+      message: raised
+        ? `Seeded referral ${referral.id} and raised its ACCOMPANIED_REFERRAL Quick Response card.`
+        : `Seeded referral ${referral.id} but raising its Quick Response card failed — check approval-service.`,
+    };
+  } catch (err) {
+    return {
+      step,
+      created: false,
+      message: `Failed: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
+/**
+ * Demo REFERRAL_INCOMPLETE Quick Response card (SRS FR-SV-4.5 / Appendix E.4). Creates a
+ * Referral row (type STANDARD, status PENDING_FOLLOWUP) plus a child ReferralFollowup row
+ * (followupStatus INCOMPLETE, with notVisitedReason set — this is what the card's "reason"
+ * / "missed count" fields actually read, per ReferralRepository.findFollowupSummary()), and
+ * raises the linked approval_requests row the same way seedAccompaniedReferralDemo does.
+ */
+async function seedIncompleteReferralDemo(): Promise<SeedResult> {
+  const step = 'referral-incomplete-demo';
+  try {
+    const pre = await checkReferralDemoPreconditions(DEMO_REFERRAL_INCOMPLETE_TAG);
+    if (!pre.proceed) return { ...pre.result, step };
+    const { beneficiaryId, requestedByUserId, authorizationHeader } = pre;
+
+    const referralTypeLookupValueId = await resolveReferralTypeLookupId(
+      'STANDARD',
+      authorizationHeader,
+    );
+    if (!referralTypeLookupValueId) {
+      return {
+        step,
+        created: false,
+        message: 'REFERRAL_TYPE/STANDARD lookup value not found — is auth-service seeded? Skipped.',
+      };
+    }
+
+    const referral = await prisma.referral.create({
+      data: {
+        beneficiaryId,
+        referralTypeLookupValueId,
+        referralDate: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000),
+        facilityType: 'PHC',
+        facilityName: DEMO_REFERRAL_INCOMPLETE_TAG,
+        status: 'PENDING_FOLLOWUP',
+      },
+    });
+
+    await prisma.referralFollowup.create({
+      data: {
+        referralId: referral.id,
+        followupDate: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
+        followupStatus: 'INCOMPLETE',
+        notVisitedReason: 'Beneficiary unavailable at scheduled facility visit.',
+      },
+    });
+
+    const decisionStatusLookupId = await resolveApprovalStatusPendingId(authorizationHeader);
+    if (!decisionStatusLookupId) {
+      return {
+        step,
+        created: true,
+        message: `Seeded referral ${referral.id} with an incomplete follow-up, but no PENDING APPROVAL_STATUS lookup value was found — Quick Response card not raised.`,
+      };
+    }
+
+    const raised = await raiseApprovalRequest(
+      {
+        requestType: 'REFERRAL_INCOMPLETE',
+        beneficiaryId,
+        referralId: referral.id,
+        requestedByUserId,
+        decisionStatusLookupId,
+      },
+      authorizationHeader,
+    );
+
+    return {
+      step,
+      created: true,
+      message: raised
+        ? `Seeded referral ${referral.id} with an incomplete follow-up and raised its REFERRAL_INCOMPLETE Quick Response card.`
+        : `Seeded referral ${referral.id} with an incomplete follow-up, but raising its Quick Response card failed — check approval-service.`,
+    };
+  } catch (err) {
+    return {
+      step,
+      created: false,
+      message: `Failed: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
 async function main(): Promise<void> {
-  const results = [await seedSelfReportedConditions(), await seedRiskParameters()];
+  const results = [
+    await seedSelfReportedConditions(),
+    await seedRiskParameters(),
+    await seedAccompaniedReferralDemo(),
+    await seedIncompleteReferralDemo(),
+  ];
 
   console.log('\nSeed summary:');
   for (const r of results) {

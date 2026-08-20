@@ -3,8 +3,10 @@ import { BeneficiaryRiskService } from './beneficiaryRisk.service';
 import type { BeneficiaryRiskRepository } from './beneficiaryRisk.repository';
 import { BeneficiaryClient } from './beneficiary.client';
 import { listSakhiIdsForSupervisor } from './sakhi.client';
+import { resolveRiskGrades } from './riskGrade.client';
 
 jest.mock('./sakhi.client');
+jest.mock('./riskGrade.client');
 
 const BENEFICIARY_ID = '11111111-1111-1111-1111-111111111111';
 const AUTH_HEADER = 'Bearer test-token';
@@ -65,6 +67,7 @@ describe('BeneficiaryRiskService', () => {
     getById: jest.fn(),
   } as unknown as jest.Mocked<BeneficiaryClient>;
   const listSakhiIdsForSupervisorMock = jest.mocked(listSakhiIdsForSupervisor);
+  const resolveRiskGradesMock = jest.mocked(resolveRiskGrades);
   let service: BeneficiaryRiskService;
 
   beforeEach(() => {
@@ -254,6 +257,143 @@ describe('BeneficiaryRiskService', () => {
         ),
       ).rejects.toThrow('Beneficiary not found.');
       expect(repository.findStateSnapshots).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getRiskState', () => {
+    const GRADES = new Map([
+      ['grade-mild', { code: 'MILD', sortOrder: 1 }],
+      ['grade-moderate', { code: 'MODERATE', sortOrder: 2 }],
+      ['grade-severe', { code: 'SEVERE', sortOrder: 3 }],
+    ]);
+
+    function flagged(overrides: Partial<Record<string, unknown>> = {}) {
+      return {
+        id: 'flag-1',
+        riskConditionId: 'condition-1',
+        riskGradeLookupValueId: 'grade-mild',
+        observedValueJson: { value: 1 },
+        isReferralTrigger: false,
+        isEducationTrigger: false,
+        isHrVisitTrigger: false,
+        riskCondition: {
+          conditionCode: 'ANEMIA',
+          conditionName: 'Anemia',
+          phase: 'ANC',
+        },
+        ...overrides,
+      };
+    }
+
+    it('worsening grade across 2 assessments: baseline = earliest, latest = most recent, everHighest = the worse of the two', async () => {
+      resolveRiskGradesMock.mockResolvedValue(GRADES);
+      // desc order (most-recent-first), matching the repository's real ordering.
+      repository.findAssessmentsWithFlags.mockResolvedValue([
+        assessment({
+          id: 'assessment-2',
+          evaluatedAt: new Date('2026-07-01'),
+          riskFlags: [flagged({ riskGradeLookupValueId: 'grade-severe' })],
+        }),
+        assessment({
+          id: 'assessment-1',
+          evaluatedAt: new Date('2026-06-01'),
+          riskFlags: [flagged({ riskGradeLookupValueId: 'grade-mild' })],
+        }),
+      ] as never);
+
+      const result = await service.getRiskState(BENEFICIARY_ID, caller(), AUTH_HEADER);
+
+      expect(result.riskConditionSummaries).toEqual([
+        expect.objectContaining({
+          riskConditionId: 'condition-1',
+          baselineGrade: 'MILD',
+          baselineAssessedAt: new Date('2026-06-01'),
+          latestGrade: 'SEVERE',
+          latestAssessedAt: new Date('2026-07-01'),
+          everHighestGrade: 'SEVERE',
+          everAtRiskFlag: true,
+        }),
+      ]);
+    });
+
+    it('a condition flagged only once: baseline == latest == everHighest', async () => {
+      resolveRiskGradesMock.mockResolvedValue(GRADES);
+      repository.findAssessmentsWithFlags.mockResolvedValue([
+        assessment({ riskFlags: [flagged({ riskGradeLookupValueId: 'grade-moderate' })] }),
+      ] as never);
+
+      const result = await service.getRiskState(BENEFICIARY_ID, caller(), AUTH_HEADER);
+
+      expect(result.riskConditionSummaries).toHaveLength(1);
+      const [summary] = result.riskConditionSummaries;
+      expect(summary.baselineGrade).toBe('MODERATE');
+      expect(summary.latestGrade).toBe('MODERATE');
+      expect(summary.everHighestGrade).toBe('MODERATE');
+      expect(summary.baselineAssessedAt).toEqual(summary.latestAssessedAt);
+    });
+
+    it('multiple distinct conditions produce one summary object each, not merged', async () => {
+      resolveRiskGradesMock.mockResolvedValue(GRADES);
+      repository.findAssessmentsWithFlags.mockResolvedValue([
+        assessment({
+          riskFlags: [
+            flagged({ riskConditionId: 'condition-1', riskGradeLookupValueId: 'grade-mild' }),
+            flagged({ riskConditionId: 'condition-2', riskGradeLookupValueId: 'grade-severe' }),
+          ],
+        }),
+      ] as never);
+
+      const result = await service.getRiskState(BENEFICIARY_ID, caller(), AUTH_HEADER);
+
+      expect(result.riskConditionSummaries.map((s) => s.riskConditionId).sort()).toEqual([
+        'condition-1',
+        'condition-2',
+      ]);
+    });
+
+    it('propagates a grade-lookup resolution failure rather than returning a partial response', async () => {
+      repository.findAssessmentsWithFlags.mockResolvedValue([
+        assessment({ riskFlags: [flagged()] }),
+      ] as never);
+      resolveRiskGradesMock.mockRejectedValue(new Error('Unable to resolve RISK_GRADE.'));
+
+      await expect(service.getRiskState(BENEFICIARY_ID, caller(), AUTH_HEADER)).rejects.toThrow(
+        'Unable to resolve RISK_GRADE.',
+      );
+    });
+
+    it('returns an empty riskConditionSummaries array (not a 404) for a beneficiary with no risk flags ever', async () => {
+      repository.findAssessmentsWithFlags.mockResolvedValue([]);
+
+      const result = await service.getRiskState(BENEFICIARY_ID, caller(), AUTH_HEADER);
+
+      expect(result).toEqual({ beneficiaryId: BENEFICIARY_ID, riskConditionSummaries: [] });
+      expect(resolveRiskGradesMock).not.toHaveBeenCalled();
+    });
+
+    it('403s when a SAKHI caller targets a beneficiary that is not her own — same scoping as getRiskProfile', async () => {
+      beneficiaryClient.getById.mockResolvedValue({
+        id: BENEFICIARY_ID,
+        sakhiId: 'some-other-sakhi',
+      } as never);
+
+      await expect(
+        service.getRiskState(
+          BENEFICIARY_ID,
+          caller({ id: 'sakhi-1', roles: ['SAKHI'] }),
+          AUTH_HEADER,
+        ),
+      ).rejects.toThrow('You do not have access to this beneficiary.');
+      expect(repository.findAssessmentsWithFlags).not.toHaveBeenCalled();
+    });
+
+    it('leaves a MANAGER/ADMIN caller unscoped, without calling beneficiary-service', async () => {
+      repository.findAssessmentsWithFlags.mockResolvedValue([]);
+
+      await service.getRiskState(BENEFICIARY_ID, caller({ roles: ['MANAGER'] }), AUTH_HEADER);
+
+      expect(beneficiaryClient.getById).not.toHaveBeenCalled();
+      expect(repository.findAssessmentsWithFlags).toHaveBeenCalledWith(BENEFICIARY_ID);
     });
   });
 });

@@ -50,6 +50,33 @@ const beneficiaryRiskProfileSchema = z.object({
   assessments: z.array(riskAssessmentViewSchema),
 });
 
+// RISK_GRADE's 6 values (see auth-service seed-data.ts) — null when a flag's
+// riskGradeLookupValueId doesn't resolve to a known RISK_GRADE value.
+const riskGradeSchema = z
+  .enum(['NORMAL', 'MILD', 'MODERATE', 'SEVERE', 'HIGH', 'CRITICAL'])
+  .nullable();
+
+const riskConditionSummarySchema = z.object({
+  riskConditionId: z.string().uuid(),
+  conditionName: z.string(),
+  // The real RiskPhase enum (RiskCondition.phase) — NOTE: differs from the
+  // HLD/DB-design doc's INFANT_FOLLOWUP/CLOSURE, which use INC/CCV here.
+  phase: z.enum(['REGISTRATION', 'ANC', 'DELIVERY', 'PP', 'NN', 'INC', 'CCV']),
+  baselineGrade: riskGradeSchema,
+  baselineObservedValue: z.record(z.unknown()).nullable(),
+  baselineAssessedAt: z.string().datetime(),
+  latestGrade: riskGradeSchema,
+  latestObservedValue: z.record(z.unknown()).nullable(),
+  latestAssessedAt: z.string().datetime(),
+  everHighestGrade: riskGradeSchema,
+  everAtRiskFlag: z.boolean(),
+});
+
+const beneficiaryRiskStateSchema = z.object({
+  beneficiaryId: z.string().uuid(),
+  riskConditionSummaries: z.array(riskConditionSummarySchema),
+});
+
 const apiErrorSchema = z.object({
   success: z.literal(false),
   message: z.string(),
@@ -107,5 +134,41 @@ export function registerBeneficiaryRiskRoutes(
     requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
     validate(beneficiaryRiskParamsSchema, 'params'),
     controller.getRiskProfile,
+  );
+
+  doc.get(
+    '/beneficiaries/:beneficiaryId/risk-state',
+    {
+      summary:
+        "A beneficiary's current and historical risk classification, per HLD line 204 — one " +
+        'summary row per riskConditionId, derived from every RiskFlag ever recorded across ' +
+        "all of the beneficiary's assessments. Same role-scoping as GET " +
+        '/beneficiaries/:beneficiaryId/risk (SAKHI self / SUPERVISOR roster / MANAGER+ADMIN ' +
+        'unscoped). NOTE: baselineGrade/everHighestGrade are derived from this data, not from ' +
+        "a dedicated baseline-tracking table (this service doesn't maintain one) — " +
+        'baselineGrade is the earliest flag on record for that condition in this environment, ' +
+        "not necessarily the beneficiary's true registration-time baseline.",
+      tags: ['Beneficiary Risk'],
+      params: beneficiaryRiskParamsSchema,
+      responses: {
+        200: {
+          description:
+            'riskConditionSummaries is empty (not a 404) when the beneficiary has no ' +
+            'risk-relevant data, but exists and is in scope.',
+          schema: envelope(beneficiaryRiskStateSchema),
+        },
+        400: { description: 'Malformed beneficiaryId', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: {
+          description: "Caller role not permitted, or beneficiary outside the caller's scope",
+          schema: apiErrorSchema,
+        },
+        404: { description: 'Beneficiary not found', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(beneficiaryRiskParamsSchema, 'params'),
+    controller.getRiskState,
   );
 }
