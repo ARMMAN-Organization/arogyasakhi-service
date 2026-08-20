@@ -682,4 +682,36 @@ export function registerBeneficiaryRoutes(doc: DocumentedRouter, service: Benefi
     validate(idParamsSchema, 'params'),
     controller.reactivateCase,
   );
+
+  doc.patch(
+    '/beneficiaries/:id/transfer',
+    {
+      summary:
+        'Missed Visit Escalation TRANSFER (FR-SV-4.3) — moves a case to PENDING_TRANSFER, ' +
+        "removing it from the Sakhi's ACTIVE-filtered roster views pending a Manager's review. " +
+        "sakhiId is left unchanged so the beneficiary's visit schedule keeps running " +
+        'independently during the review window. Intended to be called server-to-server by ' +
+        "notification-escalation-service's decideMissedVisit, forwarding the deciding " +
+        "Supervisor's own token — unlike /close, not reachable by a SAKHI (no route for it).",
+      tags: ['Beneficiaries'],
+      params: idParamsSchema,
+      responses: {
+        200: {
+          description: 'Case moved to PENDING_TRANSFER; the updated case is returned',
+          schema: envelope(beneficiaryCaseDetailSchema),
+        },
+        401: errorResponse(401),
+        403: errorResponse(403, {
+          message: "This beneficiary case is outside this Supervisor's roster.",
+        }),
+        404: errorResponse(404, { message: 'Beneficiary case not found.' }),
+        409: errorResponse(409, { message: 'Cannot transfer a CLOSED beneficiary case.' }),
+        500: errorResponse(500),
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(idParamsSchema, 'params'),
+    controller.applyTransfer,
+  );
 }

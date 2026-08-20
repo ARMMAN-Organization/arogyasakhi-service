@@ -52,6 +52,15 @@ enum BeneficiaryStatus {
   CLOSED
   TRANSFERRED
   REOPEN_REQUESTED
+  // Missed Visit Escalation TRANSFER (FR-SV-4.3, "Scenario A"): the
+  // beneficiary is removed from her Sakhi's active list pending a Manager's
+  // review (up to 15 days). sakhiId is deliberately left unchanged — her
+  // visit schedule keeps running independently during the review window
+  // (see notification-escalation-service's EscalationEvent.reviewDeadlineAt)
+  // — this status only hides her from "ACTIVE"-filtered roster views.
+  // Distinct from TRANSFERRED, which represents the Manager's own completed
+  // reassignment to a new Sakhi (a separate, not-yet-built capability).
+  PENDING_TRANSFER
 }
 
 enum CasePhase {

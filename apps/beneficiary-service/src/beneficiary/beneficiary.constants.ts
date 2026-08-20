@@ -17,6 +17,7 @@ export const BENEFICIARY_STATUSES = [
   'CLOSED',
   'TRANSFERRED',
   'REOPEN_REQUESTED',
+  'PENDING_TRANSFER',
 ] as const;
 export type BeneficiaryStatus = (typeof BENEFICIARY_STATUSES)[number];
 

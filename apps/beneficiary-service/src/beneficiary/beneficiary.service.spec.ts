@@ -33,6 +33,7 @@ describe('BeneficiaryService', () => {
     updatePhase: jest.fn(),
     closeCase: jest.fn(),
     reactivateCase: jest.fn(),
+    markPendingTransfer: jest.fn(),
     countByCaseType: jest.fn(),
     countByRiskGrade: jest.fn(),
     findIds: jest.fn(),
@@ -765,6 +766,95 @@ describe('BeneficiaryService', () => {
       );
 
       expect(repository.reactivateCase).toHaveBeenCalledWith(beneficiaryId, supervisorId);
+    });
+  });
+
+  describe('applyTransfer', () => {
+    const beneficiaryId = '22222222-2222-2222-2222-222222222222';
+    const supervisorId = '44444444-4444-4444-4444-444444444444';
+    const sakhiId = '55555555-5555-5555-5555-555555555555';
+
+    function caseRow(overrides: Partial<Record<string, unknown>> = {}) {
+      return {
+        id: beneficiaryId,
+        sakhiId,
+        currentStatus: 'ACTIVE',
+        pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
+        ...overrides,
+      };
+    }
+
+    it('moves an ACTIVE case to PENDING_TRANSFER and returns it via getById', async () => {
+      repository.findById
+        .mockResolvedValueOnce(caseRow() as never)
+        .mockResolvedValueOnce(caseRow({ currentStatus: 'PENDING_TRANSFER' }) as never);
+      repository.markPendingTransfer.mockResolvedValue(true);
+
+      const result = await service.applyTransfer(
+        beneficiaryId,
+        caller({ roles: ['ADMIN'] }),
+        AUTH_HEADER,
+      );
+
+      expect(repository.markPendingTransfer).toHaveBeenCalledWith(beneficiaryId, CALLER_ID);
+      expect(result).toMatchObject({ id: beneficiaryId });
+    });
+
+    it('404s on an unknown beneficiary id', async () => {
+      repository.findById.mockResolvedValue(null);
+
+      await expect(
+        service.applyTransfer(beneficiaryId, caller({ roles: ['ADMIN'] }), AUTH_HEADER),
+      ).rejects.toMatchObject({ status: 404 });
+      expect(repository.markPendingTransfer).not.toHaveBeenCalled();
+    });
+
+    it('409s when the case is CLOSED', async () => {
+      repository.findById.mockResolvedValue(caseRow({ currentStatus: 'CLOSED' }) as never);
+
+      await expect(
+        service.applyTransfer(beneficiaryId, caller({ roles: ['ADMIN'] }), AUTH_HEADER),
+      ).rejects.toMatchObject({ status: 409 });
+      expect(repository.markPendingTransfer).not.toHaveBeenCalled();
+    });
+
+    it('409s when the conditional update races with a concurrent status change', async () => {
+      repository.findById.mockResolvedValue(caseRow() as never);
+      repository.markPendingTransfer.mockResolvedValue(false);
+
+      await expect(
+        service.applyTransfer(beneficiaryId, caller({ roles: ['ADMIN'] }), AUTH_HEADER),
+      ).rejects.toMatchObject({ status: 409 });
+    });
+
+    it('403s when a SUPERVISOR targets a case outside their own roster', async () => {
+      repository.findById.mockResolvedValue(caseRow() as never);
+      listSakhiIdsForSupervisorMock.mockResolvedValue(['some-other-sakhi']);
+
+      await expect(
+        service.applyTransfer(
+          beneficiaryId,
+          caller({ id: supervisorId, roles: ['SUPERVISOR'] }),
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(repository.markPendingTransfer).not.toHaveBeenCalled();
+    });
+
+    it('allows a SUPERVISOR to transfer a case in their own roster', async () => {
+      repository.findById
+        .mockResolvedValueOnce(caseRow() as never)
+        .mockResolvedValueOnce(caseRow({ currentStatus: 'PENDING_TRANSFER' }) as never);
+      repository.markPendingTransfer.mockResolvedValue(true);
+      listSakhiIdsForSupervisorMock.mockResolvedValue([sakhiId]);
+
+      await service.applyTransfer(
+        beneficiaryId,
+        caller({ id: supervisorId, roles: ['SUPERVISOR'] }),
+        AUTH_HEADER,
+      );
+
+      expect(repository.markPendingTransfer).toHaveBeenCalledWith(beneficiaryId, supervisorId);
     });
   });
 
