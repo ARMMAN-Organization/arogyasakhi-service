@@ -20,13 +20,5 @@ jobs:
       - name: Derive affected base
         uses: nrwl/nx-set-shas@v4
       - run: npx nx affected -t lint --parallel=3
-      - name: Run tests
-        env:
-          # Unit tests mock Prisma and never touch a real database, but every
-          # service's app-config.ts requires DATABASE_URL/DIRECT_URL with no
-          # default (fail-fast boot check) — importing app.module.ts (even
-          # transitively, e.g. via a controller spec) throws without these.
-          DATABASE_URL: postgresql://user:password@localhost:5432/db
-          DIRECT_URL: postgresql://user:password@localhost:5432/db
-        run: npx nx affected -t test --parallel=3 --coverage --passWithNoTests
+      - run: npx nx affected -t test --parallel=3 --coverage --passWithNoTests
       - run: npx nx affected -t build --parallel=3
