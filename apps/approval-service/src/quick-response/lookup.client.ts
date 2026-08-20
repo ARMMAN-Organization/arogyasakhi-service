@@ -43,4 +43,29 @@ export class LookupClient {
     const body = (await res.json()) as { data: LookupCategory };
     return body.data.values.find((v) => v.valueCode === valueCode)?.id ?? null;
   }
+
+  /**
+   * The reverse of resolveApprovalStatusId — resolves a
+   * decision_status_lookup_id back to its APPROVAL_STATUS value code (e.g.
+   * "PENDING"), for read endpoints that expose a human-readable status
+   * rather than the raw FK. Fails open to null (not thrown) on any
+   * resolution failure, matching this class's existing fail-open contract.
+   */
+  async resolveApprovalStatusCode(
+    lookupValueId: string,
+    authorizationHeader: string,
+  ): Promise<string | null> {
+    let res: Response;
+    try {
+      res = await fetch(`${appConfig.API_GATEWAY_BASE_URL}/api/v1/lookups/APPROVAL_STATUS`, {
+        headers: { Authorization: authorizationHeader },
+      });
+    } catch {
+      return null;
+    }
+    if (!res.ok) return null;
+
+    const body = (await res.json()) as { data: LookupCategory };
+    return body.data.values.find((v) => v.id === lookupValueId)?.valueCode ?? null;
+  }
 }

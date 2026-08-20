@@ -29,6 +29,17 @@ const decideLmpChangeRequestResponseSchema = z.object({
   decision: z.string(),
 });
 
+const lmpChangeRequestDetailSchema = z.object({
+  id: z.string().uuid(),
+  beneficiaryId: z.string().uuid(),
+  oldLmpDate: z.string().nullable(),
+  newLmpDate: z.string().nullable(),
+  sonographyImageAssetId: z.string().uuid().nullable(),
+  requestedByUserId: z.string().uuid(),
+  requestedAt: z.string().datetime(),
+  supervisorStatus: z.string().nullable(),
+});
+
 const apiErrorSchema = z.object({
   success: z.literal(false),
   message: z.string(),
@@ -51,6 +62,36 @@ export function registerLmpChangeRequestRoutes(
   doc: DocumentedRouter,
   service: QuickResponseService,
 ) {
+  doc.get(
+    '/lmp-change-requests/:id',
+    {
+      summary:
+        "An LMP Change request's own detail (mirrors /closures/:id, /reopen-requests/:id, " +
+        '/referrals/:id)',
+      tags: ['LMP Change Requests'],
+      params: idParamsSchema,
+      responses: {
+        200: {
+          description: 'LMP change request detail',
+          schema: envelope(lmpChangeRequestDetailSchema),
+        },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+        404: { description: 'LMP change request not found', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(idParamsSchema, 'params'),
+    asyncHandler(async (req, res, next) => {
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const result = await service.getLmpChangeRequestDetail(req.params.id, authorizationHeader);
+      res.json(ok(result));
+    }),
+  );
+
   doc.post(
     '/lmp-change-requests/:id/decision',
     {

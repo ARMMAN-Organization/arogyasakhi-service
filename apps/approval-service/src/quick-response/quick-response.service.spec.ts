@@ -9,6 +9,9 @@ import type { ClosureClient } from './closure.client';
 import type { ReferralClient } from './referral.client';
 import type { IncentiveClient } from './incentive.client';
 import type { UserClient } from './user.client';
+import type { SakhiClient } from './sakhi.client';
+import type { GeographyClient } from './geography.client';
+import type { VisitClient } from './visit.client';
 
 function approvalRequest(overrides: Partial<Record<string, unknown>> = {}) {
   return {
@@ -64,23 +67,41 @@ describe('QuickResponseService', () => {
   } as unknown as jest.Mocked<QuickResponseRepository>;
   const lookupClient = {
     resolveApprovalStatusId: jest.fn(),
+    resolveApprovalStatusCode: jest.fn(),
   } as unknown as jest.Mocked<LookupClient>;
   const escalationClient = {
     list: jest.fn(),
     findById: jest.fn(),
+    acknowledgeEddNearing: jest.fn(),
+    decideMissedVisit: jest.fn(),
   } as unknown as jest.Mocked<EscalationClient>;
-  const reopenRequestClient = { decide: jest.fn() } as unknown as jest.Mocked<ReopenRequestClient>;
+  const reopenRequestClient = {
+    decide: jest.fn(),
+    getDecisionStatusByIds: jest.fn(),
+    getById: jest.fn(),
+  } as unknown as jest.Mocked<ReopenRequestClient>;
   const beneficiaryClient = {
     applyLmpChange: jest.fn(),
     getById: jest.fn(),
   } as unknown as jest.Mocked<BeneficiaryClient>;
   const notificationClient = { notify: jest.fn() } as unknown as jest.Mocked<NotificationClient>;
-  const closureClient = { decide: jest.fn() } as unknown as jest.Mocked<ClosureClient>;
-  const referralClient = { decide: jest.fn() } as unknown as jest.Mocked<ReferralClient>;
+  const closureClient = {
+    decide: jest.fn(),
+    getDecisionStatusByIds: jest.fn(),
+    getById: jest.fn(),
+  } as unknown as jest.Mocked<ClosureClient>;
+  const referralClient = {
+    decide: jest.fn(),
+    getDecisionStatusByIds: jest.fn(),
+    getById: jest.fn(),
+  } as unknown as jest.Mocked<ReferralClient>;
   const incentiveClient = {
     triggerAccompaniedReferral: jest.fn(),
   } as unknown as jest.Mocked<IncentiveClient>;
   const userClient = { reactivateUser: jest.fn() } as unknown as jest.Mocked<UserClient>;
+  const sakhiClient = { getById: jest.fn() } as unknown as jest.Mocked<SakhiClient>;
+  const geographyClient = { getById: jest.fn() } as unknown as jest.Mocked<GeographyClient>;
+  const visitClient = { getById: jest.fn() } as unknown as jest.Mocked<VisitClient>;
   let service: QuickResponseService;
   const authHeader = 'Bearer token';
   let consoleErrorSpy: jest.SpyInstance;
@@ -96,6 +117,19 @@ describe('QuickResponseService', () => {
     // this per-call as needed.
     lookupClient.resolveApprovalStatusId.mockResolvedValue('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
     repository.markDecided.mockResolvedValue(true);
+    // Default every list()-reconciliation batch call to echo "still
+    // pending" for whatever ids it's asked about, so existing list() tests
+    // that don't care about reconciliation see unfiltered results — tests
+    // asserting filterStillPending's own behavior override these per-call.
+    closureClient.getDecisionStatusByIds.mockImplementation(
+      async (ids: string[]) => new Map(ids.map((id) => [id, 'PENDING'])),
+    );
+    reopenRequestClient.getDecisionStatusByIds.mockImplementation(
+      async (ids: string[]) => new Map(ids.map((id) => [id, 'PENDING'])),
+    );
+    referralClient.getDecisionStatusByIds.mockImplementation(
+      async (ids: string[]) => new Map(ids.map((id) => [id, 'PENDING_FOLLOWUP'])),
+    );
     service = new QuickResponseService(
       repository,
       lookupClient,
@@ -107,6 +141,9 @@ describe('QuickResponseService', () => {
       referralClient,
       incentiveClient,
       userClient,
+      sakhiClient,
+      geographyClient,
+      visitClient,
     );
   });
 
@@ -169,11 +206,652 @@ describe('QuickResponseService', () => {
         service.list({ status: 'PENDING', cursor: 'not-valid!!', limit: 50 }, authHeader),
       ).rejects.toMatchObject({ status: 400 });
     });
+
+    describe('reconciling stale PENDING cards against their backing resource', () => {
+      it('excludes a CLOSURE_REVIEW card whose closure was already decided directly', async () => {
+        repository.findMany.mockResolvedValue([
+          approvalRequest({ requestType: 'CLOSURE_REVIEW', closureId: 'closure-1' }),
+        ]);
+        escalationClient.list.mockResolvedValue({ cards: [], nextCursor: null });
+        closureClient.getDecisionStatusByIds.mockResolvedValue(
+          new Map([['closure-1', 'APPROVED']]),
+        );
+
+        const result = await service.list({ status: 'PENDING', limit: 50 }, authHeader);
+        expect(result.cards).toHaveLength(0);
+      });
+
+      it('excludes a REOPEN card whose reopen request was already decided directly', async () => {
+        repository.findMany.mockResolvedValue([
+          approvalRequest({ requestType: 'REOPEN', reopenRequestId: 'reopen-1' }),
+        ]);
+        escalationClient.list.mockResolvedValue({ cards: [], nextCursor: null });
+        reopenRequestClient.getDecisionStatusByIds.mockResolvedValue(
+          new Map([['reopen-1', 'REJECTED']]),
+        );
+
+        const result = await service.list({ status: 'PENDING', limit: 50 }, authHeader);
+        expect(result.cards).toHaveLength(0);
+      });
+
+      it.each(['REFERRAL_INCOMPLETE', 'ACCOMPANIED_REFERRAL'])(
+        'excludes a %s card whose referral is no longer PENDING_FOLLOWUP',
+        async (requestType) => {
+          repository.findMany.mockResolvedValue([
+            approvalRequest({ requestType, referralId: 'referral-1' }),
+          ]);
+          escalationClient.list.mockResolvedValue({ cards: [], nextCursor: null });
+          referralClient.getDecisionStatusByIds.mockResolvedValue(
+            new Map([['referral-1', 'COMPLETED']]),
+          );
+
+          const result = await service.list({ status: 'PENDING', limit: 50 }, authHeader);
+          expect(result.cards).toHaveLength(0);
+        },
+      );
+
+      it('never calls any reconciliation client for LMP_CHANGE or DATA_RESTORE cards', async () => {
+        repository.findMany.mockResolvedValue([
+          approvalRequest({
+            id: 'card-lmp',
+            requestType: 'LMP_CHANGE',
+            reopenRequestId: null,
+          }),
+          approvalRequest({
+            id: 'card-restore',
+            requestType: 'DATA_RESTORE',
+            reopenRequestId: null,
+          }),
+        ]);
+        escalationClient.list.mockResolvedValue({ cards: [], nextCursor: null });
+
+        const result = await service.list({ status: 'PENDING', limit: 50 }, authHeader);
+
+        expect(result.cards).toHaveLength(2);
+        expect(closureClient.getDecisionStatusByIds).not.toHaveBeenCalled();
+        expect(reopenRequestClient.getDecisionStatusByIds).not.toHaveBeenCalled();
+        expect(referralClient.getDecisionStatusByIds).not.toHaveBeenCalled();
+      });
+
+      it('treats an id absent from the batch response as no longer pending', async () => {
+        repository.findMany.mockResolvedValue([
+          approvalRequest({ requestType: 'CLOSURE_REVIEW', closureId: 'closure-deleted' }),
+        ]);
+        escalationClient.list.mockResolvedValue({ cards: [], nextCursor: null });
+        // The batch call succeeds but doesn't include this id at all (e.g.
+        // the closure was soft-deleted) — absence, not an explicit status,
+        // is still "not pending".
+        closureClient.getDecisionStatusByIds.mockResolvedValue(new Map());
+
+        const result = await service.list({ status: 'PENDING', limit: 50 }, authHeader);
+        expect(result.cards).toHaveLength(0);
+      });
+
+      it('skips reconciliation entirely for a non-PENDING status query', async () => {
+        repository.findMany.mockResolvedValue([
+          approvalRequest({ requestType: 'CLOSURE_REVIEW', closureId: 'closure-1' }),
+        ]);
+
+        const result = await service.list({ status: 'APPROVED', limit: 50 }, authHeader);
+
+        expect(result.cards).toHaveLength(1);
+        expect(closureClient.getDecisionStatusByIds).not.toHaveBeenCalled();
+      });
+
+      it('fails open for a group whose batch call rejects, while still reconciling the other groups', async () => {
+        repository.findMany.mockResolvedValue([
+          approvalRequest({
+            id: 'card-closure',
+            requestType: 'CLOSURE_REVIEW',
+            closureId: 'closure-1',
+            reopenRequestId: null,
+          }),
+          approvalRequest({
+            id: 'card-reopen',
+            requestType: 'REOPEN',
+            reopenRequestId: 'reopen-1',
+          }),
+        ]);
+        escalationClient.list.mockResolvedValue({ cards: [], nextCursor: null });
+        closureClient.getDecisionStatusByIds.mockRejectedValue(new Error('network error'));
+        reopenRequestClient.getDecisionStatusByIds.mockResolvedValue(
+          new Map([['reopen-1', 'APPROVED']]),
+        );
+
+        const result = await service.list({ status: 'PENDING', limit: 50 }, authHeader);
+
+        // closure group failed -> passes through un-reconciled (still shown);
+        // reopen group succeeded and found it decided -> excluded.
+        expect(result.cards.map((c) => c.cardId)).toEqual(['card-closure']);
+        expect(consoleErrorSpy).toHaveBeenCalled();
+      });
+
+      it('batches all ids of the same type into a single call, not one per row', async () => {
+        repository.findMany.mockResolvedValue([
+          approvalRequest({
+            id: 'card-closure-a',
+            requestType: 'CLOSURE_REVIEW',
+            closureId: 'closure-a',
+            reopenRequestId: null,
+          }),
+          approvalRequest({
+            id: 'card-closure-b',
+            requestType: 'CLOSURE_REVIEW',
+            closureId: 'closure-b',
+            reopenRequestId: null,
+          }),
+        ]);
+        escalationClient.list.mockResolvedValue({ cards: [], nextCursor: null });
+
+        await service.list({ status: 'PENDING', limit: 50 }, authHeader);
+
+        expect(closureClient.getDecisionStatusByIds).toHaveBeenCalledTimes(1);
+        expect(closureClient.getDecisionStatusByIds).toHaveBeenCalledWith(
+          ['closure-a', 'closure-b'],
+          authHeader,
+        );
+      });
+    });
+  });
+
+  describe('getCardDetail', () => {
+    function fullBeneficiary(overrides: Partial<Record<string, unknown>> = {}) {
+      return {
+        id: '22222222-2222-2222-2222-222222222222',
+        sakhiId: '88888888-8888-8888-8888-888888888888',
+        pii: { fullName: 'Asha Devi', padaId: '99999999-9999-9999-9999-999999999999' },
+        motherCaseDetails: {
+          lmpDate: '2026-01-01T00:00:00.000Z',
+          eddDate: '2026-10-08T00:00:00.000Z',
+        },
+        riskConditionSummaries: [
+          {
+            riskConditionId: 'risk-1',
+            phase: 'ANC',
+            latestGrade: 'HIGH',
+            latestAssessedAt: '2026-07-01T00:00:00.000Z',
+            everHighestGrade: 'HIGH',
+            everAtRiskFlag: true,
+            currentReferralTriggerFlag: false,
+            currentHrVisitTriggerFlag: true,
+          },
+        ],
+        ...overrides,
+      };
+    }
+
+    beforeEach(() => {
+      sakhiClient.getById.mockResolvedValue({
+        sakhiId: '88888888-8888-8888-8888-888888888888',
+        displayName: 'Priya Sharma',
+        mobileNumber: '+919000000123',
+      });
+      geographyClient.getById.mockResolvedValue({
+        geographyUnitId: '99999999-9999-9999-9999-999999999999',
+        name: 'Sundarpada',
+        geoType: 'PADA',
+      });
+      beneficiaryClient.getById.mockResolvedValue(fullBeneficiary());
+    });
+
+    it('404s when the cardId matches neither approval_requests nor escalation_events', async () => {
+      repository.findById.mockResolvedValue(null);
+      escalationClient.findById.mockResolvedValue(null);
+
+      await expect(
+        service.getCardDetail('11111111-1111-1111-1111-111111111111', authHeader),
+      ).rejects.toMatchObject({ status: 404 });
+    });
+
+    it('LMP_CHANGE: returns names, old/new LMP, risk/contact, and null sonography asset id when absent', async () => {
+      repository.findById.mockResolvedValue(
+        approvalRequest({
+          requestType: 'LMP_CHANGE',
+          reopenRequestId: null,
+          requestPayloadJson: { newLmpDate: '2026-02-01' },
+        }),
+      );
+
+      const result = await service.getCardDetail(
+        '11111111-1111-1111-1111-111111111111',
+        authHeader,
+      );
+
+      expect(result).toMatchObject({
+        padaName: 'Sundarpada',
+        sakhiName: 'Priya Sharma',
+        beneficiaryName: 'Asha Devi',
+        oldLmpDate: '2026-01-01T00:00:00.000Z',
+        newLmpDate: '2026-02-01',
+        sonographyImageAssetId: null,
+        sakhiContactNumber: '+919000000123',
+      });
+      expect((result as unknown as { riskDetails: unknown[] }).riskDetails).toHaveLength(1);
+    });
+
+    it('LMP_CHANGE: returns the sonography asset id when the payload carries one', async () => {
+      repository.findById.mockResolvedValue(
+        approvalRequest({
+          requestType: 'LMP_CHANGE',
+          reopenRequestId: null,
+          requestPayloadJson: {
+            newLmpDate: '2026-02-01',
+            sonographyImageAssetId: 'aaaaaaaa-1111-1111-1111-111111111111',
+          },
+        }),
+      );
+
+      const result = await service.getCardDetail(
+        '11111111-1111-1111-1111-111111111111',
+        authHeader,
+      );
+
+      expect(result).toMatchObject({
+        sonographyImageAssetId: 'aaaaaaaa-1111-1111-1111-111111111111',
+      });
+    });
+
+    describe('getLmpChangeRequestDetail', () => {
+      it('returns the dedicated LMP change request shape', async () => {
+        repository.findById.mockResolvedValue(
+          approvalRequest({
+            requestType: 'LMP_CHANGE',
+            reopenRequestId: null,
+            requestPayloadJson: {
+              newLmpDate: '2026-02-01',
+              sonographyImageAssetId: 'aaaaaaaa-1111-1111-1111-111111111111',
+            },
+          }),
+        );
+        lookupClient.resolveApprovalStatusCode.mockResolvedValue('PENDING');
+
+        const result = await service.getLmpChangeRequestDetail(
+          '11111111-1111-1111-1111-111111111111',
+          authHeader,
+        );
+
+        expect(result).toEqual({
+          id: '11111111-1111-1111-1111-111111111111',
+          beneficiaryId: '22222222-2222-2222-2222-222222222222',
+          oldLmpDate: '2026-01-01T00:00:00.000Z',
+          newLmpDate: '2026-02-01',
+          sonographyImageAssetId: 'aaaaaaaa-1111-1111-1111-111111111111',
+          requestedByUserId: '44444444-4444-4444-4444-444444444444',
+          requestedAt: '2026-08-05T10:00:00.000Z',
+          supervisorStatus: 'PENDING',
+        });
+        expect(lookupClient.resolveApprovalStatusCode).toHaveBeenCalledWith(
+          'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+          authHeader,
+        );
+      });
+
+      it('404s when the id does not exist', async () => {
+        repository.findById.mockResolvedValue(null);
+
+        await expect(
+          service.getLmpChangeRequestDetail('11111111-1111-1111-1111-111111111111', authHeader),
+        ).rejects.toMatchObject({ status: 404 });
+      });
+
+      it('404s when the id belongs to a different card type — never leaks another type under this URL', async () => {
+        repository.findById.mockResolvedValue(approvalRequest({ requestType: 'REOPEN' }));
+
+        await expect(
+          service.getLmpChangeRequestDetail('11111111-1111-1111-1111-111111111111', authHeader),
+        ).rejects.toMatchObject({ status: 404 });
+      });
+
+      it('500s when the row has no linked beneficiary — data integrity issue, not a client error', async () => {
+        repository.findById.mockResolvedValue(
+          approvalRequest({ requestType: 'LMP_CHANGE', beneficiaryId: null }),
+        );
+
+        await expect(
+          service.getLmpChangeRequestDetail('11111111-1111-1111-1111-111111111111', authHeader),
+        ).rejects.toMatchObject({ status: 500 });
+      });
+
+      it('resolves supervisorStatus to null (fail-open) when the lookup cannot be resolved', async () => {
+        repository.findById.mockResolvedValue(
+          approvalRequest({ requestType: 'LMP_CHANGE', requestPayloadJson: null }),
+        );
+        lookupClient.resolveApprovalStatusCode.mockResolvedValue(null);
+
+        const result = await service.getLmpChangeRequestDetail(
+          '11111111-1111-1111-1111-111111111111',
+          authHeader,
+        );
+
+        expect(result).toMatchObject({ supervisorStatus: null, newLmpDate: null });
+      });
+    });
+
+    it('CLOSURE_REVIEW: returns closure fields, names, supervisor notes, risk details, and contact number', async () => {
+      repository.findById.mockResolvedValue(
+        approvalRequest({
+          requestType: 'CLOSURE_REVIEW',
+          reopenRequestId: null,
+          closureId: 'closure-1',
+        }),
+      );
+      closureClient.getById.mockResolvedValue({
+        id: 'closure-1',
+        beneficiaryId: '22222222-2222-2222-2222-222222222222',
+        supervisorStatus: 'PENDING',
+        closureType: 'MEDICAL',
+        closureReasonLookupValueId: 'reason-1',
+        closureDate: '2026-08-01T00:00:00.000Z',
+        supervisorNotes: 'Beneficiary relocated.',
+      });
+
+      const result = await service.getCardDetail(
+        '11111111-1111-1111-1111-111111111111',
+        authHeader,
+      );
+
+      expect(result).toMatchObject({
+        padaName: 'Sundarpada',
+        sakhiName: 'Priya Sharma',
+        beneficiaryName: 'Asha Devi',
+        closureType: 'MEDICAL',
+        closureReasonLookupValueId: 'reason-1',
+        supervisorNotes: 'Beneficiary relocated.',
+        sakhiContactNumber: '+919000000123',
+      });
+      expect(closureClient.getById).toHaveBeenCalledWith('closure-1', authHeader);
+      expect((result as unknown as { riskDetails: unknown[] }).riskDetails).toHaveLength(1);
+    });
+
+    it('REOPEN: returns reason for reopen, risk details, and contact number', async () => {
+      repository.findById.mockResolvedValue(
+        approvalRequest({ requestType: 'REOPEN', reopenRequestId: 'reopen-1' }),
+      );
+      reopenRequestClient.getById.mockResolvedValue({
+        id: 'reopen-1',
+        beneficiaryId: '22222222-2222-2222-2222-222222222222',
+        supervisorStatus: 'PENDING',
+        requestReason: 'CLOSED_BY_MISTAKE',
+        decisionNotes: null,
+      });
+
+      const result = await service.getCardDetail(
+        '11111111-1111-1111-1111-111111111111',
+        authHeader,
+      );
+
+      expect(result).toMatchObject({
+        padaName: 'Sundarpada',
+        sakhiName: 'Priya Sharma',
+        beneficiaryName: 'Asha Devi',
+        reasonForReopen: 'CLOSED_BY_MISTAKE',
+        sakhiContactNumber: '+919000000123',
+      });
+      expect((result as unknown as { riskDetails: unknown[] }).riskDetails).toHaveLength(1);
+    });
+
+    it('ACCOMPANIED_REFERRAL: returns referral details, risk/contact, and null photo evidence when absent', async () => {
+      repository.findById.mockResolvedValue(
+        approvalRequest({
+          requestType: 'ACCOMPANIED_REFERRAL',
+          reopenRequestId: null,
+          referralId: 'referral-1',
+        }),
+      );
+      referralClient.getById.mockResolvedValue({
+        id: 'referral-1',
+        beneficiaryId: '22222222-2222-2222-2222-222222222222',
+        status: 'PENDING_FOLLOWUP',
+        visitId: null,
+        referralDate: '2026-07-01T00:00:00.000Z',
+        facilityType: 'PHC',
+        facilityName: 'Sample PHC',
+        photoEvidenceMediaAssetId: null,
+        incompleteCount: 0,
+        latestFollowup: null,
+      });
+
+      const result = await service.getCardDetail(
+        '11111111-1111-1111-1111-111111111111',
+        authHeader,
+      );
+
+      expect(result).toMatchObject({
+        referralDate: '2026-07-01T00:00:00.000Z',
+        facilityType: 'PHC',
+        facilityName: 'Sample PHC',
+        photoEvidenceAssetId: null,
+        sakhiContactNumber: '+919000000123',
+      });
+      expect((result as unknown as { riskDetails: unknown[] }).riskDetails).toHaveLength(1);
+    });
+
+    it('ACCOMPANIED_REFERRAL: returns the photo evidence asset id when the referral carries one', async () => {
+      repository.findById.mockResolvedValue(
+        approvalRequest({
+          requestType: 'ACCOMPANIED_REFERRAL',
+          reopenRequestId: null,
+          referralId: 'referral-1',
+        }),
+      );
+      referralClient.getById.mockResolvedValue({
+        id: 'referral-1',
+        beneficiaryId: '22222222-2222-2222-2222-222222222222',
+        status: 'PENDING_FOLLOWUP',
+        visitId: null,
+        referralDate: '2026-07-01T00:00:00.000Z',
+        facilityType: 'PHC',
+        facilityName: 'Sample PHC',
+        photoEvidenceMediaAssetId: 'bbbbbbbb-2222-2222-2222-222222222222',
+        incompleteCount: 0,
+        latestFollowup: null,
+      });
+
+      const result = await service.getCardDetail(
+        '11111111-1111-1111-1111-111111111111',
+        authHeader,
+      );
+
+      expect(result).toMatchObject({
+        photoEvidenceAssetId: 'bbbbbbbb-2222-2222-2222-222222222222',
+      });
+    });
+
+    it('MISSED_VISIT_ESCALATION: returns visit type label, no #-visits-missed field', async () => {
+      repository.findById.mockResolvedValue(null);
+      escalationClient.findById.mockResolvedValue({
+        cardId: '66666666-6666-6666-6666-666666666666',
+        cardType: 'MISSED_VISIT',
+        cardSource: 'escalation_events',
+        beneficiaryId: '22222222-2222-2222-2222-222222222222',
+        visitId: null,
+        referralId: null,
+        escalationType: 'ANC_2_MISSED',
+        status: 'OPEN',
+        raisedAt: '2026-08-05T11:00:00.000Z',
+      });
+
+      const result = await service.getCardDetail(
+        '66666666-6666-6666-6666-666666666666',
+        authHeader,
+      );
+
+      expect(result).toMatchObject({
+        sakhiName: 'Priya Sharma',
+        beneficiaryName: 'Asha Devi',
+        visitType: 'ANC_2_MISSED',
+        sakhiContactNumber: '+919000000123',
+      });
+      expect(result).not.toHaveProperty('visitsMissedCount');
+    });
+
+    it('REFERRAL_INCOMPLETE: returns visit reference, referrals-missed count, and reason', async () => {
+      repository.findById.mockResolvedValue(
+        approvalRequest({
+          requestType: 'REFERRAL_INCOMPLETE',
+          reopenRequestId: null,
+          referralId: 'referral-1',
+        }),
+      );
+      referralClient.getById.mockResolvedValue({
+        id: 'referral-1',
+        beneficiaryId: '22222222-2222-2222-2222-222222222222',
+        status: 'PENDING_FOLLOWUP',
+        visitId: 'visit-1',
+        referralDate: '2026-07-01T00:00:00.000Z',
+        facilityType: null,
+        facilityName: null,
+        photoEvidenceMediaAssetId: null,
+        incompleteCount: 2,
+        latestFollowup: {
+          followupDate: '2026-07-15T00:00:00.000Z',
+          notVisitedReason: 'Beneficiary unavailable',
+          outcome: null,
+        },
+      });
+      visitClient.getById.mockResolvedValue({
+        id: 'visit-1',
+        scheduleId: 'schedule-1',
+        actualVisitDate: null,
+        statusLookupValueId: 'status-1',
+      });
+
+      const result = await service.getCardDetail(
+        '11111111-1111-1111-1111-111111111111',
+        authHeader,
+      );
+
+      expect(result).toMatchObject({
+        referralsMissedCount: 2,
+        reason: 'Beneficiary unavailable',
+      });
+      expect((result as unknown as { visitReference: unknown }).visitReference).toMatchObject({
+        id: 'visit-1',
+      });
+    });
+
+    it('EDD_NEARING: returns EDD date and a derived reason', async () => {
+      repository.findById.mockResolvedValue(null);
+      escalationClient.findById.mockResolvedValue({
+        cardId: '66666666-6666-6666-6666-666666666666',
+        cardType: 'EDD_NEARING',
+        cardSource: 'escalation_events',
+        beneficiaryId: '22222222-2222-2222-2222-222222222222',
+        visitId: null,
+        referralId: null,
+        escalationType: 'EDD_NEARING',
+        status: 'OPEN',
+        raisedAt: '2026-08-05T11:00:00.000Z',
+      });
+
+      const result = await service.getCardDetail(
+        '66666666-6666-6666-6666-666666666666',
+        authHeader,
+      );
+
+      expect(result).toMatchObject({
+        eddDate: '2026-10-08T00:00:00.000Z',
+        sakhiName: 'Priya Sharma',
+        beneficiaryName: 'Asha Devi',
+      });
+      expect((result as unknown as { reason: string }).reason).toContain('2026-10-08');
+    });
+
+    it('DATA_RESTORE: returns Sakhi name and id resolved from requestedByUserId', async () => {
+      repository.findById.mockResolvedValue(
+        approvalRequest({
+          requestType: 'DATA_RESTORE',
+          reopenRequestId: null,
+          beneficiaryId: null,
+          requestedByUserId: 'sakhi-user-1',
+        }),
+      );
+      sakhiClient.getById.mockResolvedValue({
+        sakhiId: 'sakhi-user-1',
+        displayName: 'Meena Kumari',
+        mobileNumber: '+919000000456',
+      });
+
+      const result = await service.getCardDetail(
+        '11111111-1111-1111-1111-111111111111',
+        authHeader,
+      );
+
+      expect(result).toMatchObject({ sakhiName: 'Meena Kumari', sakhiId: 'sakhi-user-1' });
+      expect(sakhiClient.getById).toHaveBeenCalledWith('sakhi-user-1', authHeader);
+    });
+
+    it('propagates a core beneficiary-lookup failure rather than degrading it to null', async () => {
+      repository.findById.mockResolvedValue(
+        approvalRequest({ requestType: 'REOPEN', reopenRequestId: 'reopen-1' }),
+      );
+      reopenRequestClient.getById.mockResolvedValue({
+        id: 'reopen-1',
+        beneficiaryId: '22222222-2222-2222-2222-222222222222',
+        supervisorStatus: 'PENDING',
+        requestReason: 'CLOSED_BY_MISTAKE',
+        decisionNotes: null,
+      });
+      beneficiaryClient.getById.mockRejectedValue(
+        Object.assign(new Error('Bad gateway'), { status: 502 }),
+      );
+
+      await expect(
+        service.getCardDetail('11111111-1111-1111-1111-111111111111', authHeader),
+      ).rejects.toMatchObject({ status: 502 });
+    });
+
+    it('degrades a supplementary lookup (Pada) to null on failure instead of failing the whole card', async () => {
+      repository.findById.mockResolvedValue(
+        approvalRequest({ requestType: 'REOPEN', reopenRequestId: 'reopen-1' }),
+      );
+      reopenRequestClient.getById.mockResolvedValue({
+        id: 'reopen-1',
+        beneficiaryId: '22222222-2222-2222-2222-222222222222',
+        supervisorStatus: 'PENDING',
+        requestReason: 'CLOSED_BY_MISTAKE',
+        decisionNotes: null,
+      });
+      geographyClient.getById.mockRejectedValue(new Error('auth-service unreachable'));
+
+      const result = await service.getCardDetail(
+        '11111111-1111-1111-1111-111111111111',
+        authHeader,
+      );
+
+      expect(result).toMatchObject({ padaName: null, reasonForReopen: 'CLOSED_BY_MISTAKE' });
+      expect(consoleErrorSpy).toHaveBeenCalled();
+    });
+
+    it('falls back to the thin card shape for an unsupported requestType', async () => {
+      repository.findById.mockResolvedValue(
+        approvalRequest({ requestType: 'SOMETHING_UNKNOWN', reopenRequestId: null }),
+      );
+
+      const result = await service.getCardDetail(
+        '11111111-1111-1111-1111-111111111111',
+        authHeader,
+      );
+
+      expect(result).toEqual({
+        cardId: '11111111-1111-1111-1111-111111111111',
+        cardType: 'SOMETHING_UNKNOWN',
+        cardSource: 'approval_requests',
+        beneficiaryId: '22222222-2222-2222-2222-222222222222',
+        raisedAt: expect.any(String),
+      });
+      expect(beneficiaryClient.getById).not.toHaveBeenCalled();
+    });
   });
 
   describe('decide — EDD_NEARING (escalation_events)', () => {
-    it('acknowledges OKAY with no audit/notify side effects', async () => {
+    it('acknowledges OKAY by actually calling the real acknowledge endpoint', async () => {
       escalationClient.findById.mockResolvedValue(escalationCard());
+      escalationClient.acknowledgeEddNearing.mockResolvedValue({
+        id: '66666666-6666-6666-6666-666666666666',
+        status: 'ACKNOWLEDGED',
+        actionTaken: null,
+      });
 
       const result = await service.decide(
         '66666666-6666-6666-6666-666666666666',
@@ -181,7 +859,16 @@ describe('QuickResponseService', () => {
         DECIDED_BY_USER_ID,
         authHeader,
       );
-      expect(result).toMatchObject({ decision: 'OKAY', acknowledged: true });
+
+      expect(result).toMatchObject({
+        decision: 'OKAY',
+        acknowledged: true,
+        status: 'ACKNOWLEDGED',
+      });
+      expect(escalationClient.acknowledgeEddNearing).toHaveBeenCalledWith(
+        '66666666-6666-6666-6666-666666666666',
+        authHeader,
+      );
     });
 
     it('404s when the escalation card does not exist', async () => {
@@ -195,9 +882,10 @@ describe('QuickResponseService', () => {
           authHeader,
         ),
       ).rejects.toMatchObject({ status: 404 });
+      expect(escalationClient.acknowledgeEddNearing).not.toHaveBeenCalled();
     });
 
-    it('501s a non-OKAY decision on an escalation card', async () => {
+    it('501s a non-OKAY decision on an escalation card without calling the client', async () => {
       escalationClient.findById.mockResolvedValue(escalationCard());
 
       await expect(
@@ -208,6 +896,95 @@ describe('QuickResponseService', () => {
           authHeader,
         ),
       ).rejects.toMatchObject({ status: 501 });
+      expect(escalationClient.acknowledgeEddNearing).not.toHaveBeenCalled();
+    });
+
+    it('surfaces the downstream 409 when the card was already acknowledged, rather than faking a second success', async () => {
+      escalationClient.findById.mockResolvedValue(escalationCard());
+      escalationClient.acknowledgeEddNearing.mockRejectedValue(
+        Object.assign(new Error('This EDD Nearing card has already been decided.'), {
+          status: 409,
+        }),
+      );
+
+      await expect(
+        service.decide(
+          '66666666-6666-6666-6666-666666666666',
+          { cardSource: 'escalation_events', decision: 'OKAY' },
+          DECIDED_BY_USER_ID,
+          authHeader,
+        ),
+      ).rejects.toMatchObject({ status: 409 });
+    });
+  });
+
+  describe('decide — MISSED_VISIT (escalation_events)', () => {
+    function missedVisitCard(overrides: Partial<Record<string, unknown>> = {}) {
+      return escalationCard({
+        cardType: 'MISSED_VISIT',
+        escalationType: 'ANC_2_MISSED',
+        ...overrides,
+      });
+    }
+
+    it('CLOSE calls the real close endpoint', async () => {
+      escalationClient.findById.mockResolvedValue(missedVisitCard());
+      escalationClient.decideMissedVisit.mockResolvedValue({
+        id: '66666666-6666-6666-6666-666666666666',
+        status: 'RESOLVED',
+        actionTaken: 'CLOSE',
+      });
+
+      const result = await service.decide(
+        '66666666-6666-6666-6666-666666666666',
+        { cardSource: 'escalation_events', decision: 'CLOSE' },
+        DECIDED_BY_USER_ID,
+        authHeader,
+      );
+
+      expect(result).toMatchObject({ decision: 'CLOSE', status: 'RESOLVED' });
+      expect(escalationClient.decideMissedVisit).toHaveBeenCalledWith(
+        '66666666-6666-6666-6666-666666666666',
+        'CLOSE',
+        authHeader,
+      );
+    });
+
+    it('TRANSFER calls the real transfer endpoint (FR-SV-4.3)', async () => {
+      escalationClient.findById.mockResolvedValue(missedVisitCard());
+      escalationClient.decideMissedVisit.mockResolvedValue({
+        id: '66666666-6666-6666-6666-666666666666',
+        status: 'TRANSFER_REQUESTED',
+        actionTaken: 'TRANSFER',
+      });
+
+      const result = await service.decide(
+        '66666666-6666-6666-6666-666666666666',
+        { cardSource: 'escalation_events', decision: 'TRANSFER' },
+        DECIDED_BY_USER_ID,
+        authHeader,
+      );
+
+      expect(result).toMatchObject({ decision: 'TRANSFER', status: 'TRANSFER_REQUESTED' });
+      expect(escalationClient.decideMissedVisit).toHaveBeenCalledWith(
+        '66666666-6666-6666-6666-666666666666',
+        'TRANSFER',
+        authHeader,
+      );
+    });
+
+    it('501s an unrelated decision value (e.g. APPROVE) without calling the client', async () => {
+      escalationClient.findById.mockResolvedValue(missedVisitCard());
+
+      await expect(
+        service.decide(
+          '66666666-6666-6666-6666-666666666666',
+          { cardSource: 'escalation_events', decision: 'APPROVE' },
+          DECIDED_BY_USER_ID,
+          authHeader,
+        ),
+      ).rejects.toMatchObject({ status: 501 });
+      expect(escalationClient.decideMissedVisit).not.toHaveBeenCalled();
     });
   });
 
@@ -688,6 +1465,9 @@ describe('QuickResponseService', () => {
       beneficiaryClient.getById.mockResolvedValue({
         id: card.beneficiaryId as string,
         sakhiId: '88888888-8888-8888-8888-888888888888',
+        pii: { fullName: 'Test Beneficiary', padaId: null },
+        motherCaseDetails: null,
+        riskConditionSummaries: [],
       });
 
       const result = await service.decide(
@@ -791,6 +1571,9 @@ describe('QuickResponseService', () => {
       beneficiaryClient.getById.mockResolvedValue({
         id: card.beneficiaryId as string,
         sakhiId: '88888888-8888-8888-8888-888888888888',
+        pii: { fullName: 'Test Beneficiary', padaId: null },
+        motherCaseDetails: null,
+        riskConditionSummaries: [],
       });
       incentiveClient.triggerAccompaniedReferral.mockRejectedValue(
         Object.assign(new Error('No active incentive rate'), { status: 404 }),
@@ -842,6 +1625,9 @@ describe('QuickResponseService', () => {
       beneficiaryClient.getById.mockResolvedValue({
         id: card.beneficiaryId as string,
         sakhiId: '88888888-8888-8888-8888-888888888888',
+        pii: { fullName: 'Test Beneficiary', padaId: null },
+        motherCaseDetails: null,
+        riskConditionSummaries: [],
       });
       notificationClient.notify.mockRejectedValue(
         Object.assign(new Error('Forbidden'), { status: 403 }),

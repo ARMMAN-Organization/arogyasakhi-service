@@ -86,6 +86,35 @@ export function registerQuickResponseRoutes(doc: DocumentedRouter, service: Quic
     controller.list,
   );
 
+  doc.get(
+    '/quick-response/:cardId',
+    {
+      summary:
+        'Per-card-type detail for one Quick Response card — the list envelope only carries ' +
+        'the thin {cardId, cardType, cardSource, beneficiaryId, raisedAt} shape, not enough ' +
+        "to render any of the 8 cards' own content. Fields vary by cardType (see " +
+        'QuickResponseService.getCardDetail); two fields are deliberately never returned — ' +
+        "LMP Change's sonography image and Accompanied Referral's photo evidence — since " +
+        'neither has an upload path built yet.',
+      tags: ['Quick Response'],
+      params: cardIdParamsSchema,
+      responses: {
+        200: {
+          description: 'Card detail, shape varies by cardType',
+          schema: envelope(quickResponseCardSchema),
+        },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+        404: { description: 'Card not found', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER'),
+    validate(cardIdParamsSchema, 'params'),
+    controller.getCardDetail,
+  );
+
   doc.post(
     '/quick-response/:cardId/decision',
     {

@@ -13,6 +13,9 @@ import { ClosureClient } from './closure.client';
 import { ReferralClient } from './referral.client';
 import { IncentiveClient } from './incentive.client';
 import { UserClient } from './user.client';
+import { SakhiClient } from './sakhi.client';
+import { GeographyClient } from './geography.client';
+import { VisitClient } from './visit.client';
 
 /**
  * Composition root for the Quick Response feature: wires repository +
@@ -31,6 +34,9 @@ export function createQuickResponseModule(prisma: PrismaService): DocumentedRout
     new ReferralClient(),
     new IncentiveClient(),
     new UserClient(),
+    new SakhiClient(),
+    new GeographyClient(),
+    new VisitClient(),
   );
   const doc = createDocumentedRouter();
   registerQuickResponseRoutes(doc, service);
