@@ -29,15 +29,21 @@ const CONDITION_IDS = {
 
 // Real ANC_VISIT question codes (see
 // apps/visit-form-service/prisma/seed-data/anc-visit.json), plus `age` and
-// `badObstetricHistoryFlag`, which form.service.ts merges in from the
-// beneficiary's MOTHER_REGISTRATION submission.
+// the raw gravida/livingChildren/abortions/priorComplications fields, which
+// form.service.ts merges in from the beneficiary's MOTHER_REGISTRATION
+// submission — the Bad Obstetric History threshold (G>4/L<P/abortions>=2/
+// prior complications) is computed inside this rule pack, not by the
+// caller (see PR #172 review: business thresholds live in GoRules).
 const NORMAL_VITALS = {
   conditionIds: CONDITION_IDS,
   age: 25,
   mid_upper_arm_circumference_in_cm: 24,
   bmi: 22,
   height_of_the_woman_in_cm: 155,
-  badObstetricHistoryFlag: false,
+  gravida: 2,
+  livingChildren: 2,
+  abortions: 0,
+  priorComplications: ['no_complications'],
   haemoglobin_hb_g_dl: 12,
   blood_pressure_bp_systolic: 110,
   blood_pressure_bp_diastolic: 70,
@@ -181,6 +187,23 @@ describe('ancRiskRulesJson', () => {
     expect(hypo.isHrVisitTrigger).toBe(false);
   });
 
+  it('does not trigger Hypotension/Hypoglycemia off each other when only the two co-occur — sibling accompanied-by gates are excluded (PR #172 review)', async () => {
+    const result = await evaluateRulePack(ancRiskRulesJson, {
+      ...NORMAL_VITALS,
+      blood_pressure_bp_systolic: 85,
+      blood_glucose_in_mg_dl: 60,
+    });
+
+    const hypotension = findCondition(result, CONDITION_IDS.HYPOTENSION);
+    const hypoglycemia = findCondition(result, CONDITION_IDS.HYPOGLYCEMIA);
+    expect(hypotension.grade).toBe('MILD');
+    expect(hypoglycemia.grade).toBe('MILD');
+    expect(hypotension.isReferralTrigger).toBe(false);
+    expect(hypotension.isHrVisitTrigger).toBe(false);
+    expect(hypoglycemia.isReferralTrigger).toBe(false);
+    expect(hypoglycemia.isHrVisitTrigger).toBe(false);
+  });
+
   it('grades Hyperthermia MILD and triggers every instance; Hypothermia MILD alone does not trigger', async () => {
     const hyper = await evaluateRulePack(ancRiskRulesJson, {
       ...NORMAL_VITALS,
@@ -269,7 +292,7 @@ describe('ancRiskRulesJson', () => {
       ...NORMAL_VITALS,
       height_of_the_woman_in_cm: 140,
       age: 40,
-      badObstetricHistoryFlag: true,
+      gravida: 5,
       isFirstInstance: { STUNTING: false, AGE: false, BAD_OBSTETRIC_HISTORY: false },
     });
 
@@ -279,6 +302,53 @@ describe('ancRiskRulesJson', () => {
     expect(findCondition(result, CONDITION_IDS.BAD_OBSTETRIC_HISTORY).isReferralTrigger).toBe(
       false,
     );
+  });
+
+  describe('Bad Obstetric History threshold (moved into GoRules — PR #172 review)', () => {
+    it('grades NORMAL when none of the threshold conditions are met', async () => {
+      const result = await evaluateRulePack(ancRiskRulesJson, NORMAL_VITALS);
+      expect(findCondition(result, CONDITION_IDS.BAD_OBSTETRIC_HISTORY).grade).toBe('NORMAL');
+    });
+
+    it('grades MILD when gravida exceeds 4', async () => {
+      const result = await evaluateRulePack(ancRiskRulesJson, { ...NORMAL_VITALS, gravida: 5 });
+      expect(findCondition(result, CONDITION_IDS.BAD_OBSTETRIC_HISTORY).grade).toBe('MILD');
+    });
+
+    it('grades MILD when livingChildren is less than gravida', async () => {
+      const result = await evaluateRulePack(ancRiskRulesJson, {
+        ...NORMAL_VITALS,
+        gravida: 3,
+        livingChildren: 1,
+      });
+      expect(findCondition(result, CONDITION_IDS.BAD_OBSTETRIC_HISTORY).grade).toBe('MILD');
+    });
+
+    it('grades MILD when abortions >= 2', async () => {
+      const result = await evaluateRulePack(ancRiskRulesJson, { ...NORMAL_VITALS, abortions: 2 });
+      expect(findCondition(result, CONDITION_IDS.BAD_OBSTETRIC_HISTORY).grade).toBe('MILD');
+    });
+
+    it('grades MILD when a non-"no_complications" answer is present', async () => {
+      const result = await evaluateRulePack(ancRiskRulesJson, {
+        ...NORMAL_VITALS,
+        priorComplications: ['yes_miscarriage'],
+      });
+      expect(findCondition(result, CONDITION_IDS.BAD_OBSTETRIC_HISTORY).grade).toBe('MILD');
+    });
+
+    it('is not graded at all when no registration-derived field is present', async () => {
+      const rest = { ...NORMAL_VITALS };
+      delete (rest as Partial<typeof NORMAL_VITALS>).gravida;
+      delete (rest as Partial<typeof NORMAL_VITALS>).livingChildren;
+      delete (rest as Partial<typeof NORMAL_VITALS>).abortions;
+      delete (rest as Partial<typeof NORMAL_VITALS>).priorComplications;
+
+      const result = await evaluateRulePack(ancRiskRulesJson, rest);
+      expect(
+        result.conditions.some((c) => c.riskConditionId === CONDITION_IDS.BAD_OBSTETRIC_HISTORY),
+      ).toBe(false);
+    });
   });
 
   it('Gestational Weight Gain: referral gated by first-instance, HR visit trigger fires every instance (pre-graded radio value)', async () => {
