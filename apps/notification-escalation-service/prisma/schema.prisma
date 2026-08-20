@@ -53,6 +53,10 @@ enum EscalationStatus {
 
 enum NotificationType {
   MISSED_VISIT_ESCALATION
+  // Missed Visit Escalation TRANSFER (FR-SV-4.3) — the Sakhi's in-app
+  // notification that her beneficiary has been removed from her active
+  // list pending a Manager's review.
+  BENEFICIARY_TRANSFER_NOTICE
   REFERRAL_UPDATE
   REFERRAL_FOLLOWUP_DUE
   REFERRAL_FOLLOWUP_OVERDUE
@@ -94,7 +98,13 @@ model EscalationEvent {
   status               EscalationStatus @map("status")
   // supervisor_profiles.supervisor_id — owned by another service, no cross-service relation.
   assignedSupervisorId String?          @map("assigned_supervisor_id")
+  // Missed Visit Escalation detail only — no confirmed data source yet, so this
+  // is populated by whatever upstream process creates the row; null until then.
+  visitsMissedCount    Int?             @map("visits_missed_count")
   resolvedAt           DateTime?        @map("resolved_at")
+  // TRANSFER_REQUESTED only (FR-SV-4.3) — the Manager's review deadline,
+  // stamped at decision time as now + 15 days. Null for every other status.
+  reviewDeadlineAt     DateTime?        @map("review_deadline_at")
   actionTaken          String?          @map("action_taken") @db.VarChar(80)
   createdAt            DateTime         @default(now()) @map("created_at")
   createdByUserId      String?          @map("created_by_user_id")

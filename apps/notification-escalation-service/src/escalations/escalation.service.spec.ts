@@ -1,6 +1,9 @@
 import { EscalationService } from './escalation.service';
 import type { EscalationRepository } from './escalation.repository';
 import type { ListEscalationEventsInput } from './dto/list-escalation-events.dto';
+import type { NotificationRepository } from '../notifications/notification.repository';
+import type { BeneficiaryClient } from './beneficiary.client';
+import type { ManagerNoticeClient } from './manager-notice.client';
 import type { EscalationType } from '../../../../node_modules/.prisma/client-notification-escalation-service';
 
 function row(overrides: { id?: string; escalationType?: EscalationType; createdAt?: Date } = {}) {
@@ -13,7 +16,9 @@ function row(overrides: { id?: string; escalationType?: EscalationType; createdA
     triggerRuleVersionId: null,
     status: 'OPEN' as const,
     assignedSupervisorId: null,
+    visitsMissedCount: null,
     resolvedAt: null,
+    reviewDeadlineAt: null,
     actionTaken: null,
     createdAt: overrides.createdAt ?? new Date('2026-08-05T10:00:00.000Z'),
     createdByUserId: null,
@@ -28,13 +33,20 @@ describe('EscalationService', () => {
   const repository = {
     findMany: jest.fn(),
     findById: jest.fn(),
+    create: jest.fn(),
+    updateStatus: jest.fn(),
   } as unknown as jest.Mocked<EscalationRepository>;
+  const notificationRepository = {
+    findMany: jest.fn(),
+    create: jest.fn(),
+  } as unknown as jest.Mocked<NotificationRepository>;
   let service: EscalationService;
   const baseQuery: ListEscalationEventsInput = { status: 'OPEN', limit: 50 };
+  const AUTH_HEADER = 'Bearer test-token';
 
   beforeEach(() => {
     jest.resetAllMocks();
-    service = new EscalationService(repository);
+    service = new EscalationService(repository, notificationRepository);
   });
 
   it('groups every *_MISSED escalation type under MISSED_VISIT', async () => {
@@ -99,6 +111,54 @@ describe('EscalationService', () => {
     expect(repository.findMany).not.toHaveBeenCalled();
   });
 
+  describe('create', () => {
+    it('creates a Missed-Visit-type escalation row', async () => {
+      const created = row({ escalationType: 'ANC_2_MISSED' });
+      repository.create.mockResolvedValue(created);
+
+      const result = await service.create(
+        { beneficiaryId: created.beneficiaryId, escalationType: 'ANC_2_MISSED' },
+        'admin-user-id',
+      );
+
+      expect(result).toBe(created);
+      expect(repository.create).toHaveBeenCalledWith(
+        { beneficiaryId: created.beneficiaryId, escalationType: 'ANC_2_MISSED' },
+        'admin-user-id',
+      );
+    });
+
+    it('creates an EDD_NEARING escalation row', async () => {
+      const created = row({ escalationType: 'EDD_NEARING' });
+      repository.create.mockResolvedValue(created);
+
+      const result = await service.create(
+        { beneficiaryId: created.beneficiaryId, escalationType: 'EDD_NEARING' },
+        'admin-user-id',
+      );
+
+      expect(result).toBe(created);
+      expect(result.status).toBe('OPEN');
+    });
+
+    it('passes optional fields through to the repository unchanged', async () => {
+      const created = row({ escalationType: 'ANC_2_MISSED' });
+      repository.create.mockResolvedValue(created);
+      const input = {
+        beneficiaryId: created.beneficiaryId,
+        escalationType: 'ANC_2_MISSED' as const,
+        visitId: '33333333-3333-3333-3333-333333333333',
+        referralId: '44444444-4444-4444-4444-444444444444',
+        visitsMissedCount: 2,
+        assignedSupervisorId: '55555555-5555-5555-5555-555555555555',
+      };
+
+      await service.create(input, 'admin-user-id');
+
+      expect(repository.create).toHaveBeenCalledWith(input, 'admin-user-id');
+    });
+  });
+
   describe('findById', () => {
     it('returns the card shape for a supported card type', async () => {
       repository.findById.mockResolvedValue(row({ escalationType: 'EDD_NEARING' }));
@@ -116,6 +176,545 @@ describe('EscalationService', () => {
       repository.findById.mockResolvedValue(row({ escalationType: 'SYNC_DELAY' }));
       const result = await service.findById('11111111-1111-1111-1111-111111111111');
       expect(result).toBeNull();
+    });
+  });
+
+  describe('getMissedVisitDetail', () => {
+    it('returns the detail shape for a supported card type', async () => {
+      repository.findById.mockResolvedValue({
+        ...row({ escalationType: 'ANC_2_MISSED' }),
+        visitsMissedCount: 2,
+      });
+      const result = await service.getMissedVisitDetail('11111111-1111-1111-1111-111111111111');
+      expect(result).toEqual({
+        id: '11111111-1111-1111-1111-111111111111',
+        beneficiaryId: '22222222-2222-2222-2222-222222222222',
+        visitsMissedCount: 2,
+        visitType: 'ANC',
+        requestedAt: '2026-08-05T10:00:00.000Z',
+        status: 'PENDING',
+      });
+    });
+
+    it('maps TRANSFER_REQUESTED to TRANSFERRED', async () => {
+      repository.findById.mockResolvedValue({
+        ...row({ escalationType: 'ANC_2_MISSED' }),
+        status: 'TRANSFER_REQUESTED' as const,
+        visitsMissedCount: null,
+      });
+      const result = await service.getMissedVisitDetail('11111111-1111-1111-1111-111111111111');
+      expect(result.status).toBe('TRANSFERRED');
+    });
+
+    it('maps RESOLVED to CLOSED', async () => {
+      repository.findById.mockResolvedValue({
+        ...row({ escalationType: 'ANC_2_MISSED' }),
+        status: 'RESOLVED' as const,
+        visitsMissedCount: null,
+      });
+      const result = await service.getMissedVisitDetail('11111111-1111-1111-1111-111111111111');
+      expect(result.status).toBe('CLOSED');
+    });
+
+    it('maps DISMISSED to CLOSED', async () => {
+      repository.findById.mockResolvedValue({
+        ...row({ escalationType: 'ANC_2_MISSED' }),
+        status: 'DISMISSED' as const,
+        visitsMissedCount: null,
+      });
+      const result = await service.getMissedVisitDetail('11111111-1111-1111-1111-111111111111');
+      expect(result.status).toBe('CLOSED');
+    });
+
+    it('falls back to PENDING for a status this card type does not use', async () => {
+      repository.findById.mockResolvedValue({
+        ...row({ escalationType: 'ANC_2_MISSED' }),
+        status: 'CLOSE_REQUESTED' as const,
+        visitsMissedCount: null,
+      });
+      const result = await service.getMissedVisitDetail('11111111-1111-1111-1111-111111111111');
+      expect(result.status).toBe('PENDING');
+    });
+
+    it.each([
+      ['ANC_HR_MISSED', 'ANC'],
+      ['PP_HR_MISSED', 'PP'],
+      ['NN_HR_MISSED', 'NN'],
+      ['INC_2_MISSED', 'INC'],
+      ['INC_HR_MISSED', 'INC-HR'],
+      ['CCV_MISSED', 'CCV'],
+      ['CCV_HR_MISSED', 'CCV-HR'],
+    ])('maps %s to visitType %s', async (escalationType, visitType) => {
+      repository.findById.mockResolvedValue({
+        ...row({ escalationType: escalationType as EscalationType }),
+        visitsMissedCount: null,
+      });
+      const result = await service.getMissedVisitDetail('11111111-1111-1111-1111-111111111111');
+      expect(result.visitType).toBe(visitType);
+    });
+
+    it('passes through a null visitsMissedCount', async () => {
+      repository.findById.mockResolvedValue({
+        ...row({ escalationType: 'ANC_2_MISSED' }),
+        visitsMissedCount: null,
+      });
+      const result = await service.getMissedVisitDetail('11111111-1111-1111-1111-111111111111');
+      expect(result.visitsMissedCount).toBeNull();
+    });
+
+    it('404s on an unknown id', async () => {
+      repository.findById.mockResolvedValue(null);
+      await expect(service.getMissedVisitDetail('unknown-id')).rejects.toMatchObject({
+        status: 404,
+      });
+    });
+
+    it('422s when the escalation is not a Missed Visit type', async () => {
+      repository.findById.mockResolvedValue({
+        ...row({ escalationType: 'EDD_NEARING' }),
+        visitsMissedCount: null,
+      });
+      await expect(
+        service.getMissedVisitDetail('11111111-1111-1111-1111-111111111111'),
+      ).rejects.toMatchObject({ status: 422 });
+    });
+  });
+
+  describe('getEddNearingDetail', () => {
+    const beneficiaryClient = {
+      getById: jest.fn(),
+    } as unknown as jest.Mocked<BeneficiaryClient>;
+    let eddService: EscalationService;
+
+    beforeEach(() => {
+      eddService = new EscalationService(repository, notificationRepository, beneficiaryClient);
+      beneficiaryClient.getById.mockResolvedValue({
+        id: '22222222-2222-2222-2222-222222222222',
+        sakhiId: 'sakhi-a',
+        motherCaseDetails: { eddDate: '2027-03-01T00:00:00.000Z' },
+        pii: { fullName: 'Jane Doe' },
+      });
+    });
+
+    it('returns the detail shape with a computed reason', async () => {
+      repository.findById.mockResolvedValue(row({ escalationType: 'EDD_NEARING' }));
+      const result = await eddService.getEddNearingDetail(
+        '11111111-1111-1111-1111-111111111111',
+        AUTH_HEADER,
+      );
+      expect(result).toEqual({
+        id: '11111111-1111-1111-1111-111111111111',
+        beneficiaryId: '22222222-2222-2222-2222-222222222222',
+        eddDate: '2027-03-01',
+        reason: 'EDD approaching on 2027-03-01',
+        requestedAt: '2026-08-05T10:00:00.000Z',
+        status: 'PENDING',
+      });
+    });
+
+    it('maps ACKNOWLEDGED to ACKNOWLEDGED', async () => {
+      repository.findById.mockResolvedValue({
+        ...row({ escalationType: 'EDD_NEARING' }),
+        status: 'ACKNOWLEDGED' as const,
+      });
+      const result = await eddService.getEddNearingDetail(
+        '11111111-1111-1111-1111-111111111111',
+        AUTH_HEADER,
+      );
+      expect(result.status).toBe('ACKNOWLEDGED');
+    });
+
+    it('falls back to PENDING for a status this card type does not use', async () => {
+      repository.findById.mockResolvedValue({
+        ...row({ escalationType: 'EDD_NEARING' }),
+        status: 'RESOLVED' as const,
+      });
+      const result = await eddService.getEddNearingDetail(
+        '11111111-1111-1111-1111-111111111111',
+        AUTH_HEADER,
+      );
+      expect(result.status).toBe('PENDING');
+    });
+
+    it('returns null eddDate/reason when motherCaseDetails is null', async () => {
+      repository.findById.mockResolvedValue(row({ escalationType: 'EDD_NEARING' }));
+      beneficiaryClient.getById.mockResolvedValue({
+        id: '22222222-2222-2222-2222-222222222222',
+        sakhiId: 'sakhi-a',
+        motherCaseDetails: null,
+        pii: { fullName: 'Jane Doe' },
+      });
+      const result = await eddService.getEddNearingDetail(
+        '11111111-1111-1111-1111-111111111111',
+        AUTH_HEADER,
+      );
+      expect(result.eddDate).toBeNull();
+      expect(result.reason).toBeNull();
+    });
+
+    it('404s on an unknown id', async () => {
+      repository.findById.mockResolvedValue(null);
+      await expect(eddService.getEddNearingDetail('unknown-id', AUTH_HEADER)).rejects.toMatchObject(
+        { status: 404 },
+      );
+      expect(beneficiaryClient.getById).not.toHaveBeenCalled();
+    });
+
+    it('422s when the escalation is not EDD_NEARING', async () => {
+      repository.findById.mockResolvedValue(row({ escalationType: 'ANC_2_MISSED' }));
+      await expect(
+        eddService.getEddNearingDetail('11111111-1111-1111-1111-111111111111', AUTH_HEADER),
+      ).rejects.toMatchObject({ status: 422 });
+      expect(beneficiaryClient.getById).not.toHaveBeenCalled();
+    });
+
+    it('propagates a beneficiary-service failure instead of swallowing it', async () => {
+      repository.findById.mockResolvedValue(row({ escalationType: 'EDD_NEARING' }));
+      beneficiaryClient.getById.mockRejectedValue(new Error('beneficiary-service down'));
+      await expect(
+        eddService.getEddNearingDetail('11111111-1111-1111-1111-111111111111', AUTH_HEADER),
+      ).rejects.toThrow('beneficiary-service down');
+    });
+  });
+
+  describe('acknowledgeEddNearing', () => {
+    it('OPEN -> ACKNOWLEDGED for an EDD_NEARING escalation', async () => {
+      const pending = row({ escalationType: 'EDD_NEARING' });
+      const acknowledged = { ...pending, status: 'ACKNOWLEDGED' as const };
+      repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(acknowledged);
+      repository.updateStatus.mockResolvedValue(true);
+
+      await expect(service.acknowledgeEddNearing(pending.id)).resolves.toBe(acknowledged);
+      expect(repository.updateStatus).toHaveBeenCalledWith(
+        pending.id,
+        'OPEN',
+        'ACKNOWLEDGED',
+        null,
+      );
+    });
+
+    it('404s on an unknown id', async () => {
+      repository.findById.mockResolvedValue(null);
+      await expect(service.acknowledgeEddNearing('unknown-id')).rejects.toMatchObject({
+        status: 404,
+      });
+      expect(repository.updateStatus).not.toHaveBeenCalled();
+    });
+
+    it('422s when the escalation is not EDD_NEARING', async () => {
+      repository.findById.mockResolvedValue(row({ escalationType: 'ANC_2_MISSED' }));
+      await expect(
+        service.acknowledgeEddNearing('11111111-1111-1111-1111-111111111111'),
+      ).rejects.toMatchObject({ status: 422 });
+      expect(repository.updateStatus).not.toHaveBeenCalled();
+    });
+
+    it('409s when already decided', async () => {
+      repository.findById.mockResolvedValue({
+        ...row({ escalationType: 'EDD_NEARING' }),
+        status: 'ACKNOWLEDGED' as const,
+      });
+      await expect(
+        service.acknowledgeEddNearing('11111111-1111-1111-1111-111111111111'),
+      ).rejects.toMatchObject({ status: 409 });
+      expect(repository.updateStatus).not.toHaveBeenCalled();
+    });
+
+    it('409s when the conditional update races with a concurrent decision', async () => {
+      repository.findById.mockResolvedValueOnce(row({ escalationType: 'EDD_NEARING' }));
+      repository.updateStatus.mockResolvedValue(false);
+      await expect(
+        service.acknowledgeEddNearing('11111111-1111-1111-1111-111111111111'),
+      ).rejects.toMatchObject({ status: 409 });
+    });
+  });
+
+  describe('decideMissedVisit', () => {
+    const beneficiaryClient = {
+      getById: jest.fn(),
+    } as unknown as jest.Mocked<BeneficiaryClient>;
+    let closeService: EscalationService;
+    let consoleErrorSpy: jest.SpyInstance;
+
+    beforeEach(() => {
+      closeService = new EscalationService(repository, notificationRepository, beneficiaryClient);
+      beneficiaryClient.getById.mockResolvedValue({
+        id: '22222222-2222-2222-2222-222222222222',
+        sakhiId: 'sakhi-a',
+        motherCaseDetails: null,
+        pii: { fullName: 'Jane Doe' },
+      });
+      consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    });
+
+    afterEach(() => {
+      consoleErrorSpy.mockRestore();
+    });
+
+    it('CLOSE: OPEN -> RESOLVED and notifies the Sakhi', async () => {
+      const pending = row({ escalationType: 'ANC_2_MISSED' });
+      const resolved = { ...pending, status: 'RESOLVED' as const, actionTaken: 'CLOSE' };
+      repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(resolved);
+      repository.updateStatus.mockResolvedValue(true);
+
+      const result = await closeService.decideMissedVisit(pending.id, 'CLOSE', AUTH_HEADER);
+
+      expect(result).toBe(resolved);
+      expect(repository.updateStatus).toHaveBeenCalledWith(pending.id, 'OPEN', 'RESOLVED', 'CLOSE');
+      expect(notificationRepository.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          recipientUserId: 'sakhi-a',
+          notificationType: 'MISSED_VISIT_ESCALATION',
+          linkedEntityId: pending.id,
+        }),
+      );
+    });
+
+    it('does not fail the request when notifying the Sakhi fails', async () => {
+      const pending = row({ escalationType: 'ANC_2_MISSED' });
+      const resolved = { ...pending, status: 'RESOLVED' as const, actionTaken: 'CLOSE' };
+      repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(resolved);
+      repository.updateStatus.mockResolvedValue(true);
+      beneficiaryClient.getById.mockRejectedValue(new Error('beneficiary-service down'));
+
+      await expect(closeService.decideMissedVisit(pending.id, 'CLOSE', AUTH_HEADER)).resolves.toBe(
+        resolved,
+      );
+      expect(consoleErrorSpy).toHaveBeenCalled();
+    });
+
+    it('404s on an unknown id', async () => {
+      repository.findById.mockResolvedValue(null);
+      await expect(
+        closeService.decideMissedVisit('unknown-id', 'CLOSE', AUTH_HEADER),
+      ).rejects.toMatchObject({ status: 404 });
+    });
+
+    it('422s when the escalation is not a Missed Visit type', async () => {
+      repository.findById.mockResolvedValue(row({ escalationType: 'EDD_NEARING' }));
+      await expect(
+        closeService.decideMissedVisit(
+          '11111111-1111-1111-1111-111111111111',
+          'CLOSE',
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 422 });
+      expect(repository.updateStatus).not.toHaveBeenCalled();
+    });
+
+    it('409s when already decided', async () => {
+      repository.findById.mockResolvedValue({
+        ...row({ escalationType: 'ANC_2_MISSED' }),
+        status: 'RESOLVED' as const,
+      });
+      await expect(
+        closeService.decideMissedVisit(
+          '11111111-1111-1111-1111-111111111111',
+          'CLOSE',
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 409 });
+      expect(repository.updateStatus).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('decideMissedVisit TRANSFER', () => {
+    const beneficiaryClient = {
+      getById: jest.fn(),
+      markPendingTransfer: jest.fn(),
+    } as unknown as jest.Mocked<BeneficiaryClient>;
+    const managerNoticeClient = {
+      send: jest.fn(),
+    } as unknown as jest.Mocked<ManagerNoticeClient>;
+    let transferService: EscalationService;
+    let consoleErrorSpy: jest.SpyInstance;
+
+    beforeEach(() => {
+      transferService = new EscalationService(
+        repository,
+        notificationRepository,
+        beneficiaryClient,
+        managerNoticeClient,
+      );
+      beneficiaryClient.getById.mockResolvedValue({
+        id: '22222222-2222-2222-2222-222222222222',
+        sakhiId: 'sakhi-a',
+        motherCaseDetails: null,
+        pii: { fullName: 'Jane Doe' },
+      });
+      beneficiaryClient.markPendingTransfer.mockResolvedValue(undefined);
+      managerNoticeClient.send.mockResolvedValue({
+        sent: true,
+        managerEmail: 'manager@example.com',
+        usedFallback: false,
+      });
+      consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    });
+
+    afterEach(() => {
+      consoleErrorSpy.mockRestore();
+    });
+
+    it('moves OPEN -> TRANSFER_REQUESTED with a ~15-day review deadline and no resolvedAt', async () => {
+      const pending = row({ escalationType: 'ANC_2_MISSED' });
+      const transferred = {
+        ...pending,
+        status: 'TRANSFER_REQUESTED' as const,
+        actionTaken: 'TRANSFER',
+      };
+      repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(transferred);
+      repository.updateStatus.mockResolvedValue(true);
+
+      const result = await transferService.decideMissedVisit(pending.id, 'TRANSFER', AUTH_HEADER);
+
+      expect(result).toBe(transferred);
+      expect(repository.updateStatus).toHaveBeenCalledWith(
+        pending.id,
+        'OPEN',
+        'TRANSFER_REQUESTED',
+        'TRANSFER',
+        expect.any(Date),
+      );
+      const reviewDeadlineAt = repository.updateStatus.mock.calls[0][4] as Date;
+      const daysAhead = (reviewDeadlineAt.getTime() - Date.now()) / (24 * 60 * 60 * 1000);
+      expect(daysAhead).toBeGreaterThan(14.9);
+      expect(daysAhead).toBeLessThan(15.1);
+    });
+
+    it("removes the beneficiary from the Sakhi's list, emails the Manager, and notifies the Sakhi", async () => {
+      const pending = { ...row({ escalationType: 'ANC_2_MISSED' }), visitsMissedCount: 2 };
+      repository.findById.mockResolvedValue(pending);
+      repository.updateStatus.mockResolvedValue(true);
+
+      await transferService.decideMissedVisit(pending.id, 'TRANSFER', AUTH_HEADER);
+
+      expect(beneficiaryClient.markPendingTransfer).toHaveBeenCalledWith(
+        pending.beneficiaryId,
+        AUTH_HEADER,
+      );
+      expect(managerNoticeClient.send).toHaveBeenCalledWith(
+        {
+          sakhiId: 'sakhi-a',
+          beneficiaryName: 'Jane Doe',
+          visitsMissedCount: 2,
+          visitType: 'ANC',
+        },
+        AUTH_HEADER,
+      );
+      expect(notificationRepository.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          recipientUserId: 'sakhi-a',
+          notificationType: 'BENEFICIARY_TRANSFER_NOTICE',
+          linkedEntityId: pending.id,
+        }),
+      );
+    });
+
+    it('404s on an unknown id', async () => {
+      repository.findById.mockResolvedValue(null);
+      await expect(
+        transferService.decideMissedVisit('unknown-id', 'TRANSFER', AUTH_HEADER),
+      ).rejects.toMatchObject({ status: 404 });
+      expect(repository.updateStatus).not.toHaveBeenCalled();
+    });
+
+    it('422s when the escalation is not a Missed Visit type', async () => {
+      repository.findById.mockResolvedValue(row({ escalationType: 'EDD_NEARING' }));
+      await expect(
+        transferService.decideMissedVisit(
+          '11111111-1111-1111-1111-111111111111',
+          'TRANSFER',
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 422 });
+      expect(repository.updateStatus).not.toHaveBeenCalled();
+    });
+
+    it('409s when already decided', async () => {
+      repository.findById.mockResolvedValue({
+        ...row({ escalationType: 'ANC_2_MISSED' }),
+        status: 'RESOLVED' as const,
+      });
+      await expect(
+        transferService.decideMissedVisit(
+          '11111111-1111-1111-1111-111111111111',
+          'TRANSFER',
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 409 });
+      expect(repository.updateStatus).not.toHaveBeenCalled();
+    });
+
+    it('409s when the conditional update races with a concurrent decision', async () => {
+      repository.findById.mockResolvedValue(row({ escalationType: 'ANC_2_MISSED' }));
+      repository.updateStatus.mockResolvedValue(false);
+      await expect(
+        transferService.decideMissedVisit(
+          '11111111-1111-1111-1111-111111111111',
+          'TRANSFER',
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 409 });
+      expect(beneficiaryClient.markPendingTransfer).not.toHaveBeenCalled();
+      expect(managerNoticeClient.send).not.toHaveBeenCalled();
+    });
+
+    it('still returns 200 when removing the beneficiary from the roster fails', async () => {
+      const pending = row({ escalationType: 'ANC_2_MISSED' });
+      repository.findById.mockResolvedValue(pending);
+      repository.updateStatus.mockResolvedValue(true);
+      beneficiaryClient.markPendingTransfer.mockRejectedValue(
+        new Error('beneficiary-service down'),
+      );
+
+      await expect(
+        transferService.decideMissedVisit(pending.id, 'TRANSFER', AUTH_HEADER),
+      ).resolves.toBeDefined();
+      expect(consoleErrorSpy).toHaveBeenCalled();
+      // Independent of the beneficiary fetch — still attempted despite the roster failure.
+      expect(managerNoticeClient.send).toHaveBeenCalled();
+    });
+
+    it('still returns 200 when emailing the Manager fails', async () => {
+      const pending = row({ escalationType: 'ANC_2_MISSED' });
+      repository.findById.mockResolvedValue(pending);
+      repository.updateStatus.mockResolvedValue(true);
+      managerNoticeClient.send.mockRejectedValue(new Error('auth-service down'));
+
+      await expect(
+        transferService.decideMissedVisit(pending.id, 'TRANSFER', AUTH_HEADER),
+      ).resolves.toBeDefined();
+      expect(consoleErrorSpy).toHaveBeenCalled();
+      // Independent of the Manager email — still attempted despite that failure.
+      expect(notificationRepository.create).toHaveBeenCalled();
+    });
+
+    it('still returns 200, skipping the Manager email and Sakhi notification, when the beneficiary fetch fails', async () => {
+      const pending = row({ escalationType: 'ANC_2_MISSED' });
+      repository.findById.mockResolvedValue(pending);
+      repository.updateStatus.mockResolvedValue(true);
+      beneficiaryClient.getById.mockRejectedValue(new Error('beneficiary-service down'));
+
+      await expect(
+        transferService.decideMissedVisit(pending.id, 'TRANSFER', AUTH_HEADER),
+      ).resolves.toBeDefined();
+      expect(consoleErrorSpy).toHaveBeenCalled();
+      expect(managerNoticeClient.send).not.toHaveBeenCalled();
+      expect(notificationRepository.create).not.toHaveBeenCalled();
+      // Independent of the beneficiary fetch — still attempted.
+      expect(beneficiaryClient.markPendingTransfer).toHaveBeenCalled();
+    });
+
+    it('still returns 200 when notifying the Sakhi fails', async () => {
+      const pending = row({ escalationType: 'ANC_2_MISSED' });
+      repository.findById.mockResolvedValue(pending);
+      repository.updateStatus.mockResolvedValue(true);
+      notificationRepository.create.mockRejectedValue(new Error('db error'));
+
+      await expect(
+        transferService.decideMissedVisit(pending.id, 'TRANSFER', AUTH_HEADER),
+      ).resolves.toBeDefined();
+      expect(consoleErrorSpy).toHaveBeenCalled();
     });
   });
 });

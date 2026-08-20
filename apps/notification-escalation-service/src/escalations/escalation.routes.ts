@@ -3,13 +3,29 @@ import { z } from 'zod';
 import type { EscalationService } from './escalation.service';
 import { createEscalationController } from './escalation.controller';
 import { listEscalationEventsSchema } from './dto/list-escalation-events.dto';
-import { requireRoles, trustGatewayIdentity, validate, type DocumentedRouter } from '../app.module';
+import { createEscalationEventSchema } from './dto/create-escalation-event.dto';
+import { acknowledgeEddNearingSchema } from './dto/acknowledge-edd-nearing.dto';
+import { decideMissedVisitEscalationSchema } from './dto/decide-missed-visit-escalation.dto';
+import {
+  requireRoles,
+  trustGatewayIdentity,
+  validate,
+  validateBody,
+  type DocumentedRouter,
+} from '../app.module';
 
 extendZodWithOpenApi(z);
 
 const escalationEventIdParamsSchema = z
   .object({ id: z.string().uuid().openapi({ example: '123e4567-e89b-12d3-a456-426614174000' }) })
   .strict();
+
+const beneficiaryIdParamsSchema = z.object({ beneficiaryId: z.string().uuid() }).strict();
+
+const activeTransferWindowSchema = z.object({
+  active: z.boolean(),
+  reviewDeadlineAt: z.string().datetime().nullable(),
+});
 
 const escalationCardSchema = z.object({
   cardId: z.string().uuid(),
@@ -26,6 +42,51 @@ const escalationCardSchema = z.object({
 const listEscalationEventsResponseSchema = z.object({
   cards: z.array(escalationCardSchema),
   nextCursor: z.string().nullable(),
+});
+
+// Raw EscalationEvent row shape — distinct from escalationCardSchema above,
+// which is the Quick-Response-facing projection. acknowledgeEddNearing/
+// decideMissedVisit return the underlying row as decided, not a re-shaped
+// card, since a caller deciding directly needs to see the actual persisted
+// state (status/resolvedAt/actionTaken), not the card-list projection.
+const escalationEventSchema = z.object({
+  id: z.string().uuid(),
+  beneficiaryId: z.string().uuid(),
+  visitId: z.string().uuid().nullable(),
+  referralId: z.string().uuid().nullable(),
+  escalationType: z.string().openapi({ example: 'EDD_NEARING' }),
+  status: z.enum([
+    'OPEN',
+    'ACKNOWLEDGED',
+    'TRANSFER_REQUESTED',
+    'CLOSE_REQUESTED',
+    'RESOLVED',
+    'DISMISSED',
+  ]),
+  assignedSupervisorId: z.string().uuid().nullable(),
+  resolvedAt: z.string().datetime().nullable(),
+  reviewDeadlineAt: z.string().datetime().nullable(),
+  actionTaken: z.string().nullable(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+
+const missedVisitDetailSchema = z.object({
+  id: z.string().uuid(),
+  beneficiaryId: z.string().uuid(),
+  visitsMissedCount: z.number().int().nullable(),
+  visitType: z.enum(['ANC', 'PP', 'NN', 'INC', 'INC-HR', 'CCV', 'CCV-HR']),
+  requestedAt: z.string().datetime(),
+  status: z.enum(['PENDING', 'TRANSFERRED', 'CLOSED']),
+});
+
+const eddNearingDetailSchema = z.object({
+  id: z.string().uuid(),
+  beneficiaryId: z.string().uuid(),
+  eddDate: z.string().nullable().openapi({ example: '2027-03-01' }),
+  reason: z.string().nullable(),
+  requestedAt: z.string().datetime(),
+  status: z.enum(['PENDING', 'ACKNOWLEDGED']),
 });
 
 const apiErrorSchema = z.object({
@@ -72,6 +133,24 @@ export function registerEscalationRoutes(doc: DocumentedRouter, service: Escalat
     controller.list,
   );
 
+  doc.post(
+    '/escalation-events',
+    {
+      summary: 'Raise a new escalation event',
+      tags: ['Escalations'],
+      responses: {
+        201: { description: 'Escalation event created', schema: envelope(escalationEventSchema) },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('ADMIN'),
+    validateBody(createEscalationEventSchema),
+    controller.create,
+  );
+
   doc.get(
     '/escalation-events/:id',
     {
@@ -92,5 +171,148 @@ export function registerEscalationRoutes(doc: DocumentedRouter, service: Escalat
     requireRoles('SUPERVISOR', 'MANAGER'),
     validate(escalationEventIdParamsSchema, 'params'),
     controller.findById,
+  );
+
+  doc.get(
+    '/edd-nearing-requests/:id',
+    {
+      summary:
+        "An EDD Nearing card's own detail — the fields Quick Response's generic card " +
+        'resolution omits (eddDate, reason). Mirrors /closures/:id, /reopen-requests/:id, ' +
+        '/lmp-change-requests/:id.',
+      tags: ['Escalations'],
+      params: escalationEventIdParamsSchema,
+      responses: {
+        200: {
+          description: 'EDD Nearing request detail',
+          schema: envelope(eddNearingDetailSchema),
+        },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+        404: { description: 'EDD Nearing request not found', schema: apiErrorSchema },
+        422: { description: 'Not an EDD_NEARING escalation', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER'),
+    validate(escalationEventIdParamsSchema, 'params'),
+    controller.getEddNearingDetail,
+  );
+
+  doc.get(
+    '/missed-visit-escalations/:id',
+    {
+      summary:
+        "A Missed Visit Escalation card's own detail — the fields Quick Response's generic " +
+        'card resolution omits (visitsMissedCount, visitType). Mirrors /closures/:id, ' +
+        '/reopen-requests/:id, /lmp-change-requests/:id.',
+      tags: ['Escalations'],
+      params: escalationEventIdParamsSchema,
+      responses: {
+        200: {
+          description: 'Missed Visit Escalation detail',
+          schema: envelope(missedVisitDetailSchema),
+        },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+        404: { description: 'Missed Visit Escalation not found', schema: apiErrorSchema },
+        422: { description: 'Not a Missed Visit Escalation', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER'),
+    validate(escalationEventIdParamsSchema, 'params'),
+    controller.getMissedVisitDetail,
+  );
+
+  doc.post(
+    '/edd-nearing-requests/:id/acknowledge',
+    {
+      summary:
+        'Acknowledge an EDD Nearing card — its only decision (FR-SV-4.x). No reason code, ' +
+        'no reject path, and per SRS no Sakhi notification. SUPERVISOR-only, matching the ' +
+        "Supervisor app's other new decision endpoints — new route with no existing callers " +
+        'to preserve compatibility for.',
+      tags: ['Escalations'],
+      params: escalationEventIdParamsSchema,
+      responses: {
+        200: {
+          description: 'EDD Nearing card acknowledged',
+          schema: envelope(escalationEventSchema),
+        },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+        404: { description: 'Escalation event not found', schema: apiErrorSchema },
+        409: { description: 'Already decided', schema: apiErrorSchema },
+        422: { description: 'Not an EDD_NEARING escalation', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR'),
+    validate(escalationEventIdParamsSchema, 'params'),
+    validateBody(acknowledgeEddNearingSchema),
+    controller.acknowledgeEddNearing,
+  );
+
+  doc.post(
+    '/missed-visit-escalations/:id/decision',
+    {
+      summary:
+        'Decide a Missed Visit Escalation card (FR-SV-4.3). Not an Approve/Reject flow — ' +
+        'CLOSE resolves the escalation and notifies the Sakhi to fill the closure form; ' +
+        'TRANSFER moves it to TRANSFER_REQUESTED with a 15-day Manager review deadline, then ' +
+        "best-effort removes the beneficiary from the Sakhi's list, emails her designated " +
+        'Manager, and notifies the Sakhi in-app (see missed-visit-transfer.ts). SUPERVISOR-only, ' +
+        "matching the Supervisor app's other new decision endpoints — new route with no " +
+        'existing callers to preserve compatibility for.',
+      tags: ['Escalations'],
+      params: escalationEventIdParamsSchema,
+      responses: {
+        200: {
+          description: 'Missed Visit Escalation decided',
+          schema: envelope(escalationEventSchema),
+        },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+        404: { description: 'Escalation event not found', schema: apiErrorSchema },
+        409: { description: 'Already decided', schema: apiErrorSchema },
+        422: { description: 'Not a Missed Visit Escalation', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR'),
+    validate(escalationEventIdParamsSchema, 'params'),
+    validateBody(decideMissedVisitEscalationSchema),
+    controller.decideMissedVisit,
+  );
+
+  doc.get(
+    '/escalations/beneficiaries/:beneficiaryId/active-transfer-window',
+    {
+      summary:
+        "A beneficiary's active Missed Visit Escalation TRANSFER review window (FR-SV-4.3), " +
+        'if any — the most recent TRANSFER_REQUESTED escalation with a still-future ' +
+        "reviewDeadlineAt. Intended to be called server-to-server by visit-form-service's " +
+        'own SUPERVISOR-only notMetReason gate during the review window — any authenticated ' +
+        "role may call it, same low-sensitivity rationale as auth-service's GET /users/:id/name.",
+      tags: ['Escalations'],
+      params: beneficiaryIdParamsSchema,
+      responses: {
+        200: {
+          description: 'Whether an active transfer window exists for this beneficiary',
+          schema: envelope(activeTransferWindowSchema),
+        },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        500: { description: 'Server error', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    validate(beneficiaryIdParamsSchema, 'params'),
+    controller.getActiveTransferWindow,
   );
 }
