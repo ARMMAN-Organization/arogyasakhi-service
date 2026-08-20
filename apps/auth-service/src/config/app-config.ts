@@ -33,6 +33,19 @@ const schema = z.object({
   // expiry by default (see AuthService.issueTokens) — this applies ONLY to
   // ADMIN-role logins, the one role that still gets a time-based expiry.
   JWT_ADMIN_ACCESS_TOKEN_TTL: z.string().default('15m'),
+  // Missed Visit Escalation TRANSFER (FR-SV-4.3) — see ses-email.client.ts.
+  // Both left optional rather than required: no SES sending domain is
+  // verified in every environment yet, and per this feature's best-effort
+  // design (the decision still succeeds if the email can't be sent — see
+  // EscalationService.decideMissedVisit), a service must still boot without
+  // them rather than fail fast, matching the "config not yet provisioned"
+  // case explicitly, not treating it as a startup misconfiguration.
+  AWS_REGION: z.string().min(1).default('ap-south-1'),
+  SES_FROM_ADDRESS: z.string().email().optional(),
+  // Sent to when a Sakhi has no resolvable Manager (no Supervisor assigned,
+  // or her Supervisor has no managerUserId on file yet) — see
+  // supervisor.service.ts's resolveManagerContact.
+  DEFAULT_TRANSFER_MANAGER_EMAIL: z.string().email().optional(),
 });
 
 export type AppConfig = z.infer<typeof schema>;

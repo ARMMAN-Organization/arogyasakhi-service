@@ -445,9 +445,14 @@ export const LOOKUP_CATEGORIES: {
 
 /**
  * One seed-user env var per role — SAKHI/SUPERVISOR/MANAGER/ADMIN — each a
- * JSON array of `{ username, password, displayName }`. Kept in one place so
- * seed.ts (parsing/validation) and its spec share the same source of truth
- * for which env vars exist and their DB role code.
+ * JSON array of `{ username, password, displayName }` (SAKHI entries may
+ * also carry an optional `supervisorUsername`, resolved to
+ * `sakhi_profiles.supervisor_id` via seed-supervisor.ts). Kept in one place
+ * so seed.ts (parsing/validation) and its spec share the same source of
+ * truth for which env vars exist and their DB role code.
+ *
+ * Order matters: SUPERVISOR must be seeded before SAKHI so a SAKHI entry's
+ * `supervisorUsername` can be resolved to an already-created user.
  *
  * mobileNumber is NOT read from these env vars: it's a NOT NULL UNIQUE `users`
  * column but plays no role in login (login is username + password only, per
@@ -455,8 +460,8 @@ export const LOOKUP_CATEGORIES: {
  * instead of asking every environment to supply one.
  */
 export const SEED_USER_ENV_VARS: { envVar: string; roleCode: string; mobileOffset: number }[] = [
-  { envVar: 'SAKHI', roleCode: 'SAKHI', mobileOffset: 0 },
   { envVar: 'SUPERVISOR', roleCode: 'SUPERVISOR', mobileOffset: 100 },
+  { envVar: 'SAKHI', roleCode: 'SAKHI', mobileOffset: 0 },
   { envVar: 'MANAGER', roleCode: 'MANAGER', mobileOffset: 200 },
   { envVar: 'ADMIN', roleCode: 'ADMIN', mobileOffset: 300 },
 ];

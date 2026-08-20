@@ -20,6 +20,7 @@ import { createLookupModule } from './lookups/lookup.module';
 import { createGeographyModule } from './geography/geography.module';
 import { createMasterDataModule } from './master-data/master-data.module';
 import { createSakhiModule } from './sakhis/sakhi.module';
+import { createSupervisorModule } from './supervisors/supervisor.module';
 import { createProjectGeographyModule } from './project-geography/project-geography.module';
 import { createApplicationParameterModule } from './application-parameters/application-parameter.module';
 import { createArogyaSakhiRosterModule } from './arogya-sakhi-roster/arogya-sakhi-roster.module';
@@ -90,6 +91,7 @@ export function createApp(prisma: PrismaService, signer: TokenSigner, redis: Red
   const geographyModule = createGeographyModule(prisma, signer);
   const masterDataModule = createMasterDataModule(prisma, signer);
   const sakhiModule = createSakhiModule(prisma, signer);
+  const supervisorModule = createSupervisorModule(prisma, signer);
   const projectGeographyModule = createProjectGeographyModule(prisma, signer);
   const applicationParameterModule = createApplicationParameterModule(prisma, signer);
   const arogyaSakhiRosterModule = createArogyaSakhiRosterModule(prisma, signer);
@@ -110,6 +112,7 @@ export function createApp(prisma: PrismaService, signer: TokenSigner, redis: Red
         geographyModule.registry,
         masterDataModule.registry,
         sakhiModule.registry,
+        supervisorModule.registry,
         projectGeographyModule.registry,
         applicationParameterModule.registry,
         arogyaSakhiRosterModule.registry,
@@ -125,6 +128,7 @@ export function createApp(prisma: PrismaService, signer: TokenSigner, redis: Red
   api.use(geographyModule.router);
   api.use(masterDataModule.router);
   api.use(sakhiModule.router);
+  api.use(supervisorModule.router);
   api.use(projectGeographyModule.router);
   api.use(applicationParameterModule.router);
   api.use(arogyaSakhiRosterModule.router);

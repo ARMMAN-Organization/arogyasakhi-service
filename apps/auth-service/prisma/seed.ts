@@ -8,6 +8,7 @@ import {
   type SeedResult,
 } from './seed-data';
 import { seedRoles, seedAdminUsers } from '../src/prisma/startup-seed';
+import { resolveSupervisorId } from './seed-supervisor';
 
 const prisma = new PrismaClient();
 
@@ -20,6 +21,9 @@ const seedUserSchema = z.object({
   username: z.string().min(1),
   password: z.string().min(1),
   displayName: z.string().min(1),
+  // SAKHI-only: resolved to sakhi_profiles.supervisor_id (see
+  // seed-supervisor.ts). Ignored for other roles.
+  supervisorUsername: z.string().min(1).optional(),
 });
 
 /**
@@ -118,6 +122,12 @@ async function seedUsersFromEnv(
       continue;
     }
 
+    // Resolved before the transaction so a bad supervisorUsername fails the
+    // whole step loudly instead of leaving a half-created user behind.
+    const supervisorId = user.supervisorUsername
+      ? await resolveSupervisorId(prisma, user.supervisorUsername)
+      : undefined;
+
     const passwordHash = await argon2.hash(user.password);
     const mobileNumber = await nextFreeMobileNumber(spec.mobileOffset, index);
 
@@ -141,12 +151,28 @@ async function seedUsersFromEnv(
           status: 'ACTIVE',
         },
       });
+      if (supervisorId) {
+        // phoneNumber reuses the same deterministic mobile number as the
+        // user row — seed fixtures have no other phone number to draw on,
+        // and sakhi_profiles.phone_number carries no uniqueness constraint.
+        await tx.sakhiProfile.create({
+          data: {
+            userId: created.id,
+            primaryProjectId: scope.projectId,
+            phoneNumber: mobileNumber,
+            supervisorId,
+            activeFrom: new Date(),
+          },
+        });
+      }
     });
 
     results.push({
       step: `seedUser:${user.username}`,
       created: true,
-      message: `Seeded ${spec.roleCode} user ${user.username} (mobile ${mobileNumber}, project ${scope.projectId}, geography ${scope.geographyUnitId}).`,
+      message: supervisorId
+        ? `Seeded ${spec.roleCode} user ${user.username} (mobile ${mobileNumber}, project ${scope.projectId}, geography ${scope.geographyUnitId}, supervisor ${user.supervisorUsername}).`
+        : `Seeded ${spec.roleCode} user ${user.username} (mobile ${mobileNumber}, project ${scope.projectId}, geography ${scope.geographyUnitId}).`,
     });
   }
 
