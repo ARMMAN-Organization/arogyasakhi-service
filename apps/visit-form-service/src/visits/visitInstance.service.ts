@@ -5,6 +5,7 @@ import type { UpdateVisitInstanceInput } from './dto/update-visitInstance.dto';
 import type { VisitSummaryQueryInput } from './dto/visit-summary-query.dto';
 import { findSakhiById, listSakhiIdsForSupervisor } from '../sakhis/sakhi.client';
 import { resolveVisitStatusCode, resolveVisitStatusCodes } from '../lookups/lookup.client';
+import { getActiveTransferWindow } from '../escalations/escalation.client';
 
 /** The calling principal's own identity, as carried on their trusted-identity headers. */
 export interface CallerIdentity {
@@ -63,6 +64,18 @@ export class VisitInstanceService {
    */
   listByBeneficiaryId(beneficiaryId: string) {
     return this.repository.findManyByBeneficiaryId(beneficiaryId);
+  }
+
+  /**
+   * A single visit's detail — added for Quick Response's card-enrichment
+   * endpoint (approval-service resolves REFERRAL_INCOMPLETE cards' "visit
+   * reference" through this), not a general SAKHI-facing read; the app has
+   * no existing single-visit-read flow of its own (only list/summary/PATCH).
+   */
+  async getById(id: string) {
+    const visit = await this.repository.findById(id);
+    if (!visit) throw notFound('Visit instance not found.');
+    return visit;
   }
 
   /**
@@ -136,6 +149,34 @@ export class VisitInstanceService {
 
     if (fromStatusCode === 'COMPLETED' && toStatusCode === 'COMPLETED') {
       throw conflict('This visit is already COMPLETED.');
+    }
+
+    // Missed Visit Escalation TRANSFER (FR-SV-4.3): "Supervisor must provide
+    // reasons for each missed visit" during the Manager's review window —
+    // only a SAKHI caller is gated (Supervisor/Manager/Admin are always
+    // allowed, same as everywhere else in this codebase), so the extra
+    // cross-service check only runs on the one path it can actually block.
+    if (
+      dto.notMetReason !== undefined &&
+      toStatusCode === 'MISSED' &&
+      !isPrivileged(caller) &&
+      caller.roles.includes('SAKHI')
+    ) {
+      let activeWindow = { active: false };
+      try {
+        activeWindow = await getActiveTransferWindow(existing.beneficiaryId, authorizationHeader);
+      } catch (err) {
+        console.error(
+          `Unable to check the Missed Visit Escalation transfer window for visit ${id} — ` +
+            'allowing the write:',
+          err,
+        );
+      }
+      if (activeWindow.active) {
+        throw forbidden(
+          'Only a Supervisor may record a missed-visit reason while this beneficiary is under Manager review.',
+        );
+      }
     }
 
     const updated = await this.repository.updateStatus(

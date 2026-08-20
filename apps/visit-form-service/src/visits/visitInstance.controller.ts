@@ -19,6 +19,10 @@ export function createVisitInstanceController(service: VisitInstanceService) {
       res.json(ok(await service.listByBeneficiaryId(req.params.beneficiaryId)));
     }),
 
+    getById: asyncHandler(async (req, res) => {
+      res.json(ok(await service.getById(req.params.id)));
+    }),
+
     getVisitSummary: asyncHandler(async (req, res, next) => {
       if (!req.user) return next(unauthorized());
       const authorizationHeader = req.header('authorization');
