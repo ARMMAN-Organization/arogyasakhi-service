@@ -448,7 +448,7 @@ The complete editable field list is maintained in the "Is an editable field?" co
 
 **FR-S-5.4:** HR detection thresholds are configured in gorules and must be updatable without code redeployment.
 
-> ⚠️ **PENDING** — Updated HR thresholds document from ARMMAN (Prajakta, committed 29 April 2026). Existing Appendix D to be updated on receipt. - Update: Shared.
+> ⚠️ **PARTIALLY RECEIVED** — ANC-phase HR thresholds document from ARMMAN (Prajakta), "High risk protocols_Developer's copy — ANC HR", received and incorporated into Appendix D. PP/NN/INC/CCV threshold sheets still pending.
 
 #### 3A.2.6 Referral (NEW) (Post Meeting on 22nd May, 2026)
 
@@ -1606,7 +1606,9 @@ _Note: Continue is not an explicit button. For all visit types, Continue is the 
 
 ## Appendix D — High Risk Detection Rules
 
-Please refer to the 📎 **High risk protocols_Developer's copy** sheet provided to us by Armman.
+See [Appendix_D_High_Risk_Detection_Rules.md](Appendix_D_High_Risk_Detection_Rules.md) — full parameter/threshold/trigger tables converted from the **High risk protocols_Developer's copy** ANC HR, Infant HR, and Dashboard sheets provided by ARMMAN, covering ANC (Part 1), NN/INC/CCV (Part 2), and the Manager Dashboard's HR linelist/reporting requirements (Part 3).
+
+> ⚠️ **PARTIAL** — PP-phase HR thresholds are still pending from ARMMAN. Several Part 2 (Infant) values also need ARMMAN confirmation — see that document's §2.8 Open Items.
 
 ## Appendix E — Referral Rules
 

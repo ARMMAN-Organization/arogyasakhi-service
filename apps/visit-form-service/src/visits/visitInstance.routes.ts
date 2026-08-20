@@ -7,6 +7,7 @@ import { updateVisitInstanceSchema } from './dto/update-visitInstance.dto';
 import { visitSummaryQuerySchema } from './dto/visit-summary-query.dto';
 import { countByBeneficiarySchema } from './dto/count-by-beneficiary.dto';
 import { byPadaSchema } from './dto/by-pada.dto';
+import { visitHistoryQuerySchema } from './dto/visit-history-query.dto';
 import {
   errorResponse,
   requireRoles,
@@ -84,6 +85,41 @@ const countByBeneficiaryResponseSchema = z.record(
     dueTodayCount: z.number().int(),
   }),
 );
+
+const visitHistoryVitalsSchema = z.object({
+  hemoglobin: z.object({
+    value: z.string().nullable().openapi({ example: '9.4' }),
+    unit: z.literal('g/dl'),
+  }),
+  bloodPressure: z.object({
+    systolic: z.number().int().nullable().openapi({ example: 120 }),
+    diastolic: z.number().int().nullable().openapi({ example: 80 }),
+    unit: z.literal('mmHg'),
+  }),
+  weight: z.object({
+    value: z.string().nullable().openapi({ example: '60.2' }),
+    unit: z.literal('kg'),
+  }),
+  bloodSugar: z.object({
+    value: z.string().nullable().openapi({ example: null }),
+    unit: z.literal('mg/dl'),
+  }),
+  temperature: z.object({
+    value: z.string().nullable().openapi({ example: null }),
+    unit: z.literal('°F'),
+  }),
+});
+
+const visitHistoryResponseSchema = z.object({
+  visits: z.array(
+    z.object({
+      visitId: z.string().uuid().openapi({ example: '3fa85f64-5717-4562-b3fc-2c963f66afa6' }),
+      visitCode: z.string().openapi({ example: 'ANC2' }),
+      completedAt: z.string().datetime().openapi({ example: '2026-08-04T10:12:00.000Z' }),
+      vitals: visitHistoryVitalsSchema,
+    }),
+  ),
+});
 
 function envelope<T extends z.ZodTypeAny>(data: T) {
   return z.object({ success: z.literal(true), message: z.string(), data });
@@ -165,6 +201,40 @@ export function registerVisitInstanceRoutes(doc: DocumentedRouter, service: Visi
     requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER'),
     validate(beneficiaryIdParamsSchema, 'params'),
     controller.listByBeneficiary,
+  );
+
+  doc.get(
+    '/beneficiaries/:beneficiaryId/visit-history',
+    {
+      summary:
+        "A beneficiary's last completed visits' key vitals (Hemoglobin, Blood Pressure, " +
+        'Weight, Blood Sugar, Temperature) — FR-S-4.6, shown to a Sakhi before she starts the ' +
+        "beneficiary's next visit. Filtered to COMPLETED visits only, newest first. A vital " +
+        "not captured by a given visit's form (e.g. no BP question on a PP visit) is null, " +
+        'never omitted, so the response shape never depends on which visit type was most ' +
+        'recent. Same ownership scoping as GET /beneficiaries/:beneficiaryId/latest-visit-vitals: ' +
+        'SAKHI must own the beneficiary case herself, SUPERVISOR only via her own roster, ' +
+        'MANAGER/ADMIN unrestricted.',
+      tags: ['Visits'],
+      params: beneficiaryIdParamsSchema,
+      query: visitHistoryQuerySchema,
+      responses: {
+        200: {
+          description: "Beneficiary's completed visit history with vitals",
+          schema: envelope(visitHistoryResponseSchema),
+        },
+        400: errorResponse(400, { message: 'limit: Number must be greater than or equal to 1' }),
+        401: errorResponse(401),
+        403: errorResponse(403, { message: 'This beneficiary case is outside your own roster.' }),
+        404: errorResponse(404, { message: 'Beneficiary case not found.' }),
+        500: errorResponse(500),
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(beneficiaryIdParamsSchema, 'params'),
+    validate(visitHistoryQuerySchema, 'query'),
+    controller.getVisitHistory,
   );
 
   doc.post(

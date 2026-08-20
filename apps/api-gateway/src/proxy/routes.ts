@@ -118,6 +118,23 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
     target: appConfig.RISK_REFERRAL_SERVICE_URL,
     requiresAuth: true,
   },
+  // GET /beneficiaries/:beneficiaryId/latest-visit-vitals — owned by
+  // visit-form-service (it owns form_submissions/visit_instances), not
+  // beneficiary-service, which calls this same route itself server-to-
+  // server (via visitVitals.client.ts) to enrich GET /beneficiaries/:id.
+  {
+    prefix: '/beneficiaries/:beneficiaryId/latest-visit-vitals',
+    target: appConfig.VISIT_FORM_SERVICE_URL,
+    requiresAuth: true,
+  },
+  // GET /beneficiaries/:beneficiaryId/visit-history (FR-S-4.6) — same
+  // ownership as latest-visit-vitals above: owned by visit-form-service
+  // (it owns visit_instances/form_submissions), not beneficiary-service.
+  {
+    prefix: '/beneficiaries/:beneficiaryId/visit-history',
+    target: appConfig.VISIT_FORM_SERVICE_URL,
+    requiresAuth: true,
+  },
   { prefix: '/beneficiaries', target: appConfig.BENEFICIARY_SERVICE_URL, requiresAuth: true },
   // UNCONFIRMED alias for GET /beneficiaries/risk-summary — see the route's
   // own doc comment in beneficiary.routes.ts for why this is a best guess.
@@ -149,6 +166,9 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
   { prefix: '/risk-conditions', target: appConfig.RISK_REFERRAL_SERVICE_URL, requiresAuth: true },
   // Dedicated-path alias for /risk-conditions — same data, same service.
   { prefix: '/risk-parameters', target: appConfig.RISK_REFERRAL_SERVICE_URL, requiresAuth: true },
+  // Roster-wide per-condition risk summary for a Sakhi's caseload, optionally
+  // filtered to the ANC or PNC phase set — see riskBySakhi.routes.ts.
+  { prefix: '/risk/by-sakhi', target: appConfig.RISK_REFERRAL_SERVICE_URL, requiresAuth: true },
   { prefix: '/closures', target: appConfig.CLOSURE_REOPEN_SERVICE_URL, requiresAuth: true },
   // Internal-use decision endpoint, not part of the public Quick Response
   // surface — approval-service calls it through the gateway (rather than

@@ -4,6 +4,7 @@ import type { VisitInstanceService } from './visitInstance.service';
 import type { visitSummaryQuerySchema } from './dto/visit-summary-query.dto';
 import type { countByBeneficiarySchema } from './dto/count-by-beneficiary.dto';
 import type { byPadaSchema } from './dto/by-pada.dto';
+import type { visitHistoryQuerySchema } from './dto/visit-history-query.dto';
 
 /**
  * Visit instance request handlers. Mounted under the global `api/v1`
@@ -65,6 +66,23 @@ export function createVisitInstanceController(service: VisitInstanceService) {
         authorizationHeader,
       );
       res.json(ok(updated));
+    }),
+
+    getVisitHistory: asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const query = req.query as unknown as z.infer<typeof visitHistoryQuerySchema>;
+      res.json(
+        ok(
+          await service.getVisitHistory(
+            req.params.beneficiaryId,
+            query,
+            req.user,
+            authorizationHeader,
+          ),
+        ),
+      );
     }),
   };
 }

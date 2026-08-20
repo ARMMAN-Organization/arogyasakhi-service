@@ -18,6 +18,10 @@ describe('RiskAssessmentService', () => {
     findBySubmissionId: jest.fn(),
     create: jest.fn(),
     findPhasesByConditionIds: jest.fn(),
+    findConditionIdsByPhase: jest.fn(),
+    findEverFlaggedConditionCodes: jest.fn(),
+    findConsecutiveNoImprovementCount: jest.fn(),
+    findByVisitIds: jest.fn(),
   } as unknown as jest.Mocked<RiskAssessmentRepository>;
   const beneficiaryClient = {
     getById: jest.fn(),
@@ -38,6 +42,7 @@ describe('RiskAssessmentService', () => {
     visitId: '22222222-2222-2222-2222-222222222222',
     submissionId: '33333333-3333-3333-3333-333333333333',
     ruleSetId: '44444444-4444-4444-4444-444444444444',
+    riskPhase: 'ANC',
     answers: { systolicBp: 145 },
   };
 
@@ -59,6 +64,9 @@ describe('RiskAssessmentService', () => {
     service = new RiskAssessmentService(repository, beneficiaryClient);
     beneficiaryClient.getById.mockResolvedValue({ id: BENEFICIARY_ID, sakhiId: CALLER_ID });
     repository.findPhasesByConditionIds.mockResolvedValue(new Map([['cond-1', 'ANC']]));
+    repository.findConditionIdsByPhase.mockResolvedValue(new Map([['ANEMIA', 'cond-1']]));
+    repository.findEverFlaggedConditionCodes.mockResolvedValue(new Set());
+    repository.findConsecutiveNoImprovementCount.mockResolvedValue(new Map([['ANEMIA', 0]]));
     resolveRiskGradeLookupIdMock.mockResolvedValue('grade-lookup-id-1');
     pushRiskConditionSummaryMock.mockResolvedValue({ ok: true });
   });
@@ -154,7 +162,20 @@ describe('RiskAssessmentService', () => {
 
     await service.create(dto, caller(), AUTH_HEADER);
 
-    expect(evaluateRuleSetMock).toHaveBeenCalledWith(dto.ruleSetId, dto.answers, AUTH_HEADER);
+    expect(evaluateRuleSetMock).toHaveBeenCalledWith(
+      dto.ruleSetId,
+      {
+        ...dto.answers,
+        conditionIds: { ANEMIA: 'cond-1' },
+        isFirstInstance: { ANEMIA: true },
+        // dto.riskPhase is 'ANC' — findConsecutiveNoImprovementCount is only
+        // read by infant-risk.rulesJson.ts's nutrition conditions (NN/INC/CCV
+        // phases), so the query is skipped entirely for ANC and this comes
+        // back empty rather than {ANEMIA: 0}.
+        consecutiveNoImprovementCount: {},
+      },
+      AUTH_HEADER,
+    );
     expect(resolveRiskGradeLookupIdMock).toHaveBeenCalledWith('HIGH', AUTH_HEADER);
     expect(repository.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -169,6 +190,7 @@ describe('RiskAssessmentService', () => {
           expect.objectContaining({
             riskConditionId: 'cond-1',
             riskGradeLookupValueId: 'grade-lookup-id-1',
+            gradeRank: 3,
             isReferralTrigger: true,
             isHrVisitTrigger: true,
           }),
@@ -313,6 +335,112 @@ describe('RiskAssessmentService', () => {
     expect(consoleErrorSpy).toHaveBeenCalled();
   });
 
+  describe('conditionIds / isFirstInstance / consecutiveNoImprovementCount resolution', () => {
+    beforeEach(() => {
+      repository.findBySubmissionId.mockResolvedValue(null);
+      evaluateRuleSetMock.mockResolvedValue({
+        ruleVersionId: 'rule-version-1',
+        overallRiskCategory: 'NORMAL',
+        conditions: [],
+      });
+      repository.create.mockResolvedValue({ id: 'assessment-1' } as never);
+      repository.findConsecutiveNoImprovementCount.mockResolvedValue(new Map());
+    });
+
+    it('resolves conditionIds from every ACTIVE risk_conditions row in dto.riskPhase', async () => {
+      repository.findConditionIdsByPhase.mockResolvedValue(
+        new Map([
+          ['ANEMIA', 'cond-anemia'],
+          ['HYPERTENSION', 'cond-htn'],
+        ]),
+      );
+      repository.findEverFlaggedConditionCodes.mockResolvedValue(new Set());
+
+      await service.create(dto, caller(), AUTH_HEADER);
+
+      expect(repository.findConditionIdsByPhase).toHaveBeenCalledWith('ANC');
+      expect(evaluateRuleSetMock).toHaveBeenCalledWith(
+        dto.ruleSetId,
+        expect.objectContaining({
+          conditionIds: { ANEMIA: 'cond-anemia', HYPERTENSION: 'cond-htn' },
+        }),
+        AUTH_HEADER,
+      );
+    });
+
+    it('marks a condition as isFirstInstance: false when it was ever flagged before for this beneficiary', async () => {
+      repository.findConditionIdsByPhase.mockResolvedValue(new Map([['AGE', 'cond-age']]));
+      repository.findEverFlaggedConditionCodes.mockResolvedValue(new Set(['AGE']));
+
+      await service.create(dto, caller(), AUTH_HEADER);
+
+      expect(repository.findEverFlaggedConditionCodes).toHaveBeenCalledWith(dto.beneficiaryId);
+      expect(evaluateRuleSetMock).toHaveBeenCalledWith(
+        dto.ruleSetId,
+        expect.objectContaining({ isFirstInstance: { AGE: false } }),
+        AUTH_HEADER,
+      );
+    });
+
+    it('resolves consecutiveNoImprovementCount for every condition in dto.riskPhase and merges it into the evaluation input', async () => {
+      // findConsecutiveNoImprovementCount is only read for NN/INC/CCV phases
+      // (infant-risk.rulesJson.ts's nutrition conditions) — override the
+      // shared fixture's default 'ANC' so this test actually exercises that
+      // path instead of the skip branch.
+      const incDto = { ...dto, riskPhase: 'INC' as const };
+      repository.findConditionIdsByPhase.mockResolvedValue(new Map([['WASTING', 'cond-wasting']]));
+      repository.findEverFlaggedConditionCodes.mockResolvedValue(new Set());
+      repository.findConsecutiveNoImprovementCount.mockResolvedValue(new Map([['WASTING', 3]]));
+
+      await service.create(incDto, caller(), AUTH_HEADER);
+
+      expect(repository.findConsecutiveNoImprovementCount).toHaveBeenCalledWith(dto.beneficiaryId, [
+        'WASTING',
+      ]);
+      expect(evaluateRuleSetMock).toHaveBeenCalledWith(
+        dto.ruleSetId,
+        expect.objectContaining({ consecutiveNoImprovementCount: { WASTING: 3 } }),
+        AUTH_HEADER,
+      );
+    });
+
+    it('skips findConsecutiveNoImprovementCount entirely for a non-infant phase (ANC)', async () => {
+      repository.findConditionIdsByPhase.mockResolvedValue(new Map([['ANEMIA', 'cond-anemia']]));
+      repository.findEverFlaggedConditionCodes.mockResolvedValue(new Set());
+
+      await service.create({ ...dto, riskPhase: 'ANC' }, caller(), AUTH_HEADER);
+
+      expect(repository.findConsecutiveNoImprovementCount).not.toHaveBeenCalled();
+    });
+
+    it.each([['NN' as const], ['INC' as const], ['CCV' as const]])(
+      'calls findConsecutiveNoImprovementCount for the %s phase',
+      async (riskPhase) => {
+        repository.findConditionIdsByPhase.mockResolvedValue(
+          new Map([['WASTING', 'cond-wasting']]),
+        );
+        repository.findEverFlaggedConditionCodes.mockResolvedValue(new Set());
+
+        await service.create({ ...dto, riskPhase }, caller(), AUTH_HEADER);
+
+        expect(repository.findConsecutiveNoImprovementCount).toHaveBeenCalledWith(
+          dto.beneficiaryId,
+          ['WASTING'],
+        );
+      },
+    );
+
+    it('400s when no ACTIVE risk_conditions rows are seeded for dto.riskPhase', async () => {
+      repository.findConditionIdsByPhase.mockResolvedValue(new Map());
+      repository.findEverFlaggedConditionCodes.mockResolvedValue(new Set());
+
+      await expect(service.create(dto, caller(), AUTH_HEADER)).rejects.toMatchObject({
+        status: 400,
+      });
+      expect(evaluateRuleSetMock).not.toHaveBeenCalled();
+    });
+  });
+
   it('propagates rules-service evaluation failures (e.g. 422 no published version)', async () => {
     repository.findBySubmissionId.mockResolvedValue(null);
     const evalError = { status: 422, message: 'No published rule pack version found.' };
@@ -320,5 +448,99 @@ describe('RiskAssessmentService', () => {
 
     await expect(service.create(dto, caller(), AUTH_HEADER)).rejects.toBe(evalError);
     expect(repository.create).not.toHaveBeenCalled();
+  });
+
+  describe('listByVisitIds', () => {
+    it('delegates to the repository with the given beneficiaryId and visitIds', async () => {
+      const rows = [{ id: 'ra-1', visitId: 'visit-1' }];
+      repository.findByVisitIds.mockResolvedValue(rows as never);
+
+      const result = await service.listByVisitIds(
+        BENEFICIARY_ID,
+        ['visit-1', 'visit-2'],
+        caller(),
+        AUTH_HEADER,
+      );
+
+      expect(result).toEqual(rows);
+      expect(repository.findByVisitIds).toHaveBeenCalledWith(BENEFICIARY_ID, [
+        'visit-1',
+        'visit-2',
+      ]);
+    });
+
+    it('returns an empty array when no assessments match', async () => {
+      repository.findByVisitIds.mockResolvedValue([]);
+
+      const result = await service.listByVisitIds(
+        BENEFICIARY_ID,
+        ['visit-1'],
+        caller(),
+        AUTH_HEADER,
+      );
+
+      expect(result).toEqual([]);
+    });
+
+    it('404s when the beneficiary case does not exist', async () => {
+      beneficiaryClient.getById.mockResolvedValue(null);
+
+      await expect(
+        service.listByVisitIds(BENEFICIARY_ID, ['visit-1'], caller(), AUTH_HEADER),
+      ).rejects.toMatchObject({ status: 404 });
+      expect(repository.findByVisitIds).not.toHaveBeenCalled();
+    });
+
+    it("403s a SAKHI caller reading another beneficiary's risk assessments (IDOR guard)", async () => {
+      beneficiaryClient.getById.mockResolvedValue({
+        id: BENEFICIARY_ID,
+        sakhiId: 'some-other-sakhi',
+      });
+
+      await expect(
+        service.listByVisitIds(
+          BENEFICIARY_ID,
+          ['visit-1'],
+          caller({ roles: ['SAKHI'] }),
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(repository.findByVisitIds).not.toHaveBeenCalled();
+    });
+
+    it('403s a SUPERVISOR caller whose roster does not include the beneficiary sakhi', async () => {
+      beneficiaryClient.getById.mockResolvedValue({
+        id: BENEFICIARY_ID,
+        sakhiId: 'some-other-sakhi',
+      });
+      listSakhiIdsForSupervisorMock.mockResolvedValue(['a-different-sakhi']);
+
+      await expect(
+        service.listByVisitIds(
+          BENEFICIARY_ID,
+          ['visit-1'],
+          caller({ roles: ['SUPERVISOR'] }),
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(repository.findByVisitIds).not.toHaveBeenCalled();
+    });
+
+    it('allows a MANAGER/ADMIN caller unrestricted', async () => {
+      beneficiaryClient.getById.mockResolvedValue({
+        id: BENEFICIARY_ID,
+        sakhiId: 'some-other-sakhi',
+      });
+      repository.findByVisitIds.mockResolvedValue([]);
+
+      await expect(
+        service.listByVisitIds(
+          BENEFICIARY_ID,
+          ['visit-1'],
+          caller({ roles: ['ADMIN'] }),
+          AUTH_HEADER,
+        ),
+      ).resolves.toEqual([]);
+    });
   });
 });

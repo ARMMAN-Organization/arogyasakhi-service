@@ -1,4 +1,4 @@
-import { badGateway } from '@armman/service-commons';
+import { badGateway, forbidden } from '@armman/service-commons';
 
 // Read directly (not via appConfig) so importing this client doesn't pull in
 // app-config's full schema — mirrors geography.client.ts. Despite the name,
@@ -25,6 +25,17 @@ export interface BeneficiaryCase {
   phcId: string;
   stateId: string;
   districtId: string;
+  /** childCaseDetails.dateOfBirth — null for a MOTHER case, or a CHILD case
+   * whose childCaseDetails row hasn't been created yet. Used by
+   * ccvOpeningRiskState.resolver.ts's BR-13 computation (dob is the input
+   * ccv.rulesJson.ts's decision graph keys its transition/program-exit
+   * dates off). */
+  childDateOfBirth: string | null;
+  /** BeneficiaryCase.currentPhase — used by form.service.ts to detect the
+   * actual INC->CCV transition moment (read BEFORE calling
+   * updateBeneficiaryPhase) so BR-13's ccvOpeningRiskState computation runs
+   * exactly once, not on every subsequent CCV_VISIT submission. */
+  currentPhase: string;
 }
 
 /** Raw shape of `GET /beneficiaries/:id`'s response — geography lives under `pii`. */
@@ -34,6 +45,7 @@ interface BeneficiaryCaseDetailResponse {
   projectId: string;
   beneficiaryTypeLookupId: string;
   caseTypeLookupId: string;
+  currentPhase: string;
   pii: {
     villageId: string;
     padaId: string;
@@ -42,6 +54,7 @@ interface BeneficiaryCaseDetailResponse {
     stateId: string;
     districtId: string;
   };
+  childCaseDetails: { dateOfBirth: string } | null;
 }
 
 /**
@@ -74,7 +87,7 @@ export async function findBeneficiaryById(
   }
 
   const body = (await res.json()) as { data: BeneficiaryCaseDetailResponse };
-  const { pii, ...rest } = body.data;
+  const { pii, childCaseDetails, ...rest } = body.data;
   return {
     ...rest,
     villageId: pii.villageId,
@@ -83,5 +96,60 @@ export async function findBeneficiaryById(
     phcId: pii.phcId,
     stateId: pii.stateId,
     districtId: pii.districtId,
+    childDateOfBirth: childCaseDetails?.dateOfBirth ?? null,
   };
+}
+
+export interface BeneficiaryOwnership {
+  id: string;
+  sakhiId: string;
+  caseType: string;
+}
+
+/**
+ * Fetches ONLY `{id, sakhiId, caseType}` via beneficiary-service's
+ * `GET /beneficiaries/:id/ownership` — deliberately NOT `findBeneficiaryById`
+ * (the full `GET /beneficiaries/:id`), whose own response enrichment
+ * (lastVisitVitals) calls back into this service's latest-visit-vitals
+ * endpoint. A caller doing only an ownership check (e.g.
+ * form.service.ts's getLatestVisitVitals) that used findBeneficiaryById
+ * instead would recreate that exact request cycle: getById ->
+ * resolveLatestVisitVitals -> here -> findBeneficiaryById -> getById -> ...
+ * forever. Use this function for any ownership-only check reachable from
+ * that endpoint; findBeneficiaryById remains correct for every other caller
+ * (create-child.client.ts, visitSchedule.service.ts) that needs the full
+ * case detail and is never itself in that cycle.
+ *
+ * `GET /beneficiaries/:id/ownership` does its own SAKHI/SUPERVISOR
+ * roster check server-side and returns 403 directly when the caller isn't
+ * permitted — that 403 is forwarded here as a real `forbidden()`, not
+ * treated as an upstream failure, so a caller's own scoping check still
+ * sees a 403 (not a 502) for the case that matters most: a SAKHI/SUPERVISOR
+ * outside their own roster. Confirmed live: before this fix, that exact
+ * case surfaced as a 502 "beneficiary-service unreachable" instead of the
+ * intended 403.
+ */
+export async function findBeneficiaryOwnership(
+  beneficiaryId: string,
+  authorizationHeader: string,
+): Promise<BeneficiaryOwnership | null> {
+  const url = `${GATEWAY_BASE_URL}/api/v1/beneficiaries/${beneficiaryId}/ownership`;
+  let res: Response;
+  try {
+    res = await fetch(url, { headers: { Authorization: authorizationHeader } });
+  } catch {
+    throw badGateway('Unable to verify the beneficiary — beneficiary-service is unreachable.');
+  }
+
+  if (res.status === 404) return null;
+  if (res.status === 403) {
+    const body = (await res.json().catch(() => null)) as { message?: string } | null;
+    throw forbidden(body?.message ?? 'You do not have access to this beneficiary case.');
+  }
+  if (!res.ok) {
+    throw badGateway('Unable to verify the beneficiary — beneficiary-service returned an error.');
+  }
+
+  const body = (await res.json()) as { data: BeneficiaryOwnership };
+  return body.data;
 }

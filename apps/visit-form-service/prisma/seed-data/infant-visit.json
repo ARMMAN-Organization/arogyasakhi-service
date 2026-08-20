@@ -908,7 +908,7 @@
       "required": true,
       "input_type": "date",
       "visibleWhen": {
-        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "field": "bcg",
         "operator": "eq",
         "value": "yes"
       },
@@ -944,7 +944,7 @@
       "required": true,
       "input_type": "date",
       "visibleWhen": {
-        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "field": "opv_0",
         "operator": "eq",
         "value": "yes"
       },
@@ -980,7 +980,7 @@
       "required": true,
       "input_type": "date",
       "visibleWhen": {
-        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "field": "hepatitis_b_birth_dose",
         "operator": "eq",
         "value": "yes"
       },
@@ -1016,7 +1016,7 @@
       "required": true,
       "input_type": "date",
       "visibleWhen": {
-        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "field": "vitamin_k",
         "operator": "eq",
         "value": "yes"
       },
@@ -1052,7 +1052,7 @@
       "required": true,
       "input_type": "date",
       "visibleWhen": {
-        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "field": "opv_1",
         "operator": "eq",
         "value": "yes"
       },
@@ -1088,7 +1088,7 @@
       "required": true,
       "input_type": "date",
       "visibleWhen": {
-        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "field": "pentavalent_1_dpt1",
         "operator": "eq",
         "value": "yes"
       },
@@ -1124,7 +1124,7 @@
       "required": true,
       "input_type": "date",
       "visibleWhen": {
-        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "field": "ipv_1",
         "operator": "eq",
         "value": "yes"
       },
@@ -1160,7 +1160,7 @@
       "required": true,
       "input_type": "date",
       "visibleWhen": {
-        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "field": "rotavirus1",
         "operator": "eq",
         "value": "yes"
       },
@@ -1196,7 +1196,7 @@
       "required": true,
       "input_type": "date",
       "visibleWhen": {
-        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "field": "pcv1",
         "operator": "eq",
         "value": "yes"
       },
@@ -1232,7 +1232,7 @@
       "required": true,
       "input_type": "date",
       "visibleWhen": {
-        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "field": "opv_2",
         "operator": "eq",
         "value": "yes"
       },
@@ -1268,7 +1268,7 @@
       "required": true,
       "input_type": "date",
       "visibleWhen": {
-        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "field": "pentavalent_2_dpt2",
         "operator": "eq",
         "value": "yes"
       },
@@ -1304,7 +1304,7 @@
       "required": true,
       "input_type": "date",
       "visibleWhen": {
-        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "field": "rotavirus2",
         "operator": "eq",
         "value": "yes"
       },
@@ -1340,7 +1340,7 @@
       "required": true,
       "input_type": "date",
       "visibleWhen": {
-        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "field": "opv_3",
         "operator": "eq",
         "value": "yes"
       },
@@ -1376,7 +1376,7 @@
       "required": true,
       "input_type": "date",
       "visibleWhen": {
-        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "field": "pentavalent_3_dpt3",
         "operator": "eq",
         "value": "yes"
       },
@@ -1412,7 +1412,7 @@
       "required": true,
       "input_type": "date",
       "visibleWhen": {
-        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "field": "ipv2",
         "operator": "eq",
         "value": "yes"
       },
@@ -1448,7 +1448,7 @@
       "required": true,
       "input_type": "date",
       "visibleWhen": {
-        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "field": "rotavirus3",
         "operator": "eq",
         "value": "yes"
       },
@@ -1484,7 +1484,7 @@
       "required": true,
       "input_type": "date",
       "visibleWhen": {
-        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "field": "pcv2",
         "operator": "eq",
         "value": "yes"
       },
@@ -1520,7 +1520,7 @@
       "required": true,
       "input_type": "date",
       "visibleWhen": {
-        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "field": "mmr_1_mr1",
         "operator": "eq",
         "value": "yes"
       },
@@ -1556,7 +1556,7 @@
       "required": true,
       "input_type": "date",
       "visibleWhen": {
-        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "field": "pcv_booster",
         "operator": "eq",
         "value": "yes"
       },
@@ -1592,7 +1592,7 @@
       "required": true,
       "input_type": "date",
       "visibleWhen": {
-        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "field": "vitamin_a",
         "operator": "eq",
         "value": "yes"
       },
@@ -1628,7 +1628,7 @@
       "required": true,
       "input_type": "date",
       "visibleWhen": {
-        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "field": "opv_booster",
         "operator": "eq",
         "value": "yes"
       },
@@ -1664,7 +1664,7 @@
       "required": true,
       "input_type": "date",
       "visibleWhen": {
-        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "field": "mmr2_mr2",
         "operator": "eq",
         "value": "yes"
       },
@@ -1700,7 +1700,7 @@
       "required": true,
       "input_type": "date",
       "visibleWhen": {
-        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "field": "dpt_booster1",
         "operator": "eq",
         "value": "yes"
       },

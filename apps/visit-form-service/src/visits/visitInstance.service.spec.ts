@@ -4,10 +4,12 @@ import type { CreateVisitInstanceInput } from './dto/create-visitInstance.dto';
 import { findSakhiById, listSakhiIdsForSupervisor } from '../sakhis/sakhi.client';
 import { resolveVisitStatusCode, resolveVisitStatusCodes } from '../lookups/lookup.client';
 import { getActiveTransferWindow } from '../escalations/escalation.client';
+import { findBeneficiaryOwnership } from '../beneficiaries/beneficiary.client';
 
 jest.mock('../sakhis/sakhi.client');
 jest.mock('../lookups/lookup.client');
 jest.mock('../escalations/escalation.client');
+jest.mock('../beneficiaries/beneficiary.client');
 
 describe('VisitInstanceService', () => {
   const repository = {
@@ -23,6 +25,7 @@ describe('VisitInstanceService', () => {
     countDueTodayByBeneficiary: jest.fn(),
     findByPada: jest.fn(),
     countByBeneficiary: jest.fn(),
+    findRecentCompletedVisits: jest.fn(),
   } as unknown as jest.Mocked<VisitInstanceRepository>;
   let service: VisitInstanceService;
 
@@ -32,6 +35,7 @@ describe('VisitInstanceService', () => {
   const resolveVisitStatusCodeMock = jest.mocked(resolveVisitStatusCode);
   const resolveVisitStatusCodesMock = jest.mocked(resolveVisitStatusCodes);
   const getActiveTransferWindowMock = jest.mocked(getActiveTransferWindow);
+  const findBeneficiaryOwnershipMock = jest.mocked(findBeneficiaryOwnership);
 
   // Distinct from sampleRow.statusLookupValueId ('aaaaaaaa-...') below, so
   // "transitioning to COMPLETED" tests aren't accidentally a no-op re-completion.
@@ -861,5 +865,222 @@ describe('VisitInstanceService', () => {
         );
       },
     );
+  });
+
+  describe('getVisitHistory', () => {
+    const SAKHI_CALLER = { id: 'sakhi-1', roles: ['SAKHI'] };
+
+    const completedVisit = (overrides: Partial<Record<string, unknown>> = {}) => ({
+      id: 'visit-1',
+      completedAt: new Date('2026-08-04T10:12:00.000Z'),
+      schedule: { visitCode: 'ANC2' },
+      formSubmissions: [
+        {
+          formDataJson: { blood_pressure_bp_systolic: 120, blood_pressure_bp_diastolic: 80 },
+          formVersion: { formDefinition: { formCode: 'ANC_VISIT' } },
+        },
+      ],
+      ...overrides,
+    });
+
+    beforeEach(() => {
+      findBeneficiaryOwnershipMock.mockResolvedValue({
+        id: 'ben-1',
+        sakhiId: 'sakhi-1',
+        caseType: 'MOTHER',
+      } as never);
+    });
+
+    it('returns an empty visits array when the beneficiary has no completed visits yet', async () => {
+      repository.findRecentCompletedVisits.mockResolvedValue([]);
+
+      const result = await service.getVisitHistory(
+        'ben-1',
+        { limit: 2 },
+        SAKHI_CALLER,
+        AUTH_HEADER,
+      );
+
+      expect(result).toEqual({ visits: [] });
+    });
+
+    it('returns one shaped row for a beneficiary with exactly 1 completed visit', async () => {
+      repository.findRecentCompletedVisits.mockResolvedValue([completedVisit()] as never);
+
+      const result = await service.getVisitHistory(
+        'ben-1',
+        { limit: 2 },
+        SAKHI_CALLER,
+        AUTH_HEADER,
+      );
+
+      expect(result.visits).toHaveLength(1);
+      expect(result.visits[0]).toEqual({
+        visitId: 'visit-1',
+        visitCode: 'ANC2',
+        completedAt: new Date('2026-08-04T10:12:00.000Z'),
+        vitals: {
+          hemoglobin: { value: null, unit: 'g/dl' },
+          bloodPressure: { systolic: 120, diastolic: 80, unit: 'mmHg' },
+          weight: { value: null, unit: 'kg' },
+          bloodSugar: { value: null, unit: 'mg/dl' },
+          temperature: { value: null, unit: '°F' },
+        },
+      });
+    });
+
+    it('passes the default limit (2) through to the repository so only the last 2 of 3+ completed visits come back', async () => {
+      repository.findRecentCompletedVisits.mockResolvedValue([
+        completedVisit({ id: 'visit-3', completedAt: new Date('2026-08-10T00:00:00.000Z') }),
+        completedVisit({ id: 'visit-2', completedAt: new Date('2026-08-05T00:00:00.000Z') }),
+      ] as never);
+
+      const result = await service.getVisitHistory(
+        'ben-1',
+        { limit: 2 },
+        SAKHI_CALLER,
+        AUTH_HEADER,
+      );
+
+      expect(repository.findRecentCompletedVisits).toHaveBeenCalledWith('ben-1', undefined, 2);
+      expect(result.visits).toHaveLength(2);
+      expect(result.visits[0].visitId).toBe('visit-3');
+      expect(result.visits[1].visitId).toBe('visit-2');
+    });
+
+    it('passes an explicit limit through to the repository', async () => {
+      repository.findRecentCompletedVisits.mockResolvedValue([completedVisit()] as never);
+
+      await service.getVisitHistory('ben-1', { limit: 1 }, SAKHI_CALLER, AUTH_HEADER);
+
+      expect(repository.findRecentCompletedVisits).toHaveBeenCalledWith('ben-1', undefined, 1);
+    });
+
+    it('nulls a vital not captured by the visit form, never omitting it from the response', async () => {
+      repository.findRecentCompletedVisits.mockResolvedValue([
+        completedVisit({
+          formSubmissions: [
+            {
+              formDataJson: { current_weight_kg: 55 },
+              formVersion: { formDefinition: { formCode: 'POSTPARTUM_VISIT' } },
+            },
+          ],
+        }),
+      ] as never);
+
+      const result = await service.getVisitHistory(
+        'ben-1',
+        { limit: 2 },
+        SAKHI_CALLER,
+        AUTH_HEADER,
+      );
+
+      expect(result.visits[0].vitals.bloodPressure).toEqual({
+        systolic: null,
+        diastolic: null,
+        unit: 'mmHg',
+      });
+      expect(result.visits[0].vitals.bloodSugar).toEqual({ value: null, unit: 'mg/dl' });
+      expect(result.visits[0].vitals.weight).toEqual({ value: '55', unit: 'kg' });
+    });
+
+    it('resolves a formCode filter directly through to the repository', async () => {
+      repository.findRecentCompletedVisits.mockResolvedValue([]);
+
+      await service.getVisitHistory(
+        'ben-1',
+        { formCode: 'ANC_VISIT', limit: 2 },
+        SAKHI_CALLER,
+        AUTH_HEADER,
+      );
+
+      expect(repository.findRecentCompletedVisits).toHaveBeenCalledWith('ben-1', ['ANC_VISIT'], 2);
+    });
+
+    it('resolves a repeatable visitType filter to its formCodes via visit-code-form-map', async () => {
+      repository.findRecentCompletedVisits.mockResolvedValue([]);
+
+      await service.getVisitHistory(
+        'ben-1',
+        { visitType: ['ANC', 'PP'], limit: 2 },
+        SAKHI_CALLER,
+        AUTH_HEADER,
+      );
+
+      expect(repository.findRecentCompletedVisits).toHaveBeenCalledWith(
+        'ben-1',
+        ['ANC_VISIT', 'POSTPARTUM_VISIT'],
+        2,
+      );
+    });
+
+    it("rejects when the beneficiary is outside the calling SAKHI's own roster", async () => {
+      findBeneficiaryOwnershipMock.mockResolvedValue({
+        id: 'ben-1',
+        sakhiId: 'someone-else',
+        caseType: 'MOTHER',
+      } as never);
+
+      await expect(
+        service.getVisitHistory('ben-1', { limit: 2 }, SAKHI_CALLER, AUTH_HEADER),
+      ).rejects.toThrow(/outside your own roster/);
+      expect(repository.findRecentCompletedVisits).not.toHaveBeenCalled();
+    });
+
+    it('allows a SUPERVISOR calling for a beneficiary inside her roster', async () => {
+      const SUPERVISOR_CALLER = { id: 'supervisor-1', roles: ['SUPERVISOR'], projectId: 'proj-1' };
+      findBeneficiaryOwnershipMock.mockResolvedValue({
+        id: 'ben-1',
+        sakhiId: 'sakhi-1',
+        caseType: 'MOTHER',
+      } as never);
+      listSakhiIdsForSupervisorMock.mockResolvedValue(['sakhi-1']);
+      repository.findRecentCompletedVisits.mockResolvedValue([]);
+
+      await expect(
+        service.getVisitHistory('ben-1', { limit: 2 }, SUPERVISOR_CALLER, AUTH_HEADER),
+      ).resolves.toEqual({ visits: [] });
+    });
+
+    it('rejects a SUPERVISOR calling for a beneficiary outside her roster', async () => {
+      const SUPERVISOR_CALLER = { id: 'supervisor-1', roles: ['SUPERVISOR'], projectId: 'proj-1' };
+      listSakhiIdsForSupervisorMock.mockResolvedValue(['someone-else']);
+
+      await expect(
+        service.getVisitHistory('ben-1', { limit: 2 }, SUPERVISOR_CALLER, AUTH_HEADER),
+      ).rejects.toThrow(/outside this Supervisor's roster/);
+      expect(repository.findRecentCompletedVisits).not.toHaveBeenCalled();
+    });
+
+    it('rejects a SUPERVISOR caller with no project scope', async () => {
+      const SUPERVISOR_CALLER = { id: 'supervisor-1', roles: ['SUPERVISOR'], projectId: null };
+
+      await expect(
+        service.getVisitHistory('ben-1', { limit: 2 }, SUPERVISOR_CALLER, AUTH_HEADER),
+      ).rejects.toThrow(/no project scope/);
+    });
+
+    it('allows a MANAGER caller regardless of roster', async () => {
+      const MANAGER_CALLER = { id: 'manager-1', roles: ['MANAGER'] };
+      findBeneficiaryOwnershipMock.mockResolvedValue({
+        id: 'ben-1',
+        sakhiId: 'someone-else',
+        caseType: 'MOTHER',
+      } as never);
+      repository.findRecentCompletedVisits.mockResolvedValue([]);
+
+      await expect(
+        service.getVisitHistory('ben-1', { limit: 2 }, MANAGER_CALLER, AUTH_HEADER),
+      ).resolves.toEqual({ visits: [] });
+    });
+
+    it('throws not-found when the beneficiary case does not exist', async () => {
+      findBeneficiaryOwnershipMock.mockResolvedValue(null);
+
+      await expect(
+        service.getVisitHistory('ben-1', { limit: 2 }, SAKHI_CALLER, AUTH_HEADER),
+      ).rejects.toThrow(/not found/i);
+      expect(repository.findRecentCompletedVisits).not.toHaveBeenCalled();
+    });
   });
 });

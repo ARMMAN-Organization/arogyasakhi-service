@@ -24,6 +24,24 @@ export type BeneficiaryStatus = (typeof BENEFICIARY_STATUSES)[number];
 export const CASE_PHASES = ['ANC', 'DELIVERY', 'PP', 'NN', 'INC', 'CCV', 'CLOSED'] as const;
 export type CasePhase = (typeof CASE_PHASES)[number];
 
+/** ChildCaseDetails.currentPhase — distinct from the case-level CASE_PHASES above. */
+export const CHILD_CASE_PHASES = ['NN', 'INC', 'CCV', 'CLOSED'] as const;
+export type ChildCasePhase = (typeof CHILD_CASE_PHASES)[number];
+
+/**
+ * ChildCaseDetails.ccvOpeningRiskState — the risk state a CCV-phase child
+ * case opened at. A 5-value SRS override of the doc's 4-value set (see
+ * prisma/schema.prisma's CcvOpeningRiskState enum comment).
+ */
+export const CCV_OPENING_RISK_STATES = [
+  'NEVER_HR',
+  'CURRENTLY_HR_SAM_DANGER',
+  'CURRENTLY_HR_OTHER',
+  'RECENTLY_RECOVERED',
+  'STABLE_LOW_RISK',
+] as const;
+export type CcvOpeningRiskState = (typeof CCV_OPENING_RISK_STATES)[number];
+
 export const SUMMARY_PHASES = [
   'REGISTRATION',
   'ANC',

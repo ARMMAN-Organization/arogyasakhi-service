@@ -16,6 +16,12 @@ import { usernameSchema } from './username';
  * password for every role — a user created without one could never log in.
  * `.strict()` rejects unknown fields, matching the previous global
  * ValidationPipe `forbidNonWhitelisted: true`.
+ *
+ * `projectId` is optional here (zod can't express "required only when
+ * roleCode is SAKHI" on a flat object) but AuthService.createUser enforces
+ * it as required for roleCode SAKHI — sakhi_profiles.primary_project_id is
+ * NOT NULL, and that row is created in the same transaction as the user so
+ * a SAKHI never exists without one (see AuthRepository.createUserWithRole).
  */
 export const createUserSchema = z
   .object({

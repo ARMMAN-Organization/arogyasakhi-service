@@ -51,3 +51,20 @@ describe('formFieldSchema — visibleWhen', () => {
     expect(result.success).toBe(false);
   });
 });
+
+describe('formFieldSchema — question_code length', () => {
+  it('accepts a question_code at exactly 120 characters (form_answers.field_code is VarChar(120))', () => {
+    const result = formFieldSchema.safeParse(baseField({ question_code: 'a'.repeat(120) }));
+    expect(result.success).toBe(true);
+  });
+
+  it(
+    'rejects a question_code over 120 characters — form_answers.field_code is VarChar(120); ' +
+      'an over-length code previously passed schema validation uncaught and only failed at ' +
+      'submission time as a Prisma P2000 500 (MOTHER_REGISTRATION incident this rejection follows)',
+    () => {
+      const result = formFieldSchema.safeParse(baseField({ question_code: 'a'.repeat(121) }));
+      expect(result.success).toBe(false);
+    },
+  );
+});

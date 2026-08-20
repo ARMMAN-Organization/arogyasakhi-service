@@ -198,11 +198,14 @@ export function registerAuthRoutes(
   doc.post(
     '/users',
     {
-      summary: 'Create a user (ADMIN creates any role; SUPERVISOR creates SAKHI only)',
+      summary:
+        'Create a user (ADMIN creates any role; SUPERVISOR creates SAKHI only). ' +
+        'roleCode SAKHI additionally requires projectId — a matching sakhi_profiles ' +
+        'row is created in the same transaction, using mobileNumber as its phone number.',
       tags: ['Users'],
       responses: {
         201: { description: 'User created', schema: envelope(createdUserSchema) },
-        400: errorResponse(400, { message: 'password: Required' }),
+        400: errorResponse(400, { message: 'projectId: Required to create a SAKHI user.' }),
         401: errorResponse(401),
         403: errorResponse(403, {
           message: 'You do not have access to this resource.',

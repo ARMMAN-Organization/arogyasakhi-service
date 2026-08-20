@@ -14,11 +14,64 @@ import { validateSubmission } from './form-validation';
 import { syncSocioDemographics } from '../beneficiaries/socio-demographics.client';
 import { syncHealthHistory } from '../beneficiaries/health-history.client';
 import { findBeneficiaryById } from '../beneficiaries/beneficiary.client';
+import { assertCallerOwnsBeneficiary } from '../beneficiaries/beneficiaryOwnership.guard';
 import { createChildBeneficiary } from '../beneficiaries/create-child.client';
 import { updateBeneficiaryPhase } from '../beneficiaries/update-phase.client';
 import { createClosure, resolveClosureReasonLookupId } from '../closures/closure.client';
 import { getAncestorChain } from '../geography/geography.client';
 import { triggerRiskAssessment } from '../risk-assessments/riskAssessment.client';
+import type { VisitInstanceRepository } from '../visits/visitInstance.repository';
+import { resolveAndWriteCcvOpeningRiskState } from './ccvOpeningRiskState.resolver';
+import { resolveVisitCompletion } from './visitCompletion.resolver';
+import { EMPTY_VITALS, extractVitals } from './vitalsExtractor';
+
+/**
+ * Maps this service's own formCode to risk-referral-service's RiskCondition
+ * .phase enum value, for the risk-assessment trigger's `riskPhase` field
+ * (see riskAssessment.client.ts's doc comment on why the caller supplies
+ * this). Only forms with a risk_rule_set_id configured ever reach this map
+ * (see the `dto.visitId && version.formDefinition.riskRuleSetId` guard in
+ * createSubmission) — every formCode that can carry a riskRuleSetId today
+ * must have an entry here; there is no safe fallback (see the PR #172
+ * review: a fallback to the raw formCode previously here was never a valid
+ * riskPhase, and a form assigned a ruleSetId out-of-band would silently and
+ * permanently break its risk-grading pipeline the moment risk-referral-
+ * service's strict enum rejected it — logged only as a console.warn inside
+ * triggerRiskAssessment, with no retry).
+ */
+const FORM_CODE_TO_RISK_PHASE: Record<string, string> = {
+  MOTHER_REGISTRATION: 'REGISTRATION',
+  CHILD_REGISTRATION: 'REGISTRATION',
+  ANC_VISIT: 'ANC',
+  DELIVERY_VISIT: 'DELIVERY',
+  POSTPARTUM_VISIT: 'PP',
+  // NN, INC, and CCV all share one seeded set of risk_conditions rows under
+  // phase 'INC' — per SRS §3A.2.4, CCV reuses INC's HR thresholds verbatim,
+  // and NEONATAL_VISIT's clinical fields (nutrition status, danger signs,
+  // umbilical cord, etc.) grade against the same condition set (see
+  // infant-risk.rulesJson.ts's own doc comment). INFANT_VISIT (the legacy
+  // alias of INC_VISIT — see visit-code-form-map.ts) is intentionally
+  // omitted here: it is never reached by a real visit-schedule submission,
+  // only INC_VISIT is.
+  NEONATAL_VISIT: 'INC',
+  INC_VISIT: 'INC',
+  CCV_VISIT: 'INC',
+};
+
+/**
+ * Maps a formCode to the CHILD case phase its submission advances the
+ * beneficiary to (CR-041's CHILD side, mirroring FORM_CODE_TO_RISK_PHASE's
+ * lookup style) — see the phase-advance block below in createSubmission. A
+ * formCode with no entry here never triggers a phase-advance call.
+ * NEONATAL_VISIT is the legacy alias of INC_VISIT (see
+ * visit-code-form-map.ts) and shares its target phase for the same reason
+ * FORM_CODE_TO_RISK_PHASE aliases them together.
+ */
+const FORM_CODE_TO_CHILD_PHASE: Record<string, string> = {
+  NEONATAL_VISIT: 'INC',
+  INC_VISIT: 'INC',
+  CCV_VISIT: 'CCV',
+};
 
 /**
  * Business logic for the dynamic-forms feature: fetching the active version,
@@ -26,7 +79,10 @@ import { triggerRiskAssessment } from '../risk-assessments/riskAssessment.client
  * Data access is delegated to the repository.
  */
 export class FormService {
-  constructor(private readonly repository: FormRepository) {}
+  constructor(
+    private readonly repository: FormRepository,
+    private readonly visitInstanceRepository: VisitInstanceRepository,
+  ) {}
 
   /**
    * `callerGeographyUnitId`/`authorizationHeader` are the caller's own scope
@@ -95,7 +151,7 @@ export class FormService {
       // pick the same versionNo. The @@unique([formDefinitionId, versionNo])
       // constraint keeps the data safe — surface the loser as a graceful 409
       // (retryable) rather than an unhandled 500.
-      if (isUniqueConstraintViolation(err)) {
+      if (isPrismaErrorCode(err, 'P2002')) {
         throw conflict('A form version with this number is being created concurrently. Retry.');
       }
       throw err;
@@ -196,21 +252,82 @@ export class FormService {
       throw unprocessable('Submission failed validation.', { violations });
     }
 
+    // Client-supplied visitId can be stale (a race between the visit's own
+    // POST /visits and this submission, or a bad replay) — check before the
+    // insert so this fails as a clean, named 404 instead of an unhandled FK
+    // violation. Checked with beneficiaryId, not just id — otherwise a real,
+    // non-deleted visitId belonging to a different beneficiary would wrongly
+    // pass. Run after validateSubmission (not before) so a request that's
+    // wrong in both ways reports the formData violations too, not just this
+    // 404 — the client shouldn't have to fix one error at a time across two
+    // round trips when both are already knowable in this same request.
+    if (dto.visitId) {
+      const visit = await this.repository.findVisitById(dto.visitId, dto.beneficiaryId);
+      if (!visit) throw notFound('Visit not found.');
+    }
+
     // Decompose the validated payload into normalized per-question rows so
     // every submitted field is individually queryable (ERD design stance,
     // line 19), driven by each field's declared input_type — no hardcoding.
     const formAnswers = buildFormAnswers(fields, dto.formData);
 
-    const created = await this.repository.createSubmission({
-      formVersionId: dto.formVersionId,
-      beneficiaryId: dto.beneficiaryId,
-      visitId: dto.visitId ?? null,
+    let created;
+    try {
+      created = await this.repository.createSubmission({
+        formVersionId: dto.formVersionId,
+        beneficiaryId: dto.beneficiaryId,
+        visitId: dto.visitId ?? null,
+        submittedByUserId,
+        localSubmissionUuid: dto.localSubmissionUuid,
+        formDataJson: dto.formData,
+        validationStatus: 'VALID',
+        formAnswers,
+      });
+    } catch (err) {
+      // A double-submit racing on the same localSubmissionUuid can slip past
+      // the findSubmissionByLocalUuid check above and hit the unique
+      // constraint here instead — same race shape createDraft already
+      // handles. The loser just replays the winner's row rather than
+      // erroring, same idempotent-replay contract as a sequential retry.
+      if (isPrismaErrorCode(err, 'P2002')) {
+        const existingRow = await this.repository.findSubmissionByLocalUuid(
+          dto.localSubmissionUuid,
+        );
+        if (existingRow) return toApiFormSubmission(existingRow);
+        throw err;
+      }
+      // Backstop for the race the visitId check above can't close on its
+      // own: the visit existed at check time but was gone by the time this
+      // insert ran (see that check's own comment on the pre-condition
+      // needed for this to actually fire today). form_submissions has two
+      // FK columns (form_version_id, visit_id) — only rewrite this to a
+      // "Visit not found" 404 if the failing constraint is actually the
+      // visit one; anything else (e.g. a form_version_id race) falls
+      // through to the generic handler below instead of reporting the
+      // wrong resource as missing.
+      if (isPrismaErrorCode(err, 'P2003') && failingConstraintIsVisitId(err)) {
+        console.warn(
+          `Submission insert hit a visit_id FK violation for a visitId that passed the ` +
+            `pre-insert check (localSubmissionUuid ${dto.localSubmissionUuid}) — the visit was ` +
+            `removed in the window between the check and this insert:`,
+          err,
+        );
+        throw notFound('Visit not found.');
+      }
+      throw err;
+    }
+
+    // Marks the linked VisitInstance COMPLETED — without this, a visit only
+    // reaches COMPLETED via a second, separate PATCH /visits/:id call the
+    // client has to remember to make. Best-effort, same tolerance as every
+    // other post-submission side effect below.
+    await resolveVisitCompletion(
+      formCode,
+      dto.visitId,
       submittedByUserId,
-      localSubmissionUuid: dto.localSubmissionUuid,
-      formDataJson: dto.formData,
-      validationStatus: 'VALID',
-      formAnswers,
-    });
+      this.visitInstanceRepository,
+      authorizationHeader,
+    );
 
     // Promote the socio-demographic answers into beneficiary-service, which
     // owns them as structured columns (the registration form re-asks them so
@@ -242,19 +359,76 @@ export class FormService {
       );
     }
 
+    // Advances a CHILD case's phase on its first INC-type or CCV-type visit
+    // submission (NN->INC, INC->CCV — CR-041's CHILD side; see
+    // FORM_CODE_TO_CHILD_PHASE). Best-effort, same tolerance as the Delivery
+    // phase-advance calls above: safe to call on every subsequent visit of
+    // the same type too, since applyPhaseChange treats an already-matching
+    // phase as a no-op rather than an error (see beneficiary.service.ts).
+    const childPhase = FORM_CODE_TO_CHILD_PHASE[formCode];
+    if (childPhase) {
+      // BR-13 must run exactly once, at the actual INC->CCV transition — not
+      // on every subsequent CCV_VISIT submission, which would keep
+      // re-computing (and overwriting) ccvOpeningRiskState after it's
+      // already set. Read the case's phase BEFORE advancing it so this
+      // check reflects "was this submission the one that moved CCV" rather
+      // than the post-advance state, which is always CCV once the first
+      // submission has landed.
+      const caseBeforeAdvance =
+        childPhase === 'CCV'
+          ? await findBeneficiaryById(dto.beneficiaryId, authorizationHeader)
+          : null;
+      const isFirstCcvTransition = caseBeforeAdvance?.currentPhase === 'INC';
+
+      await toleratePhaseAdvance(
+        updateBeneficiaryPhase(dto.beneficiaryId, childPhase, authorizationHeader),
+      );
+
+      if (isFirstCcvTransition && caseBeforeAdvance?.childDateOfBirth) {
+        await resolveAndWriteCcvOpeningRiskState(
+          dto.beneficiaryId,
+          caseBeforeAdvance.childDateOfBirth,
+          this.visitInstanceRepository,
+          authorizationHeader,
+        );
+      }
+    }
+
     // Triggers the risk-grading pipeline for every visit-linked submission
     // whose form has a risk_rule_set_id configured (see FormDefinition's
     // schema comment) — a form with no ruleSetId set (e.g. SUPERVISOR/SYSTEM
     // entityType forms) simply has nothing to evaluate. Best-effort, same
     // stance as syncSocioDemographics above.
     if (dto.visitId && version.formDefinition.riskRuleSetId) {
+      const riskPhase = FORM_CODE_TO_RISK_PHASE[formCode];
+      if (!riskPhase) {
+        // A form was given a riskRuleSetId out-of-band (no admin endpoint
+        // yet — see schema.prisma) without a matching FORM_CODE_TO_RISK_PHASE
+        // entry. Failing loudly here, instead of silently posting an invalid
+        // riskPhase that risk-referral-service's strict enum would reject
+        // downstream, surfaces the config gap immediately at submission time
+        // rather than as a permanently-broken, easy-to-miss best-effort
+        // console.warn (see PR #172 review).
+        throw new Error(
+          `Form "${formCode}" has a riskRuleSetId configured but no FORM_CODE_TO_RISK_PHASE ` +
+            'entry — add one before assigning this form a rule set.',
+        );
+      }
+      const answers =
+        formCode === 'ANC_VISIT'
+          ? {
+              ...dto.formData,
+              ...(await this.resolveAncRiskRegistrationAnswers(dto.beneficiaryId)),
+            }
+          : dto.formData;
       await triggerRiskAssessment(
         {
           beneficiaryId: dto.beneficiaryId,
           visitId: dto.visitId,
           submissionId: created.id,
           ruleSetId: version.formDefinition.riskRuleSetId,
-          answers: dto.formData,
+          riskPhase,
+          answers,
         },
         authorizationHeader,
       );
@@ -289,6 +463,48 @@ export class FormService {
    * child-creation against a different beneficiary than the one actually
    * recorded.
    */
+  /**
+   * Fetches the ANC risk pack's registration-time inputs (age and the raw
+   * obstetric-history fields the pack derives Bad Obstetric History from)
+   * from this beneficiary's own MOTHER_REGISTRATION submission — a
+   * same-service, same-DB lookup (no cross-service call needed). Passed
+   * through unchanged; the Bad Obstetric History threshold itself (G>4,
+   * L<P, abortions>=2, prior complications) is business-threshold math and
+   * lives in anc-risk.rulesJson.ts (GoRules), not here — see PR #172 review
+   * on .claude/CLAUDE.md's "business thresholds/rates ... live in GoRules"
+   * rule.
+   *
+   * Returns `{}` (no registration answers merged in) if no
+   * MOTHER_REGISTRATION submission exists yet for this beneficiary — the
+   * ANC risk pack's age/BOH conditions are simply skipped for that visit
+   * rather than the whole risk evaluation failing.
+   */
+  private async resolveAncRiskRegistrationAnswers(
+    beneficiaryId: string,
+  ): Promise<Record<string, unknown>> {
+    const registration = await this.repository.findLatestSubmissionByBeneficiaryAndFormCode(
+      beneficiaryId,
+      'MOTHER_REGISTRATION',
+    );
+    if (!registration) return {};
+
+    const answers = registration.formDataJson as Record<string, unknown>;
+    const age = answers.age_of_the_beneficiary;
+    const gravida = answers.gravida_total_number_of_pregnancies;
+    const livingChildren = answers.living_children;
+    const abortions = answers.abortions_pregnancy_losses_before_24_weeks;
+    const complications =
+      answers.did_you_experience_any_complications_during_birth_delivery_in_previous_pregnancies;
+
+    return {
+      ...(typeof age === 'number' ? { age } : {}),
+      ...(typeof gravida === 'number' ? { gravida } : {}),
+      ...(typeof livingChildren === 'number' ? { livingChildren } : {}),
+      ...(typeof abortions === 'number' ? { abortions } : {}),
+      ...(Array.isArray(complications) ? { priorComplications: complications } : {}),
+    };
+  }
+
   private async resolveDeliveryChildren(
     dto: CreateSubmissionInput,
     beneficiaryId: string,
@@ -461,6 +677,50 @@ export class FormService {
       authorizationHeader,
     );
   }
+
+  /**
+   * The most recent visit's vitals (weight/BP/temperature/hemoglobin/MUAC/
+   * respiratory rate) for `beneficiaryId`, projected out of that visit's
+   * formDataJson per its own formCode's question_codes (see
+   * vitalsExtractor.ts's own doc comment on why the mapping is
+   * formCode-specific — the question_codes genuinely differ across visit
+   * forms, not just cosmetically). Returns an all-null VitalsSnapshot (not
+   * a 404) when the beneficiary has never had a visit-linked clinical
+   * submission — this is the beneficiary's own valid, current state, not
+   * an error.
+   *
+   * IDOR guard: beneficiaryId is caller-supplied — without this check any
+   * authenticated SAKHI could read any beneficiary's vitals regardless of
+   * whose case it is. assertCallerOwnsBeneficiary resolves ownership via
+   * beneficiary-service's `GET /beneficiaries/:id/ownership` — deliberately
+   * NOT findBeneficiaryById (the full `GET /beneficiaries/:id`), whose own
+   * lastVisitVitals enrichment calls back into THIS endpoint; using it here
+   * would recreate that exact request cycle (getById ->
+   * resolveLatestVisitVitals -> here -> findBeneficiaryById -> getById ->
+   * ... forever, timing out on both sides — see findBeneficiaryOwnership's
+   * own doc comment). Same shared check as visitInstance.service.ts's
+   * getVisitHistory: SAKHI own-case only, SUPERVISOR own-roster only,
+   * MANAGER/ADMIN unrestricted.
+   */
+  async getLatestVisitVitals(
+    beneficiaryId: string,
+    caller: { id: string; roles: readonly string[]; projectId?: string | null },
+    authorizationHeader: string,
+  ) {
+    await assertCallerOwnsBeneficiary(beneficiaryId, caller, authorizationHeader);
+
+    const submission = await this.repository.findLatestVisitSubmission(beneficiaryId);
+    if (!submission) return { visitId: null, submittedAt: null, ...EMPTY_VITALS };
+
+    return {
+      visitId: submission.visitId,
+      submittedAt: submission.submittedAt,
+      ...extractVitals(
+        submission.formVersion.formDefinition.formCode,
+        submission.formDataJson as Record<string, unknown>,
+      ),
+    };
+  }
 }
 
 /**
@@ -472,12 +732,29 @@ async function toleratePhaseAdvance(call: Promise<void>): Promise<void> {
   await Promise.resolve(call).catch(() => undefined);
 }
 
-/** Narrows a caught Prisma error to a unique-constraint violation (P2002). */
-function isUniqueConstraintViolation(err: unknown): boolean {
+/** Narrows a caught error to a specific Prisma error code (e.g. 'P2002', 'P2003'). */
+function isPrismaErrorCode(err: unknown, code: string): boolean {
   return (
     typeof err === 'object' &&
     err !== null &&
     'code' in err &&
-    (err as { code: unknown }).code === 'P2002'
+    (err as { code: unknown }).code === code
   );
+}
+
+/**
+ * Disambiguates which FK a P2003 actually violated — form_submissions has
+ * two (form_version_id, visit_id), and only the visit one should be rewritten
+ * to "Visit not found." Prisma's P2003 sets meta.field_name to the
+ * constraint name (e.g. "form_submissions_visit_id_fkey" on Postgres);
+ * checking for the column name substring is more robust than an exact match
+ * against a constraint name whose exact string isn't guaranteed stable
+ * across migrations.
+ */
+function failingConstraintIsVisitId(err: unknown): boolean {
+  if (typeof err !== 'object' || err === null || !('meta' in err)) return false;
+  const meta = (err as { meta?: unknown }).meta;
+  if (typeof meta !== 'object' || meta === null || !('field_name' in meta)) return false;
+  const fieldName = (meta as { field_name?: unknown }).field_name;
+  return typeof fieldName === 'string' && fieldName.includes('visit_id');
 }

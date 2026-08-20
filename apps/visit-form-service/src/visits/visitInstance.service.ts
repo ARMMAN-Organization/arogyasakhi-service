@@ -3,9 +3,13 @@ import type { VisitInstanceRepository } from './visitInstance.repository';
 import type { CreateVisitInstanceInput } from './dto/create-visitInstance.dto';
 import type { UpdateVisitInstanceInput } from './dto/update-visitInstance.dto';
 import type { VisitSummaryQueryInput } from './dto/visit-summary-query.dto';
+import type { VisitHistoryQueryInput } from './dto/visit-history-query.dto';
 import { findSakhiById, listSakhiIdsForSupervisor } from '../sakhis/sakhi.client';
 import { resolveVisitStatusCode, resolveVisitStatusCodes } from '../lookups/lookup.client';
 import { getActiveTransferWindow } from '../escalations/escalation.client';
+import { assertCallerOwnsBeneficiary } from '../beneficiaries/beneficiaryOwnership.guard';
+import { resolveFormCodeForVisitType } from '../forms/visit-code-form-map';
+import { EMPTY_VISIT_HISTORY_VITALS, extractVisitHistoryVitals } from '../forms/vitalsExtractor';
 
 /** The calling principal's own identity, as carried on their trusted-identity headers. */
 export interface CallerIdentity {
@@ -397,6 +401,85 @@ export class VisitInstanceService {
       dueDate: row.schedule.scheduledDate.toISOString().slice(0, 10),
     }));
   }
+
+  /**
+   * FR-S-4.6 — a beneficiary's last `limit` (default 2) COMPLETED visits'
+   * key vitals, shown before the Sakhi starts her next visit. IDOR scoping
+   * mirrors form.service.ts's getLatestVisitVitals exactly (shared via
+   * assertCallerOwnsBeneficiary — ownership check, not a sakhiId-on-visit
+   * filter): a case's current owning Sakhi can differ from who conducted a
+   * past visit (case reassignment), so "does the caller own this
+   * beneficiary case today" is the correct check, not "did the caller
+   * conduct this visit".
+   *
+   * `formCode`/`visitType` narrow which visits are eligible before `limit`
+   * is applied — a beneficiary with 3 completed ANC visits and a
+   * `formCode=ANC_VISIT` filter still only returns her last 2 (or `limit`)
+   * ANC visits, not just any 2. visitType is resolved to its formCode via
+   * visit-code-form-map.ts (this table has no visitType column of its own —
+   * see findRecentCompletedVisits). An unrecognized visitType resolves to
+   * no formCode and is silently dropped from the filter set, same
+   * degrade-rather-than-throw stance as extractVitals.
+   */
+  async getVisitHistory(
+    beneficiaryId: string,
+    query: VisitHistoryQueryInput,
+    caller: CallerIdentity,
+    authorizationHeader: string,
+  ) {
+    await assertCallerOwnsBeneficiary(beneficiaryId, caller, authorizationHeader);
+
+    const formCodes = resolveFormCodes(query);
+    const visits = await this.repository.findRecentCompletedVisits(
+      beneficiaryId,
+      formCodes,
+      query.limit,
+    );
+
+    return {
+      visits: visits.map((visit) => {
+        const submission = visit.formSubmissions[0];
+        return {
+          visitId: visit.id,
+          visitCode: visit.schedule.visitCode,
+          completedAt: visit.completedAt,
+          vitals: submission
+            ? extractVisitHistoryVitals(
+                submission.formVersion.formDefinition.formCode,
+                submission.formDataJson as Record<string, unknown>,
+              )
+            : EMPTY_VISIT_HISTORY_VITALS,
+        };
+      }),
+    };
+  }
+}
+
+/**
+ * Resolves the query's formCode/visitType params (each optionally a single
+ * value or an array — see visit-history-query.dto.ts) into one formCode
+ * set for the repository filter. Returns undefined (no filter) when
+ * neither param was given, so findRecentCompletedVisits doesn't apply an
+ * empty-set filter that would wrongly exclude everything.
+ */
+function resolveFormCodes(query: VisitHistoryQueryInput): string[] | undefined {
+  if (!query.formCode && !query.visitType) return undefined;
+
+  const fromFormCode = query.formCode
+    ? Array.isArray(query.formCode)
+      ? query.formCode
+      : [query.formCode]
+    : [];
+  const visitTypes = query.visitType
+    ? Array.isArray(query.visitType)
+      ? query.visitType
+      : [query.visitType]
+    : [];
+  const fromVisitType = visitTypes
+    .map((visitType) => resolveFormCodeForVisitType(visitType))
+    .filter((formCode): formCode is string => formCode !== null);
+
+  return [...new Set([...fromFormCode, ...fromVisitType])];
 }
 
 /** Inserts a space before the trailing digits of a device-generated visit

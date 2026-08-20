@@ -1,0 +1,277 @@
+/**
+ * Infant (NN/INC/CCV) High-Risk clinical grading decision graph (SRS
+ * Appendix D Part 2 — "High risk protocols_Developer's copy - Infant HR",
+ * see docs/Appendix_D_High_Risk_Detection_Rules.md, Part 2).
+ *
+ * Covers neonatal (NN, 0-28 days) and infant/child (INC 0-12m, CCV 13-24m)
+ * visits. Per SRS §3A.2.4, CCV reuses INC's thresholds verbatim — this pack
+ * is evaluated for CCV submissions too, with the caller passing
+ * riskPhase: 'INC' (not a separate CCV phase) so both share one seeded set
+ * of risk_conditions rows (see riskAssessment.service.ts / seed.ts).
+ *
+ * Same input contract as anc-risk.rulesJson.ts: `conditionIds`
+ * (conditionCode -> risk_condition_id) and `isFirstInstance`
+ * (conditionCode -> boolean) are resolved by the caller and merged into the
+ * evaluation input. `isFirstInstance` gates two distinct things here: the
+ * nutrition conditions' referral trigger (via nutritionReferralTrigger) and,
+ * separately, Hypothermia/Hyperthermia/Danger Signs' HR-visit trigger (via
+ * record()'s hrGateByFirstInstance option — Appendix D's "single instance"
+ * HR-visit cadence for these three, vs. "every instance till normal" for
+ * the nutrition conditions; PR #172 review). `consecutiveNoImprovementCount`
+ * (conditionCode -> count) is also caller-resolved, for the nutrition
+ * conditions' "3 consecutive visits with no improvement" referral rule
+ * (Appendix D §2.4) — this pack has no DB access of its own for any of the
+ * three.
+ *
+ * All other input fields are read directly under their real
+ * NEONATAL_VISIT/INFANT_VISIT (INC_VISIT/CCV_VISIT) question_codes — see
+ * apps/visit-form-service/prisma/seed-data/neonatal-visit.json and
+ * infant-visit.json. The two forms have different field sets (NEONATAL_VISIT
+ * has no temperature/respiratory-rate/MUAC/developmental-milestone fields;
+ * INFANT_VISIT has no umbilical-cord field) — every branch below is
+ * independently gated on its own field(s) being present, so a phase whose
+ * form doesn't collect a given parameter simply skips that condition rather
+ * than erroring or defaulting.
+ *
+ * Nutrition grades (wasting/stunting/underweight) are NOT re-derived here
+ * from raw anthropometry — both forms already capture the Sakhi's own
+ * pre-graded value ('normal'/'mam'/'sam',
+ * 'normal'/'moderately_stunted'/'severely_stunted',
+ * 'normal'/'muw'/'suw') per the WHO growth-chart lookup the app performs
+ * offline; this pack only maps those pre-graded values onto referral/
+ * HR-visit/education trigger rules.
+ *
+ * Four items in this sheet are ambiguous or incomplete versus the source
+ * (see docs/Appendix_D_High_Risk_Detection_Rules.md §2.8) and are resolved
+ * here with a documented default rather than left unhandled:
+ *  1. Hypothermia/Hyperthermia: the sheet's single non-Normal threshold is
+ *     labelled "Severe hypothermia"/"Severe hyperthermia" but sits in the
+ *     Mild/At-Risk row with no separate Moderate/Severe band — graded here
+ *     as SEVERE (trusting the value's own label over its row position).
+ *  2. MUAC Severe cutoff's age label ("<11.5cm, 0-6m") conflicts with this
+ *     sheet's own "MUAC measured after 6 months only" rule — applied only
+ *     for ages 6-24 months; the 0-6m figure is not evaluated. INFANT_VISIT
+ *     has no explicit ageMonths field either — this pack derives it from
+ *     age_in_months when present.
+ *  3. Cord infection/omphalitis, Respiratory distress, and Neuro-
+ *     developmental status have an "every instance" referral trigger but no
+ *     HR-visit-trigger value in the source sheet — HR-visit trigger
+ *     defaults to false for these three, same treatment as PPH's blank
+ *     cells in the ANC pack.
+ *  4. No Moderate band exists for any infant condition in the source sheet
+ *     — every condition here only has Normal/Mild/Severe branches (Anemia/
+ *     Hypertension in the ANC pack are the only conditions with a true
+ *     Moderate band across both sheets).
+ *
+ * This pack deliberately does NOT read risk_conditions.referralRequiredDefault
+ * /educationRequiredDefault — those are reference/display-only master data
+ * (see schema.prisma's RiskCondition doc comment); the referral/HR-visit/
+ * education trigger logic per condition below (grade-dependent,
+ * first-instance-gated, no-improvement-streak-gated) is this pack's own
+ * sole source of truth (see PR #172 review).
+ */
+export const infantRiskRulesJson = {
+  contentType: 'application/vnd.gorules.decision',
+  nodes: [
+    { id: 'input1', type: 'inputNode', name: 'request', position: { x: 0, y: 0 } },
+    {
+      id: 'fn1',
+      type: 'functionNode',
+      name: 'computeInfantRiskGrading',
+      position: { x: 200, y: 0 },
+      content: `
+const GRADE_RANK = { NORMAL: 0, MILD: 1, MODERATE: 2, SEVERE: 3 };
+
+const handler = (input) => {
+  const { conditionIds, isFirstInstance, consecutiveNoImprovementCount } = input;
+  if (!conditionIds || typeof conditionIds !== 'object') {
+    throw new Error('conditionIds (conditionCode -> risk_condition_id map) is required.');
+  }
+  const firstInstance = isFirstInstance || {};
+  const noImprovementCounts = consecutiveNoImprovementCount || {};
+
+  const results = [];
+
+  function requireConditionId(code) {
+    const id = conditionIds[code];
+    if (!id) throw new Error('conditionIds is missing an entry for ' + code);
+    return id;
+  }
+
+  // hrGateByFirstInstance: for Hypothermia/Hyperthermia/Danger Signs, whose
+  // HR-visit trigger is "single instance" per Appendix D Part 2 (unlike the
+  // nutrition conditions above them, which HR-visit-trigger every instance
+  // till normal) — see PR #172 review. isFirst defaults to true when the
+  // caller's isFirstInstance map has no entry for this code, matching
+  // anc-risk.rulesJson.ts's same default-true convention.
+  function record(code, grade, observedValueJson, opts) {
+    opts = opts || {};
+    const isFirst = firstInstance[code] !== false;
+    const hrEligible = opts.hrVisitTrigger === true;
+    results.push({
+      riskConditionId: requireConditionId(code),
+      grade,
+      gradeRank: GRADE_RANK[grade],
+      isReferralTrigger: opts.referralTrigger === true,
+      isEducationTrigger: grade !== 'NORMAL',
+      isHrVisitTrigger: opts.hrGateByFirstInstance ? hrEligible && isFirst : hrEligible,
+      observedValueJson,
+    });
+  }
+
+  function nutritionReferralTrigger(code, grade, isFirst) {
+    if (grade === 'NORMAL') return false;
+    const noImprovementStreak = noImprovementCounts[code] || 0;
+    return isFirst || noImprovementStreak >= 3;
+  }
+
+  // --- Low Birth Weight (NEONATAL_VISIT: birth_weight_kg;
+  // INFANT_VISIT/INC_VISIT/CCV_VISIT: birth_weight_in_kg) ---
+  const birthWeightKg =
+    typeof input.birth_weight_kg === 'number' ? input.birth_weight_kg : input.birth_weight_in_kg;
+  if (typeof birthWeightKg === 'number') {
+    const grade = birthWeightKg < 2.5 ? 'MILD' : 'NORMAL';
+    record('LOW_BIRTH_WEIGHT', grade, { birthWeightKg }, {
+      // "No referral" per Appendix D §2.4 - LBW is tracked/HR-visited but
+      // never generates a referral on its own.
+      referralTrigger: false,
+      hrVisitTrigger: grade !== 'NORMAL',
+    });
+  }
+
+  // --- Undernutrition: Wasting/Stunting/Underweight (pre-graded by the
+  // visit form itself; same question_codes on both forms) ---
+  function gradeNutritionField(code, rawValue, severeValues) {
+    if (typeof rawValue !== 'string') return;
+    const isFirst = firstInstance[code] !== false;
+    const grade = rawValue === 'normal' ? 'NORMAL' : severeValues.indexOf(rawValue) !== -1 ? 'SEVERE' : 'MILD';
+    record(code, grade, { value: rawValue }, {
+      referralTrigger: nutritionReferralTrigger(code, grade, isFirst),
+      hrVisitTrigger: grade !== 'NORMAL',
+    });
+  }
+  gradeNutritionField('WASTING', input.nutritional_status_wasting, ['sam']);
+  gradeNutritionField('STUNTING_STATUS', input.nutritional_status_stunting, ['severely_stunted']);
+  gradeNutritionField('UNDERWEIGHT', input.nutritional_status_underweight, ['suw']);
+
+  // --- MAM/SAM via MUAC (6-24 months only; INFANT_VISIT/INC_VISIT/
+  // CCV_VISIT only - muac_in_cms does not exist on NEONATAL_VISIT) ---
+  const muacCm = input.muac_in_cms;
+  const ageMonths = input.age_in_months;
+  if (typeof muacCm === 'number' && typeof ageMonths === 'number' && ageMonths >= 6) {
+    const isFirst = firstInstance.MUAC_MALNUTRITION !== false;
+    const grade = muacCm < 11.5 ? 'SEVERE' : muacCm < 12.5 ? 'MILD' : 'NORMAL';
+    record('MUAC_MALNUTRITION', grade, { muacCm, ageMonths }, {
+      referralTrigger: nutritionReferralTrigger('MUAC_MALNUTRITION', grade, isFirst),
+      hrVisitTrigger: grade !== 'NORMAL',
+    });
+  }
+
+  // --- Hypothermia / Hyperthermia (INFANT_VISIT/INC_VISIT/CCV_VISIT only -
+  // no temperature field on NEONATAL_VISIT). See doc-comment default #1.
+  // HR-visit trigger is single-instance per Appendix D Part 2 (PR #172
+  // review) - a neonate hypothermic across visits 1 and 2 fires the 15-day
+  // HR follow-up only once, on first instance, not stacked every visit. ---
+  const bodyTempF = input.child_temprature_in_f;
+  if (typeof bodyTempF === 'number') {
+    const hypoGrade = bodyTempF < 96 ? 'SEVERE' : 'NORMAL';
+    record('INFANT_HYPOTHERMIA', hypoGrade, { bodyTempF }, {
+      referralTrigger: hypoGrade !== 'NORMAL',
+      hrGateByFirstInstance: true,
+      hrVisitTrigger: hypoGrade !== 'NORMAL',
+    });
+
+    const hyperGrade = bodyTempF > 100 ? 'SEVERE' : 'NORMAL';
+    record('INFANT_HYPERTHERMIA', hyperGrade, { bodyTempF }, {
+      referralTrigger: hyperGrade !== 'NORMAL',
+      hrGateByFirstInstance: true,
+      hrVisitTrigger: hyperGrade !== 'NORMAL',
+    });
+  }
+
+  // --- Cord infection / omphalitis (NEONATAL_VISIT only -
+  // umbilical_cord_care does not exist on INFANT_VISIT/INC_VISIT/
+  // CCV_VISIT) ---
+  const cordCare = input.umbilical_cord_care;
+  if (typeof cordCare === 'string') {
+    const grade = cordCare === 'clean_and_dry' ? 'NORMAL' : 'MILD';
+    record('CORD_INFECTION', grade, { cordCare }, {
+      referralTrigger: grade !== 'NORMAL',
+      // No HR-visit-trigger value given in the source sheet (default #3).
+      hrVisitTrigger: false,
+    });
+  }
+
+  // --- Respiratory distress (INFANT_VISIT/INC_VISIT/CCV_VISIT only -
+  // child_respiratory_rate_2_12_months does not exist on NEONATAL_VISIT) ---
+  const respiratoryRate = input.child_respiratory_rate_2_12_months;
+  if (typeof respiratoryRate === 'number') {
+    const grade = respiratoryRate < 40 || respiratoryRate > 60 ? 'MILD' : 'NORMAL';
+    record('RESPIRATORY_DISTRESS', grade, { respiratoryRate }, {
+      referralTrigger: grade !== 'NORMAL',
+      hrVisitTrigger: false,
+    });
+  }
+
+  // --- Neuro-developmental status (INFANT_VISIT/INC_VISIT/CCV_VISIT only -
+  // not asked on NEONATAL_VISIT) ---
+  const milestonesOnTrack = input.is_the_child_showing_all_developmental_milestones_as_per_his_her_age;
+  if (typeof milestonesOnTrack === 'string') {
+    const grade = milestonesOnTrack === 'yes' ? 'NORMAL' : 'MILD';
+    record('NEURO_DEVELOPMENTAL_STATUS', grade, { milestonesOnTrack }, {
+      referralTrigger: grade !== 'NORMAL',
+      hrVisitTrigger: false,
+    });
+  }
+
+  // --- Danger Signs (single condition row, any sign present). Each form
+  // has its own question_code and its own "no signs" sentinel value.
+  // HR-visit trigger is single-instance per Appendix D Part 2 (PR #172
+  // review), same reasoning as Hypothermia/Hyperthermia above. ---
+  const nnDangerSigns = Array.isArray(input.danger_signs) ? input.danger_signs : null;
+  const infantDangerSigns = Array.isArray(input.is_the_baby_showing_any_danger_signs_since_last_visit)
+    ? input.is_the_baby_showing_any_danger_signs_since_last_visit
+    : null;
+  const dangerSignsRaw = nnDangerSigns || infantDangerSigns;
+  if (dangerSignsRaw) {
+    const dangerSignsPresent = dangerSignsRaw.filter((s) => s !== 'no_abnormal_signs_symptoms');
+    const grade = dangerSignsPresent.length > 0 ? 'MILD' : 'NORMAL';
+    record('INFANT_DANGER_SIGNS', grade, { dangerSigns: dangerSignsPresent }, {
+      referralTrigger: grade !== 'NORMAL',
+      hrGateByFirstInstance: true,
+      hrVisitTrigger: grade !== 'NORMAL',
+    });
+  }
+
+  // --- Feeding adequacy. Both forms use current_feeding_practice, with
+  // different value sets: NEONATAL_VISIT's set has no explicit "not
+  // feeding" option in this pack's scope, so notFeeding is only derived on
+  // INFANT_VISIT/INC_VISIT/CCV_VISIT's 'not_able_to_drink_feed' value. ---
+  const feedingPractice = input.current_feeding_practice;
+  const feedingPracticeCodes = Array.isArray(feedingPractice) ? feedingPractice : [feedingPractice];
+  const notFeeding = feedingPracticeCodes.indexOf('not_able_to_drink_feed') !== -1;
+  if (typeof feedingPractice === 'string' || Array.isArray(feedingPractice)) {
+    const grade = notFeeding ? 'MILD' : 'NORMAL';
+    record('FEEDING_ADEQUACY', grade, { notFeeding }, {
+      // "Only for no feeding > supplementary feeds" (Appendix D §2.4) - the
+      // narrower "not feeding at all" case triggers referral.
+      referralTrigger: notFeeding,
+      hrVisitTrigger: false,
+    });
+  }
+
+  const worstRank = results.reduce((max, r) => Math.max(max, r.gradeRank), 0);
+  const overallRiskCategory =
+    worstRank === 3 ? 'CRITICAL' : worstRank === 2 ? 'HIGH' : worstRank === 1 ? 'LOW' : 'NORMAL';
+
+  return { overallRiskCategory, conditions: results };
+};
+      `,
+    },
+    { id: 'output1', type: 'outputNode', name: 'response', position: { x: 400, y: 0 } },
+  ],
+  edges: [
+    { id: 'e1', sourceId: 'input1', targetId: 'fn1', type: 'edge' },
+    { id: 'e2', sourceId: 'fn1', targetId: 'output1', type: 'edge' },
+  ],
+};

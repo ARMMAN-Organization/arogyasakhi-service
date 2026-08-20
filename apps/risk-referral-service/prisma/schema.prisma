@@ -133,6 +133,16 @@ model RiskCondition {
   entityType               RiskEntityType      @map("entity_type")
   phase                    RiskPhase
   gradeScale               RiskGradeScale      @map("grade_scale")
+  // Reference/display-only master data (served via GET /risk-conditions) —
+  // NOT read by the grading rule packs (anc-risk.rulesJson.ts /
+  // infant-risk.rulesJson.ts, apps/rules-service) at evaluation time. A
+  // condition's actual referral/education trigger is grade-,
+  // first-instance-, and accompanied-by-condition-dependent (e.g. Anemia
+  // only refers on MODERATE/SEVERE; Hypotension only refers when
+  // accompanied by another flagged condition) — logic a single static
+  // per-condition boolean cannot correctly express. Editing this field does
+  // NOT change grading behavior; the rule pack is the sole source of truth
+  // for that (see PR #172 review).
   referralRequiredDefault  Boolean             @default(false) @map("referral_required_default")
   educationRequiredDefault Boolean             @default(false) @map("education_required_default")
   status                   RiskConditionStatus
@@ -210,6 +220,15 @@ model RiskFlag {
   // lookup_values.lookup_value_id (category RISK_GRADE) — owned by
   // auth-service, no cross-service relation.
   riskGradeLookupValueId String   @map("risk_grade_lookup_value_id")
+  // Severity rank of this flag's grade, as computed by the rule pack at
+  // evaluation time (0=NORMAL..3=SEVERE) — persisted alongside the opaque
+  // riskGradeLookupValueId so a beneficiary's grade trend can be compared
+  // across visits (improvement/deterioration) without resolving each
+  // historic flag's grade via auth-service's RISK_GRADE lookup category.
+  // Feeds findConsecutiveNoImprovementCount (riskAssessment.repository.ts)
+  // and, longer-term, the Part 3 dashboard's progression/deterioration
+  // reports (docs/Appendix_D_High_Risk_Detection_Rules.md).
+  gradeRank              Int      @map("grade_rank")
   observedValueJson      Json?    @map("observed_value_json")
   isReferralTrigger      Boolean  @default(false) @map("is_referral_trigger")
   isEducationTrigger     Boolean  @default(false) @map("is_education_trigger")

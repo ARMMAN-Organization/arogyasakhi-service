@@ -317,7 +317,7 @@ describe('AuthService', () => {
       createdAt: new Date('2026-01-01T00:00:00.000Z'),
     };
 
-    it('hashes the password, creates the user and role assignment', async () => {
+    it('hashes the password, creates the user, role assignment, and sakhi_profiles row', async () => {
       repository.findRoleByCode.mockResolvedValue(ACTIVE_ROLE as never);
       repository.createUserWithRole.mockResolvedValue(CREATED_USER as never);
 
@@ -328,6 +328,7 @@ describe('AuthService', () => {
           password: 'Str0ngPass!',
           displayName: 'New Sakhi',
           roleCode: 'SAKHI',
+          projectId: 'project-1',
         },
         ['ADMIN'],
       );
@@ -340,8 +341,9 @@ describe('AuthService', () => {
         displayName: 'New Sakhi',
         email: null,
         roleId: 'role-1',
-        projectId: null,
+        projectId: 'project-1',
         geographyUnitId: null,
+        sakhiProfile: { primaryProjectId: 'project-1', phoneNumber: '+919876543211' },
       });
       expect(result).toEqual({
         id: 'user-2',
@@ -352,6 +354,51 @@ describe('AuthService', () => {
         status: 'ACTIVE',
         createdAt: CREATED_USER.createdAt,
       });
+    });
+
+    it('rejects creating a SAKHI without projectId — sakhi_profiles.primary_project_id is NOT NULL', async () => {
+      repository.findRoleByCode.mockResolvedValue(ACTIVE_ROLE as never);
+
+      await expect(
+        service.createUser(
+          {
+            username: 'new.sakhi',
+            mobileNumber: '+919876543211',
+            password: 'Str0ngPass!',
+            displayName: 'New Sakhi',
+            roleCode: 'SAKHI',
+          },
+          ['ADMIN'],
+        ),
+      ).rejects.toMatchObject({ status: 400 });
+      expect(repository.createUserWithRole).not.toHaveBeenCalled();
+    });
+
+    it('does not require projectId or create a sakhi_profiles row for a non-SAKHI role', async () => {
+      repository.findRoleByCode.mockResolvedValue({
+        id: 'role-2',
+        roleCode: 'SUPERVISOR',
+        isActive: true,
+      } as never);
+      repository.createUserWithRole.mockResolvedValue({
+        ...CREATED_USER,
+        username: 'new.supervisor',
+      } as never);
+
+      await service.createUser(
+        {
+          username: 'new.supervisor',
+          mobileNumber: '+919876543215',
+          password: 'Str0ngPass!',
+          displayName: 'New Supervisor',
+          roleCode: 'SUPERVISOR',
+        },
+        ['ADMIN'],
+      );
+
+      expect(repository.createUserWithRole).toHaveBeenCalledWith(
+        expect.objectContaining({ sakhiProfile: undefined }),
+      );
     });
 
     it('rejects an unknown role code without creating a user', async () => {
@@ -401,6 +448,7 @@ describe('AuthService', () => {
             password: 'Str0ngPass!',
             displayName: 'New Sakhi',
             roleCode: 'SAKHI',
+            projectId: 'project-1',
           },
           ['ADMIN'],
         ),
@@ -419,6 +467,7 @@ describe('AuthService', () => {
             password: 'Str0ngPass!',
             displayName: 'New Sakhi',
             roleCode: 'SAKHI',
+            projectId: 'project-1',
           },
           ['ADMIN'],
         ),
@@ -437,6 +486,7 @@ describe('AuthService', () => {
             password: 'Str0ngPass!',
             displayName: 'New Sakhi',
             roleCode: 'SAKHI',
+            projectId: 'project-1',
           },
           ['SUPERVISOR'],
         ),

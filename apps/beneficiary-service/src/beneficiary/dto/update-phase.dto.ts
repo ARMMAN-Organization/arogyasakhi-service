@@ -10,9 +10,9 @@ import { CASE_PHASES } from '../beneficiary.constants';
  * PATCH /beneficiaries/:id/risk-condition-summary).
  *
  * Only the transitions BeneficiaryService.applyPhaseChange actually allows
- * (ANC->PP for a MOTHER case, *->NN for a CHILD case) succeed — any other
- * value is rejected there with a 409, not here; this schema only checks the
- * value is a real CasePhase.
+ * (ANC->PP for a MOTHER case; NN->NN (no-op), NN->INC, and INC->CCV for a
+ * CHILD case) succeed — any other value is rejected there with a 409, not
+ * here; this schema only checks the value is a real CasePhase.
  */
 export const updatePhaseSchema = z
   .object({

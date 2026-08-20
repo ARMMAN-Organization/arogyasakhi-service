@@ -1,6 +1,8 @@
 import { PrismaClient } from '../../../node_modules/.prisma/client-risk-referral-service';
 import selfReportedConditions from './seed-data/self-reported-conditions.json';
 import riskParameters from './seed-data/risk-parameters.json';
+import ancRiskConditions from './seed-data/anc-risk-conditions.json';
+import infantRiskConditions from './seed-data/infant-risk-conditions.json';
 
 const prisma = new PrismaClient();
 
@@ -54,6 +56,17 @@ interface RiskParameterSeed {
   entityType: 'MOTHER' | 'CHILD';
   unit: string | null;
   dataType: 'NUMERIC' | 'BOOLEAN' | 'CATEGORICAL';
+}
+
+interface AncRiskConditionSeed {
+  conditionCode: string;
+  conditionName: string;
+  gradeScale: 'BINARY' | 'NORMAL_MILD_MODERATE_SEVERE' | 'NORMAL_LOW_MEDIUM_HIGH';
+  // Reference/display-only — see schema.prisma's RiskCondition doc comment.
+  // NOT read by anc-risk.rulesJson.ts / infant-risk.rulesJson.ts; editing
+  // these values here does not change grading/trigger behavior.
+  referralRequiredDefault: boolean;
+  educationRequiredDefault: boolean;
 }
 
 /**
@@ -253,6 +266,55 @@ async function checkReferralDemoPreconditions(
 }
 
 /**
+ * Shared by seedAncRiskConditions/seedInfantRiskConditions below — both
+ * differ only in the imported JSON, entityType, phase, and step name; every
+ * other line (existence check, create() shape, result branches) was
+ * previously copy-pasted verbatim between them (see PR #172 review).
+ */
+async function seedRiskConditions(
+  items: AncRiskConditionSeed[],
+  entityType: 'MOTHER' | 'CHILD',
+  phase: 'ANC' | 'INC',
+  stepName: string,
+): Promise<SeedResult> {
+  let createdCount = 0;
+
+  for (const condition of items) {
+    const existing = await prisma.riskCondition.findUnique({
+      where: { conditionCode: condition.conditionCode },
+    });
+    if (existing) continue;
+
+    await prisma.riskCondition.create({
+      data: {
+        conditionCode: condition.conditionCode,
+        conditionName: condition.conditionName,
+        entityType,
+        phase,
+        gradeScale: condition.gradeScale,
+        referralRequiredDefault: condition.referralRequiredDefault,
+        educationRequiredDefault: condition.educationRequiredDefault,
+        status: 'ACTIVE',
+      },
+    });
+    createdCount += 1;
+  }
+
+  if (createdCount === 0) {
+    return {
+      step: stepName,
+      created: false,
+      message: `All ${stepName.replace(/-/g, ' ')} rows already present — skipped.`,
+    };
+  }
+  return {
+    step: stepName,
+    created: true,
+    message: `Seeded ${createdCount} ${stepName.replace(/-/g, ' ')} row(s).`,
+  };
+}
+
+/**
  * Demo ACCOMPANIED_REFERRAL Quick Response card (SRS FR-SV-4.9). Creates a Referral row
  * (type ACCOMPANIED, status PENDING_FOLLOWUP so the card is decidable) and raises its
  * linked approval_requests row via approval-service's public POST /approvals — the same
@@ -407,10 +469,48 @@ async function seedIncompleteReferralDemo(): Promise<SeedResult> {
   }
 }
 
+/**
+ * Master data for the 19 ANC High-Risk conditions defined in Appendix D
+ * ("High risk protocols_Developer's copy - ANC HR", see
+ * docs/Appendix_D_High_Risk_Detection_Rules.md, Part 1). `phase: ANC` — these
+ * feed the anc-risk.rulesJson.ts RISK rule pack via a conditionCode ->
+ * risk_condition_id map that riskAssessment.service.ts builds by looking
+ * these rows up before calling evaluateRuleSet.
+ */
+function seedAncRiskConditions(): Promise<SeedResult> {
+  return seedRiskConditions(
+    ancRiskConditions as AncRiskConditionSeed[],
+    'MOTHER',
+    'ANC',
+    'anc-risk-conditions',
+  );
+}
+
+/**
+ * Master data for the 12 Infant High-Risk conditions defined in Appendix D
+ * ("High risk protocols_Developer's copy - Infant HR", see
+ * docs/Appendix_D_High_Risk_Detection_Rules.md, Part 2). Seeded once under
+ * `phase: INC` — condition_code has a global UNIQUE constraint (not
+ * unique-per-phase), and per SRS §3A.2.4 CCV reuses INC's thresholds
+ * verbatim, so both CCV_VISIT and NN (NEONATAL_VISIT) evaluations pass
+ * riskPhase: 'INC' to reuse this same seeded set rather than duplicating
+ * rows per phase (see infant-risk.rulesJson.ts's own doc comment).
+ */
+function seedInfantRiskConditions(): Promise<SeedResult> {
+  return seedRiskConditions(
+    infantRiskConditions as AncRiskConditionSeed[],
+    'CHILD',
+    'INC',
+    'infant-risk-conditions',
+  );
+}
+
 async function main(): Promise<void> {
   const results = [
     await seedSelfReportedConditions(),
     await seedRiskParameters(),
+    await seedAncRiskConditions(),
+    await seedInfantRiskConditions(),
     await seedAccompaniedReferralDemo(),
     await seedIncompleteReferralDemo(),
   ];
