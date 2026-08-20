@@ -14,6 +14,16 @@ const riskConditionSchema = z.object({
   entityType: z.enum(['MOTHER', 'CHILD']),
   phase: z.enum(['REGISTRATION', 'ANC', 'DELIVERY', 'PP', 'NN', 'INC', 'CCV']),
   gradeScale: z.enum(['BINARY', 'NORMAL_MILD_MODERATE_SEVERE', 'NORMAL_LOW_MEDIUM_HIGH']),
+  // Reference/display-only master data (e.g. for an admin condition-catalog
+  // screen) — NOT read by the grading rule packs (anc-risk.rulesJson.ts /
+  // infant-risk.rulesJson.ts) at evaluation time. A condition's actual
+  // referral/education trigger is grade-, first-instance-, and
+  // accompanied-by-condition-dependent (e.g. Anemia only refers on
+  // MODERATE/SEVERE, not MILD; Hypotension only refers when accompanied by
+  // another flagged condition) — logic a single static per-condition
+  // boolean cannot correctly express. Changing this field does NOT change
+  // grading behavior; the rule pack itself is the only source of truth for
+  // that (see PR #172 review).
   referralRequiredDefault: z.boolean(),
   educationRequiredDefault: z.boolean(),
   status: z.enum(['ACTIVE', 'INACTIVE']),
