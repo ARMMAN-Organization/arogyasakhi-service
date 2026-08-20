@@ -12,12 +12,14 @@ describe('createChildBeneficiary', () => {
     projectId: 'project-1',
     beneficiaryTypeLookupId: 'type-1',
     caseTypeLookupId: 'case-type-1',
+    currentPhase: 'ANC',
     villageId: 'village-1',
     padaId: 'pada-1',
     healthSubCentreId: 'sc-1',
     phcId: 'phc-1',
     stateId: 'state-1',
     districtId: 'district-1',
+    childDateOfBirth: null,
   };
 
   beforeEach(() => {

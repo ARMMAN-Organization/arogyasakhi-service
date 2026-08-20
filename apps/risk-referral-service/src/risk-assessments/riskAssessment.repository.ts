@@ -52,6 +52,23 @@ export class RiskAssessmentRepository {
   }
 
   /**
+   * Every RiskAssessment for the given visit ids, most-recently-evaluated
+   * first — used by callers that already know which visits they care about
+   * (e.g. BR-13's "last 3 completed INC visits" lookup, resolved by
+   * visit-form-service since it owns visit typing; risk-referral-service
+   * doesn't own visit_instances/visit_schedules, no cross-service join per
+   * the forklift rule, so it can only filter by an id list handed to it).
+   * An empty `visitIds` short-circuits to an empty array without querying.
+   */
+  async findByVisitIds(beneficiaryId: string, visitIds: string[]) {
+    if (visitIds.length === 0) return [];
+    return this.prisma.riskAssessment.findMany({
+      where: { beneficiaryId, visitId: { in: visitIds }, isDeleted: false },
+      orderBy: { evaluatedAt: 'desc' },
+    });
+  }
+
+  /**
    * Maps risk_conditions.condition_code -> risk_condition_id for every
    * ACTIVE condition in `phase` — a rule pack's own conditionCodes are
    * portable across environments, but the decision graph's output must
@@ -105,25 +122,46 @@ export class RiskAssessmentRepository {
    * moment gradeRank decreases from one flag to the next-most-recent one;
    * a flat or worsening trend keeps counting. Capped at 3 visits back since
    * the rule pack only needs to know ">=3", not the exact streak length.
+   *
+   * One batched query for every condition code (not one query per code —
+   * see PR #172 review) — each condition needs at most its 4 most recent
+   * flags, so this over-fetches per condition (no per-condition LIMIT is
+   * expressible in a single findMany) and trims to 4 in JS afterward, which
+   * is still one round trip regardless of how many conditionCodes are
+   * passed.
    */
   async findConsecutiveNoImprovementCount(
     beneficiaryId: string,
     conditionCodes: string[],
   ): Promise<Map<string, number>> {
+    if (conditionCodes.length === 0) return new Map();
+
+    const flags = await this.prisma.riskFlag.findMany({
+      where: {
+        riskAssessment: { beneficiaryId, isDeleted: false },
+        riskCondition: { conditionCode: { in: conditionCodes } },
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { gradeRank: true, riskCondition: { select: { conditionCode: true } } },
+    });
+
+    const flagsByCode = new Map<string, number[]>();
+    for (const flag of flags) {
+      const code = flag.riskCondition.conditionCode;
+      const ranks = flagsByCode.get(code);
+      if (ranks) {
+        if (ranks.length < 4) ranks.push(flag.gradeRank);
+      } else {
+        flagsByCode.set(code, [flag.gradeRank]);
+      }
+    }
+
     const result = new Map<string, number>();
     for (const conditionCode of conditionCodes) {
-      const flags = await this.prisma.riskFlag.findMany({
-        where: {
-          riskAssessment: { beneficiaryId, isDeleted: false },
-          riskCondition: { conditionCode },
-        },
-        orderBy: { createdAt: 'desc' },
-        take: 4,
-        select: { gradeRank: true },
-      });
+      const ranks = flagsByCode.get(conditionCode) ?? [];
       let streak = 0;
-      for (let i = 0; i < flags.length - 1; i++) {
-        if (flags[i].gradeRank < flags[i + 1].gradeRank) break;
+      for (let i = 0; i < ranks.length - 1; i++) {
+        if (ranks[i] < ranks[i + 1]) break;
         streak += 1;
       }
       result.set(conditionCode, streak);

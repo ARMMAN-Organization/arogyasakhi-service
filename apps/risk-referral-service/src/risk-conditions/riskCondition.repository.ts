@@ -31,4 +31,12 @@ export class RiskConditionRepository {
       select: MASTER_ROW_SELECT,
     });
   }
+
+  /** Active, non-deleted RiskCondition rows matching any of the given ids. */
+  findByIds(ids: string[]) {
+    return this.prisma.riskCondition.findMany({
+      where: { id: { in: ids }, status: 'ACTIVE', isDeleted: false },
+      select: MASTER_ROW_SELECT,
+    });
+  }
 }

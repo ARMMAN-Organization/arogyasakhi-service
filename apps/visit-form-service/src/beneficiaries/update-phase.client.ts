@@ -39,3 +39,42 @@ export async function updateBeneficiaryPhase(
     );
   }
 }
+
+/**
+ * Writes ChildCaseDetails.ccvOpeningRiskState (BR-13) via beneficiary-service's
+ * `PATCH /beneficiaries/:id/ccv-opening-risk-state` — called once, right
+ * after a successful updateBeneficiaryPhase(id, 'CCV', ...) call, by
+ * ccvOpeningRiskState.resolver.ts.
+ *
+ * Best-effort by design, same stance as updateBeneficiaryPhase: the CHILD
+ * case has already advanced to CCV by the time this runs, and BR-13's
+ * opening risk state is a derived clinical-tracking value, not something
+ * that should ever block or roll back a completed visit submission.
+ */
+export async function setCcvOpeningRiskState(
+  beneficiaryId: string,
+  ccvOpeningRiskState: string,
+  authorizationHeader: string,
+): Promise<void> {
+  try {
+    const res = await fetch(
+      `${API_GATEWAY_BASE_URL}/api/v1/beneficiaries/${beneficiaryId}/ccv-opening-risk-state`,
+      {
+        method: 'PATCH',
+        headers: { Authorization: authorizationHeader, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ccvOpeningRiskState }),
+      },
+    );
+    if (!res.ok) {
+      console.warn(
+        `Failed to set ccvOpeningRiskState to ${ccvOpeningRiskState} for beneficiary ` +
+          `${beneficiaryId} (beneficiary-service returned ${res.status}).`,
+      );
+    }
+  } catch (err) {
+    console.warn(
+      `Unable to reach beneficiary-service to set ccvOpeningRiskState for beneficiary ` +
+        `${beneficiaryId}. ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}

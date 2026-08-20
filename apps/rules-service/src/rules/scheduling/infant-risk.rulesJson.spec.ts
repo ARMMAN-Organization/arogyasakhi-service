@@ -256,6 +256,32 @@ describe('infantRiskRulesJson', () => {
     expect(findCondition(result, CONDITION_IDS.INFANT_HYPERTHERMIA).grade).toBe('NORMAL');
   });
 
+  it(
+    'gates Hypothermia/Hyperthermia HR-visit trigger by first-instance — a neonate hypothermic ' +
+      'across two visits fires the 15-day HR follow-up once, not on every visit (PR #172 review)',
+    async () => {
+      const cold = await evaluateRulePack(infantRiskRulesJson, {
+        ...NORMAL_VITALS_INFANT,
+        child_temprature_in_f: 95,
+        isFirstInstance: { INFANT_HYPOTHERMIA: false, INFANT_HYPERTHERMIA: false },
+      });
+      const hypo = findCondition(cold, CONDITION_IDS.INFANT_HYPOTHERMIA);
+      expect(hypo.grade).toBe('SEVERE');
+      expect(hypo.isReferralTrigger).toBe(true);
+      expect(hypo.isHrVisitTrigger).toBe(false);
+
+      const hot = await evaluateRulePack(infantRiskRulesJson, {
+        ...NORMAL_VITALS_INFANT,
+        child_temprature_in_f: 101,
+        isFirstInstance: { INFANT_HYPOTHERMIA: false, INFANT_HYPERTHERMIA: false },
+      });
+      const hyper = findCondition(hot, CONDITION_IDS.INFANT_HYPERTHERMIA);
+      expect(hyper.grade).toBe('SEVERE');
+      expect(hyper.isReferralTrigger).toBe(true);
+      expect(hyper.isHrVisitTrigger).toBe(false);
+    },
+  );
+
   it('grades Cord infection MILD from umbilical_cord_care, triggers referral but not HR visit (undocumented in source sheet)', async () => {
     const result = await evaluateRulePack(infantRiskRulesJson, {
       ...NORMAL_VITALS_NEONATAL,
@@ -316,6 +342,21 @@ describe('infantRiskRulesJson', () => {
     expect(dangerRows[0].grade).toBe('MILD');
     expect(dangerRows[0].isReferralTrigger).toBe(true);
     expect(dangerRows[0].isHrVisitTrigger).toBe(true);
+  });
+
+  it('gates Danger Signs HR-visit trigger by first-instance (PR #172 review)', async () => {
+    const result = await evaluateRulePack(infantRiskRulesJson, {
+      ...NORMAL_VITALS_INFANT,
+      is_the_baby_showing_any_danger_signs_since_last_visit: [
+        'convulsions_twitching_fits_or_abnormal_movements',
+      ],
+      isFirstInstance: { INFANT_DANGER_SIGNS: false },
+    });
+
+    const danger = findCondition(result, CONDITION_IDS.INFANT_DANGER_SIGNS);
+    expect(danger.grade).toBe('MILD');
+    expect(danger.isReferralTrigger).toBe(true);
+    expect(danger.isHrVisitTrigger).toBe(false);
   });
 
   it('grades any Danger Sign present (NEONATAL_VISIT field) as MILD', async () => {

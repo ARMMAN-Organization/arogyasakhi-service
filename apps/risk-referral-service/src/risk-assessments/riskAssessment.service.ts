@@ -97,13 +97,15 @@ export class RiskAssessmentService {
     // Resolve conditionCode -> risk_condition_id (a rule pack's decision
     // graph output must carry a real DB id, see ruleSet.evaluator.ts's
     // RiskEvaluationResult contract, but the pack itself only knows portable
-    // condition codes), the "only first instance" flagging history, and the
-    // "3 consecutive visits with no improvement" streak (infant nutrition
-    // conditions, Appendix D §2.4) — all merged into `answers` so the rule
-    // pack sees them as ordinary evaluation inputs (see
-    // anc-risk.rulesJson.ts / infant-risk.rulesJson.ts's `conditionIds`/
-    // `isFirstInstance`/`consecutiveNoImprovementCount`).
-    const conditionIdsByCode = await this.repository.findConditionIdsByPhase(dto.riskPhase);
+    // condition codes) and the "only first instance" flagging history
+    // concurrently — findEverFlaggedConditionCodes doesn't depend on
+    // conditionCodes at all, so it need not wait on findConditionIdsByPhase
+    // (see PR #172 review: these were previously sequenced with no
+    // dependency between them).
+    const [conditionIdsByCode, everFlaggedCodes] = await Promise.all([
+      this.repository.findConditionIdsByPhase(dto.riskPhase),
+      this.repository.findEverFlaggedConditionCodes(dto.beneficiaryId),
+    ]);
     if (conditionIdsByCode.size === 0) {
       throw badRequest(
         `No ACTIVE risk_conditions rows are seeded for phase "${dto.riskPhase}" — the rule ` +
@@ -111,10 +113,17 @@ export class RiskAssessmentService {
       );
     }
     const conditionCodes = [...conditionIdsByCode.keys()];
-    const [everFlaggedCodes, consecutiveNoImprovementByCode] = await Promise.all([
-      this.repository.findEverFlaggedConditionCodes(dto.beneficiaryId),
-      this.repository.findConsecutiveNoImprovementCount(dto.beneficiaryId, conditionCodes),
-    ]);
+    // The "3 consecutive visits with no improvement" streak (infant
+    // nutrition conditions, Appendix D §2.4) genuinely needs conditionCodes,
+    // so it can only start once findConditionIdsByPhase resolves. It's also
+    // only read by infant-risk.rulesJson.ts — skip the query entirely for
+    // ANC/REGISTRATION/DELIVERY/PP, whose rule packs never read it (see
+    // PR #172 review: it was previously called unconditionally on every
+    // phase, adding an unused DB round trip per submission).
+    const NO_IMPROVEMENT_PHASES = new Set(['NN', 'INC', 'CCV']);
+    const consecutiveNoImprovementByCode = NO_IMPROVEMENT_PHASES.has(dto.riskPhase)
+      ? await this.repository.findConsecutiveNoImprovementCount(dto.beneficiaryId, conditionCodes)
+      : new Map<string, number>();
     const conditionIds = Object.fromEntries(conditionIdsByCode);
     const isFirstInstance = Object.fromEntries(
       conditionCodes.map((code) => [code, !everFlaggedCodes.has(code)]),
@@ -213,5 +222,49 @@ export class RiskAssessmentService {
     }
 
     return assessment;
+  }
+
+  /**
+   * The RiskAssessment rows for a caller-resolved set of visit ids — used by
+   * visit-form-service's BR-13 (CCV opening risk state) resolver, which
+   * already knows which visit ids are "the last 3 completed INC visits" (it
+   * owns visit_instances/visit_schedules; this service doesn't, no
+   * cross-service join per the forklift rule). An empty `visitIds` returns
+   * an empty array without querying.
+   *
+   * Same IDOR guard as create(): beneficiaryId is caller-supplied, so
+   * without this check any authenticated SAKHI could read another
+   * beneficiary's risk assessments by visit id. Mirrors create()'s
+   * ownership check exactly (SAKHI own-case only, SUPERVISOR own-roster
+   * only, MANAGER/ADMIN unrestricted).
+   */
+  async listByVisitIds(
+    beneficiaryId: string,
+    visitIds: string[],
+    caller: AuthenticatedUser,
+    authorizationHeader: string,
+  ) {
+    const beneficiary = await this.beneficiaryClient.getById(beneficiaryId, authorizationHeader);
+    if (!beneficiary) throw notFound('Beneficiary case not found.');
+
+    if (caller.roles.includes('SAKHI')) {
+      if (beneficiary.sakhiId !== caller.id) {
+        throw forbidden('This beneficiary case is outside your own roster.');
+      }
+    } else if (caller.roles.includes('SUPERVISOR')) {
+      if (!caller.projectId) {
+        throw forbidden('Supervisor caller has no project scope.');
+      }
+      const roster = await listSakhiIdsForSupervisor(
+        caller.projectId,
+        caller.id,
+        authorizationHeader,
+      );
+      if (!roster.includes(beneficiary.sakhiId)) {
+        throw forbidden("This beneficiary case is outside this Supervisor's roster.");
+      }
+    }
+
+    return this.repository.findByVisitIds(beneficiaryId, visitIds);
   }
 }

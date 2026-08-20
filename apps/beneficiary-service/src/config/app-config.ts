@@ -22,6 +22,11 @@ const schema = z.object({
   // NOT auth-service's own port directly, since the gateway is what verifies
   // the caller's forwarded Authorization header.
   AUTH_SERVICE_BASE_URL: z.string().url().default('http://localhost:3000'),
+  // Base URL of the gateway to reach risk-referral-service's risk-conditions
+  // endpoint through, same routing pattern as AUTH_SERVICE_BASE_URL above —
+  // used to resolve a BeneficiaryRiskConditionSummary row's riskConditionId
+  // to a display name for GET /beneficiaries/:id.
+  RISK_REFERRAL_SERVICE_BASE_URL: z.string().url().default('http://localhost:3000'),
   // Base64-encoded 32-byte keys consumed directly by @armman/service-commons'
   // pii-crypto module (encryptPii/decryptPii, hashForSearch) via process.env.
   // Validated here so the service fails fast at boot rather than at first use.

@@ -100,6 +100,8 @@ export function withDecryptedName<T extends { pii: PiiRow; [k: string]: unknown 
           birthLengthCm: child.birthLengthCm,
           prematureFlag: child.prematureFlag,
           linkedAncCase: child.linkedAncCase,
+          currentPhase: child.currentPhase,
+          ccvOpeningRiskState: child.ccvOpeningRiskState,
         }
       : null;
   }
@@ -114,6 +116,11 @@ export function withDecryptedName<T extends { pii: PiiRow; [k: string]: unknown 
   }
   const risks = c.riskConditionSummaries as Record<string, unknown>[] | undefined;
   if (risks !== undefined) {
+    // conditionCode/conditionName/gradeScale start null — this projector has
+    // no network access to resolve them (risk-referral-service owns that
+    // data). beneficiary.service.ts's projectCase fills them in afterward via
+    // riskCondition.client.ts, degrading to null on an unresolved id or an
+    // unreachable risk-referral-service rather than failing the request.
     projected.riskConditionSummaries = risks.map((r) => ({
       riskConditionId: r.riskConditionId,
       phase: r.phase,
@@ -123,6 +130,9 @@ export function withDecryptedName<T extends { pii: PiiRow; [k: string]: unknown 
       everAtRiskFlag: r.everAtRiskFlag,
       currentReferralTriggerFlag: r.currentReferralTriggerFlag,
       currentHrVisitTriggerFlag: r.currentHrVisitTriggerFlag,
+      conditionCode: null as string | null,
+      conditionName: null as string | null,
+      gradeScale: null as string | null,
     }));
   }
   const history = c.statusHistory as Record<string, unknown>[] | undefined;

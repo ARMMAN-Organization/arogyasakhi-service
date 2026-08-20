@@ -29,6 +29,19 @@ const versionParamsSchema = z
 const activeVersionQuerySchema = z
   .object({ asOf: z.coerce.date().optional().openapi({ example: '2026-07-20T00:00:00.000Z' }) })
   .strict();
+const beneficiaryIdParamsSchema = z.object({ beneficiaryId: z.string().uuid() }).strict();
+
+const vitalsSnapshotSchema = z.object({
+  visitId: z.string().uuid().nullable(),
+  submittedAt: z.string().datetime().nullable(),
+  weightKg: z.number().nullable(),
+  systolicBp: z.number().nullable(),
+  diastolicBp: z.number().nullable(),
+  temperatureF: z.number().nullable(),
+  hemoglobinGDl: z.number().nullable(),
+  muacCm: z.number().nullable(),
+  respiratoryRate: z.number().nullable(),
+});
 
 // Request DTOs annotated with examples for Swagger UI; validation behavior is
 // unchanged (`.openapi()` only attaches documentation metadata).
@@ -219,5 +232,37 @@ export function registerFormRoutes(doc: DocumentedRouter, service: FormService) 
     validate(formCodeParamsSchema, 'params'),
     validateBody(createSubmissionRequestSchema),
     controller.createSubmission,
+  );
+
+  doc.get(
+    '/beneficiaries/:beneficiaryId/latest-visit-vitals',
+    {
+      summary:
+        "The beneficiary's most recent visit-linked clinical submission's vitals " +
+        '(weight/BP/temperature/hemoglobin/MUAC/respiratory rate), projected out of that ' +
+        "visit's formDataJson per its own form's question_codes (ANC_VISIT/POSTPARTUM_VISIT/" +
+        'NEONATAL_VISIT/INC_VISIT/CCV_VISIT — the only visit forms that capture vitals; ' +
+        '*_CLOSURE_VISIT and one-time forms like MOTHER_REGISTRATION never contribute). Fields ' +
+        "the visit's own form doesn't ask are null, not omitted — the response shape never " +
+        'depends on which visit type was most recent. Returns an all-null snapshot (not 404) ' +
+        'when the beneficiary has never had a visit-linked clinical submission.',
+      tags: ['Forms'],
+      params: beneficiaryIdParamsSchema,
+      responses: {
+        200: {
+          description: "The beneficiary's latest visit vitals (or an all-null snapshot)",
+          schema: envelope(vitalsSnapshotSchema),
+        },
+        400: errorResponse(400, { message: 'beneficiaryId: Invalid uuid' }),
+        401: errorResponse(401),
+        403: errorResponse(403, { message: 'This beneficiary case is outside your own roster.' }),
+        404: errorResponse(404, { message: 'Beneficiary case not found.' }),
+        500: errorResponse(500),
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER'),
+    validate(beneficiaryIdParamsSchema, 'params'),
+    controller.getLatestVisitVitals,
   );
 }

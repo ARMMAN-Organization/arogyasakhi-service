@@ -12,10 +12,16 @@
  * Same input contract as anc-risk.rulesJson.ts: `conditionIds`
  * (conditionCode -> risk_condition_id) and `isFirstInstance`
  * (conditionCode -> boolean) are resolved by the caller and merged into the
- * evaluation input. `consecutiveNoImprovementCount` (conditionCode ->
- * count) is also caller-resolved, for the nutrition conditions' "3
- * consecutive visits with no improvement" referral rule (Appendix D §2.4)
- * — this pack has no DB access of its own for any of the three.
+ * evaluation input. `isFirstInstance` gates two distinct things here: the
+ * nutrition conditions' referral trigger (via nutritionReferralTrigger) and,
+ * separately, Hypothermia/Hyperthermia/Danger Signs' HR-visit trigger (via
+ * record()'s hrGateByFirstInstance option — Appendix D's "single instance"
+ * HR-visit cadence for these three, vs. "every instance till normal" for
+ * the nutrition conditions; PR #172 review). `consecutiveNoImprovementCount`
+ * (conditionCode -> count) is also caller-resolved, for the nutrition
+ * conditions' "3 consecutive visits with no improvement" referral rule
+ * (Appendix D §2.4) — this pack has no DB access of its own for any of the
+ * three.
  *
  * All other input fields are read directly under their real
  * NEONATAL_VISIT/INFANT_VISIT (INC_VISIT/CCV_VISIT) question_codes — see
@@ -56,6 +62,13 @@
  *     — every condition here only has Normal/Mild/Severe branches (Anemia/
  *     Hypertension in the ANC pack are the only conditions with a true
  *     Moderate band across both sheets).
+ *
+ * This pack deliberately does NOT read risk_conditions.referralRequiredDefault
+ * /educationRequiredDefault — those are reference/display-only master data
+ * (see schema.prisma's RiskCondition doc comment); the referral/HR-visit/
+ * education trigger logic per condition below (grade-dependent,
+ * first-instance-gated, no-improvement-streak-gated) is this pack's own
+ * sole source of truth (see PR #172 review).
  */
 export const infantRiskRulesJson = {
   contentType: 'application/vnd.gorules.decision',
@@ -85,15 +98,23 @@ const handler = (input) => {
     return id;
   }
 
+  // hrGateByFirstInstance: for Hypothermia/Hyperthermia/Danger Signs, whose
+  // HR-visit trigger is "single instance" per Appendix D Part 2 (unlike the
+  // nutrition conditions above them, which HR-visit-trigger every instance
+  // till normal) — see PR #172 review. isFirst defaults to true when the
+  // caller's isFirstInstance map has no entry for this code, matching
+  // anc-risk.rulesJson.ts's same default-true convention.
   function record(code, grade, observedValueJson, opts) {
     opts = opts || {};
+    const isFirst = firstInstance[code] !== false;
+    const hrEligible = opts.hrVisitTrigger === true;
     results.push({
       riskConditionId: requireConditionId(code),
       grade,
       gradeRank: GRADE_RANK[grade],
       isReferralTrigger: opts.referralTrigger === true,
       isEducationTrigger: grade !== 'NORMAL',
-      isHrVisitTrigger: opts.hrVisitTrigger === true,
+      isHrVisitTrigger: opts.hrGateByFirstInstance ? hrEligible && isFirst : hrEligible,
       observedValueJson,
     });
   }
@@ -147,18 +168,23 @@ const handler = (input) => {
   }
 
   // --- Hypothermia / Hyperthermia (INFANT_VISIT/INC_VISIT/CCV_VISIT only -
-  // no temperature field on NEONATAL_VISIT). See doc-comment default #1. ---
+  // no temperature field on NEONATAL_VISIT). See doc-comment default #1.
+  // HR-visit trigger is single-instance per Appendix D Part 2 (PR #172
+  // review) - a neonate hypothermic across visits 1 and 2 fires the 15-day
+  // HR follow-up only once, on first instance, not stacked every visit. ---
   const bodyTempF = input.child_temprature_in_f;
   if (typeof bodyTempF === 'number') {
     const hypoGrade = bodyTempF < 96 ? 'SEVERE' : 'NORMAL';
     record('INFANT_HYPOTHERMIA', hypoGrade, { bodyTempF }, {
       referralTrigger: hypoGrade !== 'NORMAL',
+      hrGateByFirstInstance: true,
       hrVisitTrigger: hypoGrade !== 'NORMAL',
     });
 
     const hyperGrade = bodyTempF > 100 ? 'SEVERE' : 'NORMAL';
     record('INFANT_HYPERTHERMIA', hyperGrade, { bodyTempF }, {
       referralTrigger: hyperGrade !== 'NORMAL',
+      hrGateByFirstInstance: true,
       hrVisitTrigger: hyperGrade !== 'NORMAL',
     });
   }
@@ -199,7 +225,9 @@ const handler = (input) => {
   }
 
   // --- Danger Signs (single condition row, any sign present). Each form
-  // has its own question_code and its own "no signs" sentinel value. ---
+  // has its own question_code and its own "no signs" sentinel value.
+  // HR-visit trigger is single-instance per Appendix D Part 2 (PR #172
+  // review), same reasoning as Hypothermia/Hyperthermia above. ---
   const nnDangerSigns = Array.isArray(input.danger_signs) ? input.danger_signs : null;
   const infantDangerSigns = Array.isArray(input.is_the_baby_showing_any_danger_signs_since_last_visit)
     ? input.is_the_baby_showing_any_danger_signs_since_last_visit
@@ -210,6 +238,7 @@ const handler = (input) => {
     const grade = dangerSignsPresent.length > 0 ? 'MILD' : 'NORMAL';
     record('INFANT_DANGER_SIGNS', grade, { dangerSigns: dangerSignsPresent }, {
       referralTrigger: grade !== 'NORMAL',
+      hrGateByFirstInstance: true,
       hrVisitTrigger: grade !== 'NORMAL',
     });
   }

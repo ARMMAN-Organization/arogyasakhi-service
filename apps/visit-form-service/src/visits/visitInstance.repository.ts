@@ -37,6 +37,55 @@ export class VisitInstanceRepository {
   }
 
   /**
+   * The beneficiary's `limit` most-recently-completed INC-type visits
+   * (visitType NEONATAL_VISIT/INC_VISIT's schedule-level VisitCodeType,
+   * INC/INC_HR), most recent first — used by BR-13's CCV opening-risk-state
+   * resolver, which needs "the last 3 completed INC visits" specifically,
+   * not just any 3 visits. "Completed" means `completedAt` is set — a
+   * scheduled-but-not-yet-submitted visit row doesn't count. Joins through
+   * VisitSchedule for visitType since VisitInstance itself carries no
+   * phase/type column of its own. Ordered by completedAt (not
+   * actualVisitDate) — the same "completed" column the where clause filters
+   * on, and the convention findRecentCompletedVisits below uses; a visit
+   * conducted earlier but submitted/completed later must not outrank a more
+   * recently completed one, since recentIncVisits[0] is treated as *the
+   * most recent* completed INC visit for mostRecentIncVisitHrType.
+   */
+  findRecentCompletedIncVisits(beneficiaryId: string, limit: number) {
+    return this.prisma.visitInstance.findMany({
+      where: {
+        beneficiaryId,
+        isDeleted: false,
+        completedAt: { not: null },
+        schedule: { visitType: { in: ['INC', 'INC_HR'] } },
+      },
+      orderBy: { completedAt: 'desc' },
+      take: limit,
+    });
+  }
+
+  /**
+   * Every completed INC-type visit id in the beneficiary's 0-12m window
+   * (NN/INC/INC_HR — the full infant-tracking period BR-13's "was HR ever
+   * detected in 0-12m" scan covers, per ccv.rulesJson.ts's own doc comment),
+   * for the CCV opening-risk-state resolver to check each against
+   * risk-referral-service's hrDetectedFlag. Ids only (not full rows) — the
+   * caller batches these into one GET /risk-assessments call.
+   */
+  async findAllCompletedInfantVisitIds(beneficiaryId: string): Promise<string[]> {
+    const visits = await this.prisma.visitInstance.findMany({
+      where: {
+        beneficiaryId,
+        isDeleted: false,
+        completedAt: { not: null },
+        schedule: { visitType: { in: ['NN', 'INC', 'INC_HR'] } },
+      },
+      select: { id: true },
+    });
+    return visits.map((v) => v.id);
+  }
+
+  /**
    * Counts in-scope visits by their raw statusLookupValueId, filtered by
    * VisitSchedule.scheduledDate — the date the visit was DUE, not
    * actualVisitDate (when/if it happened), per the visit-summary widget's
@@ -242,6 +291,52 @@ export class VisitInstanceRepository {
         id: true,
         beneficiaryId: true,
         schedule: { select: { visitCode: true, scheduledDate: true } },
+      },
+    });
+  }
+
+  /**
+   * The beneficiary's `limit` most-recently-completed visits (newest
+   * `completedAt` first), for GET /beneficiaries/:beneficiaryId/visit-history
+   * (FR-S-4.6 — pre-visit vitals). "Completed" means `completedAt` is set,
+   * same convention as findRecentCompletedIncVisits — a scheduled-but-not-
+   * yet-submitted or in-progress visit doesn't count. Optionally narrowed to
+   * a set of formCodes (resolved by the service layer from the caller's own
+   * formCode/visitType query params via visit-code-form-map.ts) via the
+   * linked FormSubmission's own formVersion.formDefinition.formCode — this
+   * table has no formCode column of its own. Includes each visit's most
+   * recent non-deleted FormSubmission (there is normally exactly one per
+   * visit; `take: 1` + `orderBy submittedAt desc` guards against a
+   * theoretical resubmission leaving more than one row) so the service
+   * layer can extract vitals without a second round trip.
+   */
+  findRecentCompletedVisits(beneficiaryId: string, formCodes: string[] | undefined, limit: number) {
+    return this.prisma.visitInstance.findMany({
+      where: {
+        beneficiaryId,
+        isDeleted: false,
+        completedAt: { not: null },
+        ...(formCodes && formCodes.length > 0
+          ? {
+              formSubmissions: {
+                some: {
+                  isDeleted: false,
+                  formVersion: { formDefinition: { formCode: { in: formCodes } } },
+                },
+              },
+            }
+          : {}),
+      },
+      orderBy: { completedAt: 'desc' },
+      take: limit,
+      include: {
+        schedule: { select: { visitCode: true } },
+        formSubmissions: {
+          where: { isDeleted: false },
+          orderBy: { submittedAt: 'desc' },
+          take: 1,
+          include: { formVersion: { include: { formDefinition: true } } },
+        },
       },
     });
   }

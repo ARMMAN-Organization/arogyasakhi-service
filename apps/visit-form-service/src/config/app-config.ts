@@ -21,6 +21,13 @@ const schema = z.object({
   // derivation call) — NOT auth-service's own port directly, since the
   // gateway is what verifies the caller's forwarded Authorization header.
   AUTH_SERVICE_BASE_URL: z.string().url().default('http://localhost:3000'),
+  // rules-service's seeded "Arogya Sakhi CCV Visit Scheduling" RuleSet id —
+  // no field anywhere maps a schedule journey (like "CCV") to its ruleSetId
+  // (unlike risk-grading, which uses FormDefinition.riskRuleSetId), so this
+  // is configured directly. Optional: BR-13's CCV opening-risk-state
+  // computation is skipped (not failed) when unset — see
+  // ccvOpeningRiskState.client.ts.
+  CCV_SCHEDULE_RULE_SET_ID: z.string().uuid().optional(),
 });
 
 export type AppConfig = z.infer<typeof schema>;

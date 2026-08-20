@@ -20,6 +20,7 @@ describe('RiskConditionService', () => {
   const repository = {
     findByConditionCodes: jest.fn(),
     findAllActive: jest.fn(),
+    findByIds: jest.fn(),
   } as unknown as jest.Mocked<RiskConditionRepository>;
   let service: RiskConditionService;
 
@@ -80,6 +81,34 @@ describe('RiskConditionService', () => {
       expect(result).toEqual(rows);
       expect(repository.findAllActive).toHaveBeenCalledWith();
       expect(repository.findByConditionCodes).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('listByIds', () => {
+    it('returns the full row for each resolved id', async () => {
+      const rows = [buildRow({ id: 'rc-1' }), buildRow({ id: 'rc-2' })];
+      repository.findByIds.mockResolvedValue(rows as never);
+
+      const result = await service.listByIds(['rc-1', 'rc-2']);
+
+      expect(result).toEqual(rows);
+      expect(repository.findByIds).toHaveBeenCalledWith(['rc-1', 'rc-2']);
+    });
+
+    it('omits ids the repository did not resolve, without throwing', async () => {
+      const rows = [buildRow({ id: 'rc-1' })];
+      repository.findByIds.mockResolvedValue(rows as never);
+
+      const result = await service.listByIds(['rc-1', 'rc-unseeded']);
+
+      expect(result).toEqual(rows);
+    });
+
+    it('short-circuits to an empty array without querying when given no ids', async () => {
+      const result = await service.listByIds([]);
+
+      expect(result).toEqual([]);
+      expect(repository.findByIds).not.toHaveBeenCalled();
     });
   });
 });

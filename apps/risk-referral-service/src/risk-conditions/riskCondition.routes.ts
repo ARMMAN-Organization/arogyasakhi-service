@@ -14,6 +14,16 @@ const riskConditionSchema = z.object({
   entityType: z.enum(['MOTHER', 'CHILD']),
   phase: z.enum(['REGISTRATION', 'ANC', 'DELIVERY', 'PP', 'NN', 'INC', 'CCV']),
   gradeScale: z.enum(['BINARY', 'NORMAL_MILD_MODERATE_SEVERE', 'NORMAL_LOW_MEDIUM_HIGH']),
+  // Reference/display-only master data (e.g. for an admin condition-catalog
+  // screen) — NOT read by the grading rule packs (anc-risk.rulesJson.ts /
+  // infant-risk.rulesJson.ts) at evaluation time. A condition's actual
+  // referral/education trigger is grade-, first-instance-, and
+  // accompanied-by-condition-dependent (e.g. Anemia only refers on
+  // MODERATE/SEVERE, not MILD; Hypotension only refers when accompanied by
+  // another flagged condition) — logic a single static per-condition
+  // boolean cannot correctly express. Changing this field does NOT change
+  // grading behavior; the rule pack itself is the only source of truth for
+  // that (see PR #172 review).
   referralRequiredDefault: z.boolean(),
   educationRequiredDefault: z.boolean(),
   status: z.enum(['ACTIVE', 'INACTIVE']),
@@ -44,10 +54,11 @@ export function registerRiskConditionRoutes(doc: DocumentedRouter, service: Risk
     '/risk-conditions',
     {
       summary:
-        'List risk conditions. With conditionCode, resolves a comma-separated batch of ' +
-        'condition codes to their full rows (codes with no matching ACTIVE row are omitted ' +
-        'from the response rather than failing the whole batch). Without conditionCode, ' +
-        'returns every ACTIVE risk condition — the master-data download.',
+        'List risk conditions. With conditionCode OR ids (not both — 400 if both given), ' +
+        'resolves a comma-separated batch of condition codes or riskConditionIds to their ' +
+        'full rows (entries with no matching ACTIVE row are omitted from the response rather ' +
+        'than failing the whole batch). With neither, returns every ACTIVE risk condition — ' +
+        'the master-data download.',
       tags: ['Risk Conditions'],
       responses: {
         200: {
@@ -56,12 +67,15 @@ export function registerRiskConditionRoutes(doc: DocumentedRouter, service: Risk
             'resolved subset matching the requested codes',
           schema: envelope(z.array(riskConditionSchema)),
         },
-        400: { description: 'Malformed conditionCode query param', schema: apiErrorSchema },
+        400: {
+          description: 'Malformed conditionCode/ids query param, or both given together',
+          schema: apiErrorSchema,
+        },
         401: { description: 'Unauthenticated', schema: apiErrorSchema },
       },
     },
     trustGatewayIdentity,
     validate(listRiskConditionsQuerySchema, 'query'),
-    controller.listByConditionCodes,
+    controller.list,
   );
 }

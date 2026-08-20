@@ -1,13 +1,27 @@
+/**
+ * ccvOpeningRiskState.resolver.ts (jest.mock()'d below) imports appConfig
+ * from ../config/app-config, which calls process.exit(1) at module-load
+ * time if DATABASE_URL isn't a valid URL — jest.mock() still requires the
+ * real module once to build its automatic mock, so this must be set before
+ * any import below (see reporting-etl-service's info.controller.spec.ts and
+ * risk-referral-service's riskCondition.controller.spec.ts for the same
+ * workaround).
+ */
+process.env.DATABASE_URL ??= 'postgresql://user:pass@localhost:5432/test';
+
 import { FormService } from './form.service';
 import type { FormRepository } from './form.repository';
+import type { VisitInstanceRepository } from '../visits/visitInstance.repository';
 import * as geographyClient from '../geography/geography.client';
 import { syncSocioDemographics } from '../beneficiaries/socio-demographics.client';
 import { syncHealthHistory } from '../beneficiaries/health-history.client';
-import { findBeneficiaryById } from '../beneficiaries/beneficiary.client';
+import { findBeneficiaryById, findBeneficiaryOwnership } from '../beneficiaries/beneficiary.client';
 import { createChildBeneficiary } from '../beneficiaries/create-child.client';
 import { updateBeneficiaryPhase } from '../beneficiaries/update-phase.client';
 import { createClosure, resolveClosureReasonLookupId } from '../closures/closure.client';
 import { triggerRiskAssessment } from '../risk-assessments/riskAssessment.client';
+import { resolveAndWriteCcvOpeningRiskState } from './ccvOpeningRiskState.resolver';
+import { resolveVisitCompletion } from './visitCompletion.resolver';
 
 jest.mock('../geography/geography.client');
 jest.mock('../beneficiaries/socio-demographics.client');
@@ -17,6 +31,8 @@ jest.mock('../beneficiaries/create-child.client');
 jest.mock('../beneficiaries/update-phase.client');
 jest.mock('../closures/closure.client');
 jest.mock('../risk-assessments/riskAssessment.client');
+jest.mock('./ccvOpeningRiskState.resolver');
+jest.mock('./visitCompletion.resolver');
 
 describe('FormService', () => {
   const repository = {
@@ -32,12 +48,19 @@ describe('FormService', () => {
     createSubmission: jest.fn(),
     findVisitById: jest.fn(),
     findLatestSubmissionByBeneficiaryAndFormCode: jest.fn(),
+    findLatestVisitSubmission: jest.fn(),
   } as unknown as jest.Mocked<FormRepository>;
+  const visitInstanceRepository = {
+    findRecentCompletedIncVisits: jest.fn(),
+    findAllCompletedInfantVisitIds: jest.fn(),
+    findById: jest.fn(),
+    updateStatus: jest.fn(),
+  } as unknown as jest.Mocked<VisitInstanceRepository>;
   let service: FormService;
 
   beforeEach(() => {
     jest.resetAllMocks();
-    service = new FormService(repository);
+    service = new FormService(repository, visitInstanceRepository);
   });
 
   describe('getActiveVersion', () => {
@@ -557,6 +580,90 @@ describe('FormService', () => {
       expect(result).toEqual({ id: 'sub-1' });
     });
 
+    describe('visit completion on submission', () => {
+      it('attempts to complete the linked visit after a successful visit-linked submission', async () => {
+        repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+        repository.findVersionById.mockResolvedValue(publishedVersion as never);
+        repository.findVisitById.mockResolvedValue({ id: 'visit-1' } as never);
+        repository.createSubmission.mockResolvedValue({ id: 'sub-1' } as never);
+
+        await service.createSubmission(
+          'MOTHER_REGISTRATION',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            visitId: 'visit-1',
+            localSubmissionUuid: 'uuid-1',
+            formData: { phone_owner: 'SELF' },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(resolveVisitCompletion)).toHaveBeenCalledWith(
+          'MOTHER_REGISTRATION',
+          'visit-1',
+          'u1',
+          visitInstanceRepository,
+          'Bearer test-token',
+        );
+      });
+
+      it('still attempts completion (with visitId undefined) for a submission with no visitId', async () => {
+        repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+        repository.findVersionById.mockResolvedValue(publishedVersion as never);
+        repository.createSubmission.mockResolvedValue({ id: 'sub-1' } as never);
+
+        await service.createSubmission(
+          'MOTHER_REGISTRATION',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: { phone_owner: 'SELF' },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        // resolveVisitCompletion itself no-ops on an undefined visitId — the
+        // service always calls it, the resolver decides whether there's
+        // anything to complete (same "always call, resolver no-ops" shape
+        // as the other best-effort calls in this function).
+        expect(jest.mocked(resolveVisitCompletion)).toHaveBeenCalledWith(
+          'MOTHER_REGISTRATION',
+          undefined,
+          'u1',
+          visitInstanceRepository,
+          'Bearer test-token',
+        );
+      });
+
+      it('is awaited after the submission already committed, so its own best-effort tolerance (see visitCompletion.resolver.spec.ts) is what protects the submission, not an extra guard here', async () => {
+        repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+        repository.findVersionById.mockResolvedValue(publishedVersion as never);
+        repository.findVisitById.mockResolvedValue({ id: 'visit-1' } as never);
+        repository.createSubmission.mockResolvedValue({ id: 'sub-1' } as never);
+        jest.mocked(resolveVisitCompletion).mockResolvedValue(undefined);
+
+        const result = await service.createSubmission(
+          'MOTHER_REGISTRATION',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            visitId: 'visit-1',
+            localSubmissionUuid: 'uuid-1',
+            formData: { phone_owner: 'SELF' },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(result).toEqual({ id: 'sub-1' });
+        expect(repository.createSubmission).toHaveBeenCalled();
+      });
+    });
+
     describe('visitId validation', () => {
       it('proceeds when visitId is omitted — no visit check is attempted', async () => {
         repository.findSubmissionByLocalUuid.mockResolvedValue(null);
@@ -936,12 +1043,14 @@ describe('FormService', () => {
         projectId: 'project-1',
         beneficiaryTypeLookupId: 'type-1',
         caseTypeLookupId: 'case-type-1',
+        currentPhase: 'ANC',
         villageId: 'village-1',
         padaId: 'pada-1',
         healthSubCentreId: 'sc-1',
         phcId: 'phc-1',
         stateId: 'state-1',
         districtId: 'district-1',
+        childDateOfBirth: null,
       };
 
       const deliveryVersion = {
@@ -1151,12 +1260,14 @@ describe('FormService', () => {
         projectId: 'project-1',
         beneficiaryTypeLookupId: 'type-1',
         caseTypeLookupId: 'case-type-1',
+        currentPhase: 'ANC',
         villageId: 'village-1',
         padaId: 'pada-1',
         healthSubCentreId: 'sc-1',
         phcId: 'phc-1',
         stateId: 'state-1',
         districtId: 'district-1',
+        childDateOfBirth: null,
       };
 
       const deliveryVersion = {
@@ -1323,6 +1434,252 @@ describe('FormService', () => {
       });
     });
 
+    describe('CHILD phase advance on INC/CCV visit submission (CR-041)', () => {
+      const incVersion = {
+        id: 'version-1',
+        status: 'PUBLISHED',
+        formDefinition: { formCode: 'INC_VISIT' },
+        schemaJson: [
+          {
+            question_code: 'birth_weight_in_kg',
+            label: 'x',
+            input_type: 'number',
+            required: false,
+          },
+        ],
+        validationJson: [],
+      };
+
+      beforeEach(() => {
+        repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+        repository.createSubmission.mockResolvedValue({ id: 'sub-1' } as never);
+      });
+
+      it('advances a CHILD case to INC on an INC_VISIT submission', async () => {
+        repository.findVersionById.mockResolvedValue(incVersion as never);
+
+        await service.createSubmission(
+          'INC_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'child-1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {},
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(updateBeneficiaryPhase)).toHaveBeenCalledWith(
+          'child-1',
+          'INC',
+          'Bearer test-token',
+        );
+      });
+
+      it('advances a CHILD case to INC on the legacy NEONATAL_VISIT alias', async () => {
+        repository.findVersionById.mockResolvedValue({
+          ...incVersion,
+          formDefinition: { formCode: 'NEONATAL_VISIT' },
+        } as never);
+
+        await service.createSubmission(
+          'NEONATAL_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'child-1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {},
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(updateBeneficiaryPhase)).toHaveBeenCalledWith(
+          'child-1',
+          'INC',
+          'Bearer test-token',
+        );
+      });
+
+      it('advances a CHILD case to CCV on a CCV_VISIT submission', async () => {
+        repository.findVersionById.mockResolvedValue({
+          ...incVersion,
+          formDefinition: { formCode: 'CCV_VISIT' },
+        } as never);
+
+        await service.createSubmission(
+          'CCV_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'child-1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {},
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(updateBeneficiaryPhase)).toHaveBeenCalledWith(
+          'child-1',
+          'CCV',
+          'Bearer test-token',
+        );
+      });
+
+      it('does not call updateBeneficiaryPhase for a form code with no CHILD-phase mapping', async () => {
+        repository.findVersionById.mockResolvedValue({
+          ...incVersion,
+          formDefinition: { formCode: 'MOTHER_REGISTRATION' },
+        } as never);
+
+        await service.createSubmission(
+          'MOTHER_REGISTRATION',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {},
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(updateBeneficiaryPhase)).not.toHaveBeenCalled();
+      });
+
+      it('still saves the submission even if the phase-advance call rejects outright', async () => {
+        repository.findVersionById.mockResolvedValue(incVersion as never);
+        jest.mocked(updateBeneficiaryPhase).mockRejectedValueOnce(new Error('network down'));
+
+        const result = await service.createSubmission(
+          'INC_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'child-1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {},
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(result).toEqual(expect.objectContaining({ id: 'sub-1' }));
+      });
+    });
+
+    describe('BR-13 ccvOpeningRiskState trigger on the actual INC->CCV transition', () => {
+      const ccvVersion = {
+        id: 'version-1',
+        status: 'PUBLISHED',
+        formDefinition: { formCode: 'CCV_VISIT' },
+        schemaJson: [
+          { question_code: 'weight_in_kg', label: 'x', input_type: 'number', required: false },
+        ],
+        validationJson: [],
+      };
+
+      beforeEach(() => {
+        repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+        repository.createSubmission.mockResolvedValue({ id: 'sub-1' } as never);
+        repository.findVersionById.mockResolvedValue(ccvVersion as never);
+      });
+
+      it('resolves ccvOpeningRiskState when the case was at INC before this submission (the actual transition)', async () => {
+        jest.mocked(findBeneficiaryById).mockResolvedValue({
+          currentPhase: 'INC',
+          childDateOfBirth: '2025-01-01T00:00:00.000Z',
+        } as never);
+
+        await service.createSubmission(
+          'CCV_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'child-1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {},
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(resolveAndWriteCcvOpeningRiskState)).toHaveBeenCalledWith(
+          'child-1',
+          '2025-01-01T00:00:00.000Z',
+          visitInstanceRepository,
+          'Bearer test-token',
+        );
+      });
+
+      it('does not resolve ccvOpeningRiskState on a repeat CCV_VISIT (case already at CCV)', async () => {
+        jest.mocked(findBeneficiaryById).mockResolvedValue({
+          currentPhase: 'CCV',
+          childDateOfBirth: '2025-01-01T00:00:00.000Z',
+        } as never);
+
+        await service.createSubmission(
+          'CCV_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'child-1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {},
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(resolveAndWriteCcvOpeningRiskState)).not.toHaveBeenCalled();
+      });
+
+      it('does not resolve ccvOpeningRiskState when the case has no childDateOfBirth', async () => {
+        jest.mocked(findBeneficiaryById).mockResolvedValue({
+          currentPhase: 'INC',
+          childDateOfBirth: null,
+        } as never);
+
+        await service.createSubmission(
+          'CCV_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'child-1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {},
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(resolveAndWriteCcvOpeningRiskState)).not.toHaveBeenCalled();
+      });
+
+      it('does not resolve ccvOpeningRiskState for a non-CCV CHILD phase advance (INC_VISIT)', async () => {
+        repository.findVersionById.mockResolvedValue({
+          ...ccvVersion,
+          formDefinition: { formCode: 'INC_VISIT' },
+        } as never);
+        jest.mocked(findBeneficiaryById).mockResolvedValue({
+          currentPhase: 'NN',
+          childDateOfBirth: '2025-01-01T00:00:00.000Z',
+        } as never);
+
+        await service.createSubmission(
+          'INC_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'child-1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {},
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(resolveAndWriteCcvOpeningRiskState)).not.toHaveBeenCalled();
+        expect(jest.mocked(findBeneficiaryById)).not.toHaveBeenCalled();
+      });
+    });
+
     describe('ANC_VISIT risk assessment trigger with registration-derived answers', () => {
       const ancVersion = {
         id: 'version-1',
@@ -1346,7 +1703,7 @@ describe('FormService', () => {
         repository.findVisitById.mockResolvedValue({ id: 'visit-1' } as never);
       });
 
-      it("merges age and badObstetricHistoryFlag from the beneficiary's MOTHER_REGISTRATION submission", async () => {
+      it("merges age/gravida/livingChildren/abortions/priorComplications from the beneficiary's MOTHER_REGISTRATION submission, and passes riskPhase ANC", async () => {
         repository.findLatestSubmissionByBeneficiaryAndFormCode.mockResolvedValue({
           formDataJson: {
             age_of_the_beneficiary: 22,
@@ -1376,21 +1733,28 @@ describe('FormService', () => {
           'b1',
           'MOTHER_REGISTRATION',
         );
+        // badObstetricHistoryFlag is no longer computed here — the ANC risk
+        // rule pack (GoRules) now derives it from these raw fields (see
+        // PR #172 review: business thresholds live in GoRules).
         expect(jest.mocked(triggerRiskAssessment)).toHaveBeenCalledWith(
           expect.objectContaining({
+            riskPhase: 'ANC',
             answers: {
               haemoglobin_hb_g_dl: 9.5,
               age: 22,
-              badObstetricHistoryFlag: false,
+              gravida: 2,
+              livingChildren: 2,
+              abortions: 0,
+              priorComplications: ['no_complications'],
             },
           }),
           'Bearer test-token',
         );
       });
 
-      it('flags badObstetricHistoryFlag true when gravida exceeds 4', async () => {
+      it('passes only the registration fields that are actually present as numbers/arrays', async () => {
         repository.findLatestSubmissionByBeneficiaryAndFormCode.mockResolvedValue({
-          formDataJson: { age_of_the_beneficiary: 30, gravida_total_number_of_pregnancies: 5 },
+          formDataJson: { gravida_total_number_of_pregnancies: 3, living_children: 1 },
         } as never);
 
         await service.createSubmission(
@@ -1408,92 +1772,7 @@ describe('FormService', () => {
 
         expect(jest.mocked(triggerRiskAssessment)).toHaveBeenCalledWith(
           expect.objectContaining({
-            answers: expect.objectContaining({ badObstetricHistoryFlag: true }),
-          }),
-          'Bearer test-token',
-        );
-      });
-
-      it('flags badObstetricHistoryFlag true when livingChildren is less than gravida', async () => {
-        repository.findLatestSubmissionByBeneficiaryAndFormCode.mockResolvedValue({
-          formDataJson: {
-            gravida_total_number_of_pregnancies: 3,
-            living_children: 1,
-          },
-        } as never);
-
-        await service.createSubmission(
-          'ANC_VISIT',
-          {
-            formVersionId: 'version-1',
-            beneficiaryId: 'b1',
-            visitId: 'visit-1',
-            localSubmissionUuid: 'uuid-1',
-            formData: {},
-          },
-          'u1',
-          'Bearer test-token',
-        );
-
-        expect(jest.mocked(triggerRiskAssessment)).toHaveBeenCalledWith(
-          expect.objectContaining({
-            answers: expect.objectContaining({ badObstetricHistoryFlag: true }),
-          }),
-          'Bearer test-token',
-        );
-      });
-
-      it('flags badObstetricHistoryFlag true when abortions >= 2', async () => {
-        repository.findLatestSubmissionByBeneficiaryAndFormCode.mockResolvedValue({
-          formDataJson: { abortions_pregnancy_losses_before_24_weeks: 2 },
-        } as never);
-
-        await service.createSubmission(
-          'ANC_VISIT',
-          {
-            formVersionId: 'version-1',
-            beneficiaryId: 'b1',
-            visitId: 'visit-1',
-            localSubmissionUuid: 'uuid-1',
-            formData: {},
-          },
-          'u1',
-          'Bearer test-token',
-        );
-
-        expect(jest.mocked(triggerRiskAssessment)).toHaveBeenCalledWith(
-          expect.objectContaining({
-            answers: expect.objectContaining({ badObstetricHistoryFlag: true }),
-          }),
-          'Bearer test-token',
-        );
-      });
-
-      it('flags badObstetricHistoryFlag true when a non-"no_complications" answer is present', async () => {
-        repository.findLatestSubmissionByBeneficiaryAndFormCode.mockResolvedValue({
-          formDataJson: {
-            did_you_experience_any_complications_during_birth_delivery_in_previous_pregnancies: [
-              'yes_miscarriage',
-            ],
-          },
-        } as never);
-
-        await service.createSubmission(
-          'ANC_VISIT',
-          {
-            formVersionId: 'version-1',
-            beneficiaryId: 'b1',
-            visitId: 'visit-1',
-            localSubmissionUuid: 'uuid-1',
-            formData: {},
-          },
-          'u1',
-          'Bearer test-token',
-        );
-
-        expect(jest.mocked(triggerRiskAssessment)).toHaveBeenCalledWith(
-          expect.objectContaining({
-            answers: expect.objectContaining({ badObstetricHistoryFlag: true }),
+            answers: { gravida: 3, livingChildren: 1 },
           }),
           'Bearer test-token',
         );
@@ -1516,7 +1795,7 @@ describe('FormService', () => {
         );
 
         expect(jest.mocked(triggerRiskAssessment)).toHaveBeenCalledWith(
-          expect.objectContaining({ answers: { haemoglobin_hb_g_dl: 9.5 } }),
+          expect.objectContaining({ riskPhase: 'ANC', answers: { haemoglobin_hb_g_dl: 9.5 } }),
           'Bearer test-token',
         );
       });
@@ -1544,6 +1823,89 @@ describe('FormService', () => {
       });
     });
 
+    describe('FORM_CODE_TO_RISK_PHASE mapping (PR #172 review)', () => {
+      // Every formCode below is given riskRuleSetId: 'rule-set-1' so
+      // triggerRiskAssessment fires, and each assertion checks the actual
+      // riskPhase value sent — not just objectContaining(...) with the field
+      // omitted, which previously let an invalid/fallback riskPhase (e.g. the
+      // raw, un-mapped formCode) pass this suite silently (see PR #172
+      // review: expect.objectContaining never asserted riskPhase, so
+      // DELIVERY_VISIT/POSTPARTUM_VISIT/MOTHER_REGISTRATION/CHILD_REGISTRATION
+      // being missing from the map went undetected).
+      beforeEach(() => {
+        repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+        repository.createSubmission.mockResolvedValue({ id: 'sub-1' } as never);
+        repository.findVisitById.mockResolvedValue({ id: 'visit-1' } as never);
+        repository.findLatestSubmissionByBeneficiaryAndFormCode.mockResolvedValue(null);
+      });
+
+      const CASES: Array<[string, string]> = [
+        ['MOTHER_REGISTRATION', 'REGISTRATION'],
+        ['CHILD_REGISTRATION', 'REGISTRATION'],
+        ['ANC_VISIT', 'ANC'],
+        ['DELIVERY_VISIT', 'DELIVERY'],
+        ['POSTPARTUM_VISIT', 'PP'],
+        ['NEONATAL_VISIT', 'INC'],
+        ['INC_VISIT', 'INC'],
+        ['CCV_VISIT', 'INC'],
+      ];
+
+      it.each(CASES)('sends riskPhase %s -> %s', async (formCode, expectedRiskPhase) => {
+        repository.findVersionById.mockResolvedValue({
+          id: 'version-1',
+          status: 'PUBLISHED',
+          formDefinition: { formCode, riskRuleSetId: 'rule-set-1' },
+          schemaJson: [{ question_code: 'x', label: 'x', input_type: 'text', required: false }],
+          validationJson: [],
+        } as never);
+
+        await service.createSubmission(
+          formCode,
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            visitId: 'visit-1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {},
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(triggerRiskAssessment)).toHaveBeenCalledWith(
+          expect.objectContaining({ riskPhase: expectedRiskPhase }),
+          'Bearer test-token',
+        );
+      });
+
+      it('throws rather than sending an invalid riskPhase for a formCode with a riskRuleSetId but no mapping entry', async () => {
+        repository.findVersionById.mockResolvedValue({
+          id: 'version-1',
+          status: 'PUBLISHED',
+          formDefinition: { formCode: 'SOME_UNMAPPED_FORM', riskRuleSetId: 'rule-set-1' },
+          schemaJson: [{ question_code: 'x', label: 'x', input_type: 'text', required: false }],
+          validationJson: [],
+        } as never);
+
+        await expect(
+          service.createSubmission(
+            'SOME_UNMAPPED_FORM',
+            {
+              formVersionId: 'version-1',
+              beneficiaryId: 'b1',
+              visitId: 'visit-1',
+              localSubmissionUuid: 'uuid-1',
+              formData: {},
+            },
+            'u1',
+            'Bearer test-token',
+          ),
+        ).rejects.toThrow(/FORM_CODE_TO_RISK_PHASE/);
+
+        expect(jest.mocked(triggerRiskAssessment)).not.toHaveBeenCalled();
+      });
+    });
+
     describe('DELIVERY_VISIT childBeneficiaryIds in response', () => {
       const motherCase = {
         id: 'b1',
@@ -1551,12 +1913,14 @@ describe('FormService', () => {
         projectId: 'project-1',
         beneficiaryTypeLookupId: 'type-1',
         caseTypeLookupId: 'case-type-1',
+        currentPhase: 'ANC',
         villageId: 'village-1',
         padaId: 'pada-1',
         healthSubCentreId: 'sc-1',
         phcId: 'phc-1',
         stateId: 'state-1',
         districtId: 'district-1',
+        childDateOfBirth: null,
       };
 
       const deliveryVersion = {
@@ -2203,6 +2567,83 @@ describe('FormService', () => {
           'Bearer test-token',
         );
       });
+    });
+  });
+
+  describe('getLatestVisitVitals', () => {
+    const sakhiCaller = { id: 'sakhi-1', roles: ['SAKHI'] as const };
+
+    beforeEach(() => {
+      jest.mocked(findBeneficiaryOwnership).mockResolvedValue({ sakhiId: 'sakhi-1' } as never);
+    });
+
+    it("extracts the latest visit's vitals per its own formCode's mapping", async () => {
+      repository.findLatestVisitSubmission.mockResolvedValue({
+        visitId: 'visit-1',
+        submittedAt: new Date('2026-08-01T00:00:00.000Z'),
+        formDataJson: { blood_pressure_bp_systolic: 120, haemoglobin_hb_g_dl: 11.5 },
+        formVersion: { formDefinition: { formCode: 'ANC_VISIT' } },
+      } as never);
+
+      const result = await service.getLatestVisitVitals('ben-1', sakhiCaller, 'Bearer test-token');
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          visitId: 'visit-1',
+          submittedAt: new Date('2026-08-01T00:00:00.000Z'),
+          systolicBp: 120,
+          hemoglobinGDl: 11.5,
+          weightKg: null,
+        }),
+      );
+    });
+
+    it('returns an all-null snapshot with null visitId/submittedAt when the beneficiary has never had a qualifying visit', async () => {
+      repository.findLatestVisitSubmission.mockResolvedValue(null);
+
+      const result = await service.getLatestVisitVitals('ben-1', sakhiCaller, 'Bearer test-token');
+
+      expect(result).toEqual({
+        visitId: null,
+        submittedAt: null,
+        weightKg: null,
+        systolicBp: null,
+        diastolicBp: null,
+        temperatureF: null,
+        hemoglobinGDl: null,
+        muacCm: null,
+        respiratoryRate: null,
+        bloodSugarMgDl: null,
+      });
+    });
+
+    it("rejects when the beneficiary is outside the calling SAKHI's own roster", async () => {
+      jest.mocked(findBeneficiaryOwnership).mockResolvedValue({ sakhiId: 'someone-else' } as never);
+
+      await expect(
+        service.getLatestVisitVitals('ben-1', sakhiCaller, 'Bearer test-token'),
+      ).rejects.toThrow(/outside your own roster/);
+      expect(repository.findLatestVisitSubmission).not.toHaveBeenCalled();
+    });
+
+    it('throws not-found when the beneficiary case does not exist', async () => {
+      jest.mocked(findBeneficiaryOwnership).mockResolvedValue(null);
+
+      await expect(
+        service.getLatestVisitVitals('ben-1', sakhiCaller, 'Bearer test-token'),
+      ).rejects.toThrow(/not found/i);
+    });
+
+    it('resolves ownership via findBeneficiaryOwnership, NOT findBeneficiaryById — using the full profile lookup here would call back into GET /beneficiaries/:id and recreate the vitals request cycle', async () => {
+      repository.findLatestVisitSubmission.mockResolvedValue(null);
+
+      await service.getLatestVisitVitals('ben-1', sakhiCaller, 'Bearer test-token');
+
+      expect(jest.mocked(findBeneficiaryOwnership)).toHaveBeenCalledWith(
+        'ben-1',
+        'Bearer test-token',
+      );
+      expect(jest.mocked(findBeneficiaryById)).not.toHaveBeenCalled();
     });
   });
 });

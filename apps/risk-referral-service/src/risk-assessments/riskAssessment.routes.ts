@@ -3,9 +3,11 @@ import { z } from 'zod';
 import type { RiskAssessmentService } from './riskAssessment.service';
 import { createRiskAssessmentController } from './riskAssessment.controller';
 import { createRiskAssessmentSchema } from './dto/create-riskAssessment.dto';
+import { listRiskAssessmentsQuerySchema } from './dto/list-riskAssessments.dto';
 import {
   requireRoles,
   trustGatewayIdentity,
+  validate,
   validateBody,
   type DocumentedRouter,
 } from '../app.module';
@@ -123,5 +125,32 @@ export function registerRiskAssessmentRoutes(
     requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
     validateBody(createRiskAssessmentRequestSchema),
     controller.create,
+  );
+
+  doc.get(
+    '/risk-assessments',
+    {
+      summary:
+        'List RiskAssessment rows for a given beneficiaryId + comma-separated visitIds batch ' +
+        '— for a caller (e.g. visit-form-service resolving BR-13’s CCV opening risk state) ' +
+        'that already knows which visits it cares about, since this service does not own ' +
+        'visit_instances/visit_schedules and cannot resolve "which visits" itself.',
+      tags: ['Risk Assessments'],
+      responses: {
+        200: {
+          description: 'RiskAssessment rows matching the given visit ids, most recent first',
+          schema: envelope(z.array(riskAssessmentSchema.omit({ riskFlags: true }))),
+        },
+        400: {
+          description: 'Malformed beneficiaryId/visitIds query param',
+          schema: apiErrorSchema,
+        },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(listRiskAssessmentsQuerySchema, 'query'),
+    controller.listByVisitIds,
   );
 }

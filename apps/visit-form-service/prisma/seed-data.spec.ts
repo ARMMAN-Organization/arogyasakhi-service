@@ -471,7 +471,34 @@ describe('infant-visit.json', () => {
     });
   });
 
-  it('gates every Q5+ field behind met-beneficiary=yes', () => {
+  const VACCINE_DATE_PAIRS: [string, string][] = [
+    ['bcg', 'bcg_date'],
+    ['opv_0', 'opv_0_date'],
+    ['hepatitis_b_birth_dose', 'hepatitis_b_date_birth_dose'],
+    ['vitamin_k', 'vitamin_k_date'],
+    ['opv_1', 'opv_1_date'],
+    ['pentavalent_1_dpt1', 'pentavalent_1_dpt1_date'],
+    ['ipv_1', 'ipv_1_date'],
+    ['rotavirus1', 'rotavirus1_date'],
+    ['pcv1', 'pcv1_date'],
+    ['opv_2', 'opv_2_date'],
+    ['pentavalent_2_dpt2', 'pentavalent_2_dpt2_date'],
+    ['rotavirus2', 'rotavirus2_date'],
+    ['opv_3', 'opv_3_date'],
+    ['pentavalent_3_dpt3', 'pentavalent_3_dpt3_date'],
+    ['ipv2', 'ipv2_date'],
+    ['rotavirus3', 'rotavirus3_date'],
+    ['pcv2', 'pcv2_date'],
+    ['mmr_1_mr1', 'mmr_1_mr1_date'],
+    ['pcv_booster', 'pcv_booster_date'],
+    ['vitamin_a', 'vitamin_a_date'],
+    ['opv_booster', 'opv_booster_date'],
+    ['mmr2_mr2', 'mmr2_mr2_date'],
+    ['dpt_booster1', 'dpt_booster1_date'],
+  ];
+
+  it('gates every Q5+ field behind met-beneficiary=yes, except each vaccine date field which is gated behind its own vaccine answer', () => {
+    const vaccineDateCodes = new Set(VACCINE_DATE_PAIRS.map(([, dateCode]) => dateCode));
     for (const field of fields) {
       if (
         [
@@ -479,7 +506,8 @@ describe('infant-visit.json', () => {
           'visit_type',
           'have_you_been_able_to_meet_the_beneficiary_for_the_visit',
           'if_no_mention_reasons',
-        ].includes(field.question_code)
+        ].includes(field.question_code) ||
+        vaccineDateCodes.has(field.question_code)
       ) {
         continue;
       }
@@ -487,36 +515,19 @@ describe('infant-visit.json', () => {
     }
   });
 
-  it('has every vaccine date field present, gated behind met-beneficiary=yes', () => {
-    const vaccinePairs: [string, string][] = [
-      ['bcg', 'bcg_date'],
-      ['opv_0', 'opv_0_date'],
-      ['hepatitis_b_birth_dose', 'hepatitis_b_date_birth_dose'],
-      ['vitamin_k', 'vitamin_k_date'],
-      ['opv_1', 'opv_1_date'],
-      ['pentavalent_1_dpt1', 'pentavalent_1_dpt1_date'],
-      ['ipv_1', 'ipv_1_date'],
-      ['rotavirus1', 'rotavirus1_date'],
-      ['pcv1', 'pcv1_date'],
-      ['opv_2', 'opv_2_date'],
-      ['pentavalent_2_dpt2', 'pentavalent_2_dpt2_date'],
-      ['rotavirus2', 'rotavirus2_date'],
-      ['opv_3', 'opv_3_date'],
-      ['pentavalent_3_dpt3', 'pentavalent_3_dpt3_date'],
-      ['ipv2', 'ipv2_date'],
-      ['rotavirus3', 'rotavirus3_date'],
-      ['pcv2', 'pcv2_date'],
-      ['mmr_1_mr1', 'mmr_1_mr1_date'],
-      ['pcv_booster', 'pcv_booster_date'],
-      ['vitamin_a', 'vitamin_a_date'],
-      ['opv_booster', 'opv_booster_date'],
-      ['mmr2_mr2', 'mmr2_mr2_date'],
-      ['dpt_booster1', 'dpt_booster1_date'],
-    ];
-
-    for (const [vaccineCode, dateCode] of vaccinePairs) {
+  it('shows each vaccine date field only when its own preceding Yes/No answer is yes, not merely when the beneficiary was met', () => {
+    // The outer met-beneficiary gate is still enforced transitively: the
+    // vaccine radio field itself is gated behind met-beneficiary=yes, and an
+    // unanswered/hidden governing field already evaluates to hidden
+    // downstream — so the date field doesn't need to also reference it.
+    for (const [vaccineCode, dateCode] of VACCINE_DATE_PAIRS) {
       expect(byCode.get(vaccineCode)).toBeDefined();
-      expect(byCode.get(dateCode)?.visibleWhen).toEqual(MET_BENEFICIARY_YES_INFANT);
+      expect(byCode.get(vaccineCode)?.visibleWhen).toEqual(MET_BENEFICIARY_YES_INFANT);
+      expect(byCode.get(dateCode)?.visibleWhen).toEqual({
+        field: vaccineCode,
+        operator: 'eq',
+        value: 'yes',
+      });
     }
   });
 

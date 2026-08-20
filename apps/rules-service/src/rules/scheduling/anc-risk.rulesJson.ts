@@ -19,12 +19,15 @@
  * MOTHER_REGISTRATION question_codes (see
  * apps/visit-form-service/prisma/seed-data/anc-visit.json and
  * mother-registration.json) — the caller passes dto.formData through
- * largely unchanged (plus the registration-derived age/
- * badObstetricHistoryFlag merge, see form.service.ts's
+ * largely unchanged (plus the registration-derived age/gravida/
+ * livingChildren/abortions/priorComplications merge, see form.service.ts's
  * resolveAncRiskRegistrationAnswers), rather than this pack expecting a
  * separately-named/normalized field set. This intentionally couples the
  * pack to the form's current field names; a form schema change to any of
- * the fields read below requires updating this pack in lockstep.
+ * the fields read below requires updating this pack in lockstep. The Bad
+ * Obstetric History threshold itself (G>4/L<P/abortions>=2/prior
+ * complications) is computed inside this pack, not by the caller — business
+ * thresholds live in GoRules per .claude/CLAUDE.md.
  *
  * Per Appendix D §D.7, every condition is graded and returned every visit,
  * including NORMAL results — this pack never omits a condition from its
@@ -63,6 +66,13 @@
  * via form.service.ts) is responsible for fetching and merging those
  * registration-time answers into this pack's input alongside the current
  * visit's own answers.
+ *
+ * This pack deliberately does NOT read risk_conditions.referralRequiredDefault
+ * /educationRequiredDefault — those are reference/display-only master data
+ * (see schema.prisma's RiskCondition doc comment); the referral/HR-visit/
+ * education trigger logic per condition below (grade-dependent,
+ * first-instance-gated, accompanied-by-gated) is this pack's own sole
+ * source of truth (see PR #172 review).
  */
 export const ancRiskRulesJson = {
   contentType: 'application/vnd.gorules.decision',
@@ -106,9 +116,7 @@ const handler = (input) => {
       gradeRank: GRADE_RANK[grade],
       isReferralTrigger: gateByFirstInstance ? referralEligible && isFirst : referralEligible,
       isEducationTrigger: grade !== 'NORMAL',
-      isHrVisitTrigger: opts.hrGateByFirstInstance
-        ? hrEligible && isFirst
-        : hrEligible,
+      isHrVisitTrigger: hrEligible,
       observedValueJson,
     });
   }
@@ -158,11 +166,36 @@ const handler = (input) => {
   }
 
   // --- Bad Obstetric History (only first instance) ---
-  // Merged in by form.service.ts, derived from MOTHER_REGISTRATION answers
-  // (gravida/livingChildren/abortions/prior complications).
-  if (typeof input.badObstetricHistoryFlag === 'boolean') {
-    const grade = input.badObstetricHistoryFlag ? 'MILD' : 'NORMAL';
-    record('BAD_OBSTETRIC_HISTORY', grade, { badObstetricHistoryFlag: input.badObstetricHistoryFlag }, {
+  // Raw fields (gravida/livingChildren/abortions/priorComplications) are
+  // merged in by form.service.ts from MOTHER_REGISTRATION answers, read
+  // unchanged — the G>4/L<P/abortions>=2/prior-complications threshold
+  // itself is business-threshold math and belongs here (GoRules), not in
+  // TypeScript (see .claude/CLAUDE.md's "business thresholds/rates ... live
+  // in GoRules" rule; PR #172 review). Only gravida/livingChildren/abortions
+  // and priorComplications need be present for this condition to be graded
+  // at all — matches resolveAncRiskRegistrationAnswers's "no registration
+  // submission yet" skip, now expressed per-field instead of via one
+  // pre-derived flag.
+  const gravida = input.gravida;
+  const livingChildren = input.livingChildren;
+  const abortions = input.abortions;
+  const priorComplications = input.priorComplications;
+  if (
+    typeof gravida === 'number' ||
+    typeof abortions === 'number' ||
+    Array.isArray(priorComplications)
+  ) {
+    const badObstetricHistoryFlag =
+      (typeof gravida === 'number' && gravida > 4) ||
+      (typeof gravida === 'number' &&
+        typeof livingChildren === 'number' &&
+        livingChildren < gravida) ||
+      (typeof abortions === 'number' && abortions >= 2) ||
+      (Array.isArray(priorComplications) &&
+        priorComplications.some((code) => code !== 'no_complications'));
+
+    const grade = badObstetricHistoryFlag ? 'MILD' : 'NORMAL';
+    record('BAD_OBSTETRIC_HISTORY', grade, { badObstetricHistoryFlag }, {
       onlyFirstInstance: true,
       referralTrigger: grade !== 'NORMAL',
       hrVisitTrigger: grade !== 'NORMAL',
@@ -312,7 +345,6 @@ const handler = (input) => {
     record('GESTATIONAL_WEIGHT_GAIN', grade, { weightGainStatus }, {
       onlyFirstInstance: true,
       referralTrigger: grade !== 'NORMAL',
-      hrGateByFirstInstance: false,
       hrVisitTrigger: grade !== 'NORMAL',
     });
   }
@@ -362,11 +394,20 @@ const handler = (input) => {
   const nonNormalCodes = new Set(
     results.filter((r) => r.grade !== 'NORMAL').map((r) => r.riskConditionId),
   );
+  const accompaniedGateIds = new Set(
+    ['HYPOTENSION', 'HYPOGLYCEMIA', 'HYPOTHERMIA'].map((code) => conditionIds[code]),
+  );
   function patchAccompaniedTrigger(code, ownFlagged) {
     if (!ownFlagged) return;
     const entry = results.find((r) => r.riskConditionId === conditionIds[code]);
     if (!entry) return;
-    const otherNonNormalExists = [...nonNormalCodes].some((id) => id !== entry.riskConditionId);
+    // Excludes both the gate's own condition and the sibling gates
+    // (HYPOTENSION/HYPOGLYCEMIA/HYPOTHERMIA) — two accompanied-only
+    // conditions co-occurring with nothing else are not "accompanied by"
+    // each other's un-triggered state (see this pack's doc comment above).
+    const otherNonNormalExists = [...nonNormalCodes].some(
+      (id) => id !== entry.riskConditionId && !accompaniedGateIds.has(id),
+    );
     entry.isReferralTrigger = otherNonNormalExists;
     entry.isHrVisitTrigger = otherNonNormalExists;
   }
