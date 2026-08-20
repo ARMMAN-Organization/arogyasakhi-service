@@ -37,6 +37,50 @@ export class VisitInstanceRepository {
   }
 
   /**
+   * The beneficiary's `limit` most-recently-completed INC-type visits
+   * (visitType NEONATAL_VISIT/INC_VISIT's schedule-level VisitCodeType,
+   * INC/INC_HR), most recent first — used by BR-13's CCV opening-risk-state
+   * resolver, which needs "the last 3 completed INC visits" specifically,
+   * not just any 3 visits. "Completed" means `completedAt` is set — a
+   * scheduled-but-not-yet-submitted visit row doesn't count. Joins through
+   * VisitSchedule for visitType since VisitInstance itself carries no
+   * phase/type column of its own.
+   */
+  findRecentCompletedIncVisits(beneficiaryId: string, limit: number) {
+    return this.prisma.visitInstance.findMany({
+      where: {
+        beneficiaryId,
+        isDeleted: false,
+        completedAt: { not: null },
+        schedule: { visitType: { in: ['INC', 'INC_HR'] } },
+      },
+      orderBy: { actualVisitDate: { sort: 'desc', nulls: 'last' } },
+      take: limit,
+    });
+  }
+
+  /**
+   * Every completed INC-type visit id in the beneficiary's 0-12m window
+   * (NN/INC/INC_HR — the full infant-tracking period BR-13's "was HR ever
+   * detected in 0-12m" scan covers, per ccv.rulesJson.ts's own doc comment),
+   * for the CCV opening-risk-state resolver to check each against
+   * risk-referral-service's hrDetectedFlag. Ids only (not full rows) — the
+   * caller batches these into one GET /risk-assessments call.
+   */
+  async findAllCompletedInfantVisitIds(beneficiaryId: string): Promise<string[]> {
+    const visits = await this.prisma.visitInstance.findMany({
+      where: {
+        beneficiaryId,
+        isDeleted: false,
+        completedAt: { not: null },
+        schedule: { visitType: { in: ['NN', 'INC', 'INC_HR'] } },
+      },
+      select: { id: true },
+    });
+    return visits.map((v) => v.id);
+  }
+
+  /**
    * Counts in-scope visits by their raw statusLookupValueId, filtered by
    * VisitSchedule.scheduledDate — the date the visit was DUE, not
    * actualVisitDate (when/if it happened), per the visit-summary widget's

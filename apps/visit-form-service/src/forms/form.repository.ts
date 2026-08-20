@@ -141,6 +141,39 @@ export class FormRepository {
   }
 
   /**
+   * The most recent visit-linked submission for `beneficiaryId` across the
+   * clinical-visit form codes that actually capture vitals (ANC_VISIT,
+   * POSTPARTUM_VISIT, NEONATAL_VISIT, INC_VISIT, CCV_VISIT — see
+   * vitalsExtractor.ts's own FORM_CODE_TO_VITALS_MAPPING for why exactly
+   * these and not e.g. *_CLOSURE_VISIT, which capture no vitals fields) —
+   * used by GET /beneficiaries/:beneficiaryId/latest-visit-vitals. Ordered
+   * by submittedAt, not the visit's own scheduledDate, since a Sakhi may
+   * submit a visit's form days after conducting it and `submittedAt` is
+   * this table's own reliable timestamp regardless of that lag. Excludes
+   * non-visit-linked submissions (visitId null) — those are one-time forms
+   * like MOTHER_REGISTRATION, not part of the visit history this endpoint
+   * surfaces.
+   */
+  findLatestVisitSubmission(beneficiaryId: string) {
+    return this.prisma.formSubmission.findFirst({
+      where: {
+        beneficiaryId,
+        isDeleted: false,
+        visitId: { not: null },
+        formVersion: {
+          formDefinition: {
+            formCode: {
+              in: ['ANC_VISIT', 'POSTPARTUM_VISIT', 'NEONATAL_VISIT', 'INC_VISIT', 'CCV_VISIT'],
+            },
+          },
+        },
+      },
+      orderBy: { submittedAt: 'desc' },
+      include: { formVersion: { include: { formDefinition: true } } },
+    });
+  }
+
+  /**
    * Existence + ownership check for a visit-linked submission's visitId,
    * before the insert — visit_instances is owned by this same service
    * (unlike beneficiary_cases/form_versions' cross-service equivalents), so

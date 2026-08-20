@@ -68,5 +68,18 @@ export function createFormController(service: FormService) {
       );
       res.status(201).json(ok(created));
     }),
+
+    getLatestVisitVitals: asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const { beneficiaryId } = req.params as unknown as { beneficiaryId: string };
+      const vitals = await service.getLatestVisitVitals(
+        beneficiaryId,
+        req.user,
+        authorizationHeader,
+      );
+      res.json(ok(vitals));
+    }),
   };
 }

@@ -2,7 +2,11 @@ import { FormRepository } from './form.repository';
 
 describe('FormRepository', () => {
   const findFirst = jest.fn();
-  const prisma = { visitInstance: { findFirst } } as never;
+  const formSubmissionFindFirst = jest.fn();
+  const prisma = {
+    visitInstance: { findFirst },
+    formSubmission: { findFirst: formSubmissionFindFirst },
+  } as never;
   let repository: FormRepository;
 
   beforeEach(() => {
@@ -43,6 +47,41 @@ describe('FormRepository', () => {
       expect(findFirst).toHaveBeenCalledWith({
         where: { id: 'visit-1', beneficiaryId: 'wrong-beneficiary', isDeleted: false },
       });
+    });
+  });
+
+  describe('findLatestVisitSubmission', () => {
+    it('queries visit-linked submissions restricted to the vitals-capturing form codes, ordered most-recent-first', async () => {
+      const submission = { id: 'sub-1', beneficiaryId: 'b1' };
+      formSubmissionFindFirst.mockResolvedValue(submission);
+
+      const result = await repository.findLatestVisitSubmission('b1');
+
+      expect(formSubmissionFindFirst).toHaveBeenCalledWith({
+        where: {
+          beneficiaryId: 'b1',
+          isDeleted: false,
+          visitId: { not: null },
+          formVersion: {
+            formDefinition: {
+              formCode: {
+                in: ['ANC_VISIT', 'POSTPARTUM_VISIT', 'NEONATAL_VISIT', 'INC_VISIT', 'CCV_VISIT'],
+              },
+            },
+          },
+        },
+        orderBy: { submittedAt: 'desc' },
+        include: { formVersion: { include: { formDefinition: true } } },
+      });
+      expect(result).toBe(submission);
+    });
+
+    it('returns null when the beneficiary has no visit-linked submission for a vitals-capturing form', async () => {
+      formSubmissionFindFirst.mockResolvedValue(null);
+
+      const result = await repository.findLatestVisitSubmission('b1');
+
+      expect(result).toBeNull();
     });
   });
 });

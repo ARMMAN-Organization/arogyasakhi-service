@@ -1,4 +1,4 @@
-import { badRequest, conflict, notFound, unprocessable } from '@armman/service-commons';
+import { badRequest, conflict, forbidden, notFound, unprocessable } from '@armman/service-commons';
 import type { FormRepository } from './form.repository';
 import { schemaJsonSchema, validationJsonSchema } from './dto/form-field.dto';
 import type { CreateDraftVersionInput } from './dto/create-draft-version.dto';
@@ -13,22 +13,37 @@ import {
 import { validateSubmission } from './form-validation';
 import { syncSocioDemographics } from '../beneficiaries/socio-demographics.client';
 import { syncHealthHistory } from '../beneficiaries/health-history.client';
-import { findBeneficiaryById } from '../beneficiaries/beneficiary.client';
+import { findBeneficiaryById, findBeneficiaryOwnership } from '../beneficiaries/beneficiary.client';
 import { createChildBeneficiary } from '../beneficiaries/create-child.client';
 import { updateBeneficiaryPhase } from '../beneficiaries/update-phase.client';
 import { createClosure, resolveClosureReasonLookupId } from '../closures/closure.client';
 import { getAncestorChain } from '../geography/geography.client';
 import { triggerRiskAssessment } from '../risk-assessments/riskAssessment.client';
+import type { VisitInstanceRepository } from '../visits/visitInstance.repository';
+import { resolveAndWriteCcvOpeningRiskState } from './ccvOpeningRiskState.resolver';
+import { extractVitals } from './vitalsExtractor';
+import { listSakhiIdsForSupervisor } from '../sakhis/sakhi.client';
 
 /**
  * Maps this service's own formCode to risk-referral-service's RiskCondition
  * .phase enum value, for the risk-assessment trigger's `riskPhase` field
  * (see riskAssessment.client.ts's doc comment on why the caller supplies
- * this). Only forms with a risk_rule_set_id configured ever reach this map;
- * a formCode with no entry here falls back to itself unchanged.
+ * this). Only forms with a risk_rule_set_id configured ever reach this map
+ * (see the `dto.visitId && version.formDefinition.riskRuleSetId` guard in
+ * createSubmission) — every formCode that can carry a riskRuleSetId today
+ * must have an entry here; there is no safe fallback (see the PR #172
+ * review: a fallback to the raw formCode previously here was never a valid
+ * riskPhase, and a form assigned a ruleSetId out-of-band would silently and
+ * permanently break its risk-grading pipeline the moment risk-referral-
+ * service's strict enum rejected it — logged only as a console.warn inside
+ * triggerRiskAssessment, with no retry).
  */
 const FORM_CODE_TO_RISK_PHASE: Record<string, string> = {
+  MOTHER_REGISTRATION: 'REGISTRATION',
+  CHILD_REGISTRATION: 'REGISTRATION',
   ANC_VISIT: 'ANC',
+  DELIVERY_VISIT: 'DELIVERY',
+  POSTPARTUM_VISIT: 'PP',
   // NN, INC, and CCV all share one seeded set of risk_conditions rows under
   // phase 'INC' — per SRS §3A.2.4, CCV reuses INC's HR thresholds verbatim,
   // and NEONATAL_VISIT's clinical fields (nutrition status, danger signs,
@@ -43,12 +58,30 @@ const FORM_CODE_TO_RISK_PHASE: Record<string, string> = {
 };
 
 /**
+ * Maps a formCode to the CHILD case phase its submission advances the
+ * beneficiary to (CR-041's CHILD side, mirroring FORM_CODE_TO_RISK_PHASE's
+ * lookup style) — see the phase-advance block below in createSubmission. A
+ * formCode with no entry here never triggers a phase-advance call.
+ * NEONATAL_VISIT is the legacy alias of INC_VISIT (see
+ * visit-code-form-map.ts) and shares its target phase for the same reason
+ * FORM_CODE_TO_RISK_PHASE aliases them together.
+ */
+const FORM_CODE_TO_CHILD_PHASE: Record<string, string> = {
+  NEONATAL_VISIT: 'INC',
+  INC_VISIT: 'INC',
+  CCV_VISIT: 'CCV',
+};
+
+/**
  * Business logic for the dynamic-forms feature: fetching the active version,
  * the DRAFT -> PUBLISHED lifecycle, and validating/persisting submissions.
  * Data access is delegated to the repository.
  */
 export class FormService {
-  constructor(private readonly repository: FormRepository) {}
+  constructor(
+    private readonly repository: FormRepository,
+    private readonly visitInstanceRepository: VisitInstanceRepository,
+  ) {}
 
   /**
    * `callerGeographyUnitId`/`authorizationHeader` are the caller's own scope
@@ -313,12 +346,61 @@ export class FormService {
       );
     }
 
+    // Advances a CHILD case's phase on its first INC-type or CCV-type visit
+    // submission (NN->INC, INC->CCV — CR-041's CHILD side; see
+    // FORM_CODE_TO_CHILD_PHASE). Best-effort, same tolerance as the Delivery
+    // phase-advance calls above: safe to call on every subsequent visit of
+    // the same type too, since applyPhaseChange treats an already-matching
+    // phase as a no-op rather than an error (see beneficiary.service.ts).
+    const childPhase = FORM_CODE_TO_CHILD_PHASE[formCode];
+    if (childPhase) {
+      // BR-13 must run exactly once, at the actual INC->CCV transition — not
+      // on every subsequent CCV_VISIT submission, which would keep
+      // re-computing (and overwriting) ccvOpeningRiskState after it's
+      // already set. Read the case's phase BEFORE advancing it so this
+      // check reflects "was this submission the one that moved CCV" rather
+      // than the post-advance state, which is always CCV once the first
+      // submission has landed.
+      const caseBeforeAdvance =
+        childPhase === 'CCV'
+          ? await findBeneficiaryById(dto.beneficiaryId, authorizationHeader)
+          : null;
+      const isFirstCcvTransition = caseBeforeAdvance?.currentPhase === 'INC';
+
+      await toleratePhaseAdvance(
+        updateBeneficiaryPhase(dto.beneficiaryId, childPhase, authorizationHeader),
+      );
+
+      if (isFirstCcvTransition && caseBeforeAdvance?.childDateOfBirth) {
+        await resolveAndWriteCcvOpeningRiskState(
+          dto.beneficiaryId,
+          caseBeforeAdvance.childDateOfBirth,
+          this.visitInstanceRepository,
+          authorizationHeader,
+        );
+      }
+    }
+
     // Triggers the risk-grading pipeline for every visit-linked submission
     // whose form has a risk_rule_set_id configured (see FormDefinition's
     // schema comment) — a form with no ruleSetId set (e.g. SUPERVISOR/SYSTEM
     // entityType forms) simply has nothing to evaluate. Best-effort, same
     // stance as syncSocioDemographics above.
     if (dto.visitId && version.formDefinition.riskRuleSetId) {
+      const riskPhase = FORM_CODE_TO_RISK_PHASE[formCode];
+      if (!riskPhase) {
+        // A form was given a riskRuleSetId out-of-band (no admin endpoint
+        // yet — see schema.prisma) without a matching FORM_CODE_TO_RISK_PHASE
+        // entry. Failing loudly here, instead of silently posting an invalid
+        // riskPhase that risk-referral-service's strict enum would reject
+        // downstream, surfaces the config gap immediately at submission time
+        // rather than as a permanently-broken, easy-to-miss best-effort
+        // console.warn (see PR #172 review).
+        throw new Error(
+          `Form "${formCode}" has a riskRuleSetId configured but no FORM_CODE_TO_RISK_PHASE ` +
+            'entry — add one before assigning this form a rule set.',
+        );
+      }
       const answers =
         formCode === 'ANC_VISIT'
           ? {
@@ -332,7 +414,7 @@ export class FormService {
           visitId: dto.visitId,
           submissionId: created.id,
           ruleSetId: version.formDefinition.riskRuleSetId,
-          riskPhase: FORM_CODE_TO_RISK_PHASE[formCode] ?? formCode,
+          riskPhase,
           answers,
         },
         authorizationHeader,
@@ -369,20 +451,15 @@ export class FormService {
    * recorded.
    */
   /**
-   * Derives the ANC risk pack's registration-time inputs (age, bad obstetric
-   * history) from this beneficiary's own MOTHER_REGISTRATION submission —
-   * a same-service, same-DB lookup (no cross-service call needed: both
-   * age_of_the_beneficiary and the obstetric-history answers live on this
-   * same form). Appendix D's Bad Obstetric
-   * History condition ("G>4, L<P, Pre-term, LSCS without spacing,
-   * consecutive losses/ABORTIONS >=2, stillbirth, neonatal death, or
-   * recurrent complications") only partially maps onto what
-   * MOTHER_REGISTRATION actually asks — this derivation covers
-   * gravida>4, livingChildren<gravida, abortions>=2, and any
-   * non-"no_complications" answer on the prior-complications question.
-   * Pre-term delivery history and LSCS-without-spacing have no captured
-   * field in this form today and are NOT evaluated — a known gap versus
-   * the full Appendix D definition, not a bug.
+   * Fetches the ANC risk pack's registration-time inputs (age and the raw
+   * obstetric-history fields the pack derives Bad Obstetric History from)
+   * from this beneficiary's own MOTHER_REGISTRATION submission — a
+   * same-service, same-DB lookup (no cross-service call needed). Passed
+   * through unchanged; the Bad Obstetric History threshold itself (G>4,
+   * L<P, abortions>=2, prior complications) is business-threshold math and
+   * lives in anc-risk.rulesJson.ts (GoRules), not here — see PR #172 review
+   * on .claude/CLAUDE.md's "business thresholds/rates ... live in GoRules"
+   * rule.
    *
    * Returns `{}` (no registration answers merged in) if no
    * MOTHER_REGISTRATION submission exists yet for this beneficiary — the
@@ -406,17 +483,12 @@ export class FormService {
     const complications =
       answers.did_you_experience_any_complications_during_birth_delivery_in_previous_pregnancies;
 
-    const badObstetricHistoryFlag =
-      (typeof gravida === 'number' && gravida > 4) ||
-      (typeof gravida === 'number' &&
-        typeof livingChildren === 'number' &&
-        livingChildren < gravida) ||
-      (typeof abortions === 'number' && abortions >= 2) ||
-      (Array.isArray(complications) && complications.some((code) => code !== 'no_complications'));
-
     return {
       ...(typeof age === 'number' ? { age } : {}),
-      badObstetricHistoryFlag,
+      ...(typeof gravida === 'number' ? { gravida } : {}),
+      ...(typeof livingChildren === 'number' ? { livingChildren } : {}),
+      ...(typeof abortions === 'number' ? { abortions } : {}),
+      ...(Array.isArray(complications) ? { priorComplications: complications } : {}),
     };
   }
 
@@ -591,6 +663,69 @@ export class FormService {
       },
       authorizationHeader,
     );
+  }
+
+  /**
+   * The most recent visit's vitals (weight/BP/temperature/hemoglobin/MUAC/
+   * respiratory rate) for `beneficiaryId`, projected out of that visit's
+   * formDataJson per its own formCode's question_codes (see
+   * vitalsExtractor.ts's own doc comment on why the mapping is
+   * formCode-specific — the question_codes genuinely differ across visit
+   * forms, not just cosmetically). Returns an all-null VitalsSnapshot (not
+   * a 404) when the beneficiary has never had a visit-linked clinical
+   * submission — this is the beneficiary's own valid, current state, not
+   * an error.
+   *
+   * IDOR guard: beneficiaryId is caller-supplied — without this check any
+   * authenticated SAKHI could read any beneficiary's vitals regardless of
+   * whose case it is. Resolves ownership via beneficiary-service's
+   * `GET /beneficiaries/:id/ownership` — deliberately NOT findBeneficiaryById
+   * (the full `GET /beneficiaries/:id`), whose own lastVisitVitals
+   * enrichment calls back into THIS endpoint; using it here would recreate
+   * that exact request cycle (getById -> resolveLatestVisitVitals -> here
+   * -> findBeneficiaryById -> getById -> ... forever, timing out on both
+   * sides — see findBeneficiaryOwnership's own doc comment). Same
+   * ownership rule as visitInstance.service.ts's own resolveCallerScoping:
+   * SAKHI own-case only, SUPERVISOR own-roster only, MANAGER/ADMIN
+   * unrestricted.
+   */
+  async getLatestVisitVitals(
+    beneficiaryId: string,
+    caller: { id: string; roles: readonly string[]; projectId?: string | null },
+    authorizationHeader: string,
+  ) {
+    const beneficiary = await findBeneficiaryOwnership(beneficiaryId, authorizationHeader);
+    if (!beneficiary) throw notFound('Beneficiary case not found.');
+
+    if (caller.roles.includes('SAKHI')) {
+      if (beneficiary.sakhiId !== caller.id) {
+        throw forbidden('This beneficiary case is outside your own roster.');
+      }
+    } else if (caller.roles.includes('SUPERVISOR')) {
+      if (!caller.projectId) {
+        throw forbidden('Supervisor caller has no project scope.');
+      }
+      const roster = await listSakhiIdsForSupervisor(
+        caller.projectId,
+        caller.id,
+        authorizationHeader,
+      );
+      if (!roster.includes(beneficiary.sakhiId)) {
+        throw forbidden("This beneficiary case is outside this Supervisor's roster.");
+      }
+    }
+
+    const submission = await this.repository.findLatestVisitSubmission(beneficiaryId);
+    if (!submission) return { visitId: null, submittedAt: null, ...extractVitals('', {}) };
+
+    return {
+      visitId: submission.visitId,
+      submittedAt: submission.submittedAt,
+      ...extractVitals(
+        submission.formVersion.formDefinition.formCode,
+        submission.formDataJson as Record<string, unknown>,
+      ),
+    };
   }
 }
 
