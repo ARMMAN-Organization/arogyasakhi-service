@@ -1,3 +1,12 @@
+/**
+ * riskCondition.controller.ts imports from ../app.module, which imports
+ * ./config/app-config, which calls process.exit(1) at module-load time if
+ * DATABASE_URL isn't a valid URL — so it must be set before the module
+ * under test is required (see reporting-etl-service's info.controller.spec.ts
+ * for the same workaround).
+ */
+process.env.DATABASE_URL ??= 'postgresql://user:pass@localhost:5432/test';
+
 import { createRiskConditionController } from './riskCondition.controller';
 import type { RiskConditionService } from './riskCondition.service';
 
