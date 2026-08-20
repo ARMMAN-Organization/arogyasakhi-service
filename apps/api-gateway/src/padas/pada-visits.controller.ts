@@ -67,7 +67,12 @@ function toCardCaseType(caseType: 'MOTHER' | 'CHILD'): 'mother' | 'infant' {
  * risk-referral-service (PENDING ReferralFollowup rows, unfiltered by
  * date). Both openCount/referralFollowUpCount are always returned
  * regardless of the requested `status`, so both tab labels can be shown
- * from one call. Auth is pada-scoped, not Sakhi-scoped: a caller may view
+ * from one call. Top-level pada.id/pada.name/villageName come from the same
+ * pada-breakdown lookup used for auth below and are always present, even
+ * when `visits` is empty — the per-card padaName/villageName are a separate
+ * copy kept for list rendering and are not derived from these.
+ *
+ * Auth is pada-scoped, not Sakhi-scoped: a caller may view
  * a pada's visits only if they have >=1 beneficiary there (checked via
  * their own pada-breakdown output, since there is no direct
  * Sakhi-owns-pada concept) — a Sakhi/Supervisor with no beneficiaries in
@@ -228,7 +233,15 @@ export function createPadaVisitsRouter(signer: Pick<TokenSigner, 'verify'>): Rou
                 };
               });
 
-      res.json(ok({ openCount, referralFollowUpCount, visits }));
+      res.json(
+        ok({
+          pada: { id: pada.padaId, name: pada.padaName },
+          villageName: pada.villageName,
+          openCount,
+          referralFollowUpCount,
+          visits,
+        }),
+      );
     }),
   );
 
