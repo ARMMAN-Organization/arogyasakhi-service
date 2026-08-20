@@ -829,7 +829,7 @@
         "value": "anc_1_completed",
         "operator": "eq"
       },
-      "question_code": "if_anc1_completed_are_you_identified_with_any_high_risk_condition_as_communicated_by_doctor_during_the_latest_anc_checkup_self_reported"
+      "question_code": "anc1_high_risk_condition_self_reported"
     },
     {
       "label": "Has the women received Td dose ?",
@@ -1414,7 +1414,7 @@
           "value_code": "chewing_tobacco_gutkha_khaini_mishri_etc"
         },
         {
-          "label": "Smoking tobacco (bidi, cigareTde)",
+          "label": "Smoking tobacco (bidi, cigarette)",
           "sort_order": 2,
           "value_code": "smoking_tobacco_bidi_cigaretde"
         },
@@ -1612,7 +1612,7 @@
     },
     {
       "rule": "EXCLUSIVE_OPTION",
-      "field": "if_anc1_completed_are_you_identified_with_any_high_risk_condition_as_communicated_by_doctor_during_the_latest_anc_checkup_self_reported",
+      "field": "anc1_high_risk_condition_self_reported",
       "exclusiveValues": ["no_known_medical_condition_identified_during_check_up", "don_t_know"]
     },
     {
