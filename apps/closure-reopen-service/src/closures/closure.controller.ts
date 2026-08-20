@@ -11,6 +11,17 @@ export function createClosureController(service: ClosureService) {
       res.json(ok(await service.list()));
     }),
 
+    getDecisionStatusBatch: asyncHandler(async (req, res) => {
+      const ids = String(req.query.ids)
+        .split(',')
+        .map((id) => id.trim());
+      res.json(ok(await service.getDecisionStatusByIds(ids)));
+    }),
+
+    getById: asyncHandler(async (req, res) => {
+      res.json(ok(await service.getById(req.params.id)));
+    }),
+
     create: asyncHandler(async (req, res) => {
       const created = await service.create(req.body, req.headers.authorization ?? '');
       res.status(201).json(ok(created));

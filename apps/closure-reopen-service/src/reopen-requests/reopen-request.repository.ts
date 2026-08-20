@@ -11,6 +11,21 @@ export class ReopenRequestRepository {
   }
 
   /**
+   * Real-time supervisorStatus for a batch of reopen request ids — lets
+   * Quick Response's list() reconcile against the current decision state
+   * instead of trusting approval_requests' own (possibly stale) copy, since
+   * a reopen request can also be decided directly via PATCH/POST
+   * /reopen-requests/:id/decision, bypassing approval-service entirely. An
+   * id not found (or soft-deleted) is simply absent from the result.
+   */
+  findManyByIds(ids: string[]) {
+    return this.prisma.reopenRequest.findMany({
+      where: { id: { in: ids }, isDeleted: false },
+      select: { id: true, supervisorStatus: true },
+    });
+  }
+
+  /**
    * Finds a reopen request previously created from this exact
    * client-generated localReopenRequestUuid — lets create() treat a
    * dropped-connection retry as an idempotent replay instead of a new

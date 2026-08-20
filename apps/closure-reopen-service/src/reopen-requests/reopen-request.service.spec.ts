@@ -36,6 +36,7 @@ describe('ReopenRequestService', () => {
     findById: jest.fn(),
     findByBeneficiaryId: jest.fn(),
     findByLocalReopenRequestUuid: jest.fn(),
+    findManyByIds: jest.fn(),
     decide: jest.fn(),
     create: jest.fn(),
   } as unknown as jest.Mocked<ReopenRequestRepository>;
@@ -130,6 +131,35 @@ describe('ReopenRequestService', () => {
         status: 502,
       });
       expect(repository.findByBeneficiaryId).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getDecisionStatusByIds', () => {
+    it('delegates to the repository with the given ids', async () => {
+      const rows = [
+        { id: '11111111-1111-1111-1111-111111111111', supervisorStatus: 'PENDING' as const },
+      ];
+      repository.findManyByIds.mockResolvedValue(rows);
+
+      const ids = ['11111111-1111-1111-1111-111111111111'];
+      await expect(service.getDecisionStatusByIds(ids)).resolves.toBe(rows);
+      expect(repository.findManyByIds).toHaveBeenCalledWith(ids);
+    });
+  });
+
+  describe('getById', () => {
+    it('returns the reopen request via repository', async () => {
+      const row = reopenRequest();
+      repository.findById.mockResolvedValue(row);
+
+      await expect(service.getById(row.id)).resolves.toBe(row);
+      expect(repository.findById).toHaveBeenCalledWith(row.id);
+    });
+
+    it('404s on an unknown id', async () => {
+      repository.findById.mockResolvedValue(null);
+
+      await expect(service.getById('unknown-id')).rejects.toMatchObject({ status: 404 });
     });
   });
 

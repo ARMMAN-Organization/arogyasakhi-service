@@ -39,6 +39,16 @@ export class ClosureService {
     return this.repository.findMany();
   }
 
+  getDecisionStatusByIds(ids: string[]) {
+    return this.repository.findManyByIds(ids);
+  }
+
+  async getById(id: string) {
+    const closure = await this.repository.findById(id);
+    if (!closure) throw notFound('Closure not found.');
+    return closure;
+  }
+
   /**
    * Idempotent replay: a dropped-connection retry of a Sakhi's closure
    * submission resubmits the same client-generated localClosureUuid. Return

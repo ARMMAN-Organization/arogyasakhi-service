@@ -16,6 +16,17 @@ export function createReopenRequestController(service: ReopenRequestService) {
       res.json(ok(results));
     }),
 
+    getDecisionStatusBatch: asyncHandler(async (req, res) => {
+      const ids = String(req.query.ids)
+        .split(',')
+        .map((id) => id.trim());
+      res.json(ok(await service.getDecisionStatusByIds(ids)));
+    }),
+
+    getById: asyncHandler(async (req, res) => {
+      res.json(ok(await service.getById(req.params.id)));
+    }),
+
     create: asyncHandler(async (req, res, next) => {
       if (!req.user) return next(unauthorized());
       const created = await service.create(req.body, req.user.id, req.headers.authorization ?? '');

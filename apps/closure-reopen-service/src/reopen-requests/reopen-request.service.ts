@@ -47,6 +47,16 @@ export class ReopenRequestService {
     return this.repository.findByBeneficiaryId(beneficiaryId);
   }
 
+  getDecisionStatusByIds(ids: string[]) {
+    return this.repository.findManyByIds(ids);
+  }
+
+  async getById(id: string) {
+    const reopenRequest = await this.repository.findById(id);
+    if (!reopenRequest) throw notFound('Reopen request not found.');
+    return reopenRequest;
+  }
+
   /**
    * Raises a Sakhi's reopen request (FR-S-10.3) and, on success, raises the
    * matching REOPEN Quick Response card in approval-service. The reopen

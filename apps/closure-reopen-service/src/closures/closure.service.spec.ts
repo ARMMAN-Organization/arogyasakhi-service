@@ -36,6 +36,7 @@ describe('ClosureService', () => {
     findMany: jest.fn(),
     findById: jest.fn(),
     findByLocalClosureUuid: jest.fn(),
+    findManyByIds: jest.fn(),
     create: jest.fn(),
     decide: jest.fn(),
   } as unknown as jest.Mocked<ClosureRepository>;
@@ -90,6 +91,35 @@ describe('ClosureService', () => {
     const rows = [closureRow()];
     repository.findMany.mockResolvedValue(rows);
     await expect(service.list()).resolves.toBe(rows);
+  });
+
+  describe('getDecisionStatusByIds', () => {
+    it('delegates to the repository with the given ids', async () => {
+      const rows = [
+        { id: '11111111-1111-1111-1111-111111111111', supervisorStatus: 'PENDING' as const },
+      ];
+      repository.findManyByIds.mockResolvedValue(rows);
+
+      const ids = ['11111111-1111-1111-1111-111111111111'];
+      await expect(service.getDecisionStatusByIds(ids)).resolves.toBe(rows);
+      expect(repository.findManyByIds).toHaveBeenCalledWith(ids);
+    });
+  });
+
+  describe('getById', () => {
+    it('returns the closure via repository', async () => {
+      const closure = closureRow();
+      repository.findById.mockResolvedValue(closure);
+
+      await expect(service.getById(closure.id)).resolves.toBe(closure);
+      expect(repository.findById).toHaveBeenCalledWith(closure.id);
+    });
+
+    it('404s on an unknown id', async () => {
+      repository.findById.mockResolvedValue(null);
+
+      await expect(service.getById('unknown-id')).rejects.toMatchObject({ status: 404 });
+    });
   });
 
   describe('create', () => {
