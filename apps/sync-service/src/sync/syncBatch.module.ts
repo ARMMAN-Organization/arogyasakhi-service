@@ -6,6 +6,9 @@ import { registerSyncBatchRoutes } from './syncBatch.routes';
 import { SyncPendingRepository } from './syncPending.repository';
 import { SyncPendingService } from './syncPending.service';
 import { registerSyncPendingRoutes } from './syncPending.routes';
+import { StaleSakhisRepository } from './staleSakhis.repository';
+import { StaleSakhisService } from './staleSakhis.service';
+import { registerStaleSakhisRoutes } from './staleSakhis.routes';
 
 /**
  * Composition root for the sync feature: wires repository → service → routes
@@ -25,9 +28,12 @@ export function createSyncBatchModule(prisma: PrismaService): DocumentedRouter {
   const batchService = new SyncBatchService(batchRepository);
   const pendingRepository = new SyncPendingRepository(prisma);
   const pendingService = new SyncPendingService(pendingRepository);
+  const staleSakhisRepository = new StaleSakhisRepository(prisma);
+  const staleSakhisService = new StaleSakhisService(staleSakhisRepository);
 
   const doc = createDocumentedRouter();
   registerSyncBatchRoutes(doc, batchService);
   registerSyncPendingRoutes(doc, pendingService);
+  registerStaleSakhisRoutes(doc, staleSakhisService);
   return doc;
 }
