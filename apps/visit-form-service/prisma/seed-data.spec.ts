@@ -187,8 +187,8 @@ describe('anc-visit.json', () => {
   const fields = ancVisit.schemaJson;
   const byCode = new Map(fields.map((f) => [f.question_code, f]));
 
-  it('has exactly 56 fields, per the Revised App Form Final ANC visit form', () => {
-    expect(fields).toHaveLength(56);
+  it('has exactly 59 fields (56 existing + 3 per-Td-dose date fields)', () => {
+    expect(fields).toHaveLength(59);
   });
 
   it('groups fields into Tests, Symptoms, History, in that order', () => {
@@ -200,7 +200,7 @@ describe('anc-visit.json', () => {
     expect(sections.slice(firstSymptoms, firstHistory).every((s) => s === 'Symptoms')).toBe(true);
     expect(sections.slice(firstHistory).every((s) => s === 'History')).toBe(true);
     expect(sections.filter((s) => s === 'Tests')).toHaveLength(11);
-    expect(sections.filter((s) => s === 'Symptoms')).toHaveLength(28);
+    expect(sections.filter((s) => s === 'Symptoms')).toHaveLength(31);
     expect(sections.filter((s) => s === 'History')).toHaveLength(17);
   });
 
@@ -286,6 +286,12 @@ describe('anc-visit.json', () => {
     // that field is itself gated on met-beneficiary=yes, same
     // one-step-removed pattern as the groups above. See the dedicated test
     // below.
+    //
+    // td1_date/td2_date/booster_date are excluded here: per the source doc
+    // (row 33, "Vaccination status"), each gates on vaccination_status
+    // containing its own option value_code instead — vaccination_status
+    // itself is gated on met-beneficiary=yes, same one-step-removed pattern
+    // as the groups above. See the dedicated test below.
     for (const field of fields) {
       if (
         [
@@ -300,6 +306,9 @@ describe('anc-visit.json', () => {
           'upload_sonography_report_image',
           'how_many_ifa_tablets_did_you_consume_since_last_visit',
           'if_yes_enter_date_of_latest_anc_visit_at_the_health_facility',
+          'td1_date',
+          'td2_date',
+          'booster_date',
         ].includes(field.question_code)
       ) {
         continue;
@@ -379,6 +388,46 @@ describe('anc-visit.json', () => {
       notFuture: true,
       notBefore: { field: 'lmp' },
     });
+  });
+
+  it('shows each Td-dose date field only when vaccination_status contains its own option (row 33)', () => {
+    expect(byCode.get('td1_date')?.visibleWhen).toEqual({
+      field: 'vaccination_status',
+      operator: 'contains',
+      value: 'td1_date',
+    });
+    expect(byCode.get('td2_date')?.visibleWhen).toEqual({
+      field: 'vaccination_status',
+      operator: 'contains',
+      value: 'td2_date',
+    });
+    expect(byCode.get('booster_date')?.visibleWhen).toEqual({
+      field: 'vaccination_status',
+      operator: 'contains',
+      value: 'booster_date',
+    });
+    // The gating field itself is still met-beneficiary-gated, so the chain
+    // as a whole reduces to met-beneficiary=yes AND vaccination_status
+    // contains <option>.
+    expect(byCode.get('vaccination_status')?.visibleWhen).toEqual(MET_BENEFICIARY_YES);
+  });
+
+  it('applies notFuture to every Td-dose date, and notBefore the preceding dose (row 33)', () => {
+    expect(byCode.get('td1_date')?.dateRule).toEqual({ notFuture: true });
+    expect(byCode.get('td2_date')?.dateRule).toEqual({
+      notFuture: true,
+      notBefore: { field: 'td1_date' },
+    });
+    expect(byCode.get('booster_date')?.dateRule).toEqual({
+      notFuture: true,
+      notBefore: { field: 'td2_date' },
+    });
+  });
+
+  it('never marks a Td-dose date field required — per-option conditional required-ness is not expressible in schemaJson', () => {
+    for (const code of ['td1_date', 'td2_date', 'booster_date']) {
+      expect(byCode.get(code)?.required).toBe(false);
+    }
   });
 
   it('has an EXCLUSIVE_OPTION rule so "Normal" urine test cannot combine with other findings (Q29)', () => {
