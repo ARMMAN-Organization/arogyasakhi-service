@@ -1,4 +1,5 @@
-import { badRequest, notFound, unprocessable } from '@armman/service-commons';
+import { badRequest, forbidden, notFound, unprocessable } from '@armman/service-commons';
+import type { AuthenticatedUser } from '@armman/service-commons';
 import type { MediaAssetRepository } from './mediaAsset.repository';
 import type { CreateMediaAssetInput } from './dto/create-mediaAsset.dto';
 import type { CreateUploadUrlInput } from './dto/create-upload-url.dto';
@@ -10,10 +11,14 @@ import {
 } from './s3.client';
 import { appConfig } from '../config/app-config';
 import { getUserDisplayName } from './auth.client';
+import { BeneficiaryClient } from './beneficiary.client';
 
 /** Media asset domain logic. Data access is delegated to the repository. */
 export class MediaAssetService {
-  constructor(private readonly repository: MediaAssetRepository) {}
+  constructor(
+    private readonly repository: MediaAssetRepository,
+    private readonly beneficiaryClient: BeneficiaryClient = new BeneficiaryClient(),
+  ) {}
 
   list() {
     return this.repository.findMany();
@@ -27,15 +32,46 @@ export class MediaAssetService {
    * uploaded it, not inspect the full record. `uploadedByName` is `null` when
    * the asset has no recorded uploader, or when that user could no longer be
    * resolved (see `auth.client.ts`'s `getUserDisplayName`).
+   *
+   * PR #178 review finding #7: a media asset's presigned view URL used to be
+   * handed out to any authenticated SAKHI/SUPERVISOR/MANAGER regardless of
+   * whose case it belongs to — an IDOR letting any Sakhi view any
+   * beneficiary's consent photo etc. by guessing/enumerating asset ids.
+   * Scoping is now enforced before ever generating a URL.
    */
   async getById(
     id: string,
+    caller: AuthenticatedUser,
     authorizationHeader: string,
   ): Promise<{ viewUrl: string; uploadedByName: string | null }> {
     const asset = await this.repository.findById(id);
     if (!asset) {
       throw notFound('Media asset not found.');
     }
+
+    if (asset.beneficiaryId) {
+      // Delegates ownership scoping to beneficiary-service's own
+      // SAKHI-own-case / SUPERVISOR-roster / MANAGER-ADMIN-unrestricted
+      // check — throws 403/404 itself if the caller can't see this
+      // beneficiary. See beneficiary.client.ts for why this isn't
+      // duplicated here.
+      await this.beneficiaryClient.getById(asset.beneficiaryId, authorizationHeader);
+    } else if (!caller.roles.includes('MANAGER') && !caller.roles.includes('ADMIN')) {
+      // KNOWN GAP: an asset can also be linked via visitId/referralId/
+      // submissionId/followupId/eventId instead of beneficiaryId (see the
+      // MediaAsset model), but this diff has no client to resolve any of
+      // those other entity types back to a beneficiary/sakhi to scope
+      // against — media-service would need a client per linked entity type
+      // (visit-form-service, referral-management-service, etc.), mirroring
+      // beneficiaryClient above. Until that exists, a non-beneficiary-linked
+      // asset is only viewable by MANAGER/ADMIN, who beneficiary-service's
+      // own check would have allowed unrestricted access to anyway — a
+      // SAKHI/SUPERVISOR is blocked outright rather than risk letting them
+      // view an asset outside their case. Full resolution through every
+      // linked entity type is a larger follow-up, not fixed here.
+      throw forbidden('You do not have access to this media asset.');
+    }
+
     const { viewUrl } = await getPresignedViewUrl(asset.storageUri);
     const uploadedByName = asset.uploadedByUserId
       ? await getUserDisplayName(asset.uploadedByUserId, authorizationHeader)

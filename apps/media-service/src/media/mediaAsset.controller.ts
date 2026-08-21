@@ -70,11 +70,14 @@ export function createMediaAssetController(service: MediaAssetService) {
     }),
 
     getById: asyncHandler(async (req, res, next) => {
-      // Forwarded to auth-service to resolve the uploader's display name —
-      // see mediaAsset.service.ts's getById() and auth.client.ts.
+      // Forwarded to auth-service to resolve the uploader's display name,
+      // and to beneficiary-service to enforce ownership scoping — see
+      // mediaAsset.service.ts's getById(), auth.client.ts, and
+      // beneficiary.client.ts.
+      if (!req.user) return next(unauthorized());
       const authorizationHeader = req.header('authorization');
       if (!authorizationHeader) return next(unauthorized());
-      res.json(ok(await service.getById(req.params.id, authorizationHeader)));
+      res.json(ok(await service.getById(req.params.id, req.user, authorizationHeader)));
     }),
 
     createUploadUrl: asyncHandler(async (req, res) => {

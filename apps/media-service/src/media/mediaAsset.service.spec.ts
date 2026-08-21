@@ -23,9 +23,15 @@ jest.mock('./auth.client', () => ({
 
 import { MediaAssetService } from './mediaAsset.service';
 import type { MediaAssetRepository } from './mediaAsset.repository';
+import type { BeneficiaryClient } from './beneficiary.client';
 import type { CreateMediaAssetInput } from './dto/create-mediaAsset.dto';
 import type { CreateUploadUrlInput } from './dto/create-upload-url.dto';
 import type { MediaAsset } from '../../../../node_modules/.prisma/client-media-service';
+import type { AuthenticatedUser } from '@armman/service-commons';
+
+function caller(roles: string[]): AuthenticatedUser {
+  return { id: 'user-1', roles, projectId: null, geographyUnitId: null };
+}
 
 describe('MediaAssetService', () => {
   const repository = {
@@ -33,11 +39,14 @@ describe('MediaAssetService', () => {
     findById: jest.fn(),
     create: jest.fn(),
   } as unknown as jest.Mocked<MediaAssetRepository>;
+  const beneficiaryClient = {
+    getById: jest.fn(),
+  } as unknown as jest.Mocked<BeneficiaryClient>;
   let service: MediaAssetService;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    service = new MediaAssetService(repository);
+    service = new MediaAssetService(repository, beneficiaryClient);
   });
 
   it('lists via repository', async () => {
@@ -73,14 +82,14 @@ describe('MediaAssetService', () => {
       deletedAt: null,
     };
 
-    it('returns uploadedByName: null and skips the name lookup when the asset has no recorded uploader', async () => {
+    it('returns uploadedByName: null and skips the name lookup when the asset has no recorded uploader (MANAGER fallback path since beneficiaryId is null)', async () => {
       repository.findById.mockResolvedValue(asset);
       mockGetPresignedViewUrl.mockResolvedValue({
         viewUrl: 'https://signed.example.com/view',
         expiresInSeconds: 3600,
       });
 
-      const result = await service.getById('asset-1', 'Bearer token-123');
+      const result = await service.getById('asset-1', caller(['MANAGER']), 'Bearer token-123');
 
       expect(repository.findById).toHaveBeenCalledWith('asset-1');
       expect(mockGetPresignedViewUrl).toHaveBeenCalledWith(asset.storageUri);
@@ -96,7 +105,7 @@ describe('MediaAssetService', () => {
       });
       mockGetUserDisplayName.mockResolvedValue('Jane Sakhi');
 
-      const result = await service.getById('asset-1', 'Bearer token-123');
+      const result = await service.getById('asset-1', caller(['MANAGER']), 'Bearer token-123');
 
       expect(mockGetUserDisplayName).toHaveBeenCalledWith('user-1', 'Bearer token-123');
       expect(result).toEqual({
@@ -108,11 +117,83 @@ describe('MediaAssetService', () => {
     it('throws notFound (404) when no matching asset exists, without requesting a view URL or name', async () => {
       repository.findById.mockResolvedValue(null);
 
-      await expect(service.getById('missing-id', 'Bearer token-123')).rejects.toMatchObject({
+      await expect(
+        service.getById('missing-id', caller(['MANAGER']), 'Bearer token-123'),
+      ).rejects.toMatchObject({
         status: 404,
       });
       expect(mockGetPresignedViewUrl).not.toHaveBeenCalled();
       expect(mockGetUserDisplayName).not.toHaveBeenCalled();
+    });
+
+    describe('beneficiary/role scoping (PR #178 review finding #7)', () => {
+      it('delegates scoping to beneficiary-service and returns 200 when the asset has a beneficiaryId and the caller is in scope', async () => {
+        repository.findById.mockResolvedValue({ ...asset, beneficiaryId: 'beneficiary-1' });
+        beneficiaryClient.getById.mockResolvedValue({ id: 'beneficiary-1', sakhiId: 'user-1' });
+        mockGetPresignedViewUrl.mockResolvedValue({
+          viewUrl: 'https://signed.example.com/view',
+          expiresInSeconds: 3600,
+        });
+
+        const result = await service.getById('asset-1', caller(['SAKHI']), 'Bearer token-123');
+
+        expect(beneficiaryClient.getById).toHaveBeenCalledWith('beneficiary-1', 'Bearer token-123');
+        expect(result).toEqual({
+          viewUrl: 'https://signed.example.com/view',
+          uploadedByName: null,
+        });
+      });
+
+      it('propagates the forbidden/403 thrown by beneficiary-service when the caller is out of scope for the beneficiary, without generating a view URL', async () => {
+        repository.findById.mockResolvedValue({ ...asset, beneficiaryId: 'beneficiary-1' });
+        beneficiaryClient.getById.mockRejectedValue(
+          Object.assign(new Error('forbidden'), { status: 403 }),
+        );
+
+        await expect(
+          service.getById('asset-1', caller(['SAKHI']), 'Bearer token-123'),
+        ).rejects.toMatchObject({ status: 403 });
+        expect(mockGetPresignedViewUrl).not.toHaveBeenCalled();
+      });
+
+      it('allows a MANAGER to view an asset with no beneficiaryId, without calling beneficiary-service', async () => {
+        repository.findById.mockResolvedValue({ ...asset, beneficiaryId: null });
+        mockGetPresignedViewUrl.mockResolvedValue({
+          viewUrl: 'https://signed.example.com/view',
+          expiresInSeconds: 3600,
+        });
+
+        const result = await service.getById('asset-1', caller(['MANAGER']), 'Bearer token-123');
+
+        expect(beneficiaryClient.getById).not.toHaveBeenCalled();
+        expect(result.viewUrl).toBe('https://signed.example.com/view');
+      });
+
+      it('allows an ADMIN to view an asset with no beneficiaryId, without calling beneficiary-service', async () => {
+        repository.findById.mockResolvedValue({ ...asset, beneficiaryId: null });
+        mockGetPresignedViewUrl.mockResolvedValue({
+          viewUrl: 'https://signed.example.com/view',
+          expiresInSeconds: 3600,
+        });
+
+        const result = await service.getById('asset-1', caller(['ADMIN']), 'Bearer token-123');
+
+        expect(beneficiaryClient.getById).not.toHaveBeenCalled();
+        expect(result.viewUrl).toBe('https://signed.example.com/view');
+      });
+
+      it.each(['SAKHI', 'SUPERVISOR'])(
+        'throws forbidden (403) for a %s when the asset has no beneficiaryId, without generating a view URL',
+        async (role) => {
+          repository.findById.mockResolvedValue({ ...asset, beneficiaryId: null });
+
+          await expect(
+            service.getById('asset-1', caller([role]), 'Bearer token-123'),
+          ).rejects.toMatchObject({ status: 403 });
+          expect(beneficiaryClient.getById).not.toHaveBeenCalled();
+          expect(mockGetPresignedViewUrl).not.toHaveBeenCalled();
+        },
+      );
     });
   });
 
