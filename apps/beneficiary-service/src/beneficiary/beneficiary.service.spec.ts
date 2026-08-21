@@ -483,6 +483,36 @@ describe('BeneficiaryService', () => {
         ),
       ).rejects.toMatchObject({ status: 409 });
     });
+
+    it('409s a case in PENDING_TRANSFER — markPendingTransfer leaves sakhiId unchanged, so ownership alone must not let a phase change through while Manager review is pending', async () => {
+      repository.findById.mockResolvedValue(
+        caseRow({ currentStatus: 'PENDING_TRANSFER' }) as never,
+      );
+
+      await expect(
+        service.applyPhaseChange(
+          beneficiaryId,
+          'PP',
+          caller({ id: sakhiId, roles: ['SAKHI'] }),
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 409 });
+      expect(repository.updatePhase).not.toHaveBeenCalled();
+    });
+
+    it('still allows an ACTIVE case to advance phase (regression for the PENDING_TRANSFER guard)', async () => {
+      repository.findById.mockResolvedValue(caseRow({ currentStatus: 'ACTIVE' }) as never);
+      repository.updatePhase.mockResolvedValue(true);
+
+      await service.applyPhaseChange(
+        beneficiaryId,
+        'PP',
+        caller({ id: sakhiId, roles: ['SAKHI'] }),
+        AUTH_HEADER,
+      );
+
+      expect(repository.updatePhase).toHaveBeenCalledWith(beneficiaryId, 'MOTHER', 'ANC', 'PP');
+    });
   });
 
   describe('applyClosure', () => {
@@ -732,6 +762,55 @@ describe('BeneficiaryService', () => {
           AUTH_HEADER,
         ),
       ).rejects.toMatchObject({ status: 404 });
+    });
+
+    it('409s a case in PENDING_TRANSFER — markPendingTransfer leaves sakhiId unchanged, so the owning Sakhi must not be able to close the case out from under a pending Manager review', async () => {
+      repository.findById.mockResolvedValue(
+        caseRow({ currentStatus: 'PENDING_TRANSFER' }) as never,
+      );
+
+      await expect(
+        service.applyClosure(
+          beneficiaryId,
+          'MEDICAL',
+          caller({ id: sakhiId, roles: ['SAKHI'] }),
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 409 });
+      expect(repository.closeCase).not.toHaveBeenCalled();
+    });
+
+    it('still allows an ACTIVE case to close (regression for the PENDING_TRANSFER guard)', async () => {
+      repository.findById.mockResolvedValue(caseRow({ currentStatus: 'ACTIVE' }) as never);
+      repository.closeCase.mockResolvedValue(true);
+
+      await service.applyClosure(
+        beneficiaryId,
+        'MEDICAL',
+        caller({ id: sakhiId, roles: ['SAKHI'] }),
+        AUTH_HEADER,
+      );
+
+      expect(repository.closeCase).toHaveBeenCalledWith(beneficiaryId, sakhiId, 'MEDICAL');
+    });
+
+    it('still treats an already-CLOSED case as an idempotent no-op (regression for the PENDING_TRANSFER guard)', async () => {
+      repository.findById.mockResolvedValue(
+        caseRow({
+          currentStatus: 'CLOSED',
+          statusHistory: [{ toStatus: 'CLOSED', reasonCode: 'MEDICAL' }],
+        }) as never,
+      );
+
+      const result = await service.applyClosure(
+        beneficiaryId,
+        'MEDICAL',
+        caller({ id: sakhiId, roles: ['SAKHI'] }),
+        AUTH_HEADER,
+      );
+
+      expect(repository.closeCase).not.toHaveBeenCalled();
+      expect(result).toMatchObject({ id: beneficiaryId });
     });
   });
 
