@@ -2,6 +2,7 @@ import { badGateway } from '@armman/service-commons';
 import { OperationsService } from './operations.service';
 import type { OperationsRepository } from './operations.repository';
 import type { SakhiClient } from './sakhi.client';
+import type { VisitSummaryClient } from './visitSummary.client';
 import type { CreateSupervisorEventInput } from './dto/create-supervisorEvent.dto';
 import type {
   SupervisorEvent,
@@ -40,6 +41,9 @@ describe('OperationsService', () => {
   const sakhiClient = {
     findById: jest.fn(),
   } as unknown as jest.Mocked<SakhiClient>;
+  const visitSummaryClient = {
+    getBySakhi: jest.fn(),
+  } as unknown as jest.Mocked<VisitSummaryClient>;
   let service: OperationsService;
 
   const supervisorCaller = {
@@ -52,7 +56,7 @@ describe('OperationsService', () => {
 
   beforeEach(() => {
     jest.resetAllMocks();
-    service = new OperationsService(repository, sakhiClient);
+    service = new OperationsService(repository, sakhiClient, visitSummaryClient);
   });
 
   const eventRow: SupervisorEvent = {

@@ -19,6 +19,8 @@ import type { ListGatheringsQuery } from './dto/list-gatherings.dto';
 import type { CallSheetStatKind } from './dto/call-sheet-stats.dto';
 import { CALL_SHEET_STAT_KINDS } from './dto/call-sheet-stats.dto';
 import type { SakhiClient } from './sakhi.client';
+import type { VisitSummaryClient } from './visitSummary.client';
+import type { VisitSummaryBySakhiQueryInput } from './dto/visit-summary-by-sakhi-query.dto';
 
 /** Default recency window for the FR-SV-3.4 "recently called" card highlight. */
 const DEFAULT_RECENT_CALL_WINDOW_HOURS = 72;
@@ -72,6 +74,7 @@ export class OperationsService {
   constructor(
     private readonly repository: OperationsRepository,
     private readonly sakhiClient: SakhiClient,
+    private readonly visitSummaryClient: VisitSummaryClient,
   ) {}
 
   listEvents(filters?: ListSupervisorEventsQuery) {
@@ -464,6 +467,20 @@ export class OperationsService {
       }),
     );
     return results.filter((r): r is NonNullable<typeof r> => r !== null);
+  }
+
+  /**
+   * Visit Due / Visit 3 Days to Expire / Missed Visit rollup for a Sakhi
+   * (call-sheet screen), proxied from visit-form-service's own
+   * `/visits/visit-summary` — see visitSummary.client.ts for why no
+   * roster check happens here.
+   */
+  getVisitSummaryBySakhi(
+    sakhiId: string,
+    query: VisitSummaryBySakhiQueryInput,
+    authorizationHeader: string,
+  ) {
+    return this.visitSummaryClient.getBySakhi(sakhiId, query, authorizationHeader);
   }
 
   listTrainingTopics() {
