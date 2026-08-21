@@ -1177,6 +1177,82 @@ describe('QuickResponseService', () => {
       expect(result.decision).toBe('APPROVE');
       expect(consoleErrorSpy).toHaveBeenCalled();
     });
+
+    it('marks the card decided (decisionStatusLookupId, decidedByUserId) before reactivating — DATA_RESTORE claims the row before the side effect', async () => {
+      const card = dataRestoreRequest();
+      repository.findById.mockResolvedValue(card);
+      userClient.reactivateUser.mockResolvedValue({
+        id: card.requestedByUserId as string,
+        status: 'ACTIVE',
+      });
+
+      await service.decide(
+        card.id as string,
+        { cardSource: 'approval_requests', decision: 'APPROVE', decisionNotes: 'Verified' },
+        DECIDED_BY_USER_ID,
+        authHeader,
+      );
+
+      expect(repository.markDecided).toHaveBeenCalledWith(
+        card.id,
+        'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        DECIDED_BY_USER_ID,
+        'Verified',
+        undefined,
+      );
+    });
+
+    it('409s without reactivating when markDecided loses the pre-claim race', async () => {
+      const card = dataRestoreRequest();
+      repository.findById.mockResolvedValue(card);
+      repository.markDecided.mockResolvedValue(false);
+
+      await expect(
+        service.decide(
+          card.id as string,
+          { cardSource: 'approval_requests', decision: 'APPROVE' },
+          DECIDED_BY_USER_ID,
+          authHeader,
+        ),
+      ).rejects.toMatchObject({ status: 409 });
+
+      expect(userClient.reactivateUser).not.toHaveBeenCalled();
+    });
+
+    it('concurrent decides on the same DATA_RESTORE card: exactly one succeeds and reactivates, the other 409s', async () => {
+      const card = dataRestoreRequest();
+      repository.findById.mockResolvedValue(card);
+      userClient.reactivateUser.mockResolvedValue({
+        id: card.requestedByUserId as string,
+        status: 'ACTIVE',
+      });
+      // Simulates two concurrent requests racing to claim the same row:
+      // the first atomic markDecided call wins, the second loses.
+      repository.markDecided.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+
+      const [first, second] = await Promise.allSettled([
+        service.decide(
+          card.id as string,
+          { cardSource: 'approval_requests', decision: 'APPROVE' },
+          DECIDED_BY_USER_ID,
+          authHeader,
+        ),
+        service.decide(
+          card.id as string,
+          { cardSource: 'approval_requests', decision: 'APPROVE' },
+          DECIDED_BY_USER_ID,
+          authHeader,
+        ),
+      ]);
+
+      const outcomes = [first, second];
+      const fulfilled = outcomes.filter((o) => o.status === 'fulfilled');
+      const rejected = outcomes.filter((o) => o.status === 'rejected');
+      expect(fulfilled).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+      expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({ status: 409 });
+      expect(userClient.reactivateUser).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('list — DATA_RESTORE is visible even though it has no decision path yet', () => {
@@ -1803,21 +1879,70 @@ describe('QuickResponseService', () => {
       expect(notificationClient.notify).not.toHaveBeenCalled();
     });
 
-    it('does not fail the request when markDecided fails after the LMP change already applied', async () => {
+    it('propagates a markDecided failure and never applies the LMP change — LMP_CHANGE claims the row before the side effect, not after', async () => {
+      const card = lmpChangeRequest();
+      repository.findById.mockResolvedValue(card);
+      repository.markDecided.mockRejectedValue(new Error('db down'));
+
+      await expect(
+        service.decide(
+          card.id as string,
+          { cardSource: 'approval_requests', decision: 'APPROVE' },
+          DECIDED_BY_USER_ID,
+          authHeader,
+        ),
+      ).rejects.toThrow('db down');
+
+      expect(beneficiaryClient.applyLmpChange).not.toHaveBeenCalled();
+    });
+
+    it('409s without applying the LMP change when markDecided loses the pre-claim race', async () => {
+      const card = lmpChangeRequest();
+      repository.findById.mockResolvedValue(card);
+      repository.markDecided.mockResolvedValue(false);
+
+      await expect(
+        service.decide(
+          card.id as string,
+          { cardSource: 'approval_requests', decision: 'APPROVE' },
+          DECIDED_BY_USER_ID,
+          authHeader,
+        ),
+      ).rejects.toMatchObject({ status: 409 });
+
+      expect(beneficiaryClient.applyLmpChange).not.toHaveBeenCalled();
+    });
+
+    it('concurrent decides on the same LMP_CHANGE card: exactly one succeeds and applies the LMP change, the other 409s', async () => {
       const card = lmpChangeRequest();
       repository.findById.mockResolvedValue(card);
       beneficiaryClient.applyLmpChange.mockResolvedValue({ id: card.beneficiaryId as string });
-      repository.markDecided.mockRejectedValue(new Error('db down'));
+      // Simulates two concurrent requests racing to claim the same row:
+      // the first atomic markDecided call wins, the second loses.
+      repository.markDecided.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
 
-      const result = await service.decide(
-        card.id as string,
-        { cardSource: 'approval_requests', decision: 'APPROVE' },
-        DECIDED_BY_USER_ID,
-        authHeader,
-      );
+      const [first, second] = await Promise.allSettled([
+        service.decide(
+          card.id as string,
+          { cardSource: 'approval_requests', decision: 'APPROVE' },
+          DECIDED_BY_USER_ID,
+          authHeader,
+        ),
+        service.decide(
+          card.id as string,
+          { cardSource: 'approval_requests', decision: 'APPROVE' },
+          DECIDED_BY_USER_ID,
+          authHeader,
+        ),
+      ]);
 
-      expect(result.decision).toBe('APPROVE');
-      expect(consoleErrorSpy).toHaveBeenCalled();
+      const outcomes = [first, second];
+      const fulfilled = outcomes.filter((o) => o.status === 'fulfilled');
+      const rejected = outcomes.filter((o) => o.status === 'rejected');
+      expect(fulfilled).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+      expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({ status: 409 });
+      expect(beneficiaryClient.applyLmpChange).toHaveBeenCalledTimes(1);
     });
   });
 

@@ -661,29 +661,87 @@ export class QuickResponseService {
     const existing = await this.repository.findById(cardId);
     if (!existing) throw notFound('Quick Response card not found.');
 
-    // Only LMP_CHANGE has no downstream state of its own to lean on for
-    // idempotency (unlike CLOSURE_REVIEW/REFERRAL_INCOMPLETE/ACCOMPANIED_
-    // REFERRAL/REOPEN, each guarded by the target service's own
-    // PENDING-only status check) — so re-approving an already-decided
-    // LMP_CHANGE card silently re-applied the LMP/EDD write and re-notified
-    // the Sakhi, contradicting this endpoint's documented "409: Card
-    // already decided" contract. Checked here, once, for every card type
-    // rather than duplicated per handler.
+    // Cheap pre-check, shared by every card type: a card already decided by
+    // the time we even read it here is rejected before any side effect is
+    // attempted. This alone is NOT a race guard — two concurrent decides can
+    // both pass this read before either has written anything.
+    //
+    // CLOSURE_REVIEW/REFERRAL_INCOMPLETE/ACCOMPANIED_REFERRAL/REOPEN are
+    // still safe under that race because each forwards to a downstream
+    // service (closure-reopen-service / risk-referral-service) with its own
+    // atomic PENDING-only status guard — a second concurrent decide on those
+    // types 409s downstream even if it slips past the check below.
+    //
+    // LMP_CHANGE and DATA_RESTORE have no such downstream backstop: their
+    // side effects (LMP/EDD write to beneficiary-service, user reactivation
+    // via auth-service) are unconditional writes with no "only if still
+    // pending" guard of their own. So for those two types this method claims
+    // the row atomically via repository.markDecided() BEFORE running the
+    // side effect, instead of after — the loser of the race gets a 409 here
+    // and never reaches the side effect at all. The other types keep
+    // claiming the row only after their side effect succeeds, via the
+    // try/catch at the end of this method.
     if (existing.decidedAt) {
       throw conflict('This Quick Response card has already been decided.');
     }
 
     let result: Record<string, unknown>;
+    let alreadyMarkedDecided = false;
+    if (existing.requestType === 'LMP_CHANGE' || existing.requestType === 'DATA_RESTORE') {
+      // Validated again, redundantly, inside decideLmpChangeCard/
+      // decideDataRestoreCard below — but it must also happen here, before
+      // the pre-claim, so an invalid decision value never claims the row.
+      // Claiming first and validating after would mark a card decided for a
+      // request that was never going to apply any real decision.
+      if (dto.decision !== 'APPROVE' && dto.decision !== 'REJECT') {
+        throw badRequest(
+          `decision: Must be APPROVE or REJECT for a${
+            existing.requestType === 'LMP_CHANGE' ? 'n LMP_CHANGE' : ' DATA_RESTORE'
+          } card.`,
+        );
+      }
+
+      // Every approval_requests decision reaching this point is APPROVE or
+      // REJECT — the OKAY decision only exists on the escalation_events
+      // branch, which returns earlier in decide() and never reaches here.
+      const decisionStatusLookupId = await this.lookupClient.resolveApprovalStatusId(
+        dto.decision === 'APPROVE' ? 'APPROVED' : 'REJECTED',
+        authorizationHeader,
+      );
+      if (!decisionStatusLookupId) {
+        // Unlike the post-side-effect lookup below, there is no side effect
+        // yet to protect — failing loudly here is safe and correct, so this
+        // does not get the "log and continue, remains re-decidable"
+        // tolerance used once the side effect has already happened.
+        throw new HttpError(
+          500,
+          `No ${dto.decision === 'APPROVE' ? 'APPROVED' : 'REJECTED'} APPROVAL_STATUS lookup ` +
+            'value was found; cannot safely claim this card before applying its decision.',
+        );
+      }
+      const claimed = await this.repository.markDecided(
+        cardId,
+        decisionStatusLookupId,
+        decidedByUserId,
+        dto.decisionNotes,
+        dto.decisionReasonCodeLookupId,
+      );
+      if (!claimed) {
+        throw conflict('This Quick Response card has already been decided.');
+      }
+      alreadyMarkedDecided = true;
+    }
+
     if (existing.requestType === 'LMP_CHANGE') {
       result = await this.decideLmpChangeCard(cardId, existing, dto, authorizationHeader);
+    } else if (existing.requestType === 'DATA_RESTORE') {
+      result = await this.decideDataRestoreCard(cardId, existing, dto, authorizationHeader);
     } else if (existing.requestType === 'CLOSURE_REVIEW') {
       result = await this.decideClosureReviewCard(cardId, existing, dto, authorizationHeader);
     } else if (existing.requestType === 'REFERRAL_INCOMPLETE') {
       result = await this.decideReferralIncompleteCard(cardId, existing, dto, authorizationHeader);
     } else if (existing.requestType === 'ACCOMPANIED_REFERRAL') {
       result = await this.decideAccompaniedReferralCard(cardId, existing, dto, authorizationHeader);
-    } else if (existing.requestType === 'DATA_RESTORE') {
-      result = await this.decideDataRestoreCard(cardId, existing, dto, authorizationHeader);
     } else if (existing.requestType === 'REOPEN') {
       if (dto.decision !== 'APPROVE' && dto.decision !== 'REJECT') {
         throw badRequest('decision: Must be APPROVE or REJECT for a REOPEN card.');
@@ -727,34 +785,42 @@ export class QuickResponseService {
     // post-commit call in this method), but it also must never run before
     // the side effect, or a card could be marked decided while its actual
     // effect never happened.
-    try {
-      // Every approval_requests decision reaching this point is APPROVE or
-      // REJECT — the OKAY decision only exists on the escalation_events
-      // branch, which returns earlier in decide() and never reaches here.
-      const decisionStatusLookupId = await this.lookupClient.resolveApprovalStatusId(
-        dto.decision === 'APPROVE' ? 'APPROVED' : 'REJECTED',
-        authorizationHeader,
-      );
-      if (decisionStatusLookupId) {
-        await this.repository.markDecided(
-          cardId,
-          decisionStatusLookupId,
-          decidedByUserId,
-          dto.decisionNotes,
-          dto.decisionReasonCodeLookupId,
+    //
+    // LMP_CHANGE/DATA_RESTORE already claimed the row atomically above,
+    // before their side effect ran, so this after-the-fact marking must be
+    // skipped for them — running it again here would be a harmless no-op at
+    // best (decidedAt is already set) but is skipped anyway to keep this
+    // block's job limited to the types that actually still need it.
+    if (!alreadyMarkedDecided) {
+      try {
+        // Every approval_requests decision reaching this point is APPROVE or
+        // REJECT — the OKAY decision only exists on the escalation_events
+        // branch, which returns earlier in decide() and never reaches here.
+        const decisionStatusLookupId = await this.lookupClient.resolveApprovalStatusId(
+          dto.decision === 'APPROVE' ? 'APPROVED' : 'REJECTED',
+          authorizationHeader,
         );
-      } else {
+        if (decisionStatusLookupId) {
+          await this.repository.markDecided(
+            cardId,
+            decisionStatusLookupId,
+            decidedByUserId,
+            dto.decisionNotes,
+            dto.decisionReasonCodeLookupId,
+          );
+        } else {
+          console.error(
+            `Quick Response card ${cardId} was decided (${dto.decision}) but no ` +
+              `${dto.decision === 'APPROVE' ? 'APPROVED' : 'REJECTED'} APPROVAL_STATUS lookup ` +
+              'value was found — the card cannot be marked decided and remains re-decidable.',
+          );
+        }
+      } catch (err) {
         console.error(
-          `Quick Response card ${cardId} was decided (${dto.decision}) but no ` +
-            `${dto.decision === 'APPROVE' ? 'APPROVED' : 'REJECTED'} APPROVAL_STATUS lookup ` +
-            'value was found — the card cannot be marked decided and remains re-decidable.',
+          `Quick Response card ${cardId} was decided (${dto.decision}) but marking it decided failed:`,
+          err,
         );
       }
-    } catch (err) {
-      console.error(
-        `Quick Response card ${cardId} was decided (${dto.decision}) but marking it decided failed:`,
-        err,
-      );
     }
 
     return result;
