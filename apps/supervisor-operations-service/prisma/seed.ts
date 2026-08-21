@@ -9,6 +9,103 @@ interface SeedResult {
 }
 
 /**
+ * Item Master List demo data (SRS/ERD §4.7 inventory_items) — the global
+ * consumables/instruments catalog behind GET /inventory-items and the
+ * mobile app's "Add Item Transaction" screen. No project/sakhi scoping (this
+ * table has none), so seeding once makes every item visible app-wide.
+ * itemCategory/status are real Prisma enums (InventoryItemCategory/
+ * InventoryItemStatus) — the DB itself rejects any value outside
+ * CONSUMABLE/INSTRUMENT or ACTIVE/INACTIVE, so there is no risk of the app's
+ * strict-enum parsing seeing something else.
+ *
+ * Deduplicated by itemCode (@unique on the table) — re-running this script
+ * never creates duplicates or errors on the ones already seeded.
+ */
+const DEFAULT_INVENTORY_ITEMS: {
+  itemCode: string;
+  itemName: string;
+  itemCategory: 'CONSUMABLE' | 'INSTRUMENT';
+  unit: string;
+  status: 'ACTIVE' | 'INACTIVE';
+}[] = [
+  {
+    itemCode: 'CONS-PENCIL-01',
+    itemName: 'Pencil',
+    itemCategory: 'CONSUMABLE',
+    unit: 'pcs',
+    status: 'ACTIVE',
+  },
+  {
+    itemCode: 'CONS-CELLS-01',
+    itemName: 'Cells',
+    itemCategory: 'CONSUMABLE',
+    unit: 'pcs',
+    status: 'ACTIVE',
+  },
+  {
+    itemCode: 'CONS-SUGARSTRIP-01',
+    itemName: 'Sugar Strips',
+    itemCategory: 'CONSUMABLE',
+    unit: 'pcs',
+    status: 'ACTIVE',
+  },
+  {
+    itemCode: 'CONS-HBSTRIP-01',
+    itemName: 'HB Strips',
+    itemCategory: 'CONSUMABLE',
+    unit: 'pcs',
+    status: 'ACTIVE',
+  },
+  {
+    itemCode: 'INST-DOPPLER-01',
+    itemName: 'Doppler Test Kit',
+    itemCategory: 'INSTRUMENT',
+    unit: 'pcs',
+    status: 'ACTIVE',
+  },
+  {
+    itemCode: 'INST-BPMONITOR-01',
+    itemName: 'BP Monitor',
+    itemCategory: 'INSTRUMENT',
+    unit: 'pcs',
+    status: 'ACTIVE',
+  },
+  {
+    itemCode: 'INST-WEIGHSCALE-01',
+    itemName: 'Weighing Scale',
+    itemCategory: 'INSTRUMENT',
+    unit: 'pcs',
+    status: 'ACTIVE',
+  },
+];
+
+async function seedInventoryItems(): Promise<SeedResult> {
+  const step = 'inventory-items-master-list';
+  const items = process.env.SEED_INVENTORY_ITEMS
+    ? (JSON.parse(process.env.SEED_INVENTORY_ITEMS) as typeof DEFAULT_INVENTORY_ITEMS)
+    : DEFAULT_INVENTORY_ITEMS;
+
+  let created = 0;
+  let skipped = 0;
+  for (const item of items) {
+    const existing = await prisma.inventoryItem.findUnique({ where: { itemCode: item.itemCode } });
+    if (existing) {
+      skipped += 1;
+      continue;
+    }
+
+    await prisma.inventoryItem.create({ data: item });
+    created += 1;
+  }
+
+  return {
+    step,
+    created: created > 0,
+    message: `Created ${created} inventory item(s), skipped ${skipped} already-seeded row(s).`,
+  };
+}
+
+/**
  * Demo Call Sheet data (SRS FR-SV-3.1/3.2, ERD §4.7 call_logs) — all under
  * one Supervisor/Sakhi pair (Pemma Deshmukh / Meera Sakhi) already present
  * in this environment's auth-service data (see sakhi_profiles), so this
@@ -157,7 +254,7 @@ async function seedCallLogs(): Promise<SeedResult> {
 }
 
 async function main(): Promise<void> {
-  const results = [await seedCallLogs()];
+  const results = [await seedCallLogs(), await seedInventoryItems()];
 
   console.log('\nSeed summary:');
   for (const r of results) {
