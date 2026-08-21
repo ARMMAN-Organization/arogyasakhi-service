@@ -19,17 +19,21 @@ interface Deps {
 }
 
 /**
- * Decides a Missed Visit Escalation's TRANSFER action (FR-SV-4.3): moves the
- * card to TRANSFER_REQUESTED with a 15-day Manager review deadline, then —
- * best-effort, logged not thrown, since that decision is already committed —
- * removes the beneficiary from the Sakhi's active list, emails her
- * designated Manager, and notifies the Sakhi in-app. Each of the three side
- * effects gets its own try/catch: a beneficiary-service outage must not also
- * silently skip the Sakhi's notification, and vice versa. The Manager email
- * and Sakhi notification both need the beneficiary's name/sakhiId, so they
- * share one outer fetch — if that fetch itself fails, both are skipped
- * (mirrors decideMissedVisit's own CLOSE-branch tolerance), while the
- * roster-removal call runs independently of it.
+ * Decides a Missed Visit Escalation's TRANSFER action (FR-SV-4.3): removes
+ * the beneficiary from the Sakhi's active list first, then moves the card to
+ * TRANSFER_REQUESTED with a 15-day Manager review deadline. This order
+ * matters — `markPendingTransfer` is allowed to throw and abort here, rather
+ * than being best-effort, so a beneficiary-service outage leaves the card
+ * still OPEN (safely retryable) instead of permanently marked decided while
+ * the beneficiary never actually left the roster (previously, the escalation
+ * was flipped to TRANSFER_REQUESTED first and a `markPendingTransfer`
+ * failure was only logged, leaving the two systems out of sync with no way
+ * to recover short of a manual DB fix). Once both of those have succeeded,
+ * emailing the Manager and notifying the Sakhi in-app stay best-effort,
+ * logged not thrown, since the decision itself is already committed by that
+ * point. Those two share one outer fetch for the beneficiary's name/sakhiId
+ * — if that fetch itself fails, both are skipped (mirrors decideMissedVisit's
+ * own CLOSE-branch tolerance).
  */
 export async function decideTransfer(
   existing: EscalationEventRow,
@@ -40,6 +44,8 @@ export async function decideTransfer(
   const id = existing.id;
   const reviewDeadlineAt = new Date(Date.now() + MANAGER_REVIEW_WINDOW_DAYS * 24 * 60 * 60 * 1000);
 
+  await beneficiaryClient.markPendingTransfer(existing.beneficiaryId, authorizationHeader);
+
   const updated = await repository.updateStatus(
     id,
     'OPEN',
@@ -49,16 +55,6 @@ export async function decideTransfer(
   );
   if (!updated) {
     throw conflict('This Missed Visit Escalation card has already been decided.');
-  }
-
-  try {
-    await beneficiaryClient.markPendingTransfer(existing.beneficiaryId, authorizationHeader);
-  } catch (err) {
-    console.error(
-      `Missed Visit Escalation ${id} was transferred but removing the beneficiary from the ` +
-        "Sakhi's list failed:",
-      err,
-    );
   }
 
   try {

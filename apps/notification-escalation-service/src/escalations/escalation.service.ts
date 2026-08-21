@@ -224,6 +224,13 @@ export class EscalationService {
       throw conflict('This Missed Visit Escalation card has already been decided.');
     }
 
+    // Delegates ownership scoping to beneficiary-service's own GET /beneficiaries/:id
+    // (SAKHI-own-case / SUPERVISOR-roster / MANAGER-unrestricted) — same pattern
+    // this service's own single-record mutations should apply. Without this, a
+    // Supervisor could decide (TRANSFER or CLOSE) an escalation belonging to a
+    // beneficiary outside their own roster (IDOR).
+    await this.beneficiaryClient.getById(existing.beneficiaryId, authorizationHeader);
+
     if (action === 'TRANSFER') {
       return decideTransfer(
         existing,

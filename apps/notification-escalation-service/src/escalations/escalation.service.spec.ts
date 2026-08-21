@@ -475,7 +475,16 @@ describe('EscalationService', () => {
       const resolved = { ...pending, status: 'RESOLVED' as const, actionTaken: 'CLOSE' };
       repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(resolved);
       repository.updateStatus.mockResolvedValue(true);
-      beneficiaryClient.getById.mockRejectedValue(new Error('beneficiary-service down'));
+      // First call is the roster-scoping check (must succeed to proceed at all);
+      // the second is the CLOSE branch's own lookup for the Sakhi notification.
+      beneficiaryClient.getById
+        .mockResolvedValueOnce({
+          id: '22222222-2222-2222-2222-222222222222',
+          sakhiId: 'sakhi-a',
+          motherCaseDetails: null,
+          pii: { fullName: 'Jane Doe' },
+        })
+        .mockRejectedValueOnce(new Error('beneficiary-service down'));
 
       await expect(closeService.decideMissedVisit(pending.id, 'CLOSE', AUTH_HEADER)).resolves.toBe(
         resolved,
@@ -655,7 +664,10 @@ describe('EscalationService', () => {
           AUTH_HEADER,
         ),
       ).rejects.toMatchObject({ status: 409 });
-      expect(beneficiaryClient.markPendingTransfer).not.toHaveBeenCalled();
+      // markPendingTransfer now runs BEFORE the conditional update (see
+      // decideTransfer's doc comment) — it's expected to have already
+      // happened by the time the update itself loses the race.
+      expect(beneficiaryClient.markPendingTransfer).toHaveBeenCalled();
       expect(managerNoticeClient.send).not.toHaveBeenCalled();
     });
 
@@ -693,7 +705,16 @@ describe('EscalationService', () => {
       const pending = row({ escalationType: 'ANC_2_MISSED' });
       repository.findById.mockResolvedValue(pending);
       repository.updateStatus.mockResolvedValue(true);
-      beneficiaryClient.getById.mockRejectedValue(new Error('beneficiary-service down'));
+      // First call is the roster-scoping check (must succeed to proceed at all);
+      // the second is decideTransfer's own lookup for the Manager email/Sakhi notification.
+      beneficiaryClient.getById
+        .mockResolvedValueOnce({
+          id: '22222222-2222-2222-2222-222222222222',
+          sakhiId: 'sakhi-a',
+          motherCaseDetails: null,
+          pii: { fullName: 'Jane Doe' },
+        })
+        .mockRejectedValueOnce(new Error('beneficiary-service down'));
 
       await expect(
         transferService.decideMissedVisit(pending.id, 'TRANSFER', AUTH_HEADER),
