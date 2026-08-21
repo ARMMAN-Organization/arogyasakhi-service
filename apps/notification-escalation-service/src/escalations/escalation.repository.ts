@@ -88,6 +88,30 @@ export class EscalationRepository {
   }
 
   /**
+   * Records why a CLOSURE_PENDING escalation is still pending — does NOT
+   * change `status` (unlike updateStatus above), only conditional on it
+   * still being OPEN so a submit racing a decision (e.g. the Supervisor
+   * approving/rejecting the closure) doesn't silently overwrite state on an
+   * escalation that's no longer actionable. Same `updateMany`-count
+   * concurrency guard as updateStatus.
+   */
+  async updatePendingReason(
+    id: string,
+    pendingReasonLookupValueId: string,
+    pendingReasonNotes: string | null,
+  ): Promise<boolean> {
+    const result = await this.prisma.escalationEvent.updateMany({
+      where: { id, isDeleted: false, status: 'OPEN' },
+      data: {
+        pendingReasonLookupValueId,
+        pendingReasonNotes,
+        pendingReasonSubmittedAt: new Date(),
+      },
+    });
+    return result.count > 0;
+  }
+
+  /**
    * The most recent TRANSFER_REQUESTED row for a beneficiary, if any — used
    * by GET /escalations/beneficiaries/:beneficiaryId/active-transfer-window
    * (visit-form-service's own SUPERVISOR-only notMetReason gate during the

@@ -6,6 +6,7 @@ import { listEscalationEventsSchema } from './dto/list-escalation-events.dto';
 import { createEscalationEventSchema } from './dto/create-escalation-event.dto';
 import { acknowledgeEddNearingSchema } from './dto/acknowledge-edd-nearing.dto';
 import { decideMissedVisitEscalationSchema } from './dto/decide-missed-visit-escalation.dto';
+import { submitClosurePendingReasonSchema } from './dto/submit-closure-pending-reason.dto';
 import {
   requireRoles,
   trustGatewayIdentity,
@@ -314,5 +315,46 @@ export function registerEscalationRoutes(doc: DocumentedRouter, service: Escalat
     trustGatewayIdentity,
     validate(beneficiaryIdParamsSchema, 'params'),
     controller.getActiveTransferWindow,
+  );
+
+  doc.post(
+    '/escalations/:id/closure-pending-reason',
+    {
+      summary:
+        "Records why a still-OPEN CLOSURE_PENDING escalation card hasn't had its closure " +
+        'form submitted yet (Information not received / App Issues / Beneficiary unavailable / ' +
+        "Other, via auth-service's CLOSURE_PENDING_REASON lookup category). Does not change " +
+        'status — the closure/decision flow itself is separate. SAKHI-only; ownership is ' +
+        "delegated to beneficiary-service's own GET /beneficiaries/:id (SAKHI-own-case check).",
+      tags: ['Escalations'],
+      params: escalationEventIdParamsSchema,
+      responses: {
+        200: {
+          description: 'Pending reason recorded; escalation status unchanged',
+          schema: envelope(escalationEventSchema),
+        },
+        400: {
+          description: 'Validation error, unrecognized reason, or OTHER without notes',
+          schema: apiErrorSchema,
+        },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: {
+          description: "Caller role not permitted, or not this beneficiary's own Sakhi",
+          schema: apiErrorSchema,
+        },
+        404: { description: 'Escalation event or beneficiary not found', schema: apiErrorSchema },
+        409: { description: 'Escalation is no longer OPEN', schema: apiErrorSchema },
+        422: { description: 'Not a CLOSURE_PENDING escalation', schema: apiErrorSchema },
+        502: {
+          description: 'beneficiary-service or auth-service unreachable',
+          schema: apiErrorSchema,
+        },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI'),
+    validate(escalationEventIdParamsSchema, 'params'),
+    validateBody(submitClosurePendingReasonSchema),
+    controller.submitClosurePendingReason,
   );
 }

@@ -4,6 +4,7 @@ import type { ListEscalationEventsInput } from './dto/list-escalation-events.dto
 import type { NotificationRepository } from '../notifications/notification.repository';
 import type { BeneficiaryClient } from './beneficiary.client';
 import type { ManagerNoticeClient } from './manager-notice.client';
+import type { LookupClient } from './lookup.client';
 import type { EscalationType } from '../../../../node_modules/.prisma/client-notification-escalation-service';
 
 function row(overrides: { id?: string; escalationType?: EscalationType; createdAt?: Date } = {}) {
@@ -20,6 +21,9 @@ function row(overrides: { id?: string; escalationType?: EscalationType; createdA
     resolvedAt: null,
     reviewDeadlineAt: null,
     actionTaken: null,
+    pendingReasonLookupValueId: null,
+    pendingReasonNotes: null,
+    pendingReasonSubmittedAt: null,
     createdAt: overrides.createdAt ?? new Date('2026-08-05T10:00:00.000Z'),
     createdByUserId: null,
     updatedAt: overrides.createdAt ?? new Date('2026-08-05T10:00:00.000Z'),
@@ -35,6 +39,7 @@ describe('EscalationService', () => {
     findById: jest.fn(),
     create: jest.fn(),
     updateStatus: jest.fn(),
+    updatePendingReason: jest.fn(),
   } as unknown as jest.Mocked<EscalationRepository>;
   const notificationRepository = {
     findMany: jest.fn(),
@@ -671,20 +676,22 @@ describe('EscalationService', () => {
       expect(managerNoticeClient.send).not.toHaveBeenCalled();
     });
 
-    it('still returns 200 when removing the beneficiary from the roster fails', async () => {
+    it('propagates the error and leaves the escalation OPEN when removing the beneficiary from the roster fails', async () => {
       const pending = row({ escalationType: 'ANC_2_MISSED' });
       repository.findById.mockResolvedValue(pending);
-      repository.updateStatus.mockResolvedValue(true);
       beneficiaryClient.markPendingTransfer.mockRejectedValue(
         new Error('beneficiary-service down'),
       );
 
       await expect(
         transferService.decideMissedVisit(pending.id, 'TRANSFER', AUTH_HEADER),
-      ).resolves.toBeDefined();
-      expect(consoleErrorSpy).toHaveBeenCalled();
-      // Independent of the beneficiary fetch — still attempted despite the roster failure.
-      expect(managerNoticeClient.send).toHaveBeenCalled();
+      ).rejects.toThrow('beneficiary-service down');
+      // The escalation must not be committed to TRANSFER_REQUESTED until the
+      // roster removal has actually succeeded — otherwise the card would be
+      // permanently decided while the beneficiary never left the roster, with
+      // no way to retry.
+      expect(repository.updateStatus).not.toHaveBeenCalled();
+      expect(managerNoticeClient.send).not.toHaveBeenCalled();
     });
 
     it('still returns 200 when emailing the Manager fails', async () => {
@@ -736,6 +743,183 @@ describe('EscalationService', () => {
         transferService.decideMissedVisit(pending.id, 'TRANSFER', AUTH_HEADER),
       ).resolves.toBeDefined();
       expect(consoleErrorSpy).toHaveBeenCalled();
+    });
+  });
+
+  describe('submitClosurePendingReason', () => {
+    const beneficiaryClient = {
+      getById: jest.fn(),
+    } as unknown as jest.Mocked<BeneficiaryClient>;
+    const lookupClient = {
+      resolveClosurePendingReasonCode: jest.fn(),
+    } as unknown as jest.Mocked<LookupClient>;
+    let pendingReasonService: EscalationService;
+
+    beforeEach(() => {
+      pendingReasonService = new EscalationService(
+        repository,
+        notificationRepository,
+        beneficiaryClient,
+        undefined,
+        lookupClient,
+      );
+      beneficiaryClient.getById.mockResolvedValue({
+        id: '22222222-2222-2222-2222-222222222222',
+        sakhiId: 'sakhi-a',
+        motherCaseDetails: null,
+        pii: { fullName: 'Jane Doe' },
+      });
+      lookupClient.resolveClosurePendingReasonCode.mockResolvedValue('INFORMATION_NOT_RECEIVED');
+      repository.updatePendingReason.mockResolvedValue(true);
+    });
+
+    const INPUT = { pendingReasonLookupValueId: 'lookup-value-1' };
+
+    it('404s on an unknown escalation id', async () => {
+      repository.findById.mockResolvedValue(null);
+      await expect(
+        pendingReasonService.submitClosurePendingReason('unknown-id', INPUT, AUTH_HEADER),
+      ).rejects.toMatchObject({ status: 404 });
+      expect(beneficiaryClient.getById).not.toHaveBeenCalled();
+    });
+
+    it('422s when the escalation is not CLOSURE_PENDING', async () => {
+      repository.findById.mockResolvedValue(row({ escalationType: 'ANC_2_MISSED' }));
+      await expect(
+        pendingReasonService.submitClosurePendingReason(
+          '11111111-1111-1111-1111-111111111111',
+          INPUT,
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 422 });
+      expect(beneficiaryClient.getById).not.toHaveBeenCalled();
+    });
+
+    it('409s when the escalation is no longer OPEN', async () => {
+      repository.findById.mockResolvedValue(row({ escalationType: 'CLOSURE_PENDING' }));
+      repository.updatePendingReason.mockResolvedValue(false);
+      await expect(
+        pendingReasonService.submitClosurePendingReason(
+          '11111111-1111-1111-1111-111111111111',
+          INPUT,
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 409 });
+    });
+
+    it('propagates a beneficiary-service ownership failure as-is', async () => {
+      repository.findById.mockResolvedValue(row({ escalationType: 'CLOSURE_PENDING' }));
+      beneficiaryClient.getById.mockRejectedValue(
+        Object.assign(new Error('forbidden'), { status: 403 }),
+      );
+      await expect(
+        pendingReasonService.submitClosurePendingReason(
+          '11111111-1111-1111-1111-111111111111',
+          INPUT,
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 403 });
+    });
+
+    it('400s when the lookupValueId does not resolve', async () => {
+      repository.findById.mockResolvedValue(row({ escalationType: 'CLOSURE_PENDING' }));
+      lookupClient.resolveClosurePendingReasonCode.mockResolvedValue(null);
+      await expect(
+        pendingReasonService.submitClosurePendingReason(
+          '11111111-1111-1111-1111-111111111111',
+          INPUT,
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 400 });
+      expect(repository.updatePendingReason).not.toHaveBeenCalled();
+    });
+
+    it('400s when the reason is OTHER and notes is missing', async () => {
+      repository.findById.mockResolvedValue(row({ escalationType: 'CLOSURE_PENDING' }));
+      lookupClient.resolveClosurePendingReasonCode.mockResolvedValue('OTHER');
+      await expect(
+        pendingReasonService.submitClosurePendingReason(
+          '11111111-1111-1111-1111-111111111111',
+          INPUT,
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 400 });
+      expect(repository.updatePendingReason).not.toHaveBeenCalled();
+    });
+
+    it('accepts OTHER when notes is supplied', async () => {
+      repository.findById.mockResolvedValue(row({ escalationType: 'CLOSURE_PENDING' }));
+      lookupClient.resolveClosurePendingReasonCode.mockResolvedValue('OTHER');
+      await pendingReasonService.submitClosurePendingReason(
+        '11111111-1111-1111-1111-111111111111',
+        { ...INPUT, notes: 'Beneficiary moved away' },
+        AUTH_HEADER,
+      );
+      expect(repository.updatePendingReason).toHaveBeenCalledWith(
+        '11111111-1111-1111-1111-111111111111',
+        'lookup-value-1',
+        'Beneficiary moved away',
+      );
+    });
+
+    it('does not require notes for a non-OTHER reason', async () => {
+      repository.findById.mockResolvedValue(row({ escalationType: 'CLOSURE_PENDING' }));
+      await pendingReasonService.submitClosurePendingReason(
+        '11111111-1111-1111-1111-111111111111',
+        INPUT,
+        AUTH_HEADER,
+      );
+      expect(repository.updatePendingReason).toHaveBeenCalledWith(
+        '11111111-1111-1111-1111-111111111111',
+        'lookup-value-1',
+        null,
+      );
+    });
+
+    it('persists the reason without changing status, and returns the updated row', async () => {
+      repository.findById
+        .mockResolvedValueOnce(row({ escalationType: 'CLOSURE_PENDING' }))
+        .mockResolvedValueOnce({
+          ...row({ escalationType: 'CLOSURE_PENDING' }),
+          pendingReasonLookupValueId: 'lookup-value-1',
+        });
+
+      const result = await pendingReasonService.submitClosurePendingReason(
+        '11111111-1111-1111-1111-111111111111',
+        INPUT,
+        AUTH_HEADER,
+      );
+
+      expect(result?.status).toBe('OPEN');
+      expect(result?.pendingReasonLookupValueId).toBe('lookup-value-1');
+    });
+
+    it('propagates a beneficiary-service unreachable failure', async () => {
+      repository.findById.mockResolvedValue(row({ escalationType: 'CLOSURE_PENDING' }));
+      beneficiaryClient.getById.mockRejectedValue(
+        Object.assign(new Error('bad gateway'), { status: 502 }),
+      );
+      await expect(
+        pendingReasonService.submitClosurePendingReason(
+          '11111111-1111-1111-1111-111111111111',
+          INPUT,
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 502 });
+    });
+
+    it('propagates an auth-service (lookup) unreachable failure', async () => {
+      repository.findById.mockResolvedValue(row({ escalationType: 'CLOSURE_PENDING' }));
+      lookupClient.resolveClosurePendingReasonCode.mockRejectedValue(
+        Object.assign(new Error('bad gateway'), { status: 502 }),
+      );
+      await expect(
+        pendingReasonService.submitClosurePendingReason(
+          '11111111-1111-1111-1111-111111111111',
+          INPUT,
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 502 });
     });
   });
 });

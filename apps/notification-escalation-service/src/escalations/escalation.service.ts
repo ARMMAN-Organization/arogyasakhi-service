@@ -4,9 +4,11 @@ import type { ListEscalationEventsInput } from './dto/list-escalation-events.dto
 import type { CreateEscalationEventInput } from './dto/create-escalation-event.dto';
 import { BeneficiaryClient } from './beneficiary.client';
 import { ManagerNoticeClient } from './manager-notice.client';
+import { LookupClient } from './lookup.client';
 import { decideTransfer } from './missed-visit-transfer';
 import { MISSED_VISIT_TYPES, MISSED_VISIT_TYPE_MAP } from './missed-visit-types';
 import type { NotificationRepository } from '../notifications/notification.repository';
+import type { SubmitClosurePendingReasonInput } from './dto/submit-closure-pending-reason.dto';
 
 /** Quick Response's fixed card type for an escalation row — everything else in
  * EscalationType that isn't one of the 8 supported card types is omitted from
@@ -58,6 +60,7 @@ export class EscalationService {
     private readonly notificationRepository: NotificationRepository,
     private readonly beneficiaryClient: BeneficiaryClient = new BeneficiaryClient(),
     private readonly managerNoticeClient: ManagerNoticeClient = new ManagerNoticeClient(),
+    private readonly lookupClient: LookupClient = new LookupClient(),
   ) {}
 
   async list(query: ListEscalationEventsInput) {
@@ -226,9 +229,8 @@ export class EscalationService {
 
     // Delegates ownership scoping to beneficiary-service's own GET /beneficiaries/:id
     // (SAKHI-own-case / SUPERVISOR-roster / MANAGER-unrestricted) — same pattern
-    // this service's own single-record mutations should apply. Without this, a
-    // Supervisor could decide (TRANSFER or CLOSE) an escalation belonging to a
-    // beneficiary outside their own roster (IDOR).
+    // submitClosurePendingReason already uses. Without this, a Supervisor could
+    // decide (TRANSFER or CLOSE) an escalation outside their own roster (IDOR).
     await this.beneficiaryClient.getById(existing.beneficiaryId, authorizationHeader);
 
     if (action === 'TRANSFER') {
@@ -287,5 +289,49 @@ export class EscalationService {
       return { active: false, reviewDeadlineAt: null };
     }
     return { active: true, reviewDeadlineAt: row.reviewDeadlineAt.toISOString() };
+  }
+
+  /**
+   * Records why a still-OPEN CLOSURE_PENDING escalation hasn't had its
+   * closure form submitted yet — does not change status (the actual
+   * closure/decision flow is separate). SAKHI-only (see escalation.routes.ts);
+   * ownership is delegated to beneficiary-service's own GET /beneficiaries/:id
+   * (SAKHI-own-case check), same trust-delegation as closure-reopen-service's
+   * ClosureService.create — this service owns no sakhiId data of its own.
+   */
+  async submitClosurePendingReason(
+    id: string,
+    input: SubmitClosurePendingReasonInput,
+    authorizationHeader: string,
+  ) {
+    const existing = await this.repository.findById(id);
+    if (!existing) throw notFound('Escalation event not found.');
+    if (existing.escalationType !== 'CLOSURE_PENDING') {
+      throw unprocessable('This endpoint only accepts CLOSURE_PENDING escalations.');
+    }
+
+    await this.beneficiaryClient.getById(existing.beneficiaryId, authorizationHeader);
+
+    const reasonCode = await this.lookupClient.resolveClosurePendingReasonCode(
+      input.pendingReasonLookupValueId,
+      authorizationHeader,
+    );
+    if (!reasonCode) {
+      throw badRequest('pendingReasonLookupValueId: Unrecognized CLOSURE_PENDING_REASON value.');
+    }
+    if (reasonCode === 'OTHER' && !input.notes) {
+      throw badRequest('notes: Required when the reason is OTHER.');
+    }
+
+    const updated = await this.repository.updatePendingReason(
+      id,
+      input.pendingReasonLookupValueId,
+      input.notes ?? null,
+    );
+    if (!updated) {
+      throw conflict('This CLOSURE_PENDING escalation is no longer open.');
+    }
+
+    return this.repository.findById(id);
   }
 }

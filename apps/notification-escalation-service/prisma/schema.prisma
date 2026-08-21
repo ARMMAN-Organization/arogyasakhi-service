@@ -106,6 +106,16 @@ model EscalationEvent {
   // stamped at decision time as now + 15 days. Null for every other status.
   reviewDeadlineAt     DateTime?        @map("review_deadline_at")
   actionTaken          String?          @map("action_taken") @db.VarChar(80)
+  // CLOSURE_PENDING only (POST /escalations/:id/closure-pending-reason) — why the
+  // closure form hasn't been submitted yet. auth-service's CLOSURE_PENDING_REASON
+  // lookup_value_id — environment-specific FK, not a stable literal, same convention
+  // as escalation_events has none of its own for other cross-service lookups.
+  // Distinct from actionTaken, which records a *decision outcome* (CLOSE/TRANSFER),
+  // not a still-pending status explanation.
+  pendingReasonLookupValueId String?    @map("pending_reason_lookup_value_id")
+  // Required only when pendingReasonLookupValueId resolves to OTHER.
+  pendingReasonNotes         String?    @map("pending_reason_notes") @db.VarChar(500)
+  pendingReasonSubmittedAt   DateTime?  @map("pending_reason_submitted_at")
   createdAt            DateTime         @default(now()) @map("created_at")
   createdByUserId      String?          @map("created_by_user_id")
   updatedAt            DateTime         @updatedAt @map("updated_at")

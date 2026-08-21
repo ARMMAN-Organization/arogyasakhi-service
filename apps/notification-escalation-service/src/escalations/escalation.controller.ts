@@ -4,6 +4,7 @@ import type { EscalationService } from './escalation.service';
 import type { ListEscalationEventsInput } from './dto/list-escalation-events.dto';
 import type { CreateEscalationEventInput } from './dto/create-escalation-event.dto';
 import type { DecideMissedVisitEscalationInput } from './dto/decide-missed-visit-escalation.dto';
+import type { SubmitClosurePendingReasonInput } from './dto/submit-closure-pending-reason.dto';
 
 /**
  * Escalation event request handlers. Mounted under the global `api/v1`
@@ -52,6 +53,15 @@ export function createEscalationController(service: EscalationService) {
 
     getActiveTransferWindow: asyncHandler(async (req, res) => {
       res.json(ok(await service.getActiveTransferWindow(req.params.beneficiaryId)));
+    }),
+
+    submitClosurePendingReason: asyncHandler(async (req, res, next) => {
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const body = req.body as SubmitClosurePendingReasonInput;
+      res.json(
+        ok(await service.submitClosurePendingReason(req.params.id, body, authorizationHeader)),
+      );
     }),
   };
 }

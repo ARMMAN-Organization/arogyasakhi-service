@@ -279,6 +279,23 @@ export const LOOKUP_CATEGORIES: {
     ],
   },
   {
+    categoryCode: 'CLOSURE_PENDING_REASON',
+    categoryName: 'Closure Pending Reason',
+    description:
+      'Reasons a Sakhi gives for a still-open CLOSURE_PENDING escalation card in ' +
+      "notification-escalation-service — why the closure form hasn't been submitted yet.",
+    values: [
+      {
+        valueCode: 'INFORMATION_NOT_RECEIVED',
+        valueLabel: 'Information not received',
+        sortOrder: 0,
+      },
+      { valueCode: 'APP_ISSUES', valueLabel: 'App Issues', sortOrder: 1 },
+      { valueCode: 'BENEFICIARY_UNAVAILABLE', valueLabel: 'Beneficiary unavailable', sortOrder: 2 },
+      { valueCode: 'OTHER', valueLabel: 'Other', sortOrder: 3 },
+    ],
+  },
+  {
     categoryCode: 'CASE_TYPE',
     categoryName: 'Case Type',
     description:
