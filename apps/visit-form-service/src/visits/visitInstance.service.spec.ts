@@ -3,10 +3,12 @@ import type { VisitInstanceRepository } from './visitInstance.repository';
 import type { CreateVisitInstanceInput } from './dto/create-visitInstance.dto';
 import { findSakhiById, listSakhiIdsForSupervisor } from '../sakhis/sakhi.client';
 import { resolveVisitStatusCode, resolveVisitStatusCodes } from '../lookups/lookup.client';
+import { getActiveTransferWindow } from '../escalations/escalation.client';
 import { findBeneficiaryOwnership } from '../beneficiaries/beneficiary.client';
 
 jest.mock('../sakhis/sakhi.client');
 jest.mock('../lookups/lookup.client');
+jest.mock('../escalations/escalation.client');
 jest.mock('../beneficiaries/beneficiary.client');
 
 describe('VisitInstanceService', () => {
@@ -32,6 +34,7 @@ describe('VisitInstanceService', () => {
   const listSakhiIdsForSupervisorMock = jest.mocked(listSakhiIdsForSupervisor);
   const resolveVisitStatusCodeMock = jest.mocked(resolveVisitStatusCode);
   const resolveVisitStatusCodesMock = jest.mocked(resolveVisitStatusCodes);
+  const getActiveTransferWindowMock = jest.mocked(getActiveTransferWindow);
   const findBeneficiaryOwnershipMock = jest.mocked(findBeneficiaryOwnership);
 
   // Distinct from sampleRow.statusLookupValueId ('aaaaaaaa-...') below, so
@@ -95,6 +98,21 @@ describe('VisitInstanceService', () => {
       await expect(
         service.listByBeneficiaryId('99999999-9999-9999-9999-999999999999'),
       ).resolves.toEqual([]);
+    });
+  });
+
+  describe('getById', () => {
+    it('returns the visit via repository', async () => {
+      repository.findById.mockResolvedValue(sampleRow);
+
+      await expect(service.getById(sampleRow.id)).resolves.toBe(sampleRow);
+      expect(repository.findById).toHaveBeenCalledWith(sampleRow.id);
+    });
+
+    it('404s on an unknown id', async () => {
+      repository.findById.mockResolvedValue(null);
+
+      await expect(service.getById('unknown-id')).rejects.toMatchObject({ status: 404 });
     });
   });
 
@@ -302,6 +320,110 @@ describe('VisitInstanceService', () => {
 
       expect(findSakhiByIdMock).not.toHaveBeenCalled();
       expect(repository.updateStatus).toHaveBeenCalled();
+    });
+
+    describe('Missed Visit Escalation TRANSFER review window (FR-SV-4.3)', () => {
+      let consoleErrorSpy: jest.SpyInstance;
+
+      beforeEach(() => {
+        resolveVisitStatusCodeMock.mockImplementation((id) =>
+          Promise.resolve(id === MISSED_ID ? 'MISSED' : 'PENDING'),
+        );
+        repository.updateStatus.mockResolvedValue(true);
+        consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+      });
+
+      afterEach(() => {
+        consoleErrorSpy.mockRestore();
+      });
+
+      it('403s a SAKHI setting notMetReason on a MISSED visit during an active transfer window', async () => {
+        repository.findById.mockResolvedValue(sampleRow);
+        getActiveTransferWindowMock.mockResolvedValue({
+          active: true,
+          reviewDeadlineAt: '2027-01-01T00:00:00.000Z',
+        });
+
+        await expect(
+          service.updateStatus(
+            sampleRow.id,
+            { statusLookupValueId: MISSED_ID, notMetReason: 'Beneficiary not home' },
+            { id: SAKHI_ID, roles: ['SAKHI'] },
+            AUTH_HEADER,
+          ),
+        ).rejects.toThrow(
+          'Only a Supervisor may record a missed-visit reason while this beneficiary is under Manager review.',
+        );
+        expect(getActiveTransferWindowMock).toHaveBeenCalledWith(
+          sampleRow.beneficiaryId,
+          AUTH_HEADER,
+        );
+        expect(repository.updateStatus).not.toHaveBeenCalled();
+      });
+
+      it('allows a SAKHI to set notMetReason when there is no active transfer window', async () => {
+        repository.findById.mockResolvedValue(sampleRow);
+        getActiveTransferWindowMock.mockResolvedValue({ active: false, reviewDeadlineAt: null });
+
+        await service.updateStatus(
+          sampleRow.id,
+          { statusLookupValueId: MISSED_ID, notMetReason: 'Beneficiary not home' },
+          { id: SAKHI_ID, roles: ['SAKHI'] },
+          AUTH_HEADER,
+        );
+
+        expect(repository.updateStatus).toHaveBeenCalled();
+      });
+
+      it('allows a SUPERVISOR to set notMetReason during an active transfer window, without even checking', async () => {
+        repository.findById.mockResolvedValue(sampleRow);
+        findSakhiByIdMock.mockResolvedValue({
+          sakhiId: SAKHI_ID,
+          supervisorId: 'supervisor-1',
+          primaryProjectId: 'p1',
+        });
+
+        await service.updateStatus(
+          sampleRow.id,
+          { statusLookupValueId: MISSED_ID, notMetReason: 'Beneficiary not home' },
+          { id: 'supervisor-1', roles: ['SUPERVISOR'] },
+          AUTH_HEADER,
+        );
+
+        expect(getActiveTransferWindowMock).not.toHaveBeenCalled();
+        expect(repository.updateStatus).toHaveBeenCalled();
+      });
+
+      it('does not check the transfer window when notMetReason is not being set', async () => {
+        repository.findById.mockResolvedValue(sampleRow);
+
+        await service.updateStatus(
+          sampleRow.id,
+          { statusLookupValueId: MISSED_ID },
+          { id: SAKHI_ID, roles: ['SAKHI'] },
+          AUTH_HEADER,
+        );
+
+        expect(getActiveTransferWindowMock).not.toHaveBeenCalled();
+        expect(repository.updateStatus).toHaveBeenCalled();
+      });
+
+      it('fails open (allows the write) when the transfer-window check itself fails', async () => {
+        repository.findById.mockResolvedValue(sampleRow);
+        getActiveTransferWindowMock.mockRejectedValue(
+          new Error('notification-escalation-service down'),
+        );
+
+        await service.updateStatus(
+          sampleRow.id,
+          { statusLookupValueId: MISSED_ID, notMetReason: 'Beneficiary not home' },
+          { id: SAKHI_ID, roles: ['SAKHI'] },
+          AUTH_HEADER,
+        );
+
+        expect(repository.updateStatus).toHaveBeenCalled();
+        expect(consoleErrorSpy).toHaveBeenCalled();
+      });
     });
   });
 

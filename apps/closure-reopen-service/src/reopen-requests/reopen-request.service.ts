@@ -47,6 +47,16 @@ export class ReopenRequestService {
     return this.repository.findByBeneficiaryId(beneficiaryId);
   }
 
+  getDecisionStatusByIds(ids: string[]) {
+    return this.repository.findManyByIds(ids);
+  }
+
+  async getById(id: string) {
+    const reopenRequest = await this.repository.findById(id);
+    if (!reopenRequest) throw notFound('Reopen request not found.');
+    return reopenRequest;
+  }
+
   /**
    * Raises a Sakhi's reopen request (FR-S-10.3) and, on success, raises the
    * matching REOPEN Quick Response card in approval-service. The reopen
@@ -144,6 +154,11 @@ export class ReopenRequestService {
    * place a reopen decision is actually persisted (Quick Response is one
    * caller of it, not the only one), so the audit trail can't be bypassed
    * by calling this endpoint directly.
+   *
+   * Also re-checks ownership scoping against beneficiary-service before
+   * touching supervisorStatus — same roster check create() relies on,
+   * closing the gap where a SUPERVISOR who merely learns a reopen request id
+   * outside their own roster could otherwise decide it.
    */
   async decide(
     id: string,
@@ -153,6 +168,14 @@ export class ReopenRequestService {
   ) {
     const existing = await this.repository.findById(id);
     if (!existing) throw notFound('Reopen request not found.');
+
+    // Delegates ownership scoping to beneficiary-service's own GET
+    // /beneficiaries/:id (SAKHI-own-case / SUPERVISOR-roster /
+    // MANAGER-unrestricted) — same pattern create() already uses. Without
+    // this, any SUPERVISOR who learns a reopen request id outside their own
+    // roster could approve or reject it (IDOR).
+    await this.beneficiaryClient.getById(existing.beneficiaryId, authorizationHeader);
+
     if (existing.supervisorStatus !== 'PENDING') {
       throw conflict('This reopen request has already been decided.');
     }

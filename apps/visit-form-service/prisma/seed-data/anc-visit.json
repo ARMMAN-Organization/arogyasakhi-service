@@ -702,6 +702,45 @@
       }
     },
     {
+      "question_code": "td1_date",
+      "label": "Td-1 date",
+      "input_type": "date",
+      "required": false,
+      "section": "Symptoms",
+      "dateRule": { "notFuture": true },
+      "visibleWhen": {
+        "field": "vaccination_status",
+        "operator": "contains",
+        "value": "td1_date"
+      }
+    },
+    {
+      "question_code": "td2_date",
+      "label": "Td-2 date",
+      "input_type": "date",
+      "required": false,
+      "section": "Symptoms",
+      "dateRule": { "notFuture": true, "notBefore": { "field": "td1_date" } },
+      "visibleWhen": {
+        "field": "vaccination_status",
+        "operator": "contains",
+        "value": "td2_date"
+      }
+    },
+    {
+      "question_code": "booster_date",
+      "label": "Td-Booster date",
+      "input_type": "date",
+      "required": false,
+      "section": "Symptoms",
+      "dateRule": { "notFuture": true, "notBefore": { "field": "td2_date" } },
+      "visibleWhen": {
+        "field": "vaccination_status",
+        "operator": "contains",
+        "value": "booster_date"
+      }
+    },
+    {
       "label": "Which of these food stuff have you consumed in the last 24 hours?",
       "options": [
         {

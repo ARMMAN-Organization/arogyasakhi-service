@@ -323,6 +323,30 @@ export function registerVisitInstanceRoutes(doc: DocumentedRouter, service: Visi
     controller.create,
   );
 
+  doc.get(
+    '/visits/:id',
+    {
+      summary:
+        "A single visit instance's detail — internal use only, not part of the public " +
+        'Visits API surface (the app has no single-visit-read flow; only list/summary/' +
+        'PATCH). Added for Quick Response card-enrichment.',
+      tags: ['Visits'],
+      params: idParamsSchema,
+      responses: {
+        200: { description: 'Visit instance detail', schema: envelope(visitInstanceSchema) },
+        400: errorResponse(400),
+        401: errorResponse(401),
+        403: errorResponse(403),
+        404: errorResponse(404, { message: 'Visit instance not found.' }),
+        500: errorResponse(500),
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(idParamsSchema, 'params'),
+    controller.getById,
+  );
+
   doc.patch(
     '/visits/:id',
     {

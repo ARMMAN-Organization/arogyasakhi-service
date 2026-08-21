@@ -18,12 +18,13 @@ const ASSESSMENT_WITH_FLAGS_SELECT = {
   riskFlags: {
     select: {
       id: true,
+      riskConditionId: true,
       riskGradeLookupValueId: true,
       observedValueJson: true,
       isReferralTrigger: true,
       isEducationTrigger: true,
       isHrVisitTrigger: true,
-      riskCondition: { select: { conditionCode: true, conditionName: true } },
+      riskCondition: { select: { conditionCode: true, conditionName: true, phase: true } },
     },
   },
 } as const;

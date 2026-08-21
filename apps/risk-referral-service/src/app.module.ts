@@ -17,6 +17,7 @@ import { createRiskConditionModule } from './risk-conditions/riskCondition.modul
 import { createRiskParameterModule } from './risk-parameters/riskParameter.module';
 import { createBeneficiaryRiskModule } from './beneficiary-risk/beneficiaryRisk.module';
 import { createBeneficiaryRiskReferralModule } from './beneficiary-risk-referrals/beneficiaryRiskReferral.module';
+import { createRiskBySakhiModule } from './risk-by-sakhi/riskBySakhi.module';
 import { buildRiskReferralServiceOpenApiDocument } from './docs/openapi';
 
 // Re-export shared HTTP helpers so feature routers can import from a single place.
@@ -63,6 +64,7 @@ export function createApp(prisma: PrismaService): Application {
   const riskParameterModule = createRiskParameterModule(prisma);
   const beneficiaryRiskModule = createBeneficiaryRiskModule(prisma);
   const beneficiaryRiskReferralModule = createBeneficiaryRiskReferralModule(prisma);
+  const riskBySakhiModule = createRiskBySakhiModule(prisma);
 
   // All routes live under the global `api/v1` prefix.
   const api = express.Router();
@@ -79,6 +81,7 @@ export function createApp(prisma: PrismaService): Application {
         riskParameterModule.registry,
         beneficiaryRiskModule.registry,
         beneficiaryRiskReferralModule.registry,
+        riskBySakhiModule.registry,
       ),
     ),
   );
@@ -88,6 +91,7 @@ export function createApp(prisma: PrismaService): Application {
   api.use(riskParameterModule.router);
   api.use(beneficiaryRiskModule.router);
   api.use(beneficiaryRiskReferralModule.router);
+  api.use(riskBySakhiModule.router);
   app.use('/api/v1', api);
 
   app.use(notFoundHandler);

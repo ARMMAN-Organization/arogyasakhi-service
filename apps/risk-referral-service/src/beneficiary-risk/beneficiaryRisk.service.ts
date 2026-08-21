@@ -2,6 +2,7 @@ import { forbidden, notFound, type AuthenticatedUser } from '@armman/service-com
 import type { BeneficiaryRiskRepository } from './beneficiaryRisk.repository';
 import { BeneficiaryClient } from './beneficiary.client';
 import { listSakhiIdsForSupervisor } from './sakhi.client';
+import { resolveRiskGrades } from './riskGrade.client';
 
 type StateSnapshotRow = Awaited<
   ReturnType<BeneficiaryRiskRepository['findStateSnapshots']>
@@ -10,6 +11,21 @@ type StateSnapshotRow = Awaited<
 type AssessmentWithFlagsRow = Awaited<
   ReturnType<BeneficiaryRiskRepository['findAssessmentsWithFlags']>
 >[number];
+
+interface RiskConditionSummaryAcc {
+  riskConditionId: string;
+  conditionName: string;
+  phase: string;
+  baselineGrade: string | null;
+  baselineObservedValue: unknown;
+  baselineAssessedAt: Date;
+  latestGrade: string | null;
+  latestObservedValue: unknown;
+  latestAssessedAt: Date;
+  everHighestGrade: string | null;
+  everHighestSortOrder: number;
+  everAtRiskFlag: boolean;
+}
 
 /**
  * Assembles a beneficiary's risk profile for the reference Android app's
@@ -42,25 +58,7 @@ export class BeneficiaryRiskService {
     caller: AuthenticatedUser,
     authorizationHeader: string,
   ) {
-    const isUnscoped = caller.roles.includes('MANAGER') || caller.roles.includes('ADMIN');
-    if (!isUnscoped) {
-      const beneficiary = await this.beneficiaryClient.getById(beneficiaryId, authorizationHeader);
-      if (!beneficiary) throw notFound('Beneficiary not found.');
-
-      if (caller.roles.includes('SUPERVISOR')) {
-        if (!caller.projectId) throw forbidden('Supervisor caller has no project scope.');
-        const roster = await listSakhiIdsForSupervisor(
-          caller.projectId,
-          caller.id,
-          authorizationHeader,
-        );
-        if (!roster.includes(beneficiary.sakhiId)) {
-          throw forbidden("This beneficiary is outside this Supervisor's roster.");
-        }
-      } else if (beneficiary.sakhiId !== caller.id) {
-        throw forbidden('You do not have access to this beneficiary.');
-      }
-    }
+    await this.assertCallerCanViewBeneficiary(beneficiaryId, caller, authorizationHeader);
 
     const [snapshots, assessments] = await Promise.all([
       this.repository.findStateSnapshots(beneficiaryId),
@@ -72,6 +70,129 @@ export class BeneficiaryRiskService {
       currentState: this.toCurrentStatePerPhase(snapshots),
       assessments: assessments.map((assessment) => this.toAssessmentView(assessment)),
     };
+  }
+
+  /**
+   * A beneficiary's per-condition risk history — one row per
+   * `riskConditionId`, derived from every RiskFlag ever recorded across all
+   * of this beneficiary's assessments (not just the latest one), per the
+   * HLD's `GET /beneficiaries/:id/risk-state`. There is no dedicated
+   * baseline/ever-highest tracking table in this service (that lives in
+   * beneficiary-service's currently-unpopulated
+   * beneficiary_risk_condition_summary — see this method's callers for why
+   * that path isn't used instead): `baselineGrade` is approximated as the
+   * earliest flag on record for that condition in this environment, not
+   * necessarily the beneficiary's true registration-time baseline if older
+   * assessments existed before this data was captured.
+   */
+  async getRiskState(
+    beneficiaryId: string,
+    caller: AuthenticatedUser,
+    authorizationHeader: string,
+  ) {
+    await this.assertCallerCanViewBeneficiary(beneficiaryId, caller, authorizationHeader);
+
+    const assessments = await this.repository.findAssessmentsWithFlags(beneficiaryId);
+    if (assessments.every((assessment) => assessment.riskFlags.length === 0)) {
+      return { beneficiaryId, riskConditionSummaries: [] };
+    }
+
+    const riskGrades = await resolveRiskGrades(authorizationHeader);
+    const summaries = new Map<string, RiskConditionSummaryAcc>();
+
+    // `assessments` is ordered most-recent-`evaluatedAt`-first (see
+    // repository) — walked in that order, the FIRST time a condition is
+    // seen fixes `latest*`, and every subsequent (older) sighting overwrites
+    // `baseline*`, so it ends on the chronologically earliest one seen.
+    for (const assessment of assessments) {
+      for (const flag of assessment.riskFlags) {
+        const grade = riskGrades.get(flag.riskGradeLookupValueId);
+        const gradeCode = grade?.code ?? null;
+        const sortOrder = grade?.sortOrder ?? -1;
+        const isAtRisk = gradeCode !== null && gradeCode !== 'NORMAL';
+
+        const existing = summaries.get(flag.riskConditionId);
+        if (!existing) {
+          summaries.set(flag.riskConditionId, {
+            riskConditionId: flag.riskConditionId,
+            conditionName: flag.riskCondition.conditionName,
+            phase: flag.riskCondition.phase,
+            baselineGrade: gradeCode,
+            baselineObservedValue: flag.observedValueJson,
+            baselineAssessedAt: assessment.evaluatedAt,
+            latestGrade: gradeCode,
+            latestObservedValue: flag.observedValueJson,
+            latestAssessedAt: assessment.evaluatedAt,
+            everHighestGrade: gradeCode,
+            everHighestSortOrder: sortOrder,
+            everAtRiskFlag: isAtRisk,
+          });
+          continue;
+        }
+
+        existing.baselineGrade = gradeCode;
+        existing.baselineObservedValue = flag.observedValueJson;
+        existing.baselineAssessedAt = assessment.evaluatedAt;
+        if (sortOrder > existing.everHighestSortOrder) {
+          existing.everHighestGrade = gradeCode;
+          existing.everHighestSortOrder = sortOrder;
+        }
+        if (isAtRisk) existing.everAtRiskFlag = true;
+      }
+    }
+
+    return {
+      beneficiaryId,
+      riskConditionSummaries: [...summaries.values()].map((s) => ({
+        riskConditionId: s.riskConditionId,
+        conditionName: s.conditionName,
+        phase: s.phase,
+        baselineGrade: s.baselineGrade,
+        baselineObservedValue: s.baselineObservedValue,
+        baselineAssessedAt: s.baselineAssessedAt,
+        latestGrade: s.latestGrade,
+        latestObservedValue: s.latestObservedValue,
+        latestAssessedAt: s.latestAssessedAt,
+        everHighestGrade: s.everHighestGrade,
+        everAtRiskFlag: s.everAtRiskFlag,
+      })),
+    };
+  }
+
+  /**
+   * Shared IDOR guard for both getRiskProfile and getRiskState: a SAKHI
+   * caller may only view her own beneficiary; a SUPERVISOR only a
+   * beneficiary whose assigned Sakhi is on their own roster; MANAGER/ADMIN
+   * are unscoped. Resolves ownership via beneficiary-service (this service
+   * owns no beneficiary_cases row of its own). A beneficiaryId
+   * beneficiary-service doesn't recognize 404s rather than silently
+   * returning empty data, since an unscoped caller could otherwise use an
+   * empty response to distinguish "no risk data" from "not mine to see."
+   */
+  private async assertCallerCanViewBeneficiary(
+    beneficiaryId: string,
+    caller: AuthenticatedUser,
+    authorizationHeader: string,
+  ): Promise<void> {
+    const isUnscoped = caller.roles.includes('MANAGER') || caller.roles.includes('ADMIN');
+    if (isUnscoped) return;
+
+    const beneficiary = await this.beneficiaryClient.getById(beneficiaryId, authorizationHeader);
+    if (!beneficiary) throw notFound('Beneficiary not found.');
+
+    if (caller.roles.includes('SUPERVISOR')) {
+      if (!caller.projectId) throw forbidden('Supervisor caller has no project scope.');
+      const roster = await listSakhiIdsForSupervisor(
+        caller.projectId,
+        caller.id,
+        authorizationHeader,
+      );
+      if (!roster.includes(beneficiary.sakhiId)) {
+        throw forbidden("This beneficiary is outside this Supervisor's roster.");
+      }
+    } else if (beneficiary.sakhiId !== caller.id) {
+      throw forbidden('You do not have access to this beneficiary.');
+    }
   }
 
   /**

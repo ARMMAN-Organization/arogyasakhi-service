@@ -176,6 +176,8 @@ describe('createPadaVisitsRouter (route wiring)', () => {
       success: true,
       message: 'OK',
       data: {
+        pada: { id: PADA_ID, name: 'Pada One' },
+        villageName: 'Village One',
         openCount: 1,
         referralFollowUpCount: 1,
         visits: [
@@ -223,6 +225,8 @@ describe('createPadaVisitsRouter (route wiring)', () => {
     expect(status).toBe(200);
     expect(body).toMatchObject({
       data: {
+        pada: { id: PADA_ID, name: 'Pada One' },
+        villageName: 'Village One',
         openCount: 0,
         referralFollowUpCount: 1,
         visits: [
@@ -358,7 +362,13 @@ describe('createPadaVisitsRouter (route wiring)', () => {
       expect(body).toEqual({
         success: true,
         message: 'OK',
-        data: { openCount: 0, referralFollowUpCount: 0, visits: [] },
+        data: {
+          pada: { id: PADA_ID, name: 'Pada One' },
+          villageName: 'Village One',
+          openCount: 0,
+          referralFollowUpCount: 0,
+          visits: [],
+        },
       });
       expect(fetchMock).toHaveBeenCalledTimes(3);
     },
@@ -389,7 +399,34 @@ describe('createPadaVisitsRouter (route wiring)', () => {
 
     expect(status).toBe(200);
     expect(body).toMatchObject({
-      data: { openCount: 0, referralFollowUpCount: 1 },
+      data: {
+        pada: { id: PADA_ID, name: 'Pada One' },
+        villageName: 'Village One',
+        openCount: 0,
+        referralFollowUpCount: 1,
+      },
+    });
+  });
+
+  it('returns null pada.name/villageName when the pada has none on record', async () => {
+    signer.verify.mockResolvedValue({ sub: 'caller-1', roles: ['ADMIN'] });
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse(200, {
+          data: [{ ...padaBreakdownRow, padaName: null, villageName: null }],
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse(200, { data: [] }))
+      .mockResolvedValueOnce(jsonResponse(200, { data: [] }));
+
+    const port = await startServer();
+    const { status, body } = await get(port, `/padas/${PADA_ID}/visits?status=open`, {
+      Authorization: AUTH_HEADER,
+    });
+
+    expect(status).toBe(200);
+    expect(body).toMatchObject({
+      data: { pada: { id: PADA_ID, name: null }, villageName: null },
     });
   });
 });

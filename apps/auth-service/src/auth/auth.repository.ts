@@ -55,6 +55,18 @@ export class AuthRepository {
     });
   }
 
+  /**
+   * Minimal lookup for service-to-service display-name resolution (e.g.
+   * media-service enriching an `uploadedByUserId`) — selects only what's
+   * needed rather than the full profile the other `findUserBy*` methods pull.
+   */
+  findDisplayNameById(id: string) {
+    return this.prisma.user.findUnique({
+      where: { id },
+      select: { id: true, displayName: true, isDeleted: true },
+    });
+  }
+
   incrementFailedLoginCount(userId: string) {
     return this.prisma.user.update({
       where: { id: userId },

@@ -78,6 +78,11 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
   // Sakhi profile reads (list under a project, single lookup) — used by the
   // Supervisor's Sakhi picker/detail header on inventory/meeting screens.
   { prefix: '/sakhis', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
+  // Supervisor→Manager hierarchy link, and the Missed Visit Escalation
+  // TRANSFER Manager-notice email (FR-SV-4.3) — the latter is an
+  // internal-use endpoint, called server-to-server by
+  // notification-escalation-service's decideMissedVisit.
+  { prefix: '/supervisors', target: appConfig.AUTH_SERVICE_URL, requiresAuth: true },
   // NOTE: `/docs` is NOT proxied here. The gateway serves ONE aggregated
   // Swagger UI at `/api/v1/docs` (see docs/docs.controller.ts) that merges
   // every service's own `/docs.json` into a single page — there is no single
@@ -106,6 +111,11 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
   {
     prefix: '/beneficiaries/:beneficiaryId/visits',
     target: appConfig.VISIT_FORM_SERVICE_URL,
+    requiresAuth: true,
+  },
+  {
+    prefix: '/beneficiaries/:beneficiaryId/risk-state',
+    target: appConfig.RISK_REFERRAL_SERVICE_URL,
     requiresAuth: true,
   },
   // GET /beneficiaries/:beneficiaryId/latest-visit-vitals — owned by
@@ -156,6 +166,9 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
   { prefix: '/risk-conditions', target: appConfig.RISK_REFERRAL_SERVICE_URL, requiresAuth: true },
   // Dedicated-path alias for /risk-conditions — same data, same service.
   { prefix: '/risk-parameters', target: appConfig.RISK_REFERRAL_SERVICE_URL, requiresAuth: true },
+  // Roster-wide per-condition risk summary for a Sakhi's caseload, optionally
+  // filtered to the ANC or PNC phase set — see riskBySakhi.routes.ts.
+  { prefix: '/risk/by-sakhi', target: appConfig.RISK_REFERRAL_SERVICE_URL, requiresAuth: true },
   { prefix: '/closures', target: appConfig.CLOSURE_REOPEN_SERVICE_URL, requiresAuth: true },
   // Internal-use decision endpoint, not part of the public Quick Response
   // surface — approval-service calls it through the gateway (rather than
@@ -165,6 +178,10 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
   { prefix: '/reopen-requests', target: appConfig.CLOSURE_REOPEN_SERVICE_URL, requiresAuth: true },
   { prefix: '/approvals', target: appConfig.APPROVAL_SERVICE_URL, requiresAuth: true },
   { prefix: '/quick-response', target: appConfig.APPROVAL_SERVICE_URL, requiresAuth: true },
+  // Thin, dedicated-URL wrapper around Quick Response's own LMP_CHANGE card
+  // decision (see approval-service's lmp-change-requests/), not a separate
+  // service or table.
+  { prefix: '/lmp-change-requests', target: appConfig.APPROVAL_SERVICE_URL, requiresAuth: true },
   { prefix: '/incentives', target: appConfig.INCENTIVE_WAGES_SERVICE_URL, requiresAuth: true },
   {
     prefix: '/incentive-rates',
@@ -181,6 +198,29 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
   // trustGatewayIdentity reason as /reopen-requests above.
   {
     prefix: '/escalation-events',
+    target: appConfig.NOTIFICATION_ESCALATION_SERVICE_URL,
+    requiresAuth: true,
+  },
+  // Distinct prefix from /escalation-events above — currently just the
+  // Missed Visit Escalation TRANSFER active-review-window read (FR-SV-4.3),
+  // an internal-use endpoint called server-to-server by
+  // visit-form-service's own SUPERVISOR-only notMetReason gate.
+  {
+    prefix: '/escalations',
+    target: appConfig.NOTIFICATION_ESCALATION_SERVICE_URL,
+    requiresAuth: true,
+  },
+  // Thin, dedicated-URL wrappers around escalation-events' own EDD_NEARING/
+  // MISSED_VISIT decision logic (see notification-escalation-service's
+  // escalation.routes.ts) — same "dedicated-URL wrapper" convention as
+  // /lmp-change-requests below.
+  {
+    prefix: '/edd-nearing-requests',
+    target: appConfig.NOTIFICATION_ESCALATION_SERVICE_URL,
+    requiresAuth: true,
+  },
+  {
+    prefix: '/missed-visit-escalations',
     target: appConfig.NOTIFICATION_ESCALATION_SERVICE_URL,
     requiresAuth: true,
   },

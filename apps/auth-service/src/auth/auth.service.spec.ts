@@ -75,6 +75,7 @@ describe('AuthService', () => {
     findSakhiProfileByUserId: jest.fn(),
     updateUserTransaction: jest.fn(),
     reactivateUser: jest.fn(),
+    findDisplayNameById: jest.fn(),
   } as unknown as jest.Mocked<AuthRepository>;
 
   const signer = {
@@ -635,6 +636,37 @@ describe('AuthService', () => {
     it('returns null for a non-existent user', async () => {
       repository.findUserByIdWithProfile.mockResolvedValue(null);
       await expect(service.getProfile('missing')).resolves.toBeNull();
+    });
+  });
+
+  describe('getDisplayName', () => {
+    it('returns the id and displayName for an active user', async () => {
+      repository.findDisplayNameById.mockResolvedValue({
+        id: 'user-1',
+        displayName: 'Test Sakhi',
+        isDeleted: false,
+      } as never);
+
+      await expect(service.getDisplayName('user-1')).resolves.toEqual({
+        id: 'user-1',
+        displayName: 'Test Sakhi',
+      });
+    });
+
+    it('throws notFound (404) for a soft-deleted user', async () => {
+      repository.findDisplayNameById.mockResolvedValue({
+        id: 'user-1',
+        displayName: 'Test Sakhi',
+        isDeleted: true,
+      } as never);
+
+      await expect(service.getDisplayName('user-1')).rejects.toMatchObject({ status: 404 });
+    });
+
+    it('throws notFound (404) for a non-existent user', async () => {
+      repository.findDisplayNameById.mockResolvedValue(null);
+
+      await expect(service.getDisplayName('missing')).rejects.toMatchObject({ status: 404 });
     });
   });
 

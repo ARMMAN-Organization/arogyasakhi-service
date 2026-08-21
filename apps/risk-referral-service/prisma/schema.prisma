@@ -283,6 +283,8 @@ model Referral {
   triggerConditionListJson  Json?                    @map("trigger_condition_list_json")
   facilityType              FacilityType?            @map("facility_type")
   facilityName              String?                  @map("facility_name") @db.VarChar(200)
+  // media_assets.media_asset_id — owned by another service, no cross-service relation.
+  photoEvidenceMediaAssetId String?                  @map("photo_evidence_media_asset_id")
   status                    ReferralStatus
   validTill                 DateTime?                @map("valid_till") @db.Date
   supervisorApprovalStatus  SupervisorApprovalStatus @default(NOT_REQUIRED) @map("supervisor_approval_status")

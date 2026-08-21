@@ -185,5 +185,13 @@ export function createBeneficiaryController(service: BeneficiaryService) {
       );
       res.json(ok(updated));
     }),
+
+    applyTransfer: asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const updated = await service.applyTransfer(req.params.id, req.user, authorizationHeader);
+      res.json(ok(updated));
+    }),
   };
 }

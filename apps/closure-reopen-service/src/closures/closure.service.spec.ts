@@ -36,6 +36,7 @@ describe('ClosureService', () => {
     findMany: jest.fn(),
     findById: jest.fn(),
     findByLocalClosureUuid: jest.fn(),
+    findManyByIds: jest.fn(),
     create: jest.fn(),
     decide: jest.fn(),
   } as unknown as jest.Mocked<ClosureRepository>;
@@ -90,6 +91,35 @@ describe('ClosureService', () => {
     const rows = [closureRow()];
     repository.findMany.mockResolvedValue(rows);
     await expect(service.list()).resolves.toBe(rows);
+  });
+
+  describe('getDecisionStatusByIds', () => {
+    it('delegates to the repository with the given ids', async () => {
+      const rows = [
+        { id: '11111111-1111-1111-1111-111111111111', supervisorStatus: 'PENDING' as const },
+      ];
+      repository.findManyByIds.mockResolvedValue(rows);
+
+      const ids = ['11111111-1111-1111-1111-111111111111'];
+      await expect(service.getDecisionStatusByIds(ids)).resolves.toBe(rows);
+      expect(repository.findManyByIds).toHaveBeenCalledWith(ids);
+    });
+  });
+
+  describe('getById', () => {
+    it('returns the closure via repository', async () => {
+      const closure = closureRow();
+      repository.findById.mockResolvedValue(closure);
+
+      await expect(service.getById(closure.id)).resolves.toBe(closure);
+      expect(repository.findById).toHaveBeenCalledWith(closure.id);
+    });
+
+    it('404s on an unknown id', async () => {
+      repository.findById.mockResolvedValue(null);
+
+      await expect(service.getById('unknown-id')).rejects.toMatchObject({ status: 404 });
+    });
   });
 
   describe('create', () => {
@@ -369,6 +399,71 @@ describe('ClosureService', () => {
         service.decide('unknown-id', supervisorId, { decision: 'APPROVED' }, authHeader),
       ).rejects.toMatchObject({ status: 404 });
       expect(repository.decide).not.toHaveBeenCalled();
+    });
+
+    describe('ownership scoping via beneficiaryClient.getById', () => {
+      it('checks ownership before deciding when the supervisor is in the roster', async () => {
+        const pending = pendingClosure();
+        const decided = { ...pending, supervisorStatus: 'APPROVED' as const, supervisorId };
+        repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(decided);
+        repository.decide.mockResolvedValue(true);
+
+        await service.decide(pending.id, supervisorId, { decision: 'APPROVED' }, authHeader);
+
+        expect(beneficiaryClient.getById).toHaveBeenCalledWith(pending.beneficiaryId, authHeader);
+        expect(repository.decide).toHaveBeenCalled();
+      });
+
+      it('propagates a 403 when the supervisor is outside the beneficiary roster, without deciding', async () => {
+        const pending = pendingClosure();
+        repository.findById.mockResolvedValueOnce(pending);
+        beneficiaryClient.getById.mockRejectedValue(
+          Object.assign(new Error('This beneficiary case is outside your own roster.'), {
+            status: 403,
+          }),
+        );
+
+        await expect(
+          service.decide(pending.id, supervisorId, { decision: 'APPROVED' }, authHeader),
+        ).rejects.toMatchObject({ status: 403 });
+        expect(repository.decide).not.toHaveBeenCalled();
+      });
+
+      it('succeeds for a MANAGER/ADMIN regardless of roster (beneficiary-service is unrestricted for them)', async () => {
+        const managerId = '66666666-6666-6666-6666-666666666666';
+        const pending = pendingClosure();
+        const decided = {
+          ...pending,
+          supervisorStatus: 'APPROVED' as const,
+          supervisorId: managerId,
+        };
+        repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(decided);
+        repository.decide.mockResolvedValue(true);
+        beneficiaryClient.getById.mockResolvedValue({
+          id: pending.beneficiaryId,
+          currentStatus: 'ACTIVE',
+        });
+
+        await expect(
+          service.decide(pending.id, managerId, { decision: 'APPROVED' }, authHeader),
+        ).resolves.toBe(decided);
+        expect(repository.decide).toHaveBeenCalledWith(pending.id, managerId, {
+          decision: 'APPROVED',
+        });
+      });
+
+      it('propagates a 404 when the underlying beneficiary no longer exists', async () => {
+        const pending = pendingClosure();
+        repository.findById.mockResolvedValueOnce(pending);
+        beneficiaryClient.getById.mockRejectedValue(
+          Object.assign(new Error('Beneficiary case not found.'), { status: 404 }),
+        );
+
+        await expect(
+          service.decide(pending.id, supervisorId, { decision: 'APPROVED' }, authHeader),
+        ).rejects.toMatchObject({ status: 404 });
+        expect(repository.decide).not.toHaveBeenCalled();
+      });
     });
 
     it('422s when the closure does not require supervisor review', async () => {

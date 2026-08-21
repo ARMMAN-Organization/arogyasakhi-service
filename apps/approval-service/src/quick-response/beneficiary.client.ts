@@ -5,9 +5,23 @@ export interface BeneficiaryCaseRecord {
   id: string;
 }
 
+export interface RiskConditionSummary {
+  riskConditionId: string;
+  phase: string;
+  latestGrade: string | null;
+  latestAssessedAt: string | null;
+  everHighestGrade: string | null;
+  everAtRiskFlag: boolean;
+  currentReferralTriggerFlag: boolean;
+  currentHrVisitTriggerFlag: boolean;
+}
+
 export interface BeneficiaryCaseDetail {
   id: string;
   sakhiId: string;
+  pii: { fullName: string; padaId: string | null };
+  motherCaseDetails: { lmpDate: string; eddDate: string } | null;
+  riskConditionSummaries: RiskConditionSummary[];
 }
 
 /**

@@ -14,6 +14,10 @@ export class MediaAssetRepository {
     return this.prisma.mediaAsset.findMany({ orderBy: { createdAt: 'desc' }, take: 50 });
   }
 
+  findById(id: string) {
+    return this.prisma.mediaAsset.findFirst({ where: { id, isDeleted: false } });
+  }
+
   create(data: Prisma.MediaAssetCreateInput) {
     return this.prisma.mediaAsset.create({ data });
   }

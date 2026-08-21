@@ -7,11 +7,14 @@ import { createUploadUrlSchema } from './dto/create-upload-url.dto';
 import {
   requireRoles,
   trustGatewayIdentity,
+  validate,
   validateBody,
   type DocumentedRouter,
 } from '../app.module';
 
 extendZodWithOpenApi(z);
+
+const idParamsSchema = z.object({ id: z.string().uuid() }).strict();
 
 // Documentation-only view of the request body (passed via `doc.post`'s
 // `body` option, not to `validateBody`): annotates `s3Key` with an example
@@ -92,6 +95,25 @@ const mediaAssetFinalizeResponseSchema = z.object({
   createdAt: z.string().datetime(),
 });
 
+// Deliberately just the viewable URL plus the uploader's name — no
+// id/mimeType/other metadata, since this endpoint exists so a caller can look
+// at the image itself and know who uploaded it.
+const mediaViewSchema = z.object({
+  viewUrl: z.string().openapi({
+    description: 'Short-lived presigned URL to view/download the file directly.',
+    example: 'https://arogya-media.s3.ap-south-1.amazonaws.com/consent_photo/...',
+  }),
+  uploadedByName: z
+    .string()
+    .nullable()
+    .openapi({
+      description:
+        "The uploader's display name, resolved from auth-service — null if the asset has no " +
+        'recorded uploader, or that user could no longer be found.',
+      example: 'Jane Sakhi',
+    }),
+});
+
 const apiErrorSchema = z.object({
   success: z.literal(false),
   message: z.string(),
@@ -128,6 +150,33 @@ export function registerMediaAssetRoutes(doc: DocumentedRouter, service: MediaAs
     trustGatewayIdentity,
     requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER'),
     controller.list,
+  );
+
+  doc.get(
+    '/media/:id',
+    {
+      summary: "View a media asset's uploaded file via a short-lived presigned URL",
+      tags: ['Media'],
+      responses: {
+        200: { description: 'Presigned view URL', schema: envelope(mediaViewSchema) },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: {
+          description: 'Unauthenticated — missing/invalid trusted identity or bearer token',
+          schema: apiErrorSchema,
+        },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+        404: { description: 'Media asset not found', schema: apiErrorSchema },
+        502: {
+          description:
+            'auth-service is unreachable or returned an error while resolving the uploader name',
+          schema: apiErrorSchema,
+        },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER'),
+    validate(idParamsSchema, 'params'),
+    controller.getById,
   );
 
   doc.post(

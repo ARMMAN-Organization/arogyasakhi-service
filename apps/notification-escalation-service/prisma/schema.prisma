@@ -53,6 +53,10 @@ enum EscalationStatus {
 
 enum NotificationType {
   MISSED_VISIT_ESCALATION
+  // Missed Visit Escalation TRANSFER (FR-SV-4.3) — the Sakhi's in-app
+  // notification that her beneficiary has been removed from her active
+  // list pending a Manager's review.
+  BENEFICIARY_TRANSFER_NOTICE
   REFERRAL_UPDATE
   REFERRAL_FOLLOWUP_DUE
   REFERRAL_FOLLOWUP_OVERDUE
@@ -94,8 +98,24 @@ model EscalationEvent {
   status               EscalationStatus @map("status")
   // supervisor_profiles.supervisor_id — owned by another service, no cross-service relation.
   assignedSupervisorId String?          @map("assigned_supervisor_id")
+  // Missed Visit Escalation detail only — no confirmed data source yet, so this
+  // is populated by whatever upstream process creates the row; null until then.
+  visitsMissedCount    Int?             @map("visits_missed_count")
   resolvedAt           DateTime?        @map("resolved_at")
+  // TRANSFER_REQUESTED only (FR-SV-4.3) — the Manager's review deadline,
+  // stamped at decision time as now + 15 days. Null for every other status.
+  reviewDeadlineAt     DateTime?        @map("review_deadline_at")
   actionTaken          String?          @map("action_taken") @db.VarChar(80)
+  // CLOSURE_PENDING only (POST /escalations/:id/closure-pending-reason) — why the
+  // closure form hasn't been submitted yet. auth-service's CLOSURE_PENDING_REASON
+  // lookup_value_id — environment-specific FK, not a stable literal, same convention
+  // as escalation_events has none of its own for other cross-service lookups.
+  // Distinct from actionTaken, which records a *decision outcome* (CLOSE/TRANSFER),
+  // not a still-pending status explanation.
+  pendingReasonLookupValueId String?    @map("pending_reason_lookup_value_id")
+  // Required only when pendingReasonLookupValueId resolves to OTHER.
+  pendingReasonNotes         String?    @map("pending_reason_notes") @db.VarChar(500)
+  pendingReasonSubmittedAt   DateTime?  @map("pending_reason_submitted_at")
   createdAt            DateTime         @default(now()) @map("created_at")
   createdByUserId      String?          @map("created_by_user_id")
   updatedAt            DateTime         @updatedAt @map("updated_at")

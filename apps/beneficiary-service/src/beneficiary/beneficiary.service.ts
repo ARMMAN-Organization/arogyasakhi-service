@@ -858,6 +858,11 @@ export class BeneficiaryService {
    * A SAKHI caller may only apply this to their own case (same ownership
    * check as upsertRiskConditionSummary) — assertCallerCanTouchCase alone
    * doesn't cover this route, since it only scopes SUPERVISOR callers.
+   *
+   * Blocks a case in PENDING_TRANSFER — markPendingTransfer deliberately
+   * leaves sakhiId unchanged during the Manager review window, so this
+   * status needs its own explicit guard rather than relying on ownership
+   * checks to catch it.
    */
   async applyPhaseChange(
     beneficiaryId: string,
@@ -874,6 +879,10 @@ export class BeneficiaryService {
       }
     } else {
       await assertCallerCanTouchCase(existing.sakhiId, caller, authorizationHeader);
+    }
+
+    if (existing.currentStatus === 'PENDING_TRANSFER') {
+      throw conflict('Cannot change phase for a beneficiary case pending Manager transfer review.');
     }
 
     const fromPhase = existing.currentPhase as CasePhase;
@@ -988,6 +997,12 @@ export class BeneficiaryService {
    * (not a cross-tenant IDOR), but it is a real gap in the review workflow.
    * Tracked as a follow-up, not fixed here — would need a real machine
    * identity concept to close properly.
+   *
+   * Blocks a case in PENDING_TRANSFER — markPendingTransfer deliberately
+   * leaves sakhiId unchanged during the Manager review window, so the
+   * owning Sakhi (or her Supervisor) would otherwise still pass the
+   * ownership check above and silently discard the pending review by
+   * closing the case out from under it.
    */
   async applyClosure(
     beneficiaryId: string,
@@ -1004,6 +1019,10 @@ export class BeneficiaryService {
       }
     } else {
       await assertCallerCanTouchCase(existing.sakhiId, caller, authorizationHeader);
+    }
+
+    if (existing.currentStatus === 'PENDING_TRANSFER') {
+      throw conflict('Cannot close a beneficiary case pending Manager transfer review.');
     }
 
     if (existing.currentStatus === 'CLOSED') {
@@ -1041,6 +1060,38 @@ export class BeneficiaryService {
         );
       }
       throw conflict('Unable to close this beneficiary case.');
+    }
+
+    return this.projectCase(beneficiaryId, authorizationHeader);
+  }
+
+  /**
+   * Missed Visit Escalation TRANSFER (FR-SV-4.3's "beneficiary removed from
+   * current Sakhi's list" outcome) — called server-to-server by
+   * notification-escalation-service's decideMissedVisit, forwarding the
+   * deciding Supervisor's own token. Route-gated to SUPERVISOR/MANAGER/ADMIN
+   * (see beneficiary.routes.ts) — unlike /close, a SAKHI has no reason to
+   * transfer her own beneficiary away for Manager review, so this is not
+   * also reachable by the case's own Sakhi.
+   */
+  async applyTransfer(
+    beneficiaryId: string,
+    caller: AuthenticatedUser,
+    authorizationHeader: string,
+  ) {
+    const existing = await this.repository.findById(beneficiaryId);
+    if (!existing) throw notFound('Beneficiary case not found.');
+    await assertCallerCanTouchCase(existing.sakhiId, caller, authorizationHeader);
+    if (existing.currentStatus === 'CLOSED') {
+      throw conflict('Cannot transfer a CLOSED beneficiary case.');
+    }
+
+    const updated = await this.repository.markPendingTransfer(beneficiaryId, caller.id);
+    if (!updated) {
+      // Raced with another status change between the read above and the
+      // conditional update — same outcome as the check above, just caught a
+      // beat later instead of trusting a stale read (mirrors reactivateCase).
+      throw conflict('Cannot transfer a CLOSED beneficiary case.');
     }
 
     return this.projectCase(beneficiaryId, authorizationHeader);

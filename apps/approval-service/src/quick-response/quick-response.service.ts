@@ -9,8 +9,12 @@ import type { ClosureClient } from './closure.client';
 import type { ReferralClient } from './referral.client';
 import type { IncentiveClient } from './incentive.client';
 import type { UserClient } from './user.client';
+import type { SakhiClient, SakhiRecord } from './sakhi.client';
+import type { GeographyClient } from './geography.client';
+import type { VisitClient } from './visit.client';
 import type { ListQuickResponseInput } from './dto/list-quick-response.dto';
 import type { DecideQuickResponseInput } from './dto/decide-quick-response.dto';
+import type { DecideLmpChangeRequestInput } from '../lmp-change-requests/dto/decide-lmp-change-request.dto';
 
 /**
  * ApprovalRequestTypes surfaced as Quick Response cards — each maps 1:1 to a
@@ -88,6 +92,9 @@ export class QuickResponseService {
     private readonly referralClient: ReferralClient,
     private readonly incentiveClient: IncentiveClient,
     private readonly userClient: UserClient,
+    private readonly sakhiClient: SakhiClient,
+    private readonly geographyClient: GeographyClient,
+    private readonly visitClient: VisitClient,
   ) {}
 
   /**
@@ -107,15 +114,25 @@ export class QuickResponseService {
     const approvalRows = approvalStatusId
       ? await this.repository.findMany(approvalStatusId, query.limit, cursor)
       : [];
-    const approvalCards: ApprovalRequestCard[] = approvalRows
-      .filter((row) => APPROVAL_REQUEST_CARD_TYPES.has(row.requestType))
-      .map((row) => ({
-        cardId: row.id,
-        cardType: row.requestType,
-        cardSource: 'approval_requests' as const,
-        beneficiaryId: row.beneficiaryId,
-        raisedAt: row.createdAt.toISOString(),
-      }));
+    const typedRows = approvalRows.filter((row) =>
+      APPROVAL_REQUEST_CARD_TYPES.has(row.requestType),
+    );
+
+    // Only a PENDING page can be stale in the way reconciliation fixes (see
+    // filterStillPending's doc comment) — APPROVED/REJECTED queries return
+    // typedRows as-is.
+    const reconciledRows =
+      query.status === 'PENDING'
+        ? await this.filterStillPending(typedRows, authorizationHeader)
+        : typedRows;
+
+    const approvalCards: ApprovalRequestCard[] = reconciledRows.map((row) => ({
+      cardId: row.id,
+      cardType: row.requestType,
+      cardSource: 'approval_requests' as const,
+      beneficiaryId: row.beneficiaryId,
+      raisedAt: row.createdAt.toISOString(),
+    }));
 
     const escalationStatus = mapStatusForEscalations(query.status);
     const escalationResult = escalationStatus
@@ -144,6 +161,357 @@ export class QuickResponseService {
   }
 
   /**
+   * Per-card-type detail for the Supervisor app's card screen — the list
+   * envelope only carries {cardId, cardType, cardSource, beneficiaryId,
+   * raisedAt}, not enough to render any of the 8 cards' own content. Tries
+   * approval_requests first, then escalation_events, since a bare cardId
+   * carries no cardSource of its own (unlike decide(), which the caller
+   * already knows the source for).
+   *
+   * Field sourcing is intentionally partial: LMP Change's sonography image
+   * and Accompanied Referral's photo evidence are not returned at all (no
+   * upload path exists for either yet — returning a field that would always
+   * be null misrepresents it as "checked, found nothing" rather than "not
+   * built"). Closure Review's "completion tracker" is likewise omitted —
+   * no backing data source was identified for it.
+   */
+  async getCardDetail(cardId: string, authorizationHeader: string) {
+    const approvalRow = await this.repository.findById(cardId);
+    if (approvalRow) {
+      return this.enrichApprovalRequestCard(approvalRow, authorizationHeader);
+    }
+
+    const escalationCard = await this.escalationClient.findById(cardId, authorizationHeader);
+    if (escalationCard) {
+      return this.enrichEscalationCard(escalationCard, authorizationHeader);
+    }
+
+    throw notFound('Quick Response card not found.');
+  }
+
+  /**
+   * Wraps one supplementary enrichment lookup: logs and returns null on
+   * failure rather than throwing, so one unreachable downstream service
+   * degrades only its own field instead of failing the whole card detail.
+   * Never used for the beneficiary lookup itself — that one is core (names/
+   * pada/sakhi/risk all hinge on it) and is allowed to fail the request.
+   */
+  private async safeResolve<T>(label: string, fn: () => Promise<T | null>): Promise<T | null> {
+    try {
+      return await fn();
+    } catch (err) {
+      console.error(
+        `Quick Response card detail: failed to resolve ${label} — showing it as unavailable:`,
+        err,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Beneficiary name/Pada name/Sakhi name+contact/risk details — shared
+   * across every card type keyed on a beneficiaryId. The beneficiary
+   * lookup itself is core (thrown as-is on failure); Pada/Sakhi resolution
+   * is supplementary (fails open to null via safeResolve).
+   */
+  private async resolveCommonFields(beneficiaryId: string, authorizationHeader: string) {
+    const beneficiary = await this.beneficiaryClient.getById(beneficiaryId, authorizationHeader);
+    if (!beneficiary) throw notFound('The beneficiary linked to this card was not found.');
+
+    const [pada, sakhi] = await Promise.all([
+      beneficiary.pii.padaId
+        ? this.safeResolve('Pada', () =>
+            this.geographyClient.getById(beneficiary.pii.padaId as string, authorizationHeader),
+          )
+        : Promise.resolve(null),
+      this.safeResolve<SakhiRecord>('Sakhi', () =>
+        this.sakhiClient.getById(beneficiary.sakhiId, authorizationHeader),
+      ),
+    ]);
+
+    return {
+      beneficiary,
+      beneficiaryName: beneficiary.pii.fullName,
+      padaName: pada?.name ?? null,
+      sakhiName: sakhi?.displayName ?? null,
+      sakhiContactNumber: sakhi?.mobileNumber ?? null,
+      riskDetails: beneficiary.riskConditionSummaries,
+    };
+  }
+
+  private thinCard(row: {
+    id: string;
+    requestType: string;
+    beneficiaryId: string | null;
+    createdAt: Date;
+  }) {
+    return {
+      cardId: row.id,
+      cardType: row.requestType,
+      cardSource: 'approval_requests' as const,
+      beneficiaryId: row.beneficiaryId,
+      raisedAt: row.createdAt.toISOString(),
+    };
+  }
+
+  private async enrichApprovalRequestCard(
+    row: NonNullable<Awaited<ReturnType<QuickResponseRepository['findById']>>>,
+    authorizationHeader: string,
+  ) {
+    if (!APPROVAL_REQUEST_CARD_TYPES.has(row.requestType)) {
+      return this.thinCard(row);
+    }
+
+    if (row.requestType === 'DATA_RESTORE') {
+      const sakhi = await this.safeResolve<SakhiRecord>('Sakhi', () =>
+        this.sakhiClient.getById(row.requestedByUserId, authorizationHeader),
+      );
+      return {
+        ...this.thinCard(row),
+        sakhiName: sakhi?.displayName ?? null,
+        sakhiId: row.requestedByUserId,
+      };
+    }
+
+    if (!row.beneficiaryId) {
+      // Data-integrity edge case — every other card type is expected to
+      // carry a beneficiaryId; without one there's nothing further to
+      // resolve, so fall back to the thin shape rather than throwing.
+      return this.thinCard(row);
+    }
+    const common = await this.resolveCommonFields(row.beneficiaryId, authorizationHeader);
+
+    if (row.requestType === 'LMP_CHANGE') {
+      const payload = row.requestPayloadJson as {
+        newLmpDate?: string;
+        sonographyImageAssetId?: string;
+      } | null;
+      return {
+        ...this.thinCard(row),
+        padaName: common.padaName,
+        sakhiName: common.sakhiName,
+        beneficiaryName: common.beneficiaryName,
+        oldLmpDate: common.beneficiary.motherCaseDetails?.lmpDate ?? null,
+        newLmpDate: payload?.newLmpDate ?? null,
+        sonographyImageAssetId: payload?.sonographyImageAssetId ?? null,
+        riskDetails: common.riskDetails,
+        sakhiContactNumber: common.sakhiContactNumber,
+      };
+    }
+
+    if (row.requestType === 'CLOSURE_REVIEW') {
+      const closure = row.closureId
+        ? await this.safeResolve('closure', () =>
+            this.closureClient.getById(row.closureId as string, authorizationHeader),
+          )
+        : null;
+      return {
+        ...this.thinCard(row),
+        padaName: common.padaName,
+        sakhiName: common.sakhiName,
+        beneficiaryName: common.beneficiaryName,
+        closureType: closure?.closureType ?? null,
+        closureReasonLookupValueId: closure?.closureReasonLookupValueId ?? null,
+        closureDate: closure?.closureDate ?? null,
+        supervisorNotes: closure?.supervisorNotes ?? null,
+        riskDetails: common.riskDetails,
+        sakhiContactNumber: common.sakhiContactNumber,
+      };
+    }
+
+    if (row.requestType === 'REOPEN') {
+      const reopenRequest = row.reopenRequestId
+        ? await this.safeResolve('reopen request', () =>
+            this.reopenRequestClient.getById(row.reopenRequestId as string, authorizationHeader),
+          )
+        : null;
+      return {
+        ...this.thinCard(row),
+        padaName: common.padaName,
+        sakhiName: common.sakhiName,
+        beneficiaryName: common.beneficiaryName,
+        reasonForReopen: reopenRequest?.requestReason ?? null,
+        riskDetails: common.riskDetails,
+        sakhiContactNumber: common.sakhiContactNumber,
+      };
+    }
+
+    // ACCOMPANIED_REFERRAL / REFERRAL_INCOMPLETE — both key off referralId
+    // on the same underlying referrals table (see referral-type guard in
+    // risk-referral-service's ReferralService.decide).
+    const referral = row.referralId
+      ? await this.safeResolve('referral', () =>
+          this.referralClient.getById(row.referralId as string, authorizationHeader),
+        )
+      : null;
+
+    if (row.requestType === 'ACCOMPANIED_REFERRAL') {
+      return {
+        ...this.thinCard(row),
+        padaName: common.padaName,
+        sakhiName: common.sakhiName,
+        beneficiaryName: common.beneficiaryName,
+        referralDate: referral?.referralDate ?? null,
+        facilityType: referral?.facilityType ?? null,
+        facilityName: referral?.facilityName ?? null,
+        photoEvidenceAssetId: referral?.photoEvidenceMediaAssetId ?? null,
+        riskDetails: common.riskDetails,
+        sakhiContactNumber: common.sakhiContactNumber,
+      };
+    }
+
+    // REFERRAL_INCOMPLETE
+    const visit =
+      referral?.visitId != null
+        ? await this.safeResolve('visit', () =>
+            this.visitClient.getById(referral.visitId as string, authorizationHeader),
+          )
+        : null;
+    return {
+      ...this.thinCard(row),
+      padaName: common.padaName,
+      sakhiName: common.sakhiName,
+      beneficiaryName: common.beneficiaryName,
+      visitReference: visit,
+      referralsMissedCount: referral?.incompleteCount ?? null,
+      reason: referral?.latestFollowup?.notVisitedReason ?? null,
+      riskDetails: common.riskDetails,
+      sakhiContactNumber: common.sakhiContactNumber,
+    };
+  }
+
+  private async enrichEscalationCard(card: EscalationCard, authorizationHeader: string) {
+    const common = await this.resolveCommonFields(card.beneficiaryId, authorizationHeader);
+
+    if (card.cardType === 'EDD_NEARING') {
+      const eddDate = common.beneficiary.motherCaseDetails?.eddDate ?? null;
+      return {
+        ...card,
+        padaName: common.padaName,
+        sakhiName: common.sakhiName,
+        beneficiaryName: common.beneficiaryName,
+        eddDate,
+        reason: eddDate ? `EDD approaching on ${eddDate.slice(0, 10)}` : null,
+        riskDetails: common.riskDetails,
+        sakhiContactNumber: common.sakhiContactNumber,
+      };
+    }
+
+    // MISSED_VISIT — "# visits missed" is omitted: no confirmed data source
+    // (the same gap flagged for call-sheet-stats' own MISSED_VISIT row).
+    return {
+      ...card,
+      padaName: common.padaName,
+      sakhiName: common.sakhiName,
+      beneficiaryName: common.beneficiaryName,
+      visitType: card.escalationType,
+      riskDetails: common.riskDetails,
+      sakhiContactNumber: common.sakhiContactNumber,
+    };
+  }
+
+  /**
+   * Re-checks each CLOSURE_REVIEW/REOPEN/REFERRAL_INCOMPLETE/
+   * ACCOMPANIED_REFERRAL row against its own backing resource before
+   * returning a PENDING page. `approval_requests.decisionStatusLookupId` is
+   * only updated by this service's own decide() — but closures,
+   * reopen_requests, and referrals each also have their own decision
+   * endpoints (PATCH and, for the Supervisor app, POST) that write straight
+   * to their own tables without ever notifying approval-service. Without
+   * this check, a card decided that way would sit in this list forever
+   * looking pending, and a later attempt to decide it via Quick Response
+   * would 409 with a confusing "already decided" from the *other* service.
+   *
+   * LMP_CHANGE and DATA_RESTORE have no backing resource of their own, so
+   * they're left out of every id group below and pass through unreconciled
+   * — approval_requests is already the sole source of truth for them.
+   *
+   * A downstream service that's unreachable fails OPEN for its own group
+   * (logged, that group's cards pass through un-reconciled) rather than
+   * failing the whole list — a stale card reappearing briefly is a smaller
+   * problem than the entire Quick Response queue erroring out.
+   */
+  private async filterStillPending<
+    T extends {
+      id: string;
+      requestType: string;
+      closureId: string | null;
+      reopenRequestId: string | null;
+      referralId: string | null;
+    },
+  >(rows: T[], authorizationHeader: string): Promise<T[]> {
+    const closureIds = rows
+      .filter((row) => row.requestType === 'CLOSURE_REVIEW' && row.closureId)
+      .map((row) => row.closureId as string);
+    const reopenRequestIds = rows
+      .filter((row) => row.requestType === 'REOPEN' && row.reopenRequestId)
+      .map((row) => row.reopenRequestId as string);
+    const referralIds = rows
+      .filter(
+        (row) =>
+          (row.requestType === 'REFERRAL_INCOMPLETE' ||
+            row.requestType === 'ACCOMPANIED_REFERRAL') &&
+          row.referralId,
+      )
+      .map((row) => row.referralId as string);
+
+    const [closureResult, reopenResult, referralResult] = await Promise.all([
+      this.safeGetDecisionStatus('closure', closureIds, (ids) =>
+        this.closureClient.getDecisionStatusByIds(ids, authorizationHeader),
+      ),
+      this.safeGetDecisionStatus('reopen request', reopenRequestIds, (ids) =>
+        this.reopenRequestClient.getDecisionStatusByIds(ids, authorizationHeader),
+      ),
+      this.safeGetDecisionStatus('referral', referralIds, (ids) =>
+        this.referralClient.getDecisionStatusByIds(ids, authorizationHeader),
+      ),
+    ]);
+
+    return rows.filter((row) => {
+      if (row.requestType === 'CLOSURE_REVIEW' && row.closureId) {
+        if (!closureResult.ok) return true;
+        return closureResult.statuses.get(row.closureId) === 'PENDING';
+      }
+      if (row.requestType === 'REOPEN' && row.reopenRequestId) {
+        if (!reopenResult.ok) return true;
+        return reopenResult.statuses.get(row.reopenRequestId) === 'PENDING';
+      }
+      if (
+        (row.requestType === 'REFERRAL_INCOMPLETE' || row.requestType === 'ACCOMPANIED_REFERRAL') &&
+        row.referralId
+      ) {
+        if (!referralResult.ok) return true;
+        return referralResult.statuses.get(row.referralId) === 'PENDING_FOLLOWUP';
+      }
+      return true;
+    });
+  }
+
+  /**
+   * Wraps one reconciliation batch call: skipped entirely (no network call)
+   * for an empty id group, and on failure logs and reports `ok: false`
+   * rather than throwing — so filterStillPending can fail open for just
+   * that group instead of failing the whole Quick Response list.
+   */
+  private async safeGetDecisionStatus(
+    label: string,
+    ids: string[],
+    fetcher: (ids: string[]) => Promise<Map<string, string | null>>,
+  ): Promise<{ ok: boolean; statuses: Map<string, string | null> }> {
+    if (ids.length === 0) return { ok: true, statuses: new Map() };
+    try {
+      return { ok: true, statuses: await fetcher(ids) };
+    } catch (err) {
+      console.error(
+        `Quick Response list(): failed to reconcile ${label} decision status for ${ids.length} ` +
+          'card(s) — showing them as still pending:',
+        err,
+      );
+      return { ok: false, statuses: new Map() };
+    }
+  }
+
+  /**
    * Dispatches a decision by card type. Only EDD_NEARING and REOPEN are
    * fully wired in this phase — every other card type's real side effect
    * (ANC regen, incentive trigger, closure/referral status writes) needs a
@@ -162,6 +530,83 @@ export class QuickResponseService {
     return this.decideApprovalRequestCard(cardId, dto, decidedByUserId, authorizationHeader);
   }
 
+  /**
+   * Decides an LMP_CHANGE card via the Supervisor app's dedicated
+   * POST /lmp-change-requests/:id/decision resource. `id` is the underlying
+   * approval_requests row's own id — resolved and type-checked here (404 if
+   * missing or not actually an LMP_CHANGE row) before delegating to the
+   * existing `decide()`/`decideLmpChangeCard` unchanged, so this route can
+   * never be used to decide a different card type under a mismatched URL.
+   */
+  async decideLmpChangeRequest(
+    id: string,
+    dto: DecideLmpChangeRequestInput,
+    decidedByUserId: string,
+    authorizationHeader: string,
+  ) {
+    const existing = await this.repository.findById(id);
+    if (!existing || existing.requestType !== 'LMP_CHANGE') {
+      throw notFound('LMP change request not found.');
+    }
+    return this.decide(
+      id,
+      { cardSource: 'approval_requests', ...dto },
+      decidedByUserId,
+      authorizationHeader,
+    );
+  }
+
+  /**
+   * Detail view for the Supervisor app's dedicated GET
+   * /lmp-change-requests/:id resource. LMP_CHANGE has no table of its own
+   * (see enrichApprovalRequestCard's LMP_CHANGE branch, which this mirrors)
+   * — this is a read-shaped projection over the same approval_requests row
+   * decideLmpChangeRequest above guards, with the same 404 type-check so
+   * this URL can never leak a different card type's data.
+   */
+  async getLmpChangeRequestDetail(id: string, authorizationHeader: string) {
+    const existing = await this.repository.findById(id);
+    if (!existing || existing.requestType !== 'LMP_CHANGE') {
+      throw notFound('LMP change request not found.');
+    }
+    if (!existing.beneficiaryId) {
+      throw new HttpError(500, 'This LMP_CHANGE card has no linked beneficiary.');
+    }
+
+    const [common, supervisorStatus] = await Promise.all([
+      this.resolveCommonFields(existing.beneficiaryId, authorizationHeader),
+      this.lookupClient.resolveApprovalStatusCode(
+        existing.decisionStatusLookupId,
+        authorizationHeader,
+      ),
+    ]);
+    const payload = existing.requestPayloadJson as {
+      newLmpDate?: string;
+      sonographyImageAssetId?: string;
+    } | null;
+
+    return {
+      id: existing.id,
+      beneficiaryId: existing.beneficiaryId,
+      oldLmpDate: common.beneficiary.motherCaseDetails?.lmpDate ?? null,
+      newLmpDate: payload?.newLmpDate ?? null,
+      sonographyImageAssetId: payload?.sonographyImageAssetId ?? null,
+      requestedByUserId: existing.requestedByUserId,
+      requestedAt: existing.createdAt.toISOString(),
+      supervisorStatus,
+    };
+  }
+
+  /**
+   * EDD_NEARING supports only OKAY (acknowledge-only: no audit_log, no
+   * notify — spec's explicit exemption). MISSED_VISIT supports TRANSFER/
+   * CLOSE, not APPROVE/REJECT; TRANSFER itself still 501s (see
+   * EscalationService.decideMissedVisit's own doc comment for why). Both
+   * branches delegate the actual write to notification-escalation-service
+   * via EscalationClient — this dispatch never persists anything itself,
+   * so a second decide on an already-decided card surfaces that service's
+   * own 409 rather than faking a second success.
+   */
   private async decideEscalationCard(
     cardId: string,
     dto: DecideQuickResponseInput,
@@ -170,21 +615,40 @@ export class QuickResponseService {
     const existing = await this.escalationClient.findById(cardId, authorizationHeader);
     if (!existing) throw notFound('Quick Response card not found.');
 
-    // Only EDD_NEARING is wired this phase; MISSED_VISIT's TRANSFER/CLOSE
-    // actions need write paths in services that don't have them yet.
-    if (dto.decision !== 'OKAY') {
+    if (existing.cardType === 'EDD_NEARING') {
+      if (dto.decision !== 'OKAY') {
+        throw new HttpError(
+          501,
+          `Decision "${dto.decision}" is not yet implemented for this card.`,
+        );
+      }
+      const acknowledged = await this.escalationClient.acknowledgeEddNearing(
+        cardId,
+        authorizationHeader,
+      );
+      return {
+        cardId,
+        cardSource: 'escalation_events' as const,
+        decision: 'OKAY',
+        acknowledged: true,
+        status: acknowledged.status,
+      };
+    }
+
+    // MISSED_VISIT
+    if (dto.decision !== 'TRANSFER' && dto.decision !== 'CLOSE') {
       throw new HttpError(501, `Decision "${dto.decision}" is not yet implemented for this card.`);
     }
-    // Acknowledge-only: no audit_log, no notify (spec's explicit exemption).
-    // The actual PENDING->OPEN->DISMISSED status write happens via a future
-    // escalation-decision endpoint in notification-escalation-service —
-    // out of scope for this phase's EDD_NEARING vertical slice beyond
-    // proving the read+dispatch path; tracked as a follow-up.
+    const decided = await this.escalationClient.decideMissedVisit(
+      cardId,
+      dto.decision,
+      authorizationHeader,
+    );
     return {
       cardId,
       cardSource: 'escalation_events' as const,
-      decision: 'OKAY',
-      acknowledged: true,
+      decision: dto.decision,
+      status: decided.status,
     };
   }
 
@@ -197,29 +661,87 @@ export class QuickResponseService {
     const existing = await this.repository.findById(cardId);
     if (!existing) throw notFound('Quick Response card not found.');
 
-    // Only LMP_CHANGE has no downstream state of its own to lean on for
-    // idempotency (unlike CLOSURE_REVIEW/REFERRAL_INCOMPLETE/ACCOMPANIED_
-    // REFERRAL/REOPEN, each guarded by the target service's own
-    // PENDING-only status check) — so re-approving an already-decided
-    // LMP_CHANGE card silently re-applied the LMP/EDD write and re-notified
-    // the Sakhi, contradicting this endpoint's documented "409: Card
-    // already decided" contract. Checked here, once, for every card type
-    // rather than duplicated per handler.
+    // Cheap pre-check, shared by every card type: a card already decided by
+    // the time we even read it here is rejected before any side effect is
+    // attempted. This alone is NOT a race guard — two concurrent decides can
+    // both pass this read before either has written anything.
+    //
+    // CLOSURE_REVIEW/REFERRAL_INCOMPLETE/ACCOMPANIED_REFERRAL/REOPEN are
+    // still safe under that race because each forwards to a downstream
+    // service (closure-reopen-service / risk-referral-service) with its own
+    // atomic PENDING-only status guard — a second concurrent decide on those
+    // types 409s downstream even if it slips past the check below.
+    //
+    // LMP_CHANGE and DATA_RESTORE have no such downstream backstop: their
+    // side effects (LMP/EDD write to beneficiary-service, user reactivation
+    // via auth-service) are unconditional writes with no "only if still
+    // pending" guard of their own. So for those two types this method claims
+    // the row atomically via repository.markDecided() BEFORE running the
+    // side effect, instead of after — the loser of the race gets a 409 here
+    // and never reaches the side effect at all. The other types keep
+    // claiming the row only after their side effect succeeds, via the
+    // try/catch at the end of this method.
     if (existing.decidedAt) {
       throw conflict('This Quick Response card has already been decided.');
     }
 
     let result: Record<string, unknown>;
+    let alreadyMarkedDecided = false;
+    if (existing.requestType === 'LMP_CHANGE' || existing.requestType === 'DATA_RESTORE') {
+      // Validated again, redundantly, inside decideLmpChangeCard/
+      // decideDataRestoreCard below — but it must also happen here, before
+      // the pre-claim, so an invalid decision value never claims the row.
+      // Claiming first and validating after would mark a card decided for a
+      // request that was never going to apply any real decision.
+      if (dto.decision !== 'APPROVE' && dto.decision !== 'REJECT') {
+        throw badRequest(
+          `decision: Must be APPROVE or REJECT for a${
+            existing.requestType === 'LMP_CHANGE' ? 'n LMP_CHANGE' : ' DATA_RESTORE'
+          } card.`,
+        );
+      }
+
+      // Every approval_requests decision reaching this point is APPROVE or
+      // REJECT — the OKAY decision only exists on the escalation_events
+      // branch, which returns earlier in decide() and never reaches here.
+      const decisionStatusLookupId = await this.lookupClient.resolveApprovalStatusId(
+        dto.decision === 'APPROVE' ? 'APPROVED' : 'REJECTED',
+        authorizationHeader,
+      );
+      if (!decisionStatusLookupId) {
+        // Unlike the post-side-effect lookup below, there is no side effect
+        // yet to protect — failing loudly here is safe and correct, so this
+        // does not get the "log and continue, remains re-decidable"
+        // tolerance used once the side effect has already happened.
+        throw new HttpError(
+          500,
+          `No ${dto.decision === 'APPROVE' ? 'APPROVED' : 'REJECTED'} APPROVAL_STATUS lookup ` +
+            'value was found; cannot safely claim this card before applying its decision.',
+        );
+      }
+      const claimed = await this.repository.markDecided(
+        cardId,
+        decisionStatusLookupId,
+        decidedByUserId,
+        dto.decisionNotes,
+        dto.decisionReasonCodeLookupId,
+      );
+      if (!claimed) {
+        throw conflict('This Quick Response card has already been decided.');
+      }
+      alreadyMarkedDecided = true;
+    }
+
     if (existing.requestType === 'LMP_CHANGE') {
       result = await this.decideLmpChangeCard(cardId, existing, dto, authorizationHeader);
+    } else if (existing.requestType === 'DATA_RESTORE') {
+      result = await this.decideDataRestoreCard(cardId, existing, dto, authorizationHeader);
     } else if (existing.requestType === 'CLOSURE_REVIEW') {
       result = await this.decideClosureReviewCard(cardId, existing, dto, authorizationHeader);
     } else if (existing.requestType === 'REFERRAL_INCOMPLETE') {
       result = await this.decideReferralIncompleteCard(cardId, existing, dto, authorizationHeader);
     } else if (existing.requestType === 'ACCOMPANIED_REFERRAL') {
       result = await this.decideAccompaniedReferralCard(cardId, existing, dto, authorizationHeader);
-    } else if (existing.requestType === 'DATA_RESTORE') {
-      result = await this.decideDataRestoreCard(cardId, existing, dto, authorizationHeader);
     } else if (existing.requestType === 'REOPEN') {
       if (dto.decision !== 'APPROVE' && dto.decision !== 'REJECT') {
         throw badRequest('decision: Must be APPROVE or REJECT for a REOPEN card.');
@@ -263,34 +785,42 @@ export class QuickResponseService {
     // post-commit call in this method), but it also must never run before
     // the side effect, or a card could be marked decided while its actual
     // effect never happened.
-    try {
-      // Every approval_requests decision reaching this point is APPROVE or
-      // REJECT — the OKAY decision only exists on the escalation_events
-      // branch, which returns earlier in decide() and never reaches here.
-      const decisionStatusLookupId = await this.lookupClient.resolveApprovalStatusId(
-        dto.decision === 'APPROVE' ? 'APPROVED' : 'REJECTED',
-        authorizationHeader,
-      );
-      if (decisionStatusLookupId) {
-        await this.repository.markDecided(
-          cardId,
-          decisionStatusLookupId,
-          decidedByUserId,
-          dto.decisionNotes,
-          dto.decisionReasonCodeLookupId,
+    //
+    // LMP_CHANGE/DATA_RESTORE already claimed the row atomically above,
+    // before their side effect ran, so this after-the-fact marking must be
+    // skipped for them — running it again here would be a harmless no-op at
+    // best (decidedAt is already set) but is skipped anyway to keep this
+    // block's job limited to the types that actually still need it.
+    if (!alreadyMarkedDecided) {
+      try {
+        // Every approval_requests decision reaching this point is APPROVE or
+        // REJECT — the OKAY decision only exists on the escalation_events
+        // branch, which returns earlier in decide() and never reaches here.
+        const decisionStatusLookupId = await this.lookupClient.resolveApprovalStatusId(
+          dto.decision === 'APPROVE' ? 'APPROVED' : 'REJECTED',
+          authorizationHeader,
         );
-      } else {
+        if (decisionStatusLookupId) {
+          await this.repository.markDecided(
+            cardId,
+            decisionStatusLookupId,
+            decidedByUserId,
+            dto.decisionNotes,
+            dto.decisionReasonCodeLookupId,
+          );
+        } else {
+          console.error(
+            `Quick Response card ${cardId} was decided (${dto.decision}) but no ` +
+              `${dto.decision === 'APPROVE' ? 'APPROVED' : 'REJECTED'} APPROVAL_STATUS lookup ` +
+              'value was found — the card cannot be marked decided and remains re-decidable.',
+          );
+        }
+      } catch (err) {
         console.error(
-          `Quick Response card ${cardId} was decided (${dto.decision}) but no ` +
-            `${dto.decision === 'APPROVE' ? 'APPROVED' : 'REJECTED'} APPROVAL_STATUS lookup ` +
-            'value was found — the card cannot be marked decided and remains re-decidable.',
+          `Quick Response card ${cardId} was decided (${dto.decision}) but marking it decided failed:`,
+          err,
         );
       }
-    } catch (err) {
-      console.error(
-        `Quick Response card ${cardId} was decided (${dto.decision}) but marking it decided failed:`,
-        err,
-      );
     }
 
     return result;

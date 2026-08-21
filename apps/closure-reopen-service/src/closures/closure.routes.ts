@@ -4,6 +4,8 @@ import type { ClosureService } from './closure.service';
 import { createClosureController } from './closure.controller';
 import { createClosureSchema } from './dto/create-closure.dto';
 import { decideClosureSchema } from './dto/decide-closure.dto';
+import { decideClosureAliasSchema } from './dto/decide-closure-alias.dto';
+import { decisionStatusQuerySchema } from './dto/decision-status-query.dto';
 import {
   requireRoles,
   trustGatewayIdentity,
@@ -61,11 +63,20 @@ const decideClosureRequestSchema = decideClosureSchema.extend({
   decision: decideClosureSchema.shape.decision.openapi({ example: 'APPROVED' }),
 });
 
+const decideClosureAliasRequestSchema = decideClosureAliasSchema.extend({
+  decision: decideClosureAliasSchema.shape.decision.openapi({ example: 'APPROVE' }),
+});
+
 const apiErrorSchema = z.object({
   success: z.literal(false),
   message: z.string(),
   errorCode: z.string().openapi({ example: 'VALIDATION_ERROR' }),
   details: z.record(z.unknown()).optional(),
+});
+
+const decisionStatusRowSchema = z.object({
+  id: z.string().uuid(),
+  supervisorStatus: z.enum(['PENDING', 'APPROVED', 'REJECTED']).nullable(),
 });
 
 function envelope<T extends z.ZodTypeAny>(data: T) {
@@ -97,6 +108,57 @@ export function registerClosureRoutes(doc: DocumentedRouter, service: ClosureSer
     trustGatewayIdentity,
     requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER'),
     controller.list,
+  );
+
+  doc.get(
+    '/closures/decision-status',
+    {
+      summary:
+        'Real-time supervisorStatus for a batch of closure ids — internal use only, not part ' +
+        "of the public Closures API surface. Lets Quick Response's list() reconcile against " +
+        "the closure's actual current decision state instead of trusting approval_requests' " +
+        'own cached copy, since a closure can be decided directly via PATCH/POST ' +
+        '/closures/:id/decision, bypassing approval-service entirely. An id not found or ' +
+        'soft-deleted is simply omitted from the result, not an error.',
+      tags: ['Closures'],
+      query: decisionStatusQuerySchema,
+      responses: {
+        200: {
+          description: 'Closure decision statuses for the requested ids',
+          schema: envelope(z.array(decisionStatusRowSchema)),
+        },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(decisionStatusQuerySchema, 'query'),
+    controller.getDecisionStatusBatch,
+  );
+
+  doc.get(
+    '/closures/:id',
+    {
+      summary:
+        "A single closure's full detail — added for Quick Response's card-enrichment " +
+        'endpoint (approval-service resolves CLOSURE_REVIEW cards through this), not a ' +
+        'general SAKHI-facing read; the app has no existing single-closure-read flow.',
+      tags: ['Closures'],
+      params: closureIdParamsSchema,
+      responses: {
+        200: { description: 'Closure detail', schema: envelope(closureSchema) },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+        404: { description: 'Closure not found', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(closureIdParamsSchema, 'params'),
+    controller.getById,
   );
 
   doc.post(
@@ -138,5 +200,32 @@ export function registerClosureRoutes(doc: DocumentedRouter, service: ClosureSer
     validate(closureIdParamsSchema, 'params'),
     validateBody(decideClosureRequestSchema),
     controller.decide,
+  );
+
+  doc.post(
+    '/closures/:id/decision',
+    {
+      summary:
+        'Decide a pending closure review — Supervisor app alias (POST, APPROVE/REJECT) of the ' +
+        "PATCH endpoint above. SUPERVISOR-only, narrower than the PATCH endpoint's " +
+        'SUPERVISOR/MANAGER/ADMIN, since this is a new route with no existing callers to ' +
+        'preserve compatibility for.',
+      tags: ['Closures'],
+      params: closureIdParamsSchema,
+      responses: {
+        200: { description: 'Closure decided', schema: envelope(closureSchema) },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+        404: { description: 'Closure not found', schema: apiErrorSchema },
+        409: { description: 'Already decided', schema: apiErrorSchema },
+        422: { description: 'Closure does not require supervisor review', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR'),
+    validate(closureIdParamsSchema, 'params'),
+    validateBody(decideClosureAliasRequestSchema),
+    controller.decideAlias,
   );
 }

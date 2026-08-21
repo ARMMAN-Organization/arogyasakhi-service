@@ -661,6 +661,51 @@ export class BeneficiaryRepository {
   }
 
   /**
+   * Missed Visit Escalation TRANSFER (FR-SV-4.3) — moves a case to
+   * PENDING_TRANSFER pending a Manager's review, and records the transition
+   * in beneficiary_status_history, in one transaction. sakhiId is
+   * deliberately untouched by this method (see the PENDING_TRANSFER enum
+   * comment in schema.prisma). Idempotent like closeCase: a retry against an
+   * already-PENDING_TRANSFER case returns true rather than a spurious
+   * false/409, since notification-escalation-service's own decide-endpoint
+   * retry could otherwise double-call this. Blocked only from CLOSED — a
+   * closed case has nothing left to transfer.
+   */
+  async markPendingTransfer(beneficiaryId: string, changedByUserId: string): Promise<boolean> {
+    return this.prisma.$transaction(async (tx) => {
+      const existing = await tx.beneficiaryCase.findFirst({
+        where: { id: beneficiaryId, isDeleted: false },
+        select: { currentStatus: true },
+      });
+      if (!existing) return false;
+      if (existing.currentStatus === 'PENDING_TRANSFER') return true;
+      if (existing.currentStatus === 'CLOSED') return false;
+
+      const result = await tx.beneficiaryCase.updateMany({
+        where: {
+          id: beneficiaryId,
+          isDeleted: false,
+          currentStatus: { notIn: ['CLOSED', 'PENDING_TRANSFER'] },
+        },
+        data: { currentStatus: 'PENDING_TRANSFER' },
+      });
+      if (result.count === 0) return false;
+
+      await tx.beneficiaryStatusHistory.create({
+        data: {
+          beneficiaryId,
+          fromStatus: existing.currentStatus,
+          toStatus: 'PENDING_TRANSFER',
+          reasonCode: 'MISSED_VISIT_ESCALATION_TRANSFER',
+          changedByUserId,
+          changedAt: new Date(),
+        },
+      });
+      return true;
+    });
+  }
+
+  /**
    * Reactivates a CLOSED beneficiary case after an approved reopen request
    * (FR-SV-4.7/FR-S-10.3) — flips currentStatus back to ACTIVE and records
    * the transition in beneficiary_status_history for audit, in one

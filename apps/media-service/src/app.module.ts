@@ -19,12 +19,14 @@ export {
   asyncHandler,
   ok,
   fail,
+  validate,
   validateBody,
   requireRoles,
   trustGatewayIdentity,
   createDocumentedRouter,
   HttpError,
   ErrorCode,
+  unauthorized,
   type DocumentedRouter,
 } from '@armman/service-commons';
 

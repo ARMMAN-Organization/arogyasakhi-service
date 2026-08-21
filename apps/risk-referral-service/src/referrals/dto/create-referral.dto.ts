@@ -45,6 +45,10 @@ export const createReferralSchema = z
     triggerConditionListJson: jsonValueSchema.optional(),
     facilityType: z.enum(['PUBLIC', 'PRIVATE', 'PHC', 'RH', 'DH', 'OTHER']).optional(),
     facilityName: z.string().trim().min(1).max(200).optional(),
+    // media_assets.media_asset_id (category REFERRAL_HEALTH_FACILITY_PHOTO /
+    // REFERRAL_SAKHI_BENEFICIARY_PHOTO) — owned by media-service, no
+    // cross-service relation. Photo evidence for an accompanied referral.
+    photoEvidenceMediaAssetId: z.string().uuid().optional(),
     status: z.enum([
       'INITIATED',
       'PENDING_FOLLOWUP',

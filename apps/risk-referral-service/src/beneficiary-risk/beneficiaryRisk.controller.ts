@@ -18,5 +18,17 @@ export function createBeneficiaryRiskController(service: BeneficiaryRiskService)
       );
       res.json(ok(profile));
     }),
+
+    getRiskState: asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const state = await service.getRiskState(
+        req.params.beneficiaryId,
+        req.user,
+        authorizationHeader,
+      );
+      res.json(ok(state));
+    }),
   };
 }

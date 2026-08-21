@@ -3,8 +3,10 @@ import { z } from 'zod';
 import type { ReferralService } from './referral.service';
 import { createReferralSchema } from './dto/create-referral.dto';
 import { decideReferralSchema } from './dto/decide-referral.dto';
+import { decideReferralAliasSchema } from './dto/decide-referral-alias.dto';
 import { countByBeneficiarySchema } from './dto/count-by-beneficiary.dto';
 import { followupsByBeneficiarySchema } from './dto/followups-by-beneficiary.dto';
+import { decisionStatusQuerySchema } from './dto/decision-status-query.dto';
 import {
   asyncHandler,
   createDocumentedRouter,
@@ -53,6 +55,7 @@ const referralSchema = z.object({
   triggerConditionListJson: z.unknown().nullable(),
   facilityType: z.enum(['PUBLIC', 'PRIVATE', 'PHC', 'RH', 'DH', 'OTHER']).nullable(),
   facilityName: z.string().nullable(),
+  photoEvidenceMediaAssetId: z.string().uuid().nullable(),
   status: z.enum(['INITIATED', 'PENDING_FOLLOWUP', 'COMPLETED', 'LAPSED', 'SKIPPED', 'CANCELLED']),
   validTill: z.string().datetime().nullable(),
   supervisorApprovalStatus: z.enum(['NOT_REQUIRED', 'PENDING', 'APPROVED', 'REJECTED']),
@@ -66,6 +69,10 @@ const referralIdParamsSchema = z
 
 const decideReferralRequestSchema = decideReferralSchema.extend({
   decision: decideReferralSchema.shape.decision.openapi({ example: 'LAPSE' }),
+});
+
+const decideReferralAliasRequestSchema = decideReferralAliasSchema.extend({
+  decision: decideReferralAliasSchema.shape.decision.openapi({ example: 'APPROVE' }),
 });
 
 const referralSummarySchema = z.object({
@@ -86,6 +93,11 @@ const apiErrorSchema = z.object({
   message: z.string(),
   errorCode: z.string().openapi({ example: 'VALIDATION_ERROR' }),
   details: z.record(z.unknown()).optional(),
+});
+
+const decisionStatusRowSchema = z.object({
+  id: z.string().uuid(),
+  status: z.enum(['INITIATED', 'PENDING_FOLLOWUP', 'COMPLETED', 'LAPSED', 'SKIPPED', 'CANCELLED']),
 });
 
 function envelope<T extends z.ZodTypeAny>(data: T) {
@@ -147,6 +159,87 @@ export function createReferralRouter(service: ReferralService) {
       if (!authorizationHeader) return next(unauthorized());
       const { sakhiId } = req.query as unknown as z.infer<typeof referralSummaryQuerySchema>;
       res.json(ok(await service.getSummary(req.user, authorizationHeader, sakhiId)));
+    }),
+  );
+
+  doc.get(
+    '/referrals/decision-status',
+    {
+      summary:
+        'Real-time status for a batch of referral ids — internal use only, not part of the ' +
+        "public Referrals API surface. Lets Quick Response's list() reconcile against the " +
+        "referral's actual current status instead of trusting approval_requests' own cached " +
+        'copy, since a referral can be decided directly via PATCH/POST ' +
+        '/referrals/:id/decision, bypassing approval-service entirely. An id not found or ' +
+        'soft-deleted is simply omitted from the result, not an error.',
+      tags: ['Referrals'],
+      query: decisionStatusQuerySchema,
+      responses: {
+        200: {
+          description: 'Referral statuses for the requested ids',
+          schema: envelope(z.array(decisionStatusRowSchema)),
+        },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(decisionStatusQuerySchema, 'query'),
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const ids = String(req.query.ids)
+        .split(',')
+        .map((id) => id.trim());
+      res.json(ok(await service.getDecisionStatusByIds(ids, req.user, authorizationHeader)));
+    }),
+  );
+
+  doc.get(
+    '/referrals/:id',
+    {
+      summary:
+        "A single referral's full detail plus its follow-up summary (incompleteCount, " +
+        "latestFollowup) — added for Quick Response's card-enrichment endpoint " +
+        '(approval-service resolves ACCOMPANIED_REFERRAL/REFERRAL_INCOMPLETE cards through ' +
+        'this), not a general SAKHI-facing read; the app has no existing single-referral-' +
+        'read flow. The follow-up summary is always computed, not gated by referral type — ' +
+        'an ACCOMPANIED_REFERRAL caller simply ignores it.',
+      tags: ['Referrals'],
+      params: referralIdParamsSchema,
+      responses: {
+        200: {
+          description: 'Referral detail with follow-up summary',
+          schema: envelope(
+            referralSchema.extend({
+              incompleteCount: z.number().int(),
+              latestFollowup: z
+                .object({
+                  followupDate: z.string().datetime(),
+                  notVisitedReason: z.string().nullable(),
+                  outcome: z.string().nullable(),
+                })
+                .nullable(),
+            }),
+          ),
+        },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+        404: { description: 'Referral not found', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(referralIdParamsSchema, 'params'),
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      res.json(ok(await service.getById(req.params.id, req.user, authorizationHeader)));
     }),
   );
 
@@ -281,6 +374,47 @@ export function createReferralRouter(service: ReferralService) {
       const authorizationHeader = req.header('authorization');
       if (!authorizationHeader) return next(unauthorized());
       const updated = await service.decide(req.params.id, req.body, req.user, authorizationHeader);
+      res.json(ok(updated));
+    }),
+  );
+
+  doc.post(
+    '/referrals/:id/decision',
+    {
+      summary:
+        'Decide an Accompanied Referral — Supervisor app alias (POST, APPROVE/REJECT) of the ' +
+        'PATCH endpoint above (FR-SV-4.9). Approve completes the referral and triggers the ' +
+        'incentive; reject leaves it Pending, no incentive. SUPERVISOR-only, narrower than the ' +
+        "PATCH endpoint's SUPERVISOR/MANAGER/ADMIN, since this is a new route with no existing " +
+        'callers to preserve compatibility for.',
+      tags: ['Referrals'],
+      params: referralIdParamsSchema,
+      responses: {
+        200: { description: 'Referral decided', schema: envelope(referralSchema) },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: {
+          description: "Caller role not permitted, or outside this Supervisor's roster",
+          schema: apiErrorSchema,
+        },
+        404: { description: 'Referral not found', schema: apiErrorSchema },
+        409: { description: 'Referral is not in PENDING_FOLLOWUP status', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR'),
+    validate(referralIdParamsSchema, 'params'),
+    validateBody(decideReferralAliasRequestSchema),
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const updated = await service.decideAccompanied(
+        req.params.id,
+        req.body.decision,
+        req.user,
+        authorizationHeader,
+      );
       res.json(ok(updated));
     }),
   );

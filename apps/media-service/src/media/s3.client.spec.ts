@@ -4,6 +4,7 @@ jest.mock('../config/app-config', () => ({
     S3_UPLOAD_FOLDER: 'media',
     AWS_REGION: 'ap-south-1',
     PRESIGNED_URL_EXPIRY_SECONDS: 900,
+    PRESIGNED_VIEW_URL_EXPIRY_SECONDS: 3600,
   },
 }));
 
@@ -16,6 +17,7 @@ jest.mock('@aws-sdk/client-s3', () => {
     S3Client: jest.fn().mockImplementation(() => ({ send: mockSend })),
     PutObjectCommand: jest.fn().mockImplementation((input) => ({ input })),
     HeadObjectCommand: jest.fn().mockImplementation((input) => ({ input })),
+    GetObjectCommand: jest.fn().mockImplementation((input) => ({ input })),
     NotFound,
   };
 });
@@ -25,8 +27,13 @@ jest.mock('@aws-sdk/s3-request-presigner', () => ({
   getSignedUrl: (...args: unknown[]) => mockGetSignedUrl(...args),
 }));
 
-import { PutObjectCommand } from '@aws-sdk/client-s3';
-import { generateObjectKey, getPresignedUploadUrl, headObject } from './s3.client';
+import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
+import {
+  generateObjectKey,
+  getPresignedUploadUrl,
+  getPresignedViewUrl,
+  headObject,
+} from './s3.client';
 
 describe('s3.client', () => {
   beforeEach(() => {
@@ -56,6 +63,28 @@ describe('s3.client', () => {
       expect(result).toEqual({
         uploadUrl: 'https://signed.example.com/upload',
         expiresInSeconds: 900,
+      });
+    });
+  });
+
+  describe('getPresignedViewUrl', () => {
+    it('builds a GetObjectCommand from the key parsed out of the storage URI, and signs with the view-URL expiry', async () => {
+      mockGetSignedUrl.mockResolvedValue('https://signed.example.com/view');
+
+      const result = await getPresignedViewUrl('s3://test-bucket/media/consent_photo/abc-123');
+
+      expect(GetObjectCommand).toHaveBeenCalledWith({
+        Bucket: 'test-bucket',
+        Key: 'media/consent_photo/abc-123',
+      });
+      expect(mockGetSignedUrl).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.objectContaining({ expiresIn: 3600 }),
+      );
+      expect(result).toEqual({
+        viewUrl: 'https://signed.example.com/view',
+        expiresInSeconds: 3600,
       });
     });
   });

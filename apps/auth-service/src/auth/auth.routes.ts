@@ -95,6 +95,14 @@ const userProfileSchema = z.object({
   }),
 });
 
+// Narrower than userProfileSchema — a name only, no contact/PII/role fields.
+// Returned by GET /users/:id/name, a service-to-service lookup (e.g.
+// media-service resolving an `uploadedByUserId`), not a general profile read.
+const userNameSchema = z.object({
+  id: z.string().uuid(),
+  displayName: z.string().openapi({ example: 'Jane Sakhi' }),
+});
+
 const userIdParamsSchema = z
   .object({ id: z.string().uuid().openapi({ example: 'cc85addf-5214-45e3-b207-c2a3dadcc52f' }) })
   .strict();
@@ -282,5 +290,27 @@ export function registerAuthRoutes(
     },
     authenticate(signer),
     controller.getProfile,
+  );
+
+  doc.get(
+    '/users/:id/name',
+    {
+      summary:
+        "Resolve a user's display name by id — a narrow, low-sensitivity lookup for other " +
+        "services to enrich a stored user id (e.g. media-service's uploadedByUserId) without a " +
+        'cross-service DB join. Any authenticated role may call this — a display name alone ' +
+        'carries no PII/contact/role information, unlike the full user profile.',
+      tags: ['Users'],
+      params: userIdParamsSchema,
+      responses: {
+        200: { description: "User's display name", schema: envelope(userNameSchema) },
+        401: errorResponse(401),
+        404: errorResponse(404, { message: 'User not found.' }),
+        500: errorResponse(500),
+      },
+    },
+    authenticate(signer),
+    validate(userIdParamsSchema, 'params'),
+    controller.getUserName,
   );
 }

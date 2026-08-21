@@ -1,4 +1,4 @@
-import { asyncHandler, ok } from '../app.module';
+import { asyncHandler, ok, unauthorized } from '../app.module';
 import type { MediaAssetService } from './mediaAsset.service';
 // Same relative-path-into-generated-client import every service's own
 // prisma.service.ts uses (see e.g. apps/media-service/src/prisma/prisma.service.ts,
@@ -67,6 +67,17 @@ export function createMediaAssetController(service: MediaAssetService) {
   return {
     list: asyncHandler(async (_req, res) => {
       res.json(ok((await service.list()).map(toResponse)));
+    }),
+
+    getById: asyncHandler(async (req, res, next) => {
+      // Forwarded to auth-service to resolve the uploader's display name,
+      // and to beneficiary-service to enforce ownership scoping — see
+      // mediaAsset.service.ts's getById(), auth.client.ts, and
+      // beneficiary.client.ts.
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      res.json(ok(await service.getById(req.params.id, req.user, authorizationHeader)));
     }),
 
     createUploadUrl: asyncHandler(async (req, res) => {

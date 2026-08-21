@@ -15,6 +15,21 @@ export class ClosureRepository {
   }
 
   /**
+   * Real-time supervisorStatus for a batch of closure ids — lets Quick
+   * Response's list() reconcile against the current decision state instead
+   * of trusting approval_requests' own (possibly stale) copy, since a
+   * closure can also be decided directly via PATCH/POST
+   * /closures/:id/decision, bypassing approval-service entirely. An id not
+   * found (or soft-deleted) is simply absent from the result.
+   */
+  findManyByIds(ids: string[]) {
+    return this.prisma.closure.findMany({
+      where: { id: { in: ids }, isDeleted: false },
+      select: { id: true, supervisorStatus: true },
+    });
+  }
+
+  /**
    * Finds a closure previously created from this exact client-generated
    * localClosureUuid — lets create() treat a dropped-connection retry as an
    * idempotent replay instead of a new closure.

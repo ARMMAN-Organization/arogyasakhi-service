@@ -13,6 +13,12 @@ export interface EscalationCard {
   raisedAt: string;
 }
 
+export interface EscalationEventRecord {
+  id: string;
+  status: string;
+  actionTaken: string | null;
+}
+
 interface EscalationEventsResponse {
   cards: EscalationCard[];
   nextCursor: string | null;
@@ -77,6 +83,92 @@ export class EscalationClient {
     }
 
     const body = (await res.json()) as { data: EscalationCard };
+    return body.data;
+  }
+
+  /**
+   * Acknowledges an EDD Nearing card via notification-escalation-service's
+   * dedicated POST /edd-nearing-requests/:id/acknowledge, through the
+   * gateway. Called by QuickResponseService.decide() so an EDD_NEARING
+   * acknowledge actually persists (OPEN -> ACKNOWLEDGED) instead of
+   * returning a fake success with nothing written.
+   */
+  async acknowledgeEddNearing(
+    id: string,
+    authorizationHeader: string,
+  ): Promise<EscalationEventRecord> {
+    let res: Response;
+    try {
+      res = await fetch(
+        `${appConfig.API_GATEWAY_BASE_URL}/api/v1/edd-nearing-requests/${id}/acknowledge`,
+        { method: 'POST', headers: { Authorization: authorizationHeader } },
+      );
+    } catch {
+      throw badGateway('Unable to acknowledge the EDD Nearing card — the service is unreachable.');
+    }
+
+    if (!res.ok) {
+      if (res.status >= 400 && res.status < 500) {
+        const body = (await res.json().catch(() => null)) as { message?: string } | null;
+        throw new HttpError(
+          res.status,
+          body?.message ?? 'Unable to acknowledge the EDD Nearing card.',
+        );
+      }
+      throw badGateway(
+        'Unable to acknowledge the EDD Nearing card — the service returned an error.',
+      );
+    }
+
+    const body = (await res.json()) as { data: EscalationEventRecord };
+    return body.data;
+  }
+
+  /**
+   * Decides a Missed Visit Escalation card via notification-escalation-
+   * service's dedicated POST /missed-visit-escalations/:id/decision,
+   * through the gateway. Called by QuickResponseService.decide() so a
+   * CLOSE/TRANSFER decision actually persists instead of returning a fake
+   * success with nothing written.
+   */
+  async decideMissedVisit(
+    id: string,
+    action: 'TRANSFER' | 'CLOSE',
+    authorizationHeader: string,
+  ): Promise<EscalationEventRecord> {
+    let res: Response;
+    try {
+      res = await fetch(
+        `${appConfig.API_GATEWAY_BASE_URL}/api/v1/missed-visit-escalations/${id}/decision`,
+        {
+          method: 'POST',
+          headers: { Authorization: authorizationHeader, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action }),
+        },
+      );
+    } catch {
+      throw badGateway(
+        'Unable to decide the Missed Visit Escalation card — the service is unreachable.',
+      );
+    }
+
+    if (!res.ok) {
+      // 501 is passed through deliberately, not masked as a generic 502 —
+      // it's the service's own "TRANSFER isn't built yet" business signal
+      // (see decideMissedVisit's own doc comment), not an infra fault.
+      if ((res.status >= 400 && res.status < 500) || res.status === 501) {
+        const body = (await res.json().catch(() => null)) as { message?: string } | null;
+        throw new HttpError(
+          res.status,
+          body?.message ?? 'Unable to decide the Missed Visit Escalation card.',
+        );
+      }
+      throw badGateway(
+        'Unable to decide the Missed Visit Escalation card — the service returned an error.',
+      );
+    }
+
+    const body = (await res.json()) as { data: EscalationEventRecord };
     return body.data;
   }
 }

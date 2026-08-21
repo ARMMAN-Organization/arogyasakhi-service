@@ -13,6 +13,7 @@ import { PrismaService } from './prisma/prisma.service';
 import { createHealthRouter } from './health/health.controller';
 import { createNotificationModule } from './notifications/notification.module';
 import { createEscalationModule } from './escalations/escalation.module';
+import { createEscalationsBySakhiModule } from './escalations-by-sakhi/escalations-by-sakhi.module';
 import { buildNotificationEscalationServiceOpenApiDocument } from './docs/openapi';
 
 export {
@@ -50,6 +51,7 @@ export function createApp(prisma: PrismaService): Application {
   app.use(requestId);
   const notificationModule = createNotificationModule(prisma);
   const escalationModule = createEscalationModule(prisma);
+  const escalationsBySakhiModule = createEscalationsBySakhiModule(prisma);
 
   const api = express.Router();
   api.use(createHealthRouter(prisma));
@@ -61,11 +63,13 @@ export function createApp(prisma: PrismaService): Application {
       buildNotificationEscalationServiceOpenApiDocument(
         notificationModule.registry,
         escalationModule.registry,
+        escalationsBySakhiModule.registry,
       ),
     ),
   );
   api.use(notificationModule.router);
   api.use(escalationModule.router);
+  api.use(escalationsBySakhiModule.router);
   app.use('/api/v1', api);
   app.use(notFoundHandler);
   app.use(errorHandler);
