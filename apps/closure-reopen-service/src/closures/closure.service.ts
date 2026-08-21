@@ -166,6 +166,11 @@ export class ClosureService {
    * (supervisorStatus !== 'PENDING') means a closure can never be decided a
    * second time to retry just this step; same tolerance/manual-follow-up
    * stance as reopen-request.service.ts's decide() uses for reactivateCase.
+   *
+   * Also re-checks ownership scoping against beneficiary-service before
+   * touching supervisorStatus — same roster check create() relies on,
+   * closing the gap where a SUPERVISOR who merely learns a closure id
+   * outside their own roster could otherwise decide it.
    */
   async decide(
     id: string,
@@ -175,6 +180,14 @@ export class ClosureService {
   ) {
     const existing = await this.repository.findById(id);
     if (!existing) throw notFound('Closure not found.');
+
+    // Delegates ownership scoping to beneficiary-service's own GET
+    // /beneficiaries/:id (SAKHI-own-case / SUPERVISOR-roster /
+    // MANAGER-unrestricted) — same pattern create() already uses. Without
+    // this, any SUPERVISOR who learns a closure id outside their own
+    // roster could approve or reject it (IDOR).
+    await this.beneficiaryClient.getById(existing.beneficiaryId, authorizationHeader);
+
     if (existing.supervisorStatus === null) {
       throw unprocessable('This closure does not require supervisor review.');
     }

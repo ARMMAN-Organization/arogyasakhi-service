@@ -63,6 +63,10 @@ describe('ReopenRequestService', () => {
       id: '22222222-2222-2222-2222-222222222222',
       currentStatus: 'ACTIVE',
     });
+    beneficiaryClient.getById.mockResolvedValue({
+      id: '22222222-2222-2222-2222-222222222222',
+      currentStatus: 'CLOSED',
+    });
     service = new ReopenRequestService(
       repository,
       auditClient,
@@ -317,6 +321,70 @@ describe('ReopenRequestService', () => {
       service.decide('unknown-id', supervisorId, { decision: 'APPROVED' }, authHeader),
     ).rejects.toMatchObject({ status: 404 });
     expect(repository.decide).not.toHaveBeenCalled();
+  });
+
+  describe('ownership scoping via beneficiaryClient.getById', () => {
+    it('checks ownership before deciding when the supervisor is in the roster', async () => {
+      const pending = reopenRequest();
+      const decided = reopenRequest({
+        supervisorStatus: 'APPROVED',
+        decidedByUserId: supervisorId,
+      });
+      repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(decided);
+      repository.decide.mockResolvedValue(true);
+
+      await service.decide(pending.id, supervisorId, { decision: 'APPROVED' }, authHeader);
+
+      expect(beneficiaryClient.getById).toHaveBeenCalledWith(pending.beneficiaryId, authHeader);
+      expect(repository.decide).toHaveBeenCalled();
+    });
+
+    it('propagates a 403 when the supervisor is outside the beneficiary roster, without deciding', async () => {
+      const pending = reopenRequest();
+      repository.findById.mockResolvedValueOnce(pending);
+      beneficiaryClient.getById.mockRejectedValue(
+        Object.assign(new Error('This beneficiary case is outside your own roster.'), {
+          status: 403,
+        }),
+      );
+
+      await expect(
+        service.decide(pending.id, supervisorId, { decision: 'APPROVED' }, authHeader),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(repository.decide).not.toHaveBeenCalled();
+    });
+
+    it('succeeds for a MANAGER/ADMIN regardless of roster (beneficiary-service is unrestricted for them)', async () => {
+      const managerId = '66666666-6666-6666-6666-666666666666';
+      const pending = reopenRequest();
+      const decided = reopenRequest({ supervisorStatus: 'APPROVED', decidedByUserId: managerId });
+      repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(decided);
+      repository.decide.mockResolvedValue(true);
+      beneficiaryClient.getById.mockResolvedValue({
+        id: pending.beneficiaryId,
+        currentStatus: 'CLOSED',
+      });
+
+      await expect(
+        service.decide(pending.id, managerId, { decision: 'APPROVED' }, authHeader),
+      ).resolves.toBe(decided);
+      expect(repository.decide).toHaveBeenCalledWith(pending.id, managerId, {
+        decision: 'APPROVED',
+      });
+    });
+
+    it('propagates a 404 when the underlying beneficiary no longer exists', async () => {
+      const pending = reopenRequest();
+      repository.findById.mockResolvedValueOnce(pending);
+      beneficiaryClient.getById.mockRejectedValue(
+        Object.assign(new Error('Beneficiary case not found.'), { status: 404 }),
+      );
+
+      await expect(
+        service.decide(pending.id, supervisorId, { decision: 'APPROVED' }, authHeader),
+      ).rejects.toMatchObject({ status: 404 });
+      expect(repository.decide).not.toHaveBeenCalled();
+    });
   });
 
   it('409s on an already-APPROVED reopen request', async () => {
