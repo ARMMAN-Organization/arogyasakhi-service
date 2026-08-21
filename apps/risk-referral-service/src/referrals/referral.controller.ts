@@ -187,11 +187,14 @@ export function createReferralRouter(service: ReferralService) {
     trustGatewayIdentity,
     requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
     validate(decisionStatusQuerySchema, 'query'),
-    asyncHandler(async (req, res) => {
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
       const ids = String(req.query.ids)
         .split(',')
         .map((id) => id.trim());
-      res.json(ok(await service.getDecisionStatusByIds(ids)));
+      res.json(ok(await service.getDecisionStatusByIds(ids, req.user, authorizationHeader)));
     }),
   );
 
@@ -232,8 +235,11 @@ export function createReferralRouter(service: ReferralService) {
     trustGatewayIdentity,
     requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
     validate(referralIdParamsSchema, 'params'),
-    asyncHandler(async (req, res) => {
-      res.json(ok(await service.getById(req.params.id)));
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      res.json(ok(await service.getById(req.params.id, req.user, authorizationHeader)));
     }),
   );
 

@@ -30,8 +30,30 @@ export class ReferralService {
     return this.repository.create(dto);
   }
 
-  getDecisionStatusByIds(ids: string[]) {
-    return this.repository.findManyByIds(ids);
+  /**
+   * Real-time status for a batch of referral ids, scoped to the caller via
+   * scopeToCaller (SAKHI: own; SUPERVISOR: roster; MANAGER/ADMIN: unscoped)
+   * — without this, any SUPERVISOR/MANAGER/ADMIN caller could pass an
+   * arbitrary id list and learn the existence/status of referrals outside
+   * their own roster (IDOR). An id whose beneficiary is out of scope is
+   * simply omitted, same as an unknown/soft-deleted id.
+   */
+  async getDecisionStatusByIds(
+    ids: string[],
+    caller: AuthenticatedUser,
+    authorizationHeader: string,
+  ) {
+    const rows = await this.repository.findManyByIds(ids);
+    const scopedBeneficiaryIds = new Set(
+      await this.scopeToCaller(
+        rows.map((row) => row.beneficiaryId),
+        caller,
+        authorizationHeader,
+      ),
+    );
+    return rows
+      .filter((row) => scopedBeneficiaryIds.has(row.beneficiaryId))
+      .map((row) => ({ id: row.id, status: row.status }));
   }
 
   /**
@@ -40,10 +62,20 @@ export class ReferralService {
    * enrichment. The summary is always computed (cheap: one count + one
    * findFirst), not gated by referral type, since ACCOMPANIED_REFERRAL
    * callers simply ignore it.
+   *
+   * Delegates authorization entirely to beneficiaryClient.getById, which
+   * enforces beneficiary-service's own SAKHI-own/SUPERVISOR-roster/
+   * MANAGER-ADMIN-unrestricted scoping and throws 403/404 for an
+   * out-of-roster SUPERVISOR — same IDOR guard the sibling decide()
+   * endpoint on this same resource applies. This route is already
+   * SUPERVISOR/MANAGER/ADMIN-gated, so that one call is sufficient; unlike
+   * decide(), there's no separate roster-list double-check to replicate
+   * here.
    */
-  async getById(id: string) {
+  async getById(id: string, _caller: AuthenticatedUser, authorizationHeader: string) {
     const referral = await this.repository.findById(id);
     if (!referral) throw notFound('Referral not found.');
+    await this.beneficiaryClient.getById(referral.beneficiaryId, authorizationHeader);
     const followupSummary = await this.repository.findFollowupSummary(id);
     return { ...referral, ...followupSummary };
   }

@@ -1,4 +1,4 @@
-import type { AuthenticatedUser } from '@armman/service-commons';
+import { forbidden, type AuthenticatedUser } from '@armman/service-commons';
 import { ReferralService } from './referral.service';
 import type { ReferralRepository } from './referral.repository';
 import type { CreateReferralInput } from './dto/create-referral.dto';
@@ -473,20 +473,70 @@ describe('ReferralService', () => {
   });
 
   describe('getDecisionStatusByIds', () => {
-    it('delegates to the repository with the given ids', async () => {
+    it(
+      'scopes a SUPERVISOR caller to their roster — only in-scope rows are returned, ' +
+        'without leaking beneficiaryId',
+      async () => {
+        const rows = [
+          { id: 'ref-1', status: 'PENDING_FOLLOWUP' as const, beneficiaryId: 'ben-1' },
+          { id: 'ref-2', status: 'LAPSED' as const, beneficiaryId: 'ben-2' },
+        ];
+        repository.findManyByIds.mockResolvedValue(rows);
+        beneficiaryClient.getIds.mockResolvedValue(['ben-1']);
+
+        const result = await service.getDecisionStatusByIds(
+          ['ref-1', 'ref-2'],
+          caller({ roles: ['SUPERVISOR'] }),
+          AUTH_HEADER,
+        );
+
+        expect(result).toEqual([{ id: 'ref-1', status: 'PENDING_FOLLOWUP' }]);
+      },
+    );
+
+    it('returns all rows when every id is in scope', async () => {
       const rows = [
-        { id: '11111111-1111-1111-1111-111111111111', status: 'PENDING_FOLLOWUP' as const },
+        { id: 'ref-1', status: 'PENDING_FOLLOWUP' as const, beneficiaryId: 'ben-1' },
+        { id: 'ref-2', status: 'LAPSED' as const, beneficiaryId: 'ben-2' },
+      ];
+      repository.findManyByIds.mockResolvedValue(rows);
+      beneficiaryClient.getIds.mockResolvedValue(['ben-1', 'ben-2']);
+
+      const result = await service.getDecisionStatusByIds(
+        ['ref-1', 'ref-2'],
+        caller({ roles: ['SUPERVISOR'] }),
+        AUTH_HEADER,
+      );
+
+      expect(result).toEqual([
+        { id: 'ref-1', status: 'PENDING_FOLLOWUP' },
+        { id: 'ref-2', status: 'LAPSED' },
+      ]);
+    });
+
+    it('leaves a MANAGER/ADMIN caller unscoped — all rows returned without a beneficiary-service lookup', async () => {
+      const rows = [
+        { id: 'ref-1', status: 'PENDING_FOLLOWUP' as const, beneficiaryId: 'ben-1' },
+        { id: 'ref-2', status: 'LAPSED' as const, beneficiaryId: 'ben-2' },
       ];
       repository.findManyByIds.mockResolvedValue(rows);
 
-      const ids = ['11111111-1111-1111-1111-111111111111'];
-      await expect(service.getDecisionStatusByIds(ids)).resolves.toBe(rows);
-      expect(repository.findManyByIds).toHaveBeenCalledWith(ids);
+      const result = await service.getDecisionStatusByIds(
+        ['ref-1', 'ref-2'],
+        caller({ roles: ['MANAGER'] }),
+        AUTH_HEADER,
+      );
+
+      expect(beneficiaryClient.getIds).not.toHaveBeenCalled();
+      expect(result).toEqual([
+        { id: 'ref-1', status: 'PENDING_FOLLOWUP' },
+        { id: 'ref-2', status: 'LAPSED' },
+      ]);
     });
   });
 
   describe('getById', () => {
-    it('returns the referral merged with its follow-up summary', async () => {
+    it('SUPERVISOR in the beneficiary roster: returns the referral merged with its follow-up summary', async () => {
       const row = referral();
       const summary = {
         incompleteCount: 2,
@@ -497,16 +547,49 @@ describe('ReferralService', () => {
         },
       };
       repository.findById.mockResolvedValue(row);
+      beneficiaryClient.getById.mockResolvedValue({ id: row.beneficiaryId, sakhiId: 'sakhi-a' });
       repository.findFollowupSummary.mockResolvedValue(summary);
 
-      await expect(service.getById(row.id)).resolves.toEqual({ ...row, ...summary });
+      await expect(
+        service.getById(row.id, caller({ roles: ['SUPERVISOR'] }), AUTH_HEADER),
+      ).resolves.toEqual({ ...row, ...summary });
+      expect(beneficiaryClient.getById).toHaveBeenCalledWith(row.beneficiaryId, AUTH_HEADER);
       expect(repository.findFollowupSummary).toHaveBeenCalledWith(row.id);
     });
 
-    it('404s on an unknown id without computing a follow-up summary', async () => {
+    it('SUPERVISOR outside the beneficiary roster: propagates the 403 and never computes the follow-up summary', async () => {
+      const row = referral();
+      repository.findById.mockResolvedValue(row);
+      beneficiaryClient.getById.mockRejectedValue(
+        forbidden("This beneficiary is outside this Supervisor's roster."),
+      );
+
+      await expect(
+        service.getById(row.id, caller({ roles: ['SUPERVISOR'] }), AUTH_HEADER),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(repository.findFollowupSummary).not.toHaveBeenCalled();
+    });
+
+    it('MANAGER/ADMIN caller: succeeds unrestricted', async () => {
+      const row = referral();
+      const summary = { incompleteCount: 0, latestFollowup: null };
+      repository.findById.mockResolvedValue(row);
+      beneficiaryClient.getById.mockResolvedValue({ id: row.beneficiaryId, sakhiId: 'sakhi-a' });
+      repository.findFollowupSummary.mockResolvedValue(summary);
+
+      await expect(
+        service.getById(row.id, caller({ roles: ['MANAGER'] }), AUTH_HEADER),
+      ).resolves.toEqual({ ...row, ...summary });
+      expect(beneficiaryClient.getById).toHaveBeenCalledWith(row.beneficiaryId, AUTH_HEADER);
+    });
+
+    it('404s on an unknown id without calling beneficiaryClient or computing a follow-up summary', async () => {
       repository.findById.mockResolvedValue(null);
 
-      await expect(service.getById('unknown-id')).rejects.toMatchObject({ status: 404 });
+      await expect(
+        service.getById('unknown-id', caller({ roles: ['SUPERVISOR'] }), AUTH_HEADER),
+      ).rejects.toMatchObject({ status: 404 });
+      expect(beneficiaryClient.getById).not.toHaveBeenCalled();
       expect(repository.findFollowupSummary).not.toHaveBeenCalled();
     });
   });

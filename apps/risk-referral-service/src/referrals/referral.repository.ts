@@ -45,7 +45,7 @@ export class ReferralRepository {
   findManyByIds(ids: string[]) {
     return this.prisma.referral.findMany({
       where: { id: { in: ids }, isDeleted: false },
-      select: { id: true, status: true },
+      select: { id: true, status: true, beneficiaryId: true },
     });
   }
 
