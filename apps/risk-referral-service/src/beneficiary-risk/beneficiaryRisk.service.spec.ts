@@ -258,6 +258,44 @@ describe('BeneficiaryRiskService', () => {
       ).rejects.toThrow('Beneficiary not found.');
       expect(repository.findStateSnapshots).not.toHaveBeenCalled();
     });
+
+    it('runs the beneficiary lookup and the roster fetch concurrently for a SUPERVISOR caller, not one after the other', async () => {
+      // Regression test for the GET /beneficiaries/{id}/risk performance
+      // fix — the roster fetch does not depend on the beneficiary lookup's
+      // result, so both must be in flight before either resolves. Proven
+      // here by having listSakhiIdsForSupervisor's mock synchronously
+      // record whether beneficiaryClient.getById's promise had already
+      // settled by the time it was called: under the old sequential
+      // `await getById(); await listSakhiIdsForSupervisor();` shape, getById
+      // would always have already resolved; under Promise.all, it must not
+      // have (both start in the same microtask, before either awaits).
+      let getByIdSettledBeforeRosterCalled: boolean | null = null;
+      let getByIdSettled = false;
+
+      beneficiaryClient.getById.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            setTimeout(() => {
+              getByIdSettled = true;
+              resolve({ id: BENEFICIARY_ID, sakhiId: 'sakhi-a' } as never);
+            }, 10);
+          }),
+      );
+      listSakhiIdsForSupervisorMock.mockImplementation(() => {
+        getByIdSettledBeforeRosterCalled = getByIdSettled;
+        return Promise.resolve(['sakhi-a', 'sakhi-b']);
+      });
+      repository.findStateSnapshots.mockResolvedValue([]);
+      repository.findAssessmentsWithFlags.mockResolvedValue([]);
+
+      await service.getRiskProfile(
+        BENEFICIARY_ID,
+        caller({ id: 'supervisor-1', roles: ['SUPERVISOR'], projectId: 'project-1' }),
+        AUTH_HEADER,
+      );
+
+      expect(getByIdSettledBeforeRosterCalled).toBe(false);
+    });
   });
 
   describe('getRiskState', () => {

@@ -58,12 +58,30 @@ export class BeneficiaryRiskService {
     caller: AuthenticatedUser,
     authorizationHeader: string,
   ) {
+    // TEMPORARY — timing instrumentation for the GET /beneficiaries/{id}/risk
+    // performance investigation. Remove once a real timing breakdown has
+    // been captured against the same ngrok-tunneled dev environment the
+    // original 9-14s field measurements came from (see the perf writeup's
+    // "What's still needed" section) and a decision is made on further work.
+    const t0 = Date.now();
     await this.assertCallerCanViewBeneficiary(beneficiaryId, caller, authorizationHeader);
+    const t1 = Date.now();
 
     const [snapshots, assessments] = await Promise.all([
       this.repository.findStateSnapshots(beneficiaryId),
       this.repository.findAssessmentsWithFlags(beneficiaryId),
     ]);
+    const t2 = Date.now();
+
+    console.log(
+      JSON.stringify({
+        label: 'getRiskProfile.timing',
+        beneficiaryId,
+        ownershipCheckMs: t1 - t0,
+        dbQueryMs: t2 - t1,
+        totalMs: t2 - t0,
+      }),
+    );
 
     return {
       beneficiaryId,
@@ -177,17 +195,47 @@ export class BeneficiaryRiskService {
     const isUnscoped = caller.roles.includes('MANAGER') || caller.roles.includes('ADMIN');
     if (isUnscoped) return;
 
-    const beneficiary = await this.beneficiaryClient.getById(beneficiaryId, authorizationHeader);
+    // The roster fetch doesn't depend on the beneficiary lookup's result —
+    // run both cross-service round trips concurrently rather than
+    // sequentially (see the GET /beneficiaries/{id}/risk performance
+    // writeup: this endpoint measured 9-14s in the field, largely from
+    // these two awaited-in-series calls).
+    const isSupervisor = caller.roles.includes('SUPERVISOR');
+    if (isSupervisor && !caller.projectId) {
+      throw forbidden('Supervisor caller has no project scope.');
+    }
+
+    // TEMPORARY — per-call timing, see getRiskProfile's own instrumentation
+    // comment. Times each cross-service round trip individually, since they
+    // now run concurrently and may have very different durations.
+    const start = Date.now();
+    const [beneficiary, roster] = await Promise.all([
+      this.beneficiaryClient.getById(beneficiaryId, authorizationHeader).then((result) => {
+        console.log(
+          JSON.stringify({ label: 'beneficiaryClient.getById.timing', ms: Date.now() - start }),
+        );
+        return result;
+      }),
+      isSupervisor
+        ? listSakhiIdsForSupervisor(
+            caller.projectId as string,
+            caller.id,
+            authorizationHeader,
+          ).then((result) => {
+            console.log(
+              JSON.stringify({
+                label: 'listSakhiIdsForSupervisor.timing',
+                ms: Date.now() - start,
+              }),
+            );
+            return result;
+          })
+        : Promise.resolve(null),
+    ]);
     if (!beneficiary) throw notFound('Beneficiary not found.');
 
-    if (caller.roles.includes('SUPERVISOR')) {
-      if (!caller.projectId) throw forbidden('Supervisor caller has no project scope.');
-      const roster = await listSakhiIdsForSupervisor(
-        caller.projectId,
-        caller.id,
-        authorizationHeader,
-      );
-      if (!roster.includes(beneficiary.sakhiId)) {
+    if (isSupervisor) {
+      if (!roster?.includes(beneficiary.sakhiId)) {
         throw forbidden("This beneficiary is outside this Supervisor's roster.");
       }
     } else if (beneficiary.sakhiId !== caller.id) {

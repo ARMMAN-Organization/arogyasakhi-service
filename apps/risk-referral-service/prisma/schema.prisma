@@ -206,6 +206,10 @@ model RiskAssessment {
   // visit-form-service) must not double-write — same idempotency pattern as
   // form_submissions.localSubmissionUuid/beneficiary_cases.localCaseUuid.
   @@unique([submissionId])
+  // findAssessmentsWithFlags (beneficiaryRisk.repository.ts) filters on
+  // exactly this pair — a full table scan per GET /beneficiaries/{id}/risk
+  // call, harmless on seed-data volume but not once real data accumulates.
+  @@index([beneficiaryId, isDeleted])
   @@map("risk_assessments")
 }
 
@@ -259,6 +263,9 @@ model RiskStateSnapshot {
   isDeleted       Boolean        @default(false) @map("is_deleted")
   deletedAt       DateTime?      @map("deleted_at")
 
+  // findStateSnapshots (beneficiaryRisk.repository.ts) filters on exactly
+  // this pair — same rationale as RiskAssessment's index above.
+  @@index([beneficiaryId, isDeleted])
   @@map("risk_state_snapshots")
 }
 
