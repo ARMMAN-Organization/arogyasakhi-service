@@ -96,12 +96,22 @@ export class FormService {
     asOf: Date,
     callerGeographyUnitId: string | null,
     authorizationHeader: string,
+    beneficiaryId?: string,
   ) {
     const version = await this.repository.findActiveVersion(formCode, asOf);
     if (!version) throw notFound(`No published form version found for form code "${formCode}".`);
     const apiVersion = toApiFormVersion(version);
 
-    if (!callerGeographyUnitId) return apiVersion;
+    const prefilledContext =
+      formCode === 'NEONATAL_VISIT' && beneficiaryId
+        ? {
+            kmcEligible: await this.resolveKmcEligibility(beneficiaryId, asOf, authorizationHeader),
+          }
+        : undefined;
+
+    if (!callerGeographyUnitId) {
+      return prefilledContext ? { ...apiVersion, prefilledContext } : apiVersion;
+    }
 
     const chain = await getAncestorChain(callerGeographyUnitId, authorizationHeader);
     // Only the fields a client needs to map a level onto pii.<level>Id
@@ -112,7 +122,57 @@ export class FormService {
       geoType: unit.geoType,
       name: unit.name,
     }));
-    return { ...apiVersion, geography };
+    return { ...apiVersion, geography, ...(prefilledContext ? { prefilledContext } : {}) };
+  }
+
+  /**
+   * Resolves the single derived boolean the NEONATAL_VISIT form's
+   * `is_kmc_practiced` field's `visibleWhen` checks — birth weight <2.5kg
+   * OR preterm delivery, from the beneficiary's own DELIVERY_VISIT
+   * submission (`child1_birth_weight_kg`/`term_of_delivery`), never asked
+   * again on this form. Deliberately a single pre-computed flag rather than
+   * an OR-condition in `visibleWhen` itself: the mobile client's
+   * FormVisibilityEvaluator only parses one {field,operator,value}
+   * condition per field (see form-field.dto.ts's visibleWhen doc comment
+   * on the ANC_VISIT/INFANT_VISIT incident this constraint follows from) —
+   * expressing the OR here, not in the schema, is what keeps this safe.
+   * Also requires the baby to be <=2 months old as of `asOf` (SRS: "Don't
+   * show these questions... if the baby is more than 2 months of age"),
+   * read from beneficiary-service's `childDateOfBirth` — a second
+   * cross-service call, made only for this one formCode, and only once per
+   * form-load rather than once per KMC-adjacent field.
+   *
+   * Defaults to `false` (fail closed, KMC section hidden) when no
+   * DELIVERY_VISIT submission exists yet, or the beneficiary/DOB can't be
+   * resolved — matching the "computed fields are never required" stance
+   * elsewhere in this file rather than failing the whole form load.
+   */
+  private async resolveKmcEligibility(
+    beneficiaryId: string,
+    asOf: Date,
+    authorizationHeader: string,
+  ): Promise<boolean> {
+    const delivery = await this.repository.findLatestSubmissionByBeneficiaryAndFormCode(
+      beneficiaryId,
+      'DELIVERY_VISIT',
+    );
+    if (!delivery) return false;
+
+    const answers = delivery.formDataJson as Record<string, unknown>;
+    const birthWeightKg = answers.child1_birth_weight_kg;
+    const termOfDelivery = answers.term_of_delivery;
+
+    const lowBirthWeight = typeof birthWeightKg === 'number' && birthWeightKg < 2.5;
+    const preterm = termOfDelivery === 'pre_term';
+    if (!lowBirthWeight && !preterm) return false;
+
+    const beneficiary = await findBeneficiaryById(beneficiaryId, authorizationHeader);
+    if (!beneficiary?.childDateOfBirth) return false;
+
+    const dob = new Date(beneficiary.childDateOfBirth);
+    const twoMonthsOld = new Date(dob);
+    twoMonthsOld.setUTCMonth(twoMonthsOld.getUTCMonth() + 2);
+    return asOf.getTime() <= twoMonthsOld.getTime();
   }
 
   async createDraft(formCode: string, dto: CreateDraftVersionInput) {
@@ -246,7 +306,22 @@ export class FormService {
 
     const fields = schemaJsonSchema.parse(version.schemaJson);
     const crossFieldRules = validationJsonSchema.parse(version.validationJson ?? []);
-    const violations = validateSubmission(fields, crossFieldRules, dto.formData);
+    // Same reasoning as getActiveVersion's prefilledContext: is_kmc_practiced's
+    // visibility must be revalidated server-side against the same derived
+    // flag the client was given at form-load time, not against a raw
+    // birth-weight/term-of-delivery field the Sakhi is no longer asked for.
+    const validationData =
+      formCode === 'NEONATAL_VISIT'
+        ? {
+            ...dto.formData,
+            kmcEligible: await this.resolveKmcEligibility(
+              dto.beneficiaryId,
+              new Date(),
+              authorizationHeader,
+            ),
+          }
+        : dto.formData;
+    const violations = validateSubmission(fields, crossFieldRules, validationData);
 
     if (violations.length) {
       throw unprocessable('Submission failed validation.', { violations });

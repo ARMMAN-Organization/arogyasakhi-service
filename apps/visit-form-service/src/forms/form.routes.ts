@@ -27,7 +27,14 @@ const versionParamsSchema = z
   })
   .strict();
 const activeVersionQuerySchema = z
-  .object({ asOf: z.coerce.date().optional().openapi({ example: '2026-07-20T00:00:00.000Z' }) })
+  .object({
+    asOf: z.coerce.date().optional().openapi({ example: '2026-07-20T00:00:00.000Z' }),
+    // Only consulted for NEONATAL_VISIT today — see
+    // FormService.getActiveVersion's prefilledContext block — but accepted
+    // generically here so future forms can opt into the same mechanism
+    // without a route change.
+    beneficiaryId: z.string().uuid().optional(),
+  })
   .strict();
 const beneficiaryIdParamsSchema = z.object({ beneficiaryId: z.string().uuid() }).strict();
 

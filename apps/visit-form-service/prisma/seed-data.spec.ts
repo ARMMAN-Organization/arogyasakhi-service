@@ -778,13 +778,17 @@ describe('neonatal-visit.json', () => {
   const fields = neonatalVisit.schemaJson;
   const byCode = new Map(fields.map((f) => [f.question_code, f]));
 
-  it('has exactly 32 fields (26 base + 4 per-vaccine date fields + 2 pre-filled delivery fields)', () => {
-    expect(fields).toHaveLength(32);
+  it('has exactly 30 fields (26 base + 4 per-vaccine date fields)', () => {
+    expect(fields).toHaveLength(30);
   });
 
-  it('applies numericRange to birth/current length and weight', () => {
+  it('does not ask the Sakhi for birth weight or term of delivery on this form — carried forward from DELIVERY_VISIT server-side instead', () => {
+    expect(byCode.get('birth_weight_kg')).toBeUndefined();
+    expect(byCode.get('term_of_delivery')).toBeUndefined();
+  });
+
+  it('applies numericRange to current length and weight', () => {
     const expectedRanges: Record<string, { min: number; max: number }> = {
-      birth_weight_kg: { min: 0.5, max: 6 },
       current_length_cm: { min: 35, max: 60 },
       current_weight_kg: { min: 0.5, max: 6 },
     };
@@ -800,11 +804,11 @@ describe('neonatal-visit.json', () => {
     expect(byCode.get('date_of_death')?.visibleWhen).toEqual(gate);
   });
 
-  it('gates the KMC block behind birth_weight_kg < 2.5 (row 11, low-birth-weight eligibility)', () => {
+  it('gates the KMC block behind the server-computed kmcEligible flag (row 11, low-birth-weight/preterm eligibility) — a single condition, never an OR expressed in visibleWhen itself, since the mobile client only parses one condition per field', () => {
     expect(byCode.get('is_kmc_practiced')?.visibleWhen).toEqual({
-      field: 'birth_weight_kg',
-      operator: 'lt',
-      value: 2.5,
+      field: 'kmcEligible',
+      operator: 'eq',
+      value: true,
     });
     expect(byCode.get('kmc_duration')?.visibleWhen).toEqual({
       field: 'is_kmc_practiced',

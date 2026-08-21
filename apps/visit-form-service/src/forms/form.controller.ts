@@ -20,12 +20,16 @@ export function createFormController(service: FormService) {
       if (!authorizationHeader) return next(unauthorized());
 
       const { formCode } = req.params as unknown as { formCode: string };
-      const { asOf } = req.query as unknown as { asOf?: Date };
+      const { asOf, beneficiaryId } = req.query as unknown as {
+        asOf?: Date;
+        beneficiaryId?: string;
+      };
       const version = await service.getActiveVersion(
         formCode,
         asOf ?? new Date(),
         req.user.geographyUnitId,
         authorizationHeader,
+        beneficiaryId,
       );
       res.json(ok(version));
     }),
