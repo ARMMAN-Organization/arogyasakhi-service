@@ -139,6 +139,16 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
   // UNCONFIRMED alias for GET /beneficiaries/risk-summary — see the route's
   // own doc comment in beneficiary.routes.ts for why this is a best guess.
   { prefix: '/risk-monitoring', target: appConfig.BENEFICIARY_SERVICE_URL, requiresAuth: true },
+  // Call-sheet Visit Due / Visit 3 Days to Expire / Missed Visit rollup for a
+  // Sakhi — a thin proxy in supervisor-operations-service over
+  // visit-form-service's own /visits/visit-summary. Must be registered
+  // before the generic /visits prefix below, or that broader mount would
+  // swallow this path first.
+  {
+    prefix: '/visits/by-sakhi',
+    target: appConfig.SUPERVISOR_OPERATIONS_SERVICE_URL,
+    requiresAuth: true,
+  },
   { prefix: '/visits', target: appConfig.VISIT_FORM_SERVICE_URL, requiresAuth: true },
   { prefix: '/visit-schedules', target: appConfig.VISIT_FORM_SERVICE_URL, requiresAuth: true },
   // Visit-type reference catalog (SRS Appendix A/B) — the Supervisor app's

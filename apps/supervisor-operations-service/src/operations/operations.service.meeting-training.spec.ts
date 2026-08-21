@@ -1,6 +1,7 @@
 import { OperationsService } from './operations.service';
 import type { OperationsRepository } from './operations.repository';
 import type { SakhiClient } from './sakhi.client';
+import type { VisitSummaryClient } from './visitSummary.client';
 import type {
   SupervisorEvent,
   EventGathering,
@@ -31,6 +32,9 @@ describe('OperationsService — Meeting & Training flow', () => {
     findEventPhotos: jest.fn(),
   } as unknown as jest.Mocked<OperationsRepository>;
   const sakhiClient = { findById: jest.fn() } as unknown as jest.Mocked<SakhiClient>;
+  const visitSummaryClient = {
+    getBySakhi: jest.fn(),
+  } as unknown as jest.Mocked<VisitSummaryClient>;
   let service: OperationsService;
 
   const supervisorCaller = { id: 'supervisor-1', roles: ['SUPERVISOR'] };
@@ -39,7 +43,7 @@ describe('OperationsService — Meeting & Training flow', () => {
 
   beforeEach(() => {
     jest.resetAllMocks();
-    service = new OperationsService(repository, sakhiClient);
+    service = new OperationsService(repository, sakhiClient, visitSummaryClient);
   });
 
   const trainingEventRow: SupervisorEvent = {
