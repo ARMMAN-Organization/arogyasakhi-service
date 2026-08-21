@@ -1,4 +1,10 @@
-import { badGateway, notFound, unprocessable } from '@armman/service-commons';
+import {
+  badGateway,
+  forbidden,
+  notFound,
+  unprocessable,
+  type AuthenticatedUser,
+} from '@armman/service-commons';
 import { appConfig } from '../config/app-config';
 import type { SupervisorRepository } from './supervisor.repository';
 import { sendTransferNoticeEmail } from './ses-email.client';
@@ -44,12 +50,27 @@ export class SupervisorService {
    * setManager), so treating a missing link as a hard failure would break
    * TRANSFER for every Sakhi today. `usedFallback` lets the caller log which
    * case happened, for the org-data cleanup this is standing in for.
+   *
+   * A non-ADMIN `caller` is restricted to Sakhis on her own roster
+   * (`sakhiProfile.supervisorId === caller.id`) — without this, any
+   * SUPERVISOR could pass another Supervisor's `sakhiId` and both trigger a
+   * real email to that Sakhi's Manager and read the Manager's email back in
+   * the response. `caller` is optional to keep this callable from
+   * server-to-server/internal contexts that have no end-user identity.
    */
   async resolveManagerContact(
     sakhiId: string,
+    caller?: AuthenticatedUser,
   ): Promise<{ email: string; usedFallback: boolean; sakhiName: string }> {
     const sakhiProfile = await this.repository.findSakhiProfileByUserId(sakhiId);
     if (!sakhiProfile) throw notFound('Sakhi not found.');
+
+    if (caller && caller.roles.includes('SUPERVISOR') && !caller.roles.includes('ADMIN')) {
+      if (sakhiProfile.supervisorId !== caller.id) {
+        throw forbidden('This Sakhi is outside your own roster.');
+      }
+    }
+
     const sakhiName = sakhiProfile.user.displayName;
 
     const fallback = appConfig.DEFAULT_TRANSFER_MANAGER_EMAIL;
@@ -75,9 +96,16 @@ export class SupervisorService {
     );
   }
 
-  /** Sends the TRANSFER Manager-notice email — see ses-email.client.ts. */
-  async sendTransferNotice(input: SendTransferNoticeInput) {
-    const { email, usedFallback, sakhiName } = await this.resolveManagerContact(input.sakhiId);
+  /**
+   * Sends the TRANSFER Manager-notice email — see ses-email.client.ts.
+   * `caller` is forwarded to `resolveManagerContact` so a SUPERVISOR can
+   * only trigger this for a Sakhi on her own roster.
+   */
+  async sendTransferNotice(input: SendTransferNoticeInput, caller?: AuthenticatedUser) {
+    const { email, usedFallback, sakhiName } = await this.resolveManagerContact(
+      input.sakhiId,
+      caller,
+    );
     const sent = await sendTransferNoticeEmail({
       to: email,
       sakhiName,

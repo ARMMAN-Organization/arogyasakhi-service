@@ -20,7 +20,7 @@ export function createSupervisorController(service: SupervisorService) {
 
     sendTransferNotice: asyncHandler(async (req, res, next) => {
       if (!req.user) return next(unauthorized());
-      const result = await service.sendTransferNotice(req.body);
+      const result = await service.sendTransferNotice(req.body, req.user);
       res.json(ok(result));
     }),
   };

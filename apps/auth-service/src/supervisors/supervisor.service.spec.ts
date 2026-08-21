@@ -10,6 +10,17 @@ jest.mock('./ses-email.client', () => ({
 
 import { SupervisorService } from './supervisor.service';
 import type { SupervisorRepository } from './supervisor.repository';
+import type { AuthenticatedUser } from '@armman/service-commons';
+
+function caller(overrides: Partial<AuthenticatedUser> = {}): AuthenticatedUser {
+  return {
+    id: '55555555-5555-5555-5555-555555555555',
+    roles: ['SUPERVISOR'],
+    projectId: null,
+    geographyUnitId: null,
+    ...overrides,
+  };
+}
 
 describe('SupervisorService', () => {
   const repository = {
@@ -157,6 +168,50 @@ describe('SupervisorService', () => {
       await expect(service.resolveManagerContact(sakhiId)).rejects.toMatchObject({ status: 404 });
     });
 
+    it('404s when the sakhiId does not resolve to a Sakhi, even for a caller', async () => {
+      repository.findSakhiProfileByUserId.mockResolvedValue(null);
+
+      await expect(
+        service.resolveManagerContact(sakhiId, caller({ id: supervisorId })),
+      ).rejects.toMatchObject({ status: 404 });
+    });
+
+    it('allows a SUPERVISOR caller who owns the Sakhi', async () => {
+      repository.findSakhiProfileByUserId.mockResolvedValue(sakhiProfile() as never);
+      repository.findSupervisorProfileByUserId.mockResolvedValue({
+        managerUserId: managerId,
+      } as never);
+      repository.findUserById.mockResolvedValue({ email: 'manager@example.com' } as never);
+
+      const result = await service.resolveManagerContact(sakhiId, caller({ id: supervisorId }));
+
+      expect(result.email).toBe('manager@example.com');
+    });
+
+    it('403s a SUPERVISOR caller who does not own the Sakhi', async () => {
+      repository.findSakhiProfileByUserId.mockResolvedValue(sakhiProfile() as never);
+
+      await expect(
+        service.resolveManagerContact(sakhiId, caller({ id: 'someone-else' })),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(repository.findSupervisorProfileByUserId).not.toHaveBeenCalled();
+    });
+
+    it('allows an ADMIN caller regardless of roster ownership', async () => {
+      repository.findSakhiProfileByUserId.mockResolvedValue(sakhiProfile() as never);
+      repository.findSupervisorProfileByUserId.mockResolvedValue({
+        managerUserId: managerId,
+      } as never);
+      repository.findUserById.mockResolvedValue({ email: 'manager@example.com' } as never);
+
+      const result = await service.resolveManagerContact(
+        sakhiId,
+        caller({ id: 'someone-else', roles: ['ADMIN'] }),
+      );
+
+      expect(result.email).toBe('manager@example.com');
+    });
+
     it('sendTransferNotice sends via the resolved Manager email and reports usedFallback', async () => {
       repository.findSakhiProfileByUserId.mockResolvedValue(sakhiProfile() as never);
       repository.findSupervisorProfileByUserId.mockResolvedValue({
@@ -165,12 +220,15 @@ describe('SupervisorService', () => {
       repository.findUserById.mockResolvedValue({ email: 'manager@example.com' } as never);
       sendTransferNoticeEmailMock.mockResolvedValue(true);
 
-      const result = await service.sendTransferNotice({
-        sakhiId,
-        beneficiaryName: 'Jane Doe',
-        visitsMissedCount: 2,
-        visitType: 'ANC',
-      });
+      const result = await service.sendTransferNotice(
+        {
+          sakhiId,
+          beneficiaryName: 'Jane Doe',
+          visitsMissedCount: 2,
+          visitType: 'ANC',
+        },
+        caller({ id: supervisorId }),
+      );
 
       expect(sendTransferNoticeEmailMock).toHaveBeenCalledWith({
         to: 'manager@example.com',
@@ -184,6 +242,45 @@ describe('SupervisorService', () => {
         managerEmail: 'manager@example.com',
         usedFallback: false,
       });
+    });
+
+    it('sendTransferNotice forbids a SUPERVISOR caller outside the Sakhi roster and sends no email', async () => {
+      repository.findSakhiProfileByUserId.mockResolvedValue(sakhiProfile() as never);
+
+      await expect(
+        service.sendTransferNotice(
+          {
+            sakhiId,
+            beneficiaryName: 'Jane Doe',
+            visitsMissedCount: 2,
+            visitType: 'ANC',
+          },
+          caller({ id: 'someone-else' }),
+        ),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(sendTransferNoticeEmailMock).not.toHaveBeenCalled();
+    });
+
+    it('sendTransferNotice succeeds for an ADMIN caller regardless of roster ownership', async () => {
+      repository.findSakhiProfileByUserId.mockResolvedValue(sakhiProfile() as never);
+      repository.findSupervisorProfileByUserId.mockResolvedValue({
+        managerUserId: managerId,
+      } as never);
+      repository.findUserById.mockResolvedValue({ email: 'manager@example.com' } as never);
+      sendTransferNoticeEmailMock.mockResolvedValue(true);
+
+      const result = await service.sendTransferNotice(
+        {
+          sakhiId,
+          beneficiaryName: 'Jane Doe',
+          visitsMissedCount: 2,
+          visitType: 'ANC',
+        },
+        caller({ id: 'someone-else', roles: ['ADMIN'] }),
+      );
+
+      expect(result.sent).toBe(true);
+      expect(sendTransferNoticeEmailMock).toHaveBeenCalled();
     });
   });
 });
