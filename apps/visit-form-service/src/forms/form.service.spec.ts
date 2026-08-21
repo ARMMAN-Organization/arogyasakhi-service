@@ -129,6 +129,172 @@ describe('FormService', () => {
         }),
       );
     });
+
+    describe('NEONATAL_VISIT prefilledContext.kmcEligible', () => {
+      const version = {
+        id: 'v1',
+        versionNo: 'v1',
+        status: 'PUBLISHED',
+        checksum: Buffer.from('x'),
+      };
+
+      it('omits prefilledContext entirely when no beneficiaryId is given', async () => {
+        repository.findActiveVersion.mockResolvedValue(version as never);
+
+        const result = await service.getActiveVersion(
+          'NEONATAL_VISIT',
+          new Date(),
+          null,
+          'Bearer test-token',
+        );
+
+        expect(result).not.toHaveProperty('prefilledContext');
+        expect(repository.findLatestSubmissionByBeneficiaryAndFormCode).not.toHaveBeenCalled();
+      });
+
+      it('does not look up prefilledContext for a formCode other than NEONATAL_VISIT, even with a beneficiaryId', async () => {
+        repository.findActiveVersion.mockResolvedValue(version as never);
+
+        const result = await service.getActiveVersion(
+          'ANC_VISIT',
+          new Date(),
+          null,
+          'Bearer test-token',
+          'ben-1',
+        );
+
+        expect(result).not.toHaveProperty('prefilledContext');
+        expect(repository.findLatestSubmissionByBeneficiaryAndFormCode).not.toHaveBeenCalled();
+      });
+
+      it('resolves kmcEligible: false when the beneficiary has no DELIVERY_VISIT submission', async () => {
+        repository.findActiveVersion.mockResolvedValue(version as never);
+        repository.findLatestSubmissionByBeneficiaryAndFormCode.mockResolvedValue(null);
+
+        const result = await service.getActiveVersion(
+          'NEONATAL_VISIT',
+          new Date(),
+          null,
+          'Bearer test-token',
+          'ben-1',
+        );
+
+        expect(repository.findLatestSubmissionByBeneficiaryAndFormCode).toHaveBeenCalledWith(
+          'ben-1',
+          'DELIVERY_VISIT',
+        );
+        expect(result).toEqual(
+          expect.objectContaining({ prefilledContext: { kmcEligible: false } }),
+        );
+        expect(findBeneficiaryById).not.toHaveBeenCalled();
+      });
+
+      it('resolves kmcEligible: false when birth weight >= 2.5kg and term is full_term, without looking up the beneficiary DOB', async () => {
+        repository.findActiveVersion.mockResolvedValue(version as never);
+        repository.findLatestSubmissionByBeneficiaryAndFormCode.mockResolvedValue({
+          formDataJson: { child1_birth_weight_kg: 3.2, term_of_delivery: 'full_term' },
+        } as never);
+
+        const result = await service.getActiveVersion(
+          'NEONATAL_VISIT',
+          new Date(),
+          null,
+          'Bearer test-token',
+          'ben-1',
+        );
+
+        expect(result).toEqual(
+          expect.objectContaining({ prefilledContext: { kmcEligible: false } }),
+        );
+        expect(findBeneficiaryById).not.toHaveBeenCalled();
+      });
+
+      it('resolves kmcEligible: true for low birth weight (<2.5kg) when the baby is <=2 months old', async () => {
+        repository.findActiveVersion.mockResolvedValue(version as never);
+        repository.findLatestSubmissionByBeneficiaryAndFormCode.mockResolvedValue({
+          formDataJson: { child1_birth_weight_kg: 2.0, term_of_delivery: 'full_term' },
+        } as never);
+        jest.mocked(findBeneficiaryById).mockResolvedValue({
+          childDateOfBirth: '2026-07-01T00:00:00.000Z',
+        } as never);
+
+        const result = await service.getActiveVersion(
+          'NEONATAL_VISIT',
+          new Date('2026-08-01T00:00:00.000Z'),
+          null,
+          'Bearer test-token',
+          'ben-1',
+        );
+
+        expect(result).toEqual(
+          expect.objectContaining({ prefilledContext: { kmcEligible: true } }),
+        );
+      });
+
+      it('resolves kmcEligible: true for a preterm delivery regardless of birth weight, when the baby is <=2 months old', async () => {
+        repository.findActiveVersion.mockResolvedValue(version as never);
+        repository.findLatestSubmissionByBeneficiaryAndFormCode.mockResolvedValue({
+          formDataJson: { child1_birth_weight_kg: 3.0, term_of_delivery: 'pre_term' },
+        } as never);
+        jest.mocked(findBeneficiaryById).mockResolvedValue({
+          childDateOfBirth: '2026-07-01T00:00:00.000Z',
+        } as never);
+
+        const result = await service.getActiveVersion(
+          'NEONATAL_VISIT',
+          new Date('2026-08-01T00:00:00.000Z'),
+          null,
+          'Bearer test-token',
+          'ben-1',
+        );
+
+        expect(result).toEqual(
+          expect.objectContaining({ prefilledContext: { kmcEligible: true } }),
+        );
+      });
+
+      it('resolves kmcEligible: false when otherwise eligible but the baby is older than 2 months', async () => {
+        repository.findActiveVersion.mockResolvedValue(version as never);
+        repository.findLatestSubmissionByBeneficiaryAndFormCode.mockResolvedValue({
+          formDataJson: { child1_birth_weight_kg: 2.0, term_of_delivery: 'full_term' },
+        } as never);
+        jest.mocked(findBeneficiaryById).mockResolvedValue({
+          childDateOfBirth: '2026-01-01T00:00:00.000Z',
+        } as never);
+
+        const result = await service.getActiveVersion(
+          'NEONATAL_VISIT',
+          new Date('2026-08-01T00:00:00.000Z'),
+          null,
+          'Bearer test-token',
+          'ben-1',
+        );
+
+        expect(result).toEqual(
+          expect.objectContaining({ prefilledContext: { kmcEligible: false } }),
+        );
+      });
+
+      it('resolves kmcEligible: false (fail closed) when the beneficiary/DOB cannot be resolved', async () => {
+        repository.findActiveVersion.mockResolvedValue(version as never);
+        repository.findLatestSubmissionByBeneficiaryAndFormCode.mockResolvedValue({
+          formDataJson: { child1_birth_weight_kg: 2.0, term_of_delivery: 'full_term' },
+        } as never);
+        jest.mocked(findBeneficiaryById).mockResolvedValue(null);
+
+        const result = await service.getActiveVersion(
+          'NEONATAL_VISIT',
+          new Date('2026-08-01T00:00:00.000Z'),
+          null,
+          'Bearer test-token',
+          'ben-1',
+        );
+
+        expect(result).toEqual(
+          expect.objectContaining({ prefilledContext: { kmcEligible: false } }),
+        );
+      });
+    });
   });
 
   describe('createDraft', () => {
@@ -661,6 +827,103 @@ describe('FormService', () => {
 
         expect(result).toEqual({ id: 'sub-1' });
         expect(repository.createSubmission).toHaveBeenCalled();
+      });
+    });
+
+    describe('NEONATAL_VISIT server-side kmcEligible revalidation', () => {
+      const neonatalVersion = {
+        id: 'version-1',
+        status: 'PUBLISHED',
+        formDefinition: { formCode: 'NEONATAL_VISIT' },
+        schemaJson: [
+          {
+            question_code: 'is_kmc_practiced',
+            label: 'Is KMC practiced?',
+            input_type: 'radio',
+            required: true,
+            visibleWhen: { field: 'kmcEligible', operator: 'eq', value: true },
+          },
+        ],
+        validationJson: [],
+      };
+
+      it('requires is_kmc_practiced when the linked DELIVERY_VISIT shows low birth weight', async () => {
+        repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+        repository.findVersionById.mockResolvedValue(neonatalVersion as never);
+        repository.findLatestSubmissionByBeneficiaryAndFormCode.mockResolvedValue({
+          formDataJson: { child1_birth_weight_kg: 2.0, term_of_delivery: 'full_term' },
+        } as never);
+        jest.mocked(findBeneficiaryById).mockResolvedValue({
+          childDateOfBirth: new Date().toISOString(),
+        } as never);
+
+        const call = service.createSubmission(
+          'NEONATAL_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {},
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        await expect(call).rejects.toMatchObject({
+          details: { violations: ['Missing required field: is_kmc_practiced'] },
+        });
+      });
+
+      it('does not require is_kmc_practiced when the linked DELIVERY_VISIT shows normal birth weight/term', async () => {
+        repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+        repository.findVersionById.mockResolvedValue(neonatalVersion as never);
+        repository.findLatestSubmissionByBeneficiaryAndFormCode.mockResolvedValue({
+          formDataJson: { child1_birth_weight_kg: 3.2, term_of_delivery: 'full_term' },
+        } as never);
+        repository.createSubmission.mockResolvedValue({ id: 'sub-1' } as never);
+
+        await service.createSubmission(
+          'NEONATAL_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {},
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(repository.createSubmission).toHaveBeenCalled();
+      });
+
+      it('never persists kmcEligible into the stored formData', async () => {
+        repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+        repository.findVersionById.mockResolvedValue(neonatalVersion as never);
+        repository.findLatestSubmissionByBeneficiaryAndFormCode.mockResolvedValue({
+          formDataJson: { child1_birth_weight_kg: 2.0, term_of_delivery: 'full_term' },
+        } as never);
+        jest.mocked(findBeneficiaryById).mockResolvedValue({
+          childDateOfBirth: new Date().toISOString(),
+        } as never);
+        repository.createSubmission.mockResolvedValue({ id: 'sub-1' } as never);
+
+        await service.createSubmission(
+          'NEONATAL_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: { is_kmc_practiced: 'yes' },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        const call = repository.createSubmission.mock.calls[0][0] as {
+          formDataJson?: Record<string, unknown>;
+        };
+        expect(call.formDataJson).not.toHaveProperty('kmcEligible');
       });
     });
 

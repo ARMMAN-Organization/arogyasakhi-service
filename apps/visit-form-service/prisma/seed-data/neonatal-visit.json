@@ -20,26 +20,6 @@
       "question_code": "visit_name"
     },
     {
-      "label": "Birth weight of the baby in kg (from the Delivery form, for the KMC eligibility check below)",
-      "section": "Neonatal Visit",
-      "required": true,
-      "input_type": "number",
-      "question_code": "birth_weight_kg",
-      "numericRange": { "min": 0.5, "max": 6 }
-    },
-    {
-      "label": "Term of delivery (from the Delivery form, for the KMC eligibility check below)",
-      "options": [
-        { "label": "Pre Term", "sort_order": 0, "value_code": "pre_term" },
-        { "label": "Post Term", "sort_order": 1, "value_code": "post_term" },
-        { "label": "Full Term", "sort_order": 2, "value_code": "full_term" }
-      ],
-      "section": "Neonatal Visit",
-      "required": true,
-      "input_type": "dropdown",
-      "question_code": "term_of_delivery"
-    },
-    {
       "label": "Is the new born alive now?",
       "options": [
         { "label": "Yes", "sort_order": 0, "value_code": "yes" },
@@ -313,7 +293,7 @@
       "required": true,
       "input_type": "radio",
       "question_code": "is_kmc_practiced",
-      "visibleWhen": { "field": "birth_weight_kg", "operator": "lt", "value": 2.5 }
+      "visibleWhen": { "field": "kmcEligible", "operator": "eq", "value": true }
     },
     {
       "label": "KMC Duration",
