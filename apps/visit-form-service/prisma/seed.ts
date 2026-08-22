@@ -427,8 +427,165 @@ async function seedVisitMasters(): Promise<SeedResult> {
   };
 }
 
+// rule_versions.rule_version_id (generic SCHEDULE pack, PUBLISHED), owned by
+// rules-service — cross-service scalar ref, not FK-enforced (forklift rule).
+const GENERIC_RULE_VERSION_ID = '22222222-2222-4222-8222-222222222222';
+// lookup_values.lookup_value_id (category VISIT_STATUS), owned by auth-service.
+const VISIT_STATUS_PENDING_LOOKUP_ID = 'b2260191-2da0-4f18-92b1-0f271912effc';
+const VISIT_STATUS_MISSED_LOOKUP_ID = '618732a3-20f6-46bd-99b1-83845920d662';
+const VISIT_STATUS_COMPLETED_LOOKUP_ID = 'e40ece64-58b6-4fb7-9daf-5a0ca529606f';
+
+interface SupervisorAppVisitSeed {
+  sakhiId: string;
+  beneficiaryId: string;
+  localUuidSuffix: string;
+  statusLookupValueId: string;
+}
+
+// One visit per beneficiary case seeded by beneficiary-service's own
+// prisma/seed.ts (same fixed beneficiary ids), cycling PENDING/MISSED/COMPLETED
+// across each sakhi's 6 beneficiaries — reuses exactly what was created via the
+// live API this session, so re-running against that database is a no-op.
+const SUPERVISOR_APP_VISITS: SupervisorAppVisitSeed[] = [
+  ...[
+    {
+      sakhi: 'lakshmi',
+      sakhiId: '3df86ec1-8115-4db9-b558-a091f15b5a99',
+      beneficiaryIds: [
+        'a29616a5-cc9d-4de2-9bfc-399fa82700ca',
+        '8fc12c0d-7887-4fe6-b7bc-92ef7d953ff4',
+        '22f8e16c-d678-4f08-930e-c85e0dced2dd',
+        'a3eeb96a-aa94-4535-b647-5b9f1204a126',
+        'e20f17ba-006c-4f5c-8607-7162a9674d2d',
+        '54a09c3a-1ae7-4b58-bf14-a81798eec698',
+      ],
+    },
+    {
+      sakhi: 'nithya',
+      sakhiId: '9252ff42-6904-4005-9184-14cbbb75e84b',
+      beneficiaryIds: [
+        'cb2c9ae5-06fe-4a41-a89e-5b93bd9cb8ad',
+        '88baaa7f-b54a-419b-9a25-f59c08b23815',
+        'aeec7340-5838-482f-862e-7f778822a4c2',
+        '0bfc9aac-2ef1-496c-b78e-1c8d50cded41',
+        '91143832-c91e-4ca7-a293-7299ed29283c',
+        'e6002e06-d054-496e-a6ca-2a770a673435',
+      ],
+    },
+    {
+      sakhi: 'sandhya',
+      sakhiId: 'f84745fd-f105-40d9-bbf0-9127b3948112',
+      beneficiaryIds: [
+        '2451a47d-da90-41a3-9d79-2fdad3846043',
+        '771b04f6-54b9-4446-9381-02deadc53c47',
+        '90a98f9c-9ec2-47b9-87a2-35cdb720e51e',
+        '7446bfaa-0d32-4997-ae0a-0cfb77b6726c',
+        '5a84e3bf-a396-4182-9ea4-6b0e5a215b69',
+        '8d7cdb63-16e8-4dd6-bb65-85a134e24cdf',
+      ],
+    },
+    {
+      sakhi: 'revathi',
+      sakhiId: '079bd637-01a7-45f1-9216-fa819b736e54',
+      beneficiaryIds: [
+        '1b529119-87d4-408b-904e-94700c5e2c37',
+        '989f33f2-236e-4b2b-a943-04258d9bb8c0',
+        '7938f2fc-337c-4a9c-86ed-63f10fb19438',
+        '9cd6a2f6-2000-4e84-99ac-7933da0e34e1',
+        '56eb51a0-4c8b-44b4-8e5d-02dc89225508',
+        'bd8d91fa-8053-4cb9-b31f-6b7176acb96f',
+      ],
+    },
+    {
+      sakhi: 'shobana',
+      sakhiId: '63407922-ecb4-4812-be4e-4567938bfb20',
+      beneficiaryIds: [
+        '34460e35-1f86-499e-9efb-973f2de02dff',
+        '342e8e0e-00ad-494d-be41-adecb9b70bd8',
+        'fb03e8e7-5a19-40fd-8400-af42ad1aaff6',
+        '94594dbe-48cc-4905-90bc-336b123e824e',
+        'dbc7e805-af1e-4b14-80ce-8076ae080de7',
+        'a6f18f05-dba8-47b8-9159-0938b23e06d5',
+      ],
+    },
+  ].flatMap(({ sakhi, sakhiId, beneficiaryIds }) => {
+    const statuses = [
+      VISIT_STATUS_PENDING_LOOKUP_ID,
+      VISIT_STATUS_MISSED_LOOKUP_ID,
+      VISIT_STATUS_COMPLETED_LOOKUP_ID,
+      VISIT_STATUS_PENDING_LOOKUP_ID,
+      VISIT_STATUS_MISSED_LOOKUP_ID,
+      VISIT_STATUS_COMPLETED_LOOKUP_ID,
+    ];
+    return beneficiaryIds.map((beneficiaryId, i) => ({
+      sakhiId,
+      beneficiaryId,
+      localUuidSuffix: `${sakhi}-${i + 1}`,
+      statusLookupValueId: statuses[i],
+    }));
+  }),
+];
+
+/**
+ * Supervisor-app QA fixture: one VisitSchedule + VisitInstance per beneficiary
+ * case seeded by beneficiary-service (30 total across 5 sakhis), cycling
+ * PENDING/MISSED/COMPLETED so the Visit Summary screen has non-zero counts in
+ * every status bucket.
+ */
+async function seedSupervisorAppVisits(): Promise<SeedResult> {
+  let created = 0;
+  let skipped = 0;
+
+  for (const visit of SUPERVISOR_APP_VISITS) {
+    const localScheduleUuid = `seed-visit-schedule-${visit.localUuidSuffix}`;
+    const localVisitUuid = `seed-visit-instance-${visit.localUuidSuffix}`;
+
+    const existingSchedule = await prisma.visitSchedule.findUnique({
+      where: { localScheduleUuid },
+    });
+    const schedule =
+      existingSchedule ??
+      (await prisma.visitSchedule.create({
+        data: {
+          localScheduleUuid,
+          beneficiaryId: visit.beneficiaryId,
+          visitCode: `SEED-${visit.localUuidSuffix.toUpperCase()}`,
+          visitType: 'ANC',
+          scheduledDate: new Date('2026-08-25'),
+          windowStartDate: new Date('2026-08-15'),
+          windowEndDate: new Date('2026-09-05'),
+          anchorType: 'REGISTRATION',
+          generatedByRuleVersionId: GENERIC_RULE_VERSION_ID,
+        },
+      }));
+
+    const existingInstance = await prisma.visitInstance.findUnique({ where: { localVisitUuid } });
+    if (existingInstance) {
+      skipped += 1;
+      continue;
+    }
+
+    await prisma.visitInstance.create({
+      data: {
+        scheduleId: schedule.id,
+        beneficiaryId: visit.beneficiaryId,
+        sakhiId: visit.sakhiId,
+        localVisitUuid,
+        statusLookupValueId: visit.statusLookupValueId,
+      },
+    });
+    created += 1;
+  }
+
+  return {
+    step: 'supervisor-app-visits',
+    created: created > 0,
+    message: `Created ${created} visit instance(s), skipped ${skipped} already-seeded row(s).`,
+  };
+}
+
 async function main(): Promise<void> {
-  const results = [await seedForms(), await seedVisitMasters()];
+  const results = [await seedForms(), await seedVisitMasters(), await seedSupervisorAppVisits()];
 
   console.log('\nSeed summary:');
   for (const r of results) {
