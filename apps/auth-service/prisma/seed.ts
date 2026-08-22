@@ -312,6 +312,243 @@ async function seedTestProject(): Promise<SeedResult & { projectId: string }> {
   };
 }
 
+/**
+ * Links the test project to its full geography chain (leaf unit + every
+ * ancestor up to the state) via `project_geographies`. Without this, a
+ * client that scopes its offline geography-unit download to the project
+ * (see `GET /project-geography`) silently excludes every record tied to
+ * this geography — the exact gap that made freshly-seeded beneficiaries
+ * invisible on the mobile app despite the API returning them correctly.
+ */
+async function seedProjectGeography(
+  projectId: string,
+  leafGeographyUnitId: string,
+): Promise<SeedResult> {
+  const chain: string[] = [];
+  let currentId: string | null = leafGeographyUnitId;
+  while (currentId) {
+    chain.push(currentId);
+    const unit: { parentId: string | null } | null = await prisma.geographyUnit.findUnique({
+      where: { geographyUnitId: currentId },
+      select: { parentId: true },
+    });
+    currentId = unit?.parentId ?? null;
+  }
+
+  let created = 0;
+  let skipped = 0;
+  for (const geographyUnitId of chain) {
+    const existing = await prisma.projectGeography.findFirst({
+      where: { projectId, geographyUnitId, isDeleted: false },
+    });
+    if (existing) {
+      skipped += 1;
+      continue;
+    }
+    await prisma.projectGeography.create({
+      data: { projectId, geographyUnitId, activeFrom: new Date('2026-01-01') },
+    });
+    created += 1;
+  }
+
+  return {
+    step: 'projectGeography',
+    created: created > 0,
+    message: `Linked ${created} geography unit(s) to the test project, skipped ${skipped} already-linked.`,
+  };
+}
+
+interface SupervisorAppAccountSeed {
+  id: string;
+  username: string;
+  password: string;
+  displayName: string;
+  mobileNumber: string;
+  roleCode: 'SUPERVISOR' | 'SAKHI';
+  supervisorId?: string;
+}
+
+// Supervisor-app QA fixture: 6 supervisors + 5 sakhis, fixed ids matching what
+// beneficiary-service/visit-form-service/supervisor-operations-service/
+// approval-service/notification-escalation-service's own seed.ts files
+// already hardcode as cross-service references — unlike the generic
+// SUPERVISOR/SAKHI env-var mechanism above (which mints new random ids on
+// every fresh database), these fixed ids make the whole seed suite portable:
+// running `npm run seed` on any environment reproduces this exact dataset,
+// wired together correctly.
+const SUPERVISOR_APP_ACCOUNTS: SupervisorAppAccountSeed[] = [
+  {
+    id: '742e8dfe-984c-4c9f-af24-c3dacffecac4',
+    username: 'arun.supervisor',
+    password: 'Arun@1234',
+    displayName: 'Arun Supervisor',
+    mobileNumber: '+919100000001',
+    roleCode: 'SUPERVISOR',
+  },
+  {
+    id: '40f6e942-2101-426b-9251-947e7db9f869',
+    username: 'suresh.supervisor',
+    password: 'Suresh@1234',
+    displayName: 'Suresh Supervisor',
+    mobileNumber: '+919100000002',
+    roleCode: 'SUPERVISOR',
+  },
+  {
+    id: '55cdb187-12e5-475f-902c-c4bf50d4e220',
+    username: 'deepak.supervisor',
+    password: 'Deepak@1234',
+    displayName: 'Deepak Supervisor',
+    mobileNumber: '+919100000003',
+    roleCode: 'SUPERVISOR',
+  },
+  {
+    id: '6242e4ae-19c8-4a4b-b7ca-63768fff1615',
+    username: 'vijay.supervisor',
+    password: 'Vijay@1234',
+    displayName: 'Vijay Supervisor',
+    mobileNumber: '+919100000004',
+    roleCode: 'SUPERVISOR',
+  },
+  {
+    id: '23002b65-40c3-45e2-9c6d-76d1c42b0053',
+    username: 'manoj.supervisor',
+    password: 'Manoj@1234',
+    displayName: 'Manoj Supervisor',
+    mobileNumber: '+919100000005',
+    roleCode: 'SUPERVISOR',
+  },
+  {
+    id: '11925f16-4399-47a2-977b-ef06e89acd94',
+    username: 'raj.supervisor',
+    password: 'Str0ngPass!23',
+    displayName: 'Raj Supervisor',
+    mobileNumber: '+919800000106',
+    roleCode: 'SUPERVISOR',
+  },
+  {
+    id: '3df86ec1-8115-4db9-b558-a091f15b5a99',
+    username: 'lakshmi.sakhi',
+    password: 'lakshmi@123',
+    displayName: 'Lakshmi Sakhi',
+    mobileNumber: '+919100000011',
+    roleCode: 'SAKHI',
+    supervisorId: '742e8dfe-984c-4c9f-af24-c3dacffecac4',
+  },
+  {
+    id: '9252ff42-6904-4005-9184-14cbbb75e84b',
+    username: 'nithya.sakhi',
+    password: 'nithya@123',
+    displayName: 'Nithya Sakhi',
+    mobileNumber: '+919100000012',
+    roleCode: 'SAKHI',
+    supervisorId: '40f6e942-2101-426b-9251-947e7db9f869',
+  },
+  {
+    id: 'f84745fd-f105-40d9-bbf0-9127b3948112',
+    username: 'sandhya.sakhi',
+    password: 'sandhya@123',
+    displayName: 'Sandhya Sakhi',
+    mobileNumber: '+919100000013',
+    roleCode: 'SAKHI',
+    supervisorId: '55cdb187-12e5-475f-902c-c4bf50d4e220',
+  },
+  {
+    id: '079bd637-01a7-45f1-9216-fa819b736e54',
+    username: 'revathi.sakhi',
+    password: 'revathi@123',
+    displayName: 'Revathi Sakhi',
+    mobileNumber: '+919100000014',
+    roleCode: 'SAKHI',
+    supervisorId: '6242e4ae-19c8-4a4b-b7ca-63768fff1615',
+  },
+  {
+    id: '63407922-ecb4-4812-be4e-4567938bfb20',
+    username: 'shobana.sakhi',
+    password: 'shobana@123',
+    displayName: 'Shobana Sakhi',
+    mobileNumber: '+919100000015',
+    roleCode: 'SAKHI',
+    supervisorId: '23002b65-40c3-45e2-9c6d-76d1c42b0053',
+  },
+];
+
+async function seedSupervisorAppAccounts(scope: {
+  projectId: string;
+  geographyUnitId: string;
+}): Promise<SeedResult[]> {
+  if (process.env.NODE_ENV === 'production') {
+    return [
+      { step: 'supervisorAppAccounts', created: false, message: 'NODE_ENV=production — skipped.' },
+    ];
+  }
+
+  const roles = await prisma.role.findMany({
+    where: { roleCode: { in: ['SUPERVISOR', 'SAKHI'] } },
+  });
+  const roleIdByCode = new Map(roles.map((r) => [r.roleCode, r.id]));
+  const results: SeedResult[] = [];
+
+  for (const account of SUPERVISOR_APP_ACCOUNTS) {
+    const existing = await prisma.user.findUnique({ where: { id: account.id } });
+    if (existing) {
+      results.push({
+        step: `supervisorAppAccount:${account.username}`,
+        created: false,
+        message: `User ${account.username} already exists — skipped.`,
+      });
+      continue;
+    }
+
+    const roleId = roleIdByCode.get(account.roleCode);
+    if (!roleId) {
+      throw new Error(`Role ${account.roleCode} not found — run seedRoles first.`);
+    }
+    const passwordHash = await argon2.hash(account.password);
+
+    await prisma.$transaction(async (tx) => {
+      await tx.user.create({
+        data: {
+          id: account.id,
+          username: account.username,
+          mobileNumber: account.mobileNumber,
+          passwordHash,
+          displayName: account.displayName,
+          status: 'ACTIVE',
+        },
+      });
+      await tx.userRole.create({
+        data: {
+          userId: account.id,
+          roleId,
+          projectId: scope.projectId,
+          geographyUnitId: scope.geographyUnitId,
+          effectiveFrom: new Date(),
+          status: 'ACTIVE',
+        },
+      });
+      if (account.roleCode === 'SAKHI') {
+        await tx.sakhiProfile.create({
+          data: {
+            userId: account.id,
+            primaryProjectId: scope.projectId,
+            phoneNumber: account.mobileNumber,
+            supervisorId: account.supervisorId,
+            activeFrom: new Date(),
+          },
+        });
+      }
+    });
+
+    results.push({
+      step: `supervisorAppAccount:${account.username}`,
+      created: true,
+      message: `Seeded ${account.roleCode} user ${account.username} (id ${account.id}).`,
+    });
+  }
+
+  return results;
+}
+
 async function main(): Promise<void> {
   const results = [await seedRoles(prisma), ...(await seedAdminUsers(prisma))];
 
@@ -321,6 +558,15 @@ async function main(): Promise<void> {
   const geographyResult = await seedGeographyUnits();
   const projectResult = await seedTestProject();
   results.push(geographyResult, projectResult);
+  results.push(
+    await seedProjectGeography(projectResult.projectId, geographyResult.leafGeographyUnitId),
+  );
+  results.push(
+    ...(await seedSupervisorAppAccounts({
+      projectId: projectResult.projectId,
+      geographyUnitId: geographyResult.leafGeographyUnitId,
+    })),
+  );
 
   for (const spec of MANUAL_SEED_USER_ENV_VARS) {
     results.push(
