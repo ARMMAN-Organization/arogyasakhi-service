@@ -489,7 +489,9 @@ async function seedSupervisorAppAccounts(scope: {
   const results: SeedResult[] = [];
 
   for (const account of SUPERVISOR_APP_ACCOUNTS) {
-    const existing = await prisma.user.findUnique({ where: { id: account.id } });
+    const existing = await prisma.user.findFirst({
+      where: { OR: [{ id: account.id }, { username: account.username }] },
+    });
     if (existing) {
       results.push({
         step: `supervisorAppAccount:${account.username}`,
