@@ -209,6 +209,17 @@ export class AuthService {
     if (input.bankAccountNumber !== undefined) {
       sakhiProfileFields.bankAccountToken = encryptPii(input.bankAccountNumber);
     }
+    if (input.roleCode === 'SAKHI' && input.projectId !== undefined) {
+      // primaryProjectId drives every roster/ACL check (sakhi.repository.ts's
+      // findByProject, sakhi.service.ts's getById) — without this, moving a
+      // Sakhi's SAKHI role to a new project left her invisible to her new
+      // supervisor despite the user_roles scope and supervisorId both being
+      // updated correctly.
+      if (input.projectId === null) {
+        throw badRequest('projectId: Cannot be null for a Sakhi — primaryProjectId is required.');
+      }
+      sakhiProfileFields.primaryProjectId = input.projectId;
+    }
     if (Object.keys(sakhiProfileFields).length > 0) {
       const profile = await this.repository.findSakhiProfileByUserId(id);
       if (profile) {

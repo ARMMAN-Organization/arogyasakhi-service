@@ -771,7 +771,7 @@ describe('AuthService', () => {
     });
 
     describe('role/project/geography scope', () => {
-      it('updates projectId and geographyUnitId on the matching active role row', async () => {
+      it('updates projectId and geographyUnitId on the matching active role row for a non-SAKHI role', async () => {
         repository.findActiveUserRole.mockResolvedValue({ id: 'user-role-1' } as never);
         repository.findProjectById.mockResolvedValue({ projectId: 'project-2' } as never);
         repository.updateUserTransaction.mockResolvedValue(
@@ -780,7 +780,7 @@ describe('AuthService', () => {
               {
                 projectId: 'project-2',
                 geographyUnitId: 'geo-2',
-                role: { roleCode: 'SAKHI' },
+                role: { roleCode: 'MANAGER' },
                 project: { projectName: 'GEP-2425' },
               },
             ],
@@ -788,12 +788,12 @@ describe('AuthService', () => {
         );
 
         await service.updateUser('user-1', {
-          roleCode: 'SAKHI',
+          roleCode: 'MANAGER',
           projectId: 'project-2',
           geographyUnitId: 'geo-2',
         });
 
-        expect(repository.findActiveUserRole).toHaveBeenCalledWith('user-1', 'SAKHI');
+        expect(repository.findActiveUserRole).toHaveBeenCalledWith('user-1', 'MANAGER');
         expect(repository.findProjectById).toHaveBeenCalledWith('project-2');
         expect(repository.updateUserTransaction).toHaveBeenCalledWith('user-1', {
           user: {},
@@ -820,21 +820,105 @@ describe('AuthService', () => {
         repository.findProjectById.mockResolvedValue(null);
 
         await expect(
-          service.updateUser('user-1', { roleCode: 'SAKHI', projectId: 'missing-project' }),
+          service.updateUser('user-1', { roleCode: 'MANAGER', projectId: 'missing-project' }),
         ).rejects.toMatchObject({ status: 404 });
         expect(repository.updateUserTransaction).not.toHaveBeenCalled();
       });
 
-      it('allows clearing projectId to null on the matching role row', async () => {
+      it('allows clearing projectId to null on the matching role row for a non-SAKHI role', async () => {
         repository.findActiveUserRole.mockResolvedValue({ id: 'user-role-1' } as never);
         repository.updateUserTransaction.mockResolvedValue(updatedUserRow() as never);
 
-        await service.updateUser('user-1', { roleCode: 'SAKHI', projectId: null });
+        await service.updateUser('user-1', { roleCode: 'MANAGER', projectId: null });
 
         expect(repository.findProjectById).not.toHaveBeenCalled();
         expect(repository.updateUserTransaction).toHaveBeenCalledWith('user-1', {
           user: {},
           userRole: { id: 'user-role-1', data: { projectId: null } },
+          sakhiProfile: undefined,
+          revokeSessions: false,
+        });
+      });
+    });
+
+    describe('SAKHI role project reassignment (primaryProjectId)', () => {
+      it('also updates sakhi_profiles.primaryProjectId when roleCode is SAKHI and projectId is set', async () => {
+        repository.findActiveUserRole.mockResolvedValue({ id: 'user-role-1' } as never);
+        repository.findProjectById.mockResolvedValue({ projectId: 'project-2' } as never);
+        repository.findSakhiProfileByUserId.mockResolvedValue({ id: 'sakhi-profile-1' } as never);
+        repository.updateUserTransaction.mockResolvedValue(
+          updatedUserRow({
+            userRoles: [
+              {
+                projectId: 'project-2',
+                geographyUnitId: 'geo-2',
+                role: { roleCode: 'SAKHI' },
+                project: { projectName: 'GEP-2425' },
+              },
+            ],
+            sakhiProfile: { employeeCode: null, bankAccountToken: null, supervisorId: null },
+          }) as never,
+        );
+
+        await service.updateUser('user-1', {
+          roleCode: 'SAKHI',
+          projectId: 'project-2',
+          geographyUnitId: 'geo-2',
+        });
+
+        expect(repository.updateUserTransaction).toHaveBeenCalledWith('user-1', {
+          user: {},
+          userRole: {
+            id: 'user-role-1',
+            data: { projectId: 'project-2', geographyUnitId: 'geo-2' },
+          },
+          sakhiProfile: { id: 'sakhi-profile-1', data: { primaryProjectId: 'project-2' } },
+          revokeSessions: false,
+        });
+      });
+
+      it('combines primaryProjectId with other Sakhi profile fields (e.g. supervisorId) in one write', async () => {
+        repository.findActiveUserRole.mockResolvedValue({ id: 'user-role-1' } as never);
+        repository.findProjectById.mockResolvedValue({ projectId: 'project-2' } as never);
+        repository.findSakhiProfileByUserId.mockResolvedValue({ id: 'sakhi-profile-1' } as never);
+        repository.updateUserTransaction.mockResolvedValue(updatedUserRow() as never);
+
+        await service.updateUser('user-1', {
+          roleCode: 'SAKHI',
+          projectId: 'project-2',
+          supervisorId: 'supervisor-9',
+        });
+
+        expect(repository.updateUserTransaction).toHaveBeenCalledWith('user-1', {
+          user: {},
+          userRole: { id: 'user-role-1', data: { projectId: 'project-2' } },
+          sakhiProfile: {
+            id: 'sakhi-profile-1',
+            data: { supervisorId: 'supervisor-9', primaryProjectId: 'project-2' },
+          },
+          revokeSessions: false,
+        });
+      });
+
+      it('throws 400 when roleCode is SAKHI and projectId is explicitly null', async () => {
+        repository.findActiveUserRole.mockResolvedValue({ id: 'user-role-1' } as never);
+
+        await expect(
+          service.updateUser('user-1', { roleCode: 'SAKHI', projectId: null }),
+        ).rejects.toMatchObject({ status: 400 });
+        expect(repository.updateUserTransaction).not.toHaveBeenCalled();
+      });
+
+      it('does not touch primaryProjectId when roleCode is SAKHI but projectId is not provided', async () => {
+        repository.findActiveUserRole.mockResolvedValue({ id: 'user-role-1' } as never);
+        repository.updateUserTransaction.mockResolvedValue(updatedUserRow() as never);
+
+        await service.updateUser('user-1', { roleCode: 'SAKHI', geographyUnitId: 'geo-9' });
+
+        expect(repository.findSakhiProfileByUserId).not.toHaveBeenCalled();
+        expect(repository.updateUserTransaction).toHaveBeenCalledWith('user-1', {
+          user: {},
+          userRole: { id: 'user-role-1', data: { geographyUnitId: 'geo-9' } },
           sakhiProfile: undefined,
           revokeSessions: false,
         });
@@ -996,7 +1080,11 @@ describe('AuthService', () => {
                   phoneNumber: '+919876544139',
                   activeFrom: expect.any(Date),
                 },
-                data: { supervisorId: 'supervisor-1', phoneNumber: '+919876544139' },
+                data: {
+                  supervisorId: 'supervisor-1',
+                  phoneNumber: '+919876544139',
+                  primaryProjectId: 'project-new',
+                },
               },
             }),
           );
