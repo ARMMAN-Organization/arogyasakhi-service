@@ -38,6 +38,25 @@ export class RuleVersionRepository {
   }
 
   /**
+   * The currently-PUBLISHED version for each of a batch of rule sets — a
+   * plain `findMany`, no transaction/locking (unlike publishNewVersion),
+   * since this is a read-only batch lookup for a mobile client's full sync.
+   * A ruleSetId with no published version (unknown id, or never published)
+   * is simply absent from the result array — the caller doesn't 404 the
+   * whole batch for one missing/unpublished set.
+   */
+  findPublishedManyBySetIds(ruleSetIds: string[]) {
+    return this.prisma.ruleVersion.findMany({
+      where: {
+        ruleSetId: { in: ruleSetIds },
+        status: 'PUBLISHED',
+        effectiveTo: null,
+        isDeleted: false,
+      },
+    });
+  }
+
+  /**
    * Publishes a new version atomically: counts existing versions to derive the
    * next versionNo, retires whichever version is currently PUBLISHED (status ->
    * RETIRED, effectiveTo = the new version's effectiveFrom), and inserts the new

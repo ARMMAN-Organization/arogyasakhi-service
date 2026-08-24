@@ -13,6 +13,7 @@ describe('RuleVersionService', () => {
     findById: jest.fn(),
     findSetById: jest.fn(),
     findPublishedBySetId: jest.fn(),
+    findPublishedManyBySetIds: jest.fn(),
     publishNewVersion: jest.fn(),
   } as unknown as jest.Mocked<RuleVersionRepository>;
   let service: RuleVersionService;
@@ -99,6 +100,185 @@ describe('RuleVersionService', () => {
       repository.findSetById.mockResolvedValue({ id: setId } as never);
       repository.findPublishedBySetId.mockResolvedValue(null);
       await expect(service.getPublished(setId)).rejects.toMatchObject({ status: 404 });
+    });
+  });
+
+  describe('getPublishedVersionId', () => {
+    it('returns just the versionId for the currently-published version', async () => {
+      repository.findSetById.mockResolvedValue({ id: setId } as never);
+      repository.findPublishedBySetId.mockResolvedValue({ id: 'ver-1', ruleSetId: setId } as never);
+
+      const result = await service.getPublishedVersionId(setId);
+
+      expect(result).toEqual({ versionId: 'ver-1' });
+    });
+
+    it('throws 404 when the rule set does not exist', async () => {
+      repository.findSetById.mockResolvedValue(null);
+      await expect(service.getPublishedVersionId('missing')).rejects.toMatchObject({
+        status: 404,
+        message: 'Rule set not found.',
+      });
+      expect(repository.findPublishedBySetId).not.toHaveBeenCalled();
+    });
+
+    it('throws 404 when the set exists but has no published version', async () => {
+      repository.findSetById.mockResolvedValue({ id: setId } as never);
+      repository.findPublishedBySetId.mockResolvedValue(null);
+      await expect(service.getPublishedVersionId(setId)).rejects.toMatchObject({
+        status: 404,
+        message: 'No published rule pack version found for this rule set.',
+      });
+    });
+
+    it('works the same for a SCHEDULE rule set as a RISK one (no category branching)', async () => {
+      repository.findSetById.mockResolvedValue({ id: setId, ruleCategory: 'SCHEDULE' } as never);
+      repository.findPublishedBySetId.mockResolvedValue({ id: 'ver-2', ruleSetId: setId } as never);
+
+      const result = await service.getPublishedVersionId(setId);
+
+      expect(result).toEqual({ versionId: 'ver-2' });
+    });
+  });
+
+  describe('getContentById', () => {
+    it('returns the full rulesJson for a PUBLISHED version', async () => {
+      repository.findById.mockResolvedValue({
+        id: 'ver-1',
+        ruleSetId: setId,
+        versionNo: 'v3',
+        rulesJson: { nodes: [{ id: 'n1' }] },
+        status: 'PUBLISHED',
+        checksum: Buffer.from('x'),
+      } as never);
+
+      const result = await service.getContentById('ver-1');
+
+      expect(result).toEqual({
+        id: 'ver-1',
+        ruleSetId: setId,
+        versionNo: 'v3',
+        rulesJson: { nodes: [{ id: 'n1' }] },
+        status: 'PUBLISHED',
+      });
+    });
+
+    it('throws 404 when the version does not exist', async () => {
+      repository.findById.mockResolvedValue(null);
+      await expect(service.getContentById('missing')).rejects.toMatchObject({ status: 404 });
+    });
+
+    it('throws 404 for a DRAFT version, never returning its rulesJson', async () => {
+      repository.findById.mockResolvedValue({
+        id: 'ver-1',
+        ruleSetId: setId,
+        versionNo: 'v4',
+        rulesJson: { nodes: [] },
+        status: 'DRAFT',
+      } as never);
+
+      await expect(service.getContentById('ver-1')).rejects.toMatchObject({ status: 404 });
+    });
+
+    it('throws 404 for a RETIRED version, never returning its rulesJson', async () => {
+      repository.findById.mockResolvedValue({
+        id: 'ver-1',
+        ruleSetId: setId,
+        versionNo: 'v2',
+        rulesJson: { nodes: [] },
+        status: 'RETIRED',
+      } as never);
+
+      await expect(service.getContentById('ver-1')).rejects.toMatchObject({ status: 404 });
+    });
+  });
+
+  describe('getPublishedContentBatch', () => {
+    it('returns one entry per resolved ruleSetId, mapping versionId from the version row id', async () => {
+      const otherSetId = '88888888-8888-4888-8888-888888888888';
+      repository.findPublishedManyBySetIds.mockResolvedValue([
+        {
+          id: 'ver-1',
+          ruleSetId: setId,
+          versionNo: 'v1',
+          rulesJson: { rules: [] },
+          status: 'PUBLISHED',
+        },
+        {
+          id: 'ver-2',
+          ruleSetId: otherSetId,
+          versionNo: 'v3',
+          rulesJson: { rules: [1] },
+          status: 'PUBLISHED',
+        },
+      ] as never);
+
+      const result = await service.getPublishedContentBatch([setId, otherSetId]);
+
+      expect(repository.findPublishedManyBySetIds).toHaveBeenCalledWith([setId, otherSetId]);
+      expect(result).toEqual([
+        {
+          ruleSetId: setId,
+          versionId: 'ver-1',
+          versionNo: 'v1',
+          rulesJson: { rules: [] },
+          status: 'PUBLISHED',
+        },
+        {
+          ruleSetId: otherSetId,
+          versionId: 'ver-2',
+          versionNo: 'v3',
+          rulesJson: { rules: [1] },
+          status: 'PUBLISHED',
+        },
+      ]);
+    });
+
+    it('omits a requested setId with no published version, never erroring the whole batch', async () => {
+      // Only one of the two requested ids comes back from the repository.
+      repository.findPublishedManyBySetIds.mockResolvedValue([
+        { id: 'ver-1', ruleSetId: setId, versionNo: 'v1', rulesJson: {}, status: 'PUBLISHED' },
+      ] as never);
+
+      const result = await service.getPublishedContentBatch([setId, 'missing-set-id']);
+
+      expect(result).toEqual([
+        {
+          ruleSetId: setId,
+          versionId: 'ver-1',
+          versionNo: 'v1',
+          rulesJson: {},
+          status: 'PUBLISHED',
+        },
+      ]);
+    });
+
+    it('returns an empty array when none of the requested setIds resolve — not an error', async () => {
+      repository.findPublishedManyBySetIds.mockResolvedValue([]);
+
+      const result = await service.getPublishedContentBatch(['missing-1', 'missing-2']);
+
+      expect(result).toEqual([]);
+    });
+
+    it('works the same across mixed SCHEDULE and RISK rule sets in one batch (no category branching)', async () => {
+      const scheduleSetId = 'schedule-set-id';
+      const riskSetId = 'risk-set-id';
+      repository.findPublishedManyBySetIds.mockResolvedValue([
+        {
+          id: 'ver-a',
+          ruleSetId: scheduleSetId,
+          versionNo: 'v1',
+          rulesJson: {},
+          status: 'PUBLISHED',
+        },
+        { id: 'ver-b', ruleSetId: riskSetId, versionNo: 'v1', rulesJson: {}, status: 'PUBLISHED' },
+      ] as never);
+
+      const result = await service.getPublishedContentBatch([scheduleSetId, riskSetId]);
+
+      expect(result).toHaveLength(2);
+      expect(result.map((r) => r.ruleSetId)).toEqual([scheduleSetId, riskSetId]);
     });
   });
 
