@@ -68,6 +68,68 @@ export class RuleVersionService {
   }
 
   /**
+   * The currently-published version's id for a rule set — open to any
+   * authenticated role (unlike getPublished, which is ADMIN-only and also
+   * returns the full rulesJson/checksum), so a mobile client can resolve
+   * "which versionId is published for this rule set" without rules-admin
+   * access. Same two-step 404 as getPublished()/evaluate() (unknown set vs.
+   * never-published set are both 404, distinguishable only by message).
+   */
+  async getPublishedVersionId(ruleSetId: string) {
+    const set = await this.repository.findSetById(ruleSetId);
+    if (!set) throw notFound('Rule set not found.');
+
+    const version = await this.repository.findPublishedBySetId(ruleSetId);
+    if (!version) throw notFound('No published rule pack version found for this rule set.');
+    return { versionId: version.id };
+  }
+
+  /**
+   * A rule version's full rulesJson content by its own id — open to any
+   * authenticated role, so a mobile client can fetch the JDM decision graph
+   * for on-device evaluation (SCHEDULE or RISK) without rules-admin access.
+   * Unlike getById() (which deliberately omits rulesJson for a lightweight
+   * existence/status check), this is the one non-admin route that returns
+   * the actual decision graph — 404s on a DRAFT/RETIRED version exactly like
+   * a non-existent id, so an unpublished rule pack's existence is never
+   * revealed to a non-admin caller (same posture as getPublished()/evaluate()
+   * never evaluating against a DRAFT).
+   */
+  async getContentById(id: string) {
+    const version = await this.repository.findById(id);
+    if (!version || version.status !== 'PUBLISHED') {
+      throw notFound('Rule version not found.');
+    }
+    return {
+      id: version.id,
+      ruleSetId: version.ruleSetId,
+      versionNo: version.versionNo,
+      rulesJson: version.rulesJson,
+      status: version.status,
+    };
+  }
+
+  /**
+   * The currently-published content for a batch of rule sets in one call —
+   * a mobile client's full sync (SCHEDULE ×6 + RISK ×2 today) resolved in
+   * one round trip instead of one getPublishedVersionId + getContentById
+   * pair per rule set. A ruleSetId with no published version (unknown id,
+   * or never published) is simply omitted from the result array — never
+   * errors the whole batch for one missing/unpublished set, since the
+   * caller's other rule sets should still sync successfully.
+   */
+  async getPublishedContentBatch(ruleSetIds: string[]) {
+    const versions = await this.repository.findPublishedManyBySetIds(ruleSetIds);
+    return versions.map((version) => ({
+      ruleSetId: version.ruleSetId,
+      versionId: version.id,
+      versionNo: version.versionNo,
+      rulesJson: version.rulesJson,
+      status: version.status,
+    }));
+  }
+
+  /**
    * Executes the rule set's currently-published gorules decision graph
    * against the caller-supplied answers — the "Central GoRules execution"
    * this service's own purpose statement (package.json/.claude/CLAUDE.md)

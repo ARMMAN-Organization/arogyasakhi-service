@@ -7,6 +7,7 @@ import {
   createVisitScheduleBulkSchema,
   MAX_BULK_SCHEDULE_ROWS,
 } from './dto/create-visit-schedule-bulk.dto';
+import { generateVisitScheduleSchema } from './dto/generate-visit-schedule.dto';
 import {
   errorResponse,
   payloadTooLarge,
@@ -29,6 +30,14 @@ const bulkResultSchema = z.object({
   created: z.number().int(),
   alreadyExisted: z.number().int(),
   schedules: z.array(createdScheduleSchema),
+});
+
+const generateResultSchema = bulkResultSchema.extend({
+  evaluation: z.record(z.unknown()).openapi({
+    description:
+      "The rules-service pack's raw evaluation output, for the caller to inspect " +
+      '(e.g. DELIVERY returns a dispatch decision with no schedule rows of its own).',
+  }),
 });
 
 function envelope<T extends z.ZodTypeAny>(data: T) {
@@ -92,5 +101,42 @@ export function registerVisitScheduleRoutes(doc: DocumentedRouter, service: Visi
     rejectOversizedBatch,
     validateBody(createVisitScheduleBulkSchema),
     controller.createBulk,
+  );
+
+  doc.post(
+    '/visit-schedules/generate',
+    {
+      summary:
+        "Compute and persist a beneficiary's visit schedule for one SRS journey " +
+        "(ANC/PP/NN/INC/HR/DELIVERY) via rules-service's published GoRules SCHEDULE pack, " +
+        'instead of trusting caller-supplied dates (FR-S-2.2A). CCV is not covered here — see ' +
+        'ccvOpeningRiskState.resolver.ts. DELIVERY returns a dispatch decision with no schedule ' +
+        'rows of its own; the caller issues separate /generate calls for PP/NN/INC per that plan.',
+      tags: ['Visit Schedules'],
+      responses: {
+        201: {
+          description: 'Schedule generated (or dispatch decision returned for DELIVERY)',
+          schema: envelope(generateResultSchema),
+        },
+        400: errorResponse(400, {
+          message: 'No rule set is configured for the "NN" schedule kind.',
+        }),
+        401: errorResponse(401),
+        403: errorResponse(403),
+        404: errorResponse(404, { message: 'Beneficiary case not found.' }),
+        409: errorResponse(409, {
+          message:
+            'A schedule for visitCode "ANC3" already exists under a different localScheduleUuid.',
+        }),
+        502: errorResponse(502, {
+          message: 'Unable to evaluate the visit schedule — rules-service is unreachable.',
+        }),
+        500: errorResponse(500),
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR'),
+    validateBody(generateVisitScheduleSchema),
+    controller.generate,
   );
 }

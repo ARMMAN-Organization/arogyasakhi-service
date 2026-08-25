@@ -13,5 +13,12 @@ export function createVisitScheduleController(service: VisitScheduleService) {
       const result = await service.createBulk(req.body, req.user, authorizationHeader);
       res.status(201).json(ok(result));
     }),
+
+    generate: asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization') ?? '';
+      const result = await service.generateSchedule(req.body, req.user, authorizationHeader);
+      res.status(201).json(ok(result));
+    }),
   };
 }

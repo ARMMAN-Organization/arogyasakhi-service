@@ -3,6 +3,10 @@ import { z } from 'zod';
 import type { RuleVersionService } from './ruleVersion.service';
 import { createRuleVersionController } from './ruleVersion.controller';
 import { publishRuleVersionSchema } from './dto/publish-ruleVersion.dto';
+import {
+  listPublishedContentQuerySchema,
+  MAX_BATCH_RULE_SET_IDS,
+} from './dto/list-published-content.dto';
 import { evaluateRuleSetSchema } from './dto/evaluate-ruleSet.dto';
 import { evaluateScheduleSchema } from './dto/evaluate-schedule.dto';
 import { evaluateEscalationSchema } from './dto/evaluate-escalation.dto';
@@ -56,6 +60,39 @@ const ruleVersionSummarySchema = z.object({
   id: z.string().uuid(),
   ruleSetId: z.string().uuid(),
   status: z.enum(['DRAFT', 'PUBLISHED', 'RETIRED']).openapi({ example: 'PUBLISHED' }),
+});
+
+const publishedVersionIdSchema = z.object({
+  versionId: z.string().uuid(),
+});
+
+// Narrower than ruleVersionSchema — omits effectiveFrom/effectiveTo/
+// publishedByUserId (admin-only audit fields), but unlike
+// ruleVersionSummarySchema DOES include rulesJson — this is the one
+// non-admin response that returns the actual decision graph, for on-device
+// SCHEDULE/RISK rule evaluation. status is always 'PUBLISHED' here since
+// getContentById() 404s on anything else.
+const ruleVersionContentSchema = z.object({
+  id: z.string().uuid(),
+  ruleSetId: z.string().uuid(),
+  versionNo: z.string().openapi({ example: 'v1' }),
+  rulesJson: z
+    .unknown()
+    .openapi({ type: 'object', example: { rules: [], version: 'gorules-decision-graph' } }),
+  status: z.literal('PUBLISHED'),
+});
+
+// Batch variant of ruleVersionContentSchema — one entry per requested
+// ruleSetId that has a published version (a ruleSetId with none is simply
+// absent, never a per-id error inside the array).
+const publishedContentBatchItemSchema = z.object({
+  ruleSetId: z.string().uuid(),
+  versionId: z.string().uuid(),
+  versionNo: z.string().openapi({ example: 'v1' }),
+  rulesJson: z
+    .unknown()
+    .openapi({ type: 'object', example: { rules: [], version: 'gorules-decision-graph' } }),
+  status: z.literal('PUBLISHED'),
 });
 
 const evaluateRuleSetRequestSchema = evaluateRuleSetSchema.extend({
@@ -148,6 +185,88 @@ export function registerRuleVersionRoutes(doc: DocumentedRouter, service: RuleVe
     requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
     validate(versionIdParamsSchema, 'params'),
     controller.getById,
+  );
+
+  doc.get(
+    '/rules/versions/:versionId/content',
+    {
+      summary:
+        'Get the full rulesJson (JDM decision graph) for a rule version — but only if it is ' +
+        'the currently-PUBLISHED version; a DRAFT/RETIRED id 404s exactly like an unknown id, ' +
+        "so an unpublished rule pack's existence is never revealed to a non-admin caller. For " +
+        'on-device SCHEDULE/RISK rule evaluation — pair with GET /rules/:setId/published-version ' +
+        'to first resolve which versionId is currently published.',
+      tags: ['Rules'],
+      params: versionIdParamsSchema,
+      responses: {
+        200: { description: 'Rule version content', schema: envelope(ruleVersionContentSchema) },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        404: {
+          description: 'Rule version not found, or not the currently-published version',
+          schema: apiErrorSchema,
+        },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(versionIdParamsSchema, 'params'),
+    controller.getContentById,
+  );
+
+  doc.get(
+    '/rules/published-content',
+    {
+      summary:
+        'Batch variant of GET /rules/versions/:versionId/content — resolves the currently-' +
+        'published content for many rule sets in one call (setIds as a comma-separated list, ' +
+        `max ${MAX_BATCH_RULE_SET_IDS}), instead of one published-version + content round trip ` +
+        'per rule set. A requested setId with no published version (unknown, or never ' +
+        'published) is simply omitted from the result array — never errors the whole batch ' +
+        'for one missing/unpublished set.',
+      tags: ['Rules'],
+      responses: {
+        200: {
+          description:
+            'Published content for each requested setId that resolved to a published ' +
+            'version — may be a subset of, or empty relative to, the requested setIds',
+          schema: envelope(z.array(publishedContentBatchItemSchema)),
+        },
+        400: {
+          description: 'Malformed setIds (not comma-separated uuids, or over the cap)',
+          schema: apiErrorSchema,
+        },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(listPublishedContentQuerySchema, 'query'),
+    controller.getPublishedContentBatch,
+  );
+
+  doc.get(
+    '/rules/:setId/published-version',
+    {
+      summary:
+        'Get the currently-published versionId for a rule set — open to any authenticated ' +
+        'role, unlike GET /admin/rules/:setId (ADMIN-only, returns the full version incl. ' +
+        'rulesJson). For a mobile client resolving which versionId to pass to ' +
+        'GET /rules/versions/:versionId/content.',
+      tags: ['Rules'],
+      params: setIdParamsSchema,
+      responses: {
+        200: { description: 'Published versionId', schema: envelope(publishedVersionIdSchema) },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        404: {
+          description: 'Rule set unknown, or it has no published version',
+          schema: apiErrorSchema,
+        },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(setIdParamsSchema, 'params'),
+    controller.getPublishedVersionId,
   );
 
   doc.get(

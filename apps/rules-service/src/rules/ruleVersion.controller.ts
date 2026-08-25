@@ -15,6 +15,19 @@ export function createRuleVersionController(service: RuleVersionService) {
       res.json(ok(await service.getPublished(req.params.setId)));
     }),
 
+    getPublishedVersionId: asyncHandler(async (req, res) => {
+      res.json(ok(await service.getPublishedVersionId(req.params.setId)));
+    }),
+
+    getContentById: asyncHandler(async (req, res) => {
+      res.json(ok(await service.getContentById(req.params.versionId)));
+    }),
+
+    getPublishedContentBatch: asyncHandler(async (req, res) => {
+      const setIds = (req.query as { setIds: string }).setIds.split(',');
+      res.json(ok(await service.getPublishedContentBatch(setIds)));
+    }),
+
     publish: asyncHandler(async (req, res, next) => {
       if (!req.user) return next(unauthorized());
       const published = await service.publish(req.params.setId, req.body, req.user.id);

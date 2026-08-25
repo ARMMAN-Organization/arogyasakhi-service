@@ -59,6 +59,19 @@ export class VisitScheduleRepository {
   }
 
   /**
+   * Re-stamps a stored row's provenance after a rule-pack republish evaluates
+   * an already-scheduled slot identically — the schedule content is unchanged
+   * so no supersede is needed, but generatedByRuleVersionId must reflect the
+   * version that most recently confirmed it, not the one that first created it.
+   */
+  updateGeneratedByRuleVersionId(id: string, generatedByRuleVersionId: string) {
+    return this.prisma.visitSchedule.update({
+      where: { id },
+      data: { generatedByRuleVersionId },
+    });
+  }
+
+  /**
    * Inserts every new row in one transaction — all-or-nothing, per FR-S-2.2's
    * "a partially-written schedule is worse than no schedule" requirement.
    *
