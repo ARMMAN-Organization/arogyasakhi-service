@@ -34,7 +34,8 @@
  * output based on its own grade.
  *
  * Known coarser-than-spec gradings, because the form doesn't capture the
- * finer distinction Appendix D describes:
+ * finer distinction Appendix D describes — tracked pending ARMMAN
+ * confirmation as GitHub issue #191:
  *  - Bleeding (APH) has no spotting/moderate/heavy severity field — the
  *    form only captures presence via
  *    "bleeding_from_vagina" inside the shared danger-signs multiselect
@@ -60,6 +61,20 @@
  * (only the shared bleeding_from_vagina danger sign) — PPH is therefore
  * never actually graded from a real ANC_VISIT submission today; the input
  * exists here for forward-compatibility if a dedicated PPH field is added.
+ *
+ * Bad Obstetric History (below) grades only G>4/L<P/abortions>=2/prior
+ * complications — Appendix D §1.3 also lists Pre-term delivery and LSCS
+ * without spacing as BOH criteria, but neither is captured as a discrete
+ * form field on MOTHER_REGISTRATION today, so this pack cannot evaluate
+ * them; not implemented pending ARMMAN confirming the criteria and whether
+ * new form fields are needed (issue #191).
+ *
+ * Sickle Cell is not read or graded by this pack at all. Appendix D's
+ * Anemia table ties Sickle Cell Disease to the Moderate tier, but
+ * MOTHER_REGISTRATION's own field treats SCD as Severe risk + referral —
+ * an unresolved conflict between the two sources (issue #191). Sickle Cell
+ * Trait has no stated grading impact anywhere. Not implemented until that
+ * conflict and SCT's effect (if any) are confirmed.
  *
  * Age and Bad Obstetric History are captured once at MOTHER_REGISTRATION,
  * not on the recurring ANC_VISIT form — the caller (riskAssessment.service.ts

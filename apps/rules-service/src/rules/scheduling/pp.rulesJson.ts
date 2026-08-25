@@ -4,6 +4,13 @@
  * `deliveryDate` — the input schema deliberately has no "actual completion
  * date" field, so PP3-5 cannot shift on a late PP2 completion (BR-05: "If
  * PP2 completed late, PP3 stays at Day 45").
+ *
+ * This is visit-SCHEDULE timing only. There is no PP-phase RISK grading
+ * pack (contrast anc-risk.rulesJson.ts / infant-risk.rulesJson.ts) — the
+ * PP HR threshold sheet has not been received from ARMMAN yet (SRS §3A.2.5,
+ * "PP/NN/INC/CCV threshold sheets still pending"; tracked as issue #191).
+ * Do not add PP risk grading here — it belongs in its own pp-risk.rulesJson.ts
+ * once thresholds are confirmed.
  */
 export const ppRulesJson = {
   contentType: 'application/vnd.gorules.decision',
