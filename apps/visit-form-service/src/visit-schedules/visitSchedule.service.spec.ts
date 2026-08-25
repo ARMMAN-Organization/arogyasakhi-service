@@ -35,6 +35,7 @@ describe('VisitScheduleService', () => {
     findByBeneficiaryAndVisitCodes: jest.fn(),
     findById: jest.fn(),
     createAllOrNothing: jest.fn(),
+    updateGeneratedByRuleVersionId: jest.fn(),
   } as unknown as jest.Mocked<VisitScheduleRepository>;
   let service: VisitScheduleService;
 
@@ -177,6 +178,85 @@ describe('VisitScheduleService', () => {
       status: 409,
     });
     expect(repository.createAllOrNothing).not.toHaveBeenCalled();
+  });
+
+  it('re-stamps generatedByRuleVersionId on a matching replay under a newer rule version, without inserting anything', async () => {
+    const staleRuleVersionId = 'stale-rule-version';
+    repository.findByLocalScheduleUuids.mockResolvedValue([
+      {
+        id: 'sched-1',
+        localScheduleUuid: 'local-1',
+        status: 'GENERATED',
+        beneficiaryId,
+        visitCode: 'ANC1',
+        visitType: 'ANC',
+        sequenceNo: 1,
+        scheduledDate: new Date('2026-08-04'),
+        windowStartDate: new Date('2026-08-04'),
+        windowEndDate: new Date('2026-08-09'),
+        anchorType: 'REGISTRATION',
+        anchorVisitId: null,
+        generatedByRuleVersionId: staleRuleVersionId,
+      },
+    ] as never);
+
+    const result = await service.createBulk(baseDto(), sakhiCaller, authHeader);
+
+    expect(result.created).toBe(0);
+    expect(result.alreadyExisted).toBe(1);
+    expect(repository.createAllOrNothing).not.toHaveBeenCalled();
+    expect(repository.updateGeneratedByRuleVersionId).toHaveBeenCalledWith(
+      'sched-1',
+      ruleVersionId,
+    );
+  });
+
+  it('rejects with 409, and a rule-version-aware message, when a replay under a newer rule version carries different content', async () => {
+    const staleRuleVersionId = 'stale-rule-version';
+    repository.findByLocalScheduleUuids.mockResolvedValue([
+      {
+        id: 'sched-1',
+        localScheduleUuid: 'local-1',
+        status: 'GENERATED',
+        beneficiaryId,
+        visitCode: 'ANC1',
+        visitType: 'ANC',
+        sequenceNo: 1,
+        scheduledDate: new Date('2026-08-04'),
+        windowStartDate: new Date('2026-08-04'),
+        windowEndDate: new Date('2026-08-09'),
+        anchorType: 'REGISTRATION',
+        anchorVisitId: null,
+        generatedByRuleVersionId: staleRuleVersionId,
+      },
+    ] as never);
+
+    // Same localScheduleUuid as the stored row, but a different scheduledDate
+    // AND a different generatedByRuleVersionId than what's stored.
+    const dto = baseDto({
+      schedules: [
+        {
+          localScheduleUuid: 'local-1',
+          visitCode: 'ANC1',
+          visitType: 'ANC',
+          sequenceNo: 1,
+          scheduledDate: '2026-08-05',
+          windowStartDate: '2026-08-05',
+          windowEndDate: '2026-08-10',
+          anchorType: 'REGISTRATION',
+          anchorVisitLocalUuid: null,
+        },
+      ],
+    });
+
+    await expect(service.createBulk(dto, sakhiCaller, authHeader)).rejects.toMatchObject({
+      status: 409,
+      message: expect.stringContaining(
+        'regenerating an existing schedule under a new rule version',
+      ),
+    });
+    expect(repository.createAllOrNothing).not.toHaveBeenCalled();
+    expect(repository.updateGeneratedByRuleVersionId).not.toHaveBeenCalled();
   });
 
   it('rejects with 409 when a localScheduleUuid collides with another beneficiary’s row', async () => {
@@ -754,6 +834,21 @@ describe('VisitScheduleService', () => {
         service.generateSchedule(ancDto, otherSupervisorCaller, authHeader),
       ).rejects.toMatchObject({ status: 403 });
       expect(evaluateScheduleClient.evaluateSchedule).not.toHaveBeenCalled();
+    });
+
+    it('allows a SUPERVISOR whose Sakhi is assigned to them, same ownership rule as createBulk', async () => {
+      (evaluateScheduleClient.evaluateSchedule as jest.Mock).mockResolvedValue({
+        ruleVersionId,
+        totalRegularVisits: 0,
+        visits: [],
+        postEddVisit: null,
+        deliveryFormFiledByEddPlus7: false,
+      });
+
+      await expect(
+        service.generateSchedule(ancDto, supervisorCaller, authHeader),
+      ).resolves.toMatchObject({ beneficiaryId, created: 0 });
+      expect(sakhiClient.findSakhiById).toHaveBeenCalledWith(sakhiId, authHeader);
     });
   });
 });

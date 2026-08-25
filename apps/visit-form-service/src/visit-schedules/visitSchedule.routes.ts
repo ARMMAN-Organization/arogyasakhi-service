@@ -135,7 +135,7 @@ export function registerVisitScheduleRoutes(doc: DocumentedRouter, service: Visi
       },
     },
     trustGatewayIdentity,
-    requireRoles('SAKHI'),
+    requireRoles('SAKHI', 'SUPERVISOR'),
     validateBody(generateVisitScheduleSchema),
     controller.generate,
   );

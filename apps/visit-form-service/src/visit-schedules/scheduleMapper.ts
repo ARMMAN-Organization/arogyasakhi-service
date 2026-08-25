@@ -132,7 +132,16 @@ export function toBulkScheduleRows(
           'HR evaluation hrVisit is malformed or missing despite generateHrVisit=true.',
         );
       }
-      return [toRow(beneficiaryId, 'ANC_HR', 'ANC_HR', 1, hrVisit, 'ACTUAL_VISIT')];
+      // hrVisit.visitName is "<phase>-HR" (e.g. "INC-HR") per hr.rulesJson.ts —
+      // derive the visitCode/visitType from it instead of hardcoding one phase,
+      // since visitCodeTypeSchema defines distinct ANC_HR/INC_HR/CCV_HR values.
+      const hrType = hrVisit.visitName.replace('-', '_');
+      if (hrType !== 'ANC_HR' && hrType !== 'INC_HR' && hrType !== 'CCV_HR') {
+        throw badRequest(
+          `HR evaluation returned an unrecognised visitName: "${hrVisit.visitName}".`,
+        );
+      }
+      return [toRow(beneficiaryId, hrType, hrType, 1, hrVisit, 'ACTUAL_VISIT')];
     }
 
     case 'DELIVERY':

@@ -147,12 +147,16 @@ describe('toBulkScheduleRows', () => {
     expect(rows[0]).toMatchObject({ visitCode: 'INC1', anchorType: 'DOB' });
   });
 
-  it('maps a single HR row when generateHrVisit is true', () => {
+  it.each([
+    ['ANC-HR', 'ANC_HR'],
+    ['INC-HR', 'INC_HR'],
+    ['CCV-HR', 'CCV_HR'],
+  ])('maps a single %s row when generateHrVisit is true', (visitName, expectedType) => {
     const rows = toBulkScheduleRows(beneficiaryId, 'HR', {
       generateHrVisit: true,
       cumulative: false,
       hrVisit: {
-        visitName: 'ANC_HR',
+        visitName,
         scheduledDate: '2026-08-10',
         windowOpen: '2026-08-08',
         windowClose: '2026-08-12',
@@ -160,10 +164,25 @@ describe('toBulkScheduleRows', () => {
     });
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
-      visitCode: 'ANC_HR1',
-      visitType: 'ANC_HR',
+      visitCode: `${expectedType}1`,
+      visitType: expectedType,
       anchorType: 'ACTUAL_VISIT',
     });
+  });
+
+  it('rejects an HR evaluation with an unrecognised visitName', () => {
+    expect(() =>
+      toBulkScheduleRows(beneficiaryId, 'HR', {
+        generateHrVisit: true,
+        cumulative: false,
+        hrVisit: {
+          visitName: 'PP-HR',
+          scheduledDate: '2026-08-10',
+          windowOpen: '2026-08-08',
+          windowClose: '2026-08-12',
+        },
+      }),
+    ).toThrow(/unrecognised visitName/);
   });
 
   it('maps no rows when generateHrVisit is false', () => {
