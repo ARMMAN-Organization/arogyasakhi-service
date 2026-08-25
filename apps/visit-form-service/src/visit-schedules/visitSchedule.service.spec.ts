@@ -2,14 +2,14 @@ import { VisitScheduleService } from './visitSchedule.service';
 import type { VisitScheduleRepository } from './visitSchedule.repository';
 import * as beneficiaryClient from '../beneficiaries/beneficiary.client';
 import * as ruleVersionClient from '../rules/ruleVersion.client';
-import * as evaluateScheduleClient from '../rules/evaluateSchedule.client';
+import * as evaluateSchedulePackClient from '../rules/evaluateSchedulePack.client';
 import * as sakhiClient from '../sakhis/sakhi.client';
 import type { CreateVisitScheduleBulkInput } from './dto/create-visit-schedule-bulk.dto';
 import type { GenerateVisitScheduleInput } from './dto/generate-visit-schedule.dto';
 
 jest.mock('../beneficiaries/beneficiary.client');
 jest.mock('../rules/ruleVersion.client');
-jest.mock('../rules/evaluateSchedule.client');
+jest.mock('../rules/evaluateSchedulePack.client');
 jest.mock('../sakhis/sakhi.client');
 // The mutable config object is defined INSIDE the factory, not closed over
 // from outer scope — jest.mock factories are hoisted above every import and
@@ -577,7 +577,7 @@ describe('VisitScheduleService', () => {
     };
 
     it('computes ANC rows via rules-service and persists them, forwarding exactly the ANC-shaped input', async () => {
-      (evaluateScheduleClient.evaluateSchedule as jest.Mock).mockResolvedValue({
+      (evaluateSchedulePackClient.evaluateSchedulePack as jest.Mock).mockResolvedValue({
         ruleVersionId,
         totalRegularVisits: 2,
         visits: [
@@ -612,7 +612,7 @@ describe('VisitScheduleService', () => {
 
       const result = await service.generateSchedule(ancDto, sakhiCaller, authHeader);
 
-      expect(evaluateScheduleClient.evaluateSchedule).toHaveBeenCalledWith(
+      expect(evaluateSchedulePackClient.evaluateSchedulePack).toHaveBeenCalledWith(
         'anc-rule-set-1',
         'ANC',
         { registrationDate: '2026-08-04', edd: '2027-03-01', deliveryFormFiledDate: null },
@@ -641,14 +641,16 @@ describe('VisitScheduleService', () => {
         await expect(
           service.generateSchedule(incDto, sakhiCaller, authHeader),
         ).rejects.toMatchObject({ status: 400 });
-        expect(evaluateScheduleClient.evaluateSchedule).not.toHaveBeenCalled();
+        expect(evaluateSchedulePackClient.evaluateSchedulePack).not.toHaveBeenCalled();
       } finally {
         appConfig.INC_SCHEDULE_RULE_SET_ID = original;
       }
     });
 
     it('propagates a 502 when rules-service is unreachable', async () => {
-      (evaluateScheduleClient.evaluateSchedule as jest.Mock).mockRejectedValue({ status: 502 });
+      (evaluateSchedulePackClient.evaluateSchedulePack as jest.Mock).mockRejectedValue({
+        status: 502,
+      });
 
       await expect(service.generateSchedule(ancDto, sakhiCaller, authHeader)).rejects.toMatchObject(
         { status: 502 },
@@ -663,7 +665,7 @@ describe('VisitScheduleService', () => {
         windowOpen: '2026-08-01',
         windowClose: '2026-08-09',
       }));
-      (evaluateScheduleClient.evaluateSchedule as jest.Mock).mockResolvedValue({
+      (evaluateSchedulePackClient.evaluateSchedulePack as jest.Mock).mockResolvedValue({
         ruleVersionId,
         visits,
       });
@@ -677,7 +679,7 @@ describe('VisitScheduleService', () => {
 
       const result = await service.generateSchedule(ppDto, sakhiCaller, authHeader);
 
-      expect(evaluateScheduleClient.evaluateSchedule).toHaveBeenCalledWith(
+      expect(evaluateSchedulePackClient.evaluateSchedulePack).toHaveBeenCalledWith(
         'pp-rule-set-1',
         'PP',
         { deliveryDate: '2026-08-04' },
@@ -687,7 +689,7 @@ describe('VisitScheduleService', () => {
     });
 
     it('rejects PP when rules-service does not return exactly 5 visits', async () => {
-      (evaluateScheduleClient.evaluateSchedule as jest.Mock).mockResolvedValue({
+      (evaluateSchedulePackClient.evaluateSchedulePack as jest.Mock).mockResolvedValue({
         ruleVersionId,
         visits: [
           {
@@ -706,7 +708,7 @@ describe('VisitScheduleService', () => {
     });
 
     it('persists only the present NN slot when nn2 is absent, forwarding deliveryDate/deliveryFormFiledDate as input', async () => {
-      (evaluateScheduleClient.evaluateSchedule as jest.Mock).mockResolvedValue({
+      (evaluateSchedulePackClient.evaluateSchedulePack as jest.Mock).mockResolvedValue({
         ruleVersionId,
         scenario: 'SINGLE_VISIT',
         neonatalPhaseApplies: true,
@@ -724,7 +726,7 @@ describe('VisitScheduleService', () => {
 
       const result = await service.generateSchedule(nnDto, sakhiCaller, authHeader);
 
-      expect(evaluateScheduleClient.evaluateSchedule).toHaveBeenCalledWith(
+      expect(evaluateSchedulePackClient.evaluateSchedulePack).toHaveBeenCalledWith(
         'nn-rule-set-1',
         'NN',
         { deliveryDate: '2026-08-04', deliveryFormFiledDate: '2026-08-05' },
@@ -740,7 +742,7 @@ describe('VisitScheduleService', () => {
     });
 
     it('persists INC rows and ignores droppedVisits, forwarding dob/registrationDate as input', async () => {
-      (evaluateScheduleClient.evaluateSchedule as jest.Mock).mockResolvedValue({
+      (evaluateSchedulePackClient.evaluateSchedulePack as jest.Mock).mockResolvedValue({
         ruleVersionId,
         registrationCategory: 'EARLY',
         visits: [
@@ -763,7 +765,7 @@ describe('VisitScheduleService', () => {
 
       const result = await service.generateSchedule(incDto, sakhiCaller, authHeader);
 
-      expect(evaluateScheduleClient.evaluateSchedule).toHaveBeenCalledWith(
+      expect(evaluateSchedulePackClient.evaluateSchedulePack).toHaveBeenCalledWith(
         'inc-rule-set-1',
         'INC',
         { dob: '2026-08-04', registrationDate: '2026-08-05' },
@@ -779,7 +781,7 @@ describe('VisitScheduleService', () => {
     });
 
     it('persists no rows when HR evaluation says generateHrVisit is false, forwarding phase/hrDetectedThisVisit/actualCompletionDate', async () => {
-      (evaluateScheduleClient.evaluateSchedule as jest.Mock).mockResolvedValue({
+      (evaluateSchedulePackClient.evaluateSchedulePack as jest.Mock).mockResolvedValue({
         ruleVersionId,
         generateHrVisit: false,
         cumulative: false,
@@ -788,7 +790,7 @@ describe('VisitScheduleService', () => {
 
       const result = await service.generateSchedule(hrDto, sakhiCaller, authHeader);
 
-      expect(evaluateScheduleClient.evaluateSchedule).toHaveBeenCalledWith(
+      expect(evaluateSchedulePackClient.evaluateSchedulePack).toHaveBeenCalledWith(
         'hr-rule-set-1',
         'HR',
         { phase: 'ANC', hrDetectedThisVisit: true, actualCompletionDate: '2026-08-04' },
@@ -799,7 +801,7 @@ describe('VisitScheduleService', () => {
     });
 
     it('returns the DELIVERY dispatch decision with no persisted rows, forwarding deliveryOutcome/motherEnrollmentType/numberOfChildren/dates', async () => {
-      (evaluateScheduleClient.evaluateSchedule as jest.Mock).mockResolvedValue({
+      (evaluateSchedulePackClient.evaluateSchedulePack as jest.Mock).mockResolvedValue({
         ruleVersionId,
         motherPlan: {
           generatePpSchedule: true,
@@ -812,7 +814,7 @@ describe('VisitScheduleService', () => {
 
       const result = await service.generateSchedule(deliveryDto, sakhiCaller, authHeader);
 
-      expect(evaluateScheduleClient.evaluateSchedule).toHaveBeenCalledWith(
+      expect(evaluateSchedulePackClient.evaluateSchedulePack).toHaveBeenCalledWith(
         'delivery-rule-set-1',
         'DELIVERY',
         {
@@ -833,11 +835,11 @@ describe('VisitScheduleService', () => {
       await expect(
         service.generateSchedule(ancDto, otherSupervisorCaller, authHeader),
       ).rejects.toMatchObject({ status: 403 });
-      expect(evaluateScheduleClient.evaluateSchedule).not.toHaveBeenCalled();
+      expect(evaluateSchedulePackClient.evaluateSchedulePack).not.toHaveBeenCalled();
     });
 
     it('allows a SUPERVISOR whose Sakhi is assigned to them, same ownership rule as createBulk', async () => {
-      (evaluateScheduleClient.evaluateSchedule as jest.Mock).mockResolvedValue({
+      (evaluateSchedulePackClient.evaluateSchedulePack as jest.Mock).mockResolvedValue({
         ruleVersionId,
         totalRegularVisits: 0,
         visits: [],

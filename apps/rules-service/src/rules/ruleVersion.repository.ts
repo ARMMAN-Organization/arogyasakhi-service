@@ -44,16 +44,28 @@ export class RuleVersionRepository {
    * A ruleSetId with no published version (unknown id, or never published)
    * is simply absent from the result array — the caller doesn't 404 the
    * whole batch for one missing/unpublished set.
+   *
+   * There is no DB constraint enforcing at most one PUBLISHED+effectiveTo:null
+   * row per ruleSetId (only publishNewVersion's transaction upholds it), so —
+   * same defensive ordering as the single-id findPublishedBySetId — this
+   * orders by effectiveFrom desc and keeps only the first row seen per
+   * ruleSetId, in case a race ever leaves more than one PUBLISHED row.
    */
-  findPublishedManyBySetIds(ruleSetIds: string[]) {
-    return this.prisma.ruleVersion.findMany({
+  async findPublishedManyBySetIds(ruleSetIds: string[]) {
+    const rows = await this.prisma.ruleVersion.findMany({
       where: {
         ruleSetId: { in: ruleSetIds },
         status: 'PUBLISHED',
         effectiveTo: null,
         isDeleted: false,
       },
+      orderBy: { effectiveFrom: 'desc' },
     });
+    const byRuleSetId = new Map<string, (typeof rows)[number]>();
+    for (const row of rows) {
+      if (!byRuleSetId.has(row.ruleSetId)) byRuleSetId.set(row.ruleSetId, row);
+    }
+    return [...byRuleSetId.values()];
   }
 
   /**

@@ -30,10 +30,11 @@ const schema = z.object({
   CCV_SCHEDULE_RULE_SET_ID: z.string().uuid().optional(),
   // Same "no scheduleKind->ruleSetId mapping exists" gap as CCV above, for
   // the other six SCHEDULE_KINDS this service can generate via
-  // POST /visit-schedules/generate (generateSchedule.service.ts). Each is
-  // optional — a journey with no configured ruleSetId simply isn't available
-  // to /generate yet, surfaced as a 400 rather than skipped silently, since
-  // (unlike CCV's risk-tier hint) a missing schedule here is not optional.
+  // POST /visit-schedules/generate (visitSchedule.service.ts's
+  // generateSchedule()). Each is optional — a journey with no configured
+  // ruleSetId simply isn't available to /generate yet, surfaced as a 400
+  // rather than skipped silently, since (unlike CCV's risk-tier hint) a
+  // missing schedule here is not optional.
   ANC_SCHEDULE_RULE_SET_ID: z.string().uuid().optional(),
   PP_SCHEDULE_RULE_SET_ID: z.string().uuid().optional(),
   NN_SCHEDULE_RULE_SET_ID: z.string().uuid().optional(),

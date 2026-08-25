@@ -10,7 +10,7 @@ import { toBulkScheduleRows } from './scheduleMapper';
 import { ruleSetIdFor } from './scheduleRuleSets';
 import { findBeneficiaryById } from '../beneficiaries/beneficiary.client';
 import { findRuleVersion } from '../rules/ruleVersion.client';
-import { evaluateSchedule } from '../rules/evaluateSchedule.client';
+import { evaluateSchedulePack } from '../rules/evaluateSchedulePack.client';
 import { findSakhiById } from '../sakhis/sakhi.client';
 
 /** The calling principal's own identity, as carried on their trusted-identity headers. */
@@ -163,7 +163,7 @@ export class VisitScheduleService {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars -- destructured only to omit from `input`
     const { beneficiaryId, scheduleKind, ...input } = dto;
 
-    const evaluation = await evaluateSchedule(
+    const evaluation = await evaluateSchedulePack(
       ruleSetId,
       dto.scheduleKind,
       input,

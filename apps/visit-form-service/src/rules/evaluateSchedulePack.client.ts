@@ -12,14 +12,16 @@ export interface ScheduleEvaluation {
 
 /**
  * Calls rules-service's `POST /rules/:setId/evaluate-schedule` and returns
- * its result, or throws. Unlike scheduleEvaluate.client.ts's best-effort
- * degrade-to-null (used for BR-13's CCV opening-risk-state hint, where a
- * failure just means "skip a nice-to-have flag"), this client throws on any
- * failure — the caller (generateSchedule.service.ts) persists the dates this
- * evaluation returns, so a silently-missing result must never be mistaken
- * for "no schedule needed."
+ * its result, or throws. Unlike scheduleEvaluate.client.ts's evaluateSchedule
+ * (best-effort degrade-to-null, used for BR-13's CCV opening-risk-state hint,
+ * where a failure just means "skip a nice-to-have flag"), this client throws
+ * on any failure — the caller (visitSchedule.service.ts's generateSchedule())
+ * persists the dates this evaluation returns, so a silently-missing result
+ * must never be mistaken for "no schedule needed." Named evaluateSchedulePack
+ * (not evaluateSchedule) specifically so it can't be confused with, or
+ * accidentally imported instead of, that other same-signature function.
  */
-export async function evaluateSchedule(
+export async function evaluateSchedulePack(
   ruleSetId: string,
   scheduleKind: string,
   input: Record<string, unknown>,
