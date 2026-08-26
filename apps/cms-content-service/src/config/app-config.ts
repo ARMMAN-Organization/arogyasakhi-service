@@ -1,10 +1,21 @@
+import { publicBaseUrlsSchema } from '@armman/service-commons';
 import { z } from 'zod';
 
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(3014),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
-  CORS_ORIGINS: z.string().default('').transform((v) => v.split(',').map((o) => o.trim()).filter(Boolean)),
+  DATABASE_URL: z.string().url(),
+  CORS_ORIGINS: z
+    .string()
+    .default('')
+    .transform((v) =>
+      v
+        .split(',')
+        .map((o) => o.trim())
+        .filter(Boolean),
+    ),
+  PUBLIC_BASE_URLS: publicBaseUrlsSchema,
 });
 
 export type AppConfig = z.infer<typeof schema>;

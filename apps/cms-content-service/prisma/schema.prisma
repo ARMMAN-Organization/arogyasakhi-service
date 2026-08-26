@@ -1,0 +1,79 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../../../node_modules/.prisma/client-cms-content-service"
+}
+
+datasource db {
+  provider  = "postgresql"
+  directUrl = env("DIRECT_URL")
+  url       = env("DATABASE_URL")
+}
+
+// cms-content-service owns these tables only (forklift rule).
+//
+// SRS v3.0 FR-S-13.1-13.4 ("Learn More" knowledge base) and FR-S-5.2 (queued
+// health education message on HR detection). Per SRS Assumptions (line 166)
+// and Open Item 12 (line 601), ARMMAN has not yet delivered the real content
+// structure (section names, topics, content files) — this schema is the
+// "Content coming soon" placeholder shell explicitly called for in the SRS,
+// not a final content model. Field names here are NOT sourced from a Strapi
+// schema (none has been provided — see the ERD doc's own "Open Decisions"
+// table, which flags content_sections/topics/versions field definitions as
+// unresolved) — they are a minimal shape sufficient to serve a placeholder
+// response and to be extended once ARMMAN provides the real structure.
+enum LearnMoreMediaType {
+  QNA_TEXT
+  PDF
+  INFOGRAPHIC
+  GIF
+  VIDEO
+  AUDIO
+}
+
+enum LearnMoreContentStatus {
+  ACTIVE
+  INACTIVE
+}
+
+// FR-S-13.2: "Structure: Two-level — Sections containing Topics."
+model LearnMoreSection {
+  id              String                 @id @default(uuid()) @map("learn_more_section_id")
+  sectionCode     String                 @unique @map("section_code") @db.VarChar(80)
+  sectionName     String                 @map("section_name") @db.VarChar(160)
+  sortOrder       Int                    @default(0) @map("sort_order")
+  status          LearnMoreContentStatus
+  createdAt       DateTime               @default(now()) @map("created_at")
+  createdByUserId String?                @map("created_by_user_id")
+  updatedAt       DateTime               @updatedAt @map("updated_at")
+  updatedByUserId String?                @map("updated_by_user_id")
+  isDeleted       Boolean                @default(false) @map("is_deleted")
+  deletedAt       DateTime?              @map("deleted_at")
+
+  topics LearnMoreTopic[]
+
+  @@map("learn_more_sections")
+}
+
+// FR-S-13.2: "Each topic can have a different media type (QnA text, PDF,
+// Infographic, GIF, Video, Audio)." contentUrl is nullable — a placeholder
+// topic has no real media yet.
+model LearnMoreTopic {
+  id              String                 @id @default(uuid()) @map("learn_more_topic_id")
+  sectionId       String                 @map("learn_more_section_id")
+  topicCode       String                 @unique @map("topic_code") @db.VarChar(80)
+  topicName       String                 @map("topic_name") @db.VarChar(160)
+  mediaType       LearnMoreMediaType     @map("media_type")
+  contentUrl      String?                @map("content_url")
+  sortOrder       Int                    @default(0) @map("sort_order")
+  status          LearnMoreContentStatus
+  createdAt       DateTime               @default(now()) @map("created_at")
+  createdByUserId String?                @map("created_by_user_id")
+  updatedAt       DateTime               @updatedAt @map("updated_at")
+  updatedByUserId String?                @map("updated_by_user_id")
+  isDeleted       Boolean                @default(false) @map("is_deleted")
+  deletedAt       DateTime?              @map("deleted_at")
+
+  section LearnMoreSection @relation(fields: [sectionId], references: [id])
+
+  @@map("learn_more_topics")
+}

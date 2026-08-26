@@ -4,6 +4,16 @@
  * `deliveryDate` — the input schema deliberately has no "actual completion
  * date" field, so PP3-5 cannot shift on a late PP2 completion (BR-05: "If
  * PP2 completed late, PP3 stays at Day 45").
+ *
+ * This is visit-SCHEDULE timing only. There is no PP-phase RISK grading
+ * pack yet (contrast anc-risk.rulesJson.ts / infant-risk.rulesJson.ts).
+ * Issue #191 confirmed PP HR grading is in scope — using the PP_VISIT
+ * form's own fields (danger signs, bleeding, fever, foul discharge, wound
+ * infection, pallor, dehydration, BP, Hb, blood glucose, BMI, MUAC,
+ * referral flag, maternal risk flag) against the HR Protocol Developer's
+ * Copy — but the pack itself is not yet built. Do not add PP risk grading
+ * here; it belongs in its own pp-risk.rulesJson.ts, mirroring
+ * anc-risk.rulesJson.ts's structure.
  */
 export const ppRulesJson = {
   contentType: 'application/vnd.gorules.decision',

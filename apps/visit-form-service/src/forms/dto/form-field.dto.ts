@@ -137,6 +137,14 @@ export const formFieldSchema = z
     // Named character-class checks — never a raw regex in JSON, to keep
     // seed data free of arbitrary executable-ish patterns.
     pattern: z.enum(['NAME_NO_SPECIAL_CHARS']).optional(),
+    // SRS FR-S-13.4: "Learn More content also accessible contextually within
+    // form screens — relevant content appears at the bottom of specific form
+    // fields." Resolves via cms-content-service's GET /learn-more/topics/:code.
+    // Optional/nullable and unused by any seeded form today — ARMMAN has not
+    // yet provided the real Learn More topic codes (SRS Open Item 12) — added
+    // now so a future PATCH to a form version can attach a real code without
+    // a second schema migration.
+    learnMoreTopicCode: z.string().trim().min(1).nullable().optional(),
   })
   .strict();
 

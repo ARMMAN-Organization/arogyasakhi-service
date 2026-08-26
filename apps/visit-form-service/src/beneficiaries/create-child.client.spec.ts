@@ -52,6 +52,7 @@ describe('createChildBeneficiary', () => {
         sex: 'MALE',
         birthWeightKg: 2.4,
         birthLengthCm: 45,
+        birthOrder: 1,
       },
       'Bearer test-token',
     );
@@ -72,7 +73,12 @@ describe('createChildBeneficiary', () => {
       }),
     );
     expect(body.childDetails).toEqual(
-      expect.objectContaining({ sex: 'MALE', birthWeightKg: 2.4, birthLengthCm: 45 }),
+      expect.objectContaining({
+        sex: 'MALE',
+        birthWeightKg: 2.4,
+        birthLengthCm: 45,
+        birthOrder: 1,
+      }),
     );
     expect(body.pii).toEqual(
       expect.objectContaining({
@@ -99,6 +105,7 @@ describe('createChildBeneficiary', () => {
         localCaseUuid: 'uuid-1-child1',
         registrationDate: new Date('2026-08-01T00:00:00.000Z'),
         dateOfBirth: new Date('2026-08-01T00:00:00.000Z'),
+        birthOrder: 1,
       },
       'Bearer test-token',
     );
@@ -119,12 +126,14 @@ describe('createChildBeneficiary', () => {
         localCaseUuid: 'uuid-1-child2',
         registrationDate: new Date('2026-08-01T00:00:00.000Z'),
         dateOfBirth: new Date('2026-08-01T00:00:00.000Z'),
+        birthOrder: 2,
       },
       'Bearer test-token',
     );
 
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(body.acknowledgeDuplicate).toBe(true);
+    expect(body.childDetails.birthOrder).toBe(2);
   });
 
   it('swallows a non-ok response so the Delivery submission is never failed by it, returning null', async () => {
@@ -137,6 +146,7 @@ describe('createChildBeneficiary', () => {
           localCaseUuid: 'uuid-1-child1',
           registrationDate: new Date(),
           dateOfBirth: new Date(),
+          birthOrder: 1,
         },
         'Bearer test-token',
       ),
@@ -154,6 +164,7 @@ describe('createChildBeneficiary', () => {
           localCaseUuid: 'uuid-1-child1',
           registrationDate: new Date(),
           dateOfBirth: new Date(),
+          birthOrder: 1,
         },
         'Bearer test-token',
       ),

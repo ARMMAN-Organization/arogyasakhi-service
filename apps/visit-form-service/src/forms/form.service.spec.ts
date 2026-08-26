@@ -49,6 +49,7 @@ describe('FormService', () => {
     findVisitById: jest.fn(),
     findLatestSubmissionByBeneficiaryAndFormCode: jest.fn(),
     findLatestVisitSubmission: jest.fn(),
+    findLatestDeliverySubmission: jest.fn(),
   } as unknown as jest.Mocked<FormRepository>;
   const visitInstanceRepository = {
     findRecentCompletedIncVisits: jest.fn(),
@@ -1396,6 +1397,7 @@ describe('FormService', () => {
             sex: 'MALE',
             birthWeightKg: 2.4,
             birthLengthCm: 45,
+            birthOrder: 1,
           }),
           'Bearer test-token',
         );
@@ -1423,11 +1425,15 @@ describe('FormService', () => {
 
         expect(jest.mocked(createChildBeneficiary)).toHaveBeenCalledTimes(2);
         expect(jest.mocked(createChildBeneficiary)).toHaveBeenCalledWith(
-          expect.objectContaining({ localCaseUuid: 'uuid-1-child1', sex: 'MALE' }),
+          expect.objectContaining({ localCaseUuid: 'uuid-1-child1', sex: 'MALE', birthOrder: 1 }),
           'Bearer test-token',
         );
         expect(jest.mocked(createChildBeneficiary)).toHaveBeenCalledWith(
-          expect.objectContaining({ localCaseUuid: 'uuid-1-child2', sex: 'FEMALE' }),
+          expect.objectContaining({
+            localCaseUuid: 'uuid-1-child2',
+            sex: 'FEMALE',
+            birthOrder: 2,
+          }),
           'Bearer test-token',
         );
       });
@@ -1449,6 +1455,37 @@ describe('FormService', () => {
         );
 
         expect(jest.mocked(createChildBeneficiary)).not.toHaveBeenCalled();
+      });
+
+      // Regression test: in a twin case where the earlier slot was a
+      // stillbirth, the surviving twin's birthOrder must still reflect its
+      // real slot (2), not shift to 1 because it's the only child actually
+      // created — beneficiary-service's slot-based stillbirth guard relies
+      // on this to check the CORRECT slot's outcome, not just "some slot."
+      it('assigns the correct birthOrder to a live-born twin even when an earlier slot was stillborn', async () => {
+        await service.createSubmission(
+          'DELIVERY_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {
+              date_of_delivery: '2026-08-01',
+              number_of_babies_born: 2,
+              child1_delivery_outcome: 'antepartum_still_birth_fresh',
+              child2_delivery_outcome: 'live_birth',
+              child2_sex_of_baby: 'female',
+            },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(createChildBeneficiary)).toHaveBeenCalledTimes(1);
+        expect(jest.mocked(createChildBeneficiary)).toHaveBeenCalledWith(
+          expect.objectContaining({ localCaseUuid: 'uuid-1-child2', birthOrder: 2 }),
+          'Bearer test-token',
+        );
       });
 
       it('does not create a beneficiary for a non-existent child slot', async () => {
@@ -1962,7 +1999,10 @@ describe('FormService', () => {
       beforeEach(() => {
         repository.findSubmissionByLocalUuid.mockResolvedValue(null);
         repository.findVersionById.mockResolvedValue(ancVersion as never);
-        repository.createSubmission.mockResolvedValue({ id: 'sub-1' } as never);
+        repository.createSubmission.mockResolvedValue({
+          id: 'sub-1',
+          submittedAt: new Date('2026-08-01T00:00:00.000Z'),
+        } as never);
         repository.findVisitById.mockResolvedValue({ id: 'visit-1' } as never);
       });
 
@@ -2009,6 +2049,7 @@ describe('FormService', () => {
               livingChildren: 2,
               abortions: 0,
               priorComplications: ['no_complications'],
+              visitDate: '2026-08-01T00:00:00.000Z',
             },
           }),
           'Bearer test-token',
@@ -2035,7 +2076,11 @@ describe('FormService', () => {
 
         expect(jest.mocked(triggerRiskAssessment)).toHaveBeenCalledWith(
           expect.objectContaining({
-            answers: { gravida: 3, livingChildren: 1 },
+            answers: {
+              gravida: 3,
+              livingChildren: 1,
+              visitDate: '2026-08-01T00:00:00.000Z',
+            },
           }),
           'Bearer test-token',
         );
@@ -2058,7 +2103,13 @@ describe('FormService', () => {
         );
 
         expect(jest.mocked(triggerRiskAssessment)).toHaveBeenCalledWith(
-          expect.objectContaining({ riskPhase: 'ANC', answers: { haemoglobin_hb_g_dl: 9.5 } }),
+          expect.objectContaining({
+            riskPhase: 'ANC',
+            answers: {
+              haemoglobin_hb_g_dl: 9.5,
+              visitDate: '2026-08-01T00:00:00.000Z',
+            },
+          }),
           'Bearer test-token',
         );
       });
@@ -2097,7 +2148,10 @@ describe('FormService', () => {
       // being missing from the map went undetected).
       beforeEach(() => {
         repository.findSubmissionByLocalUuid.mockResolvedValue(null);
-        repository.createSubmission.mockResolvedValue({ id: 'sub-1' } as never);
+        repository.createSubmission.mockResolvedValue({
+          id: 'sub-1',
+          submittedAt: new Date('2026-08-01T00:00:00.000Z'),
+        } as never);
         repository.findVisitById.mockResolvedValue({ id: 'visit-1' } as never);
         repository.findLatestSubmissionByBeneficiaryAndFormCode.mockResolvedValue(null);
       });
@@ -2907,6 +2961,62 @@ describe('FormService', () => {
         'Bearer test-token',
       );
       expect(jest.mocked(findBeneficiaryById)).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getDeliveryOutcomes', () => {
+    it('returns one outcome per child slot present on the latest DELIVERY_VISIT submission, each tagged with its own birthOrder', async () => {
+      repository.findLatestDeliverySubmission.mockResolvedValue({
+        formDataJson: {
+          child1_delivery_outcome: 'live_birth',
+          child2_delivery_outcome: 'antepartum_still_birth_fresh',
+        },
+      } as never);
+
+      const result = await service.getDeliveryOutcomes('mother-1');
+
+      expect(result).toEqual({
+        outcomes: [
+          { birthOrder: 1, outcome: 'live_birth' },
+          { birthOrder: 2, outcome: 'antepartum_still_birth_fresh' },
+        ],
+      });
+    });
+
+    it('returns an empty outcomes array when the mother has no DELIVERY_VISIT submission yet', async () => {
+      repository.findLatestDeliverySubmission.mockResolvedValue(null);
+
+      const result = await service.getDeliveryOutcomes('mother-1');
+
+      expect(result).toEqual({ outcomes: [] });
+    });
+
+    it('skips a child slot with no delivery-outcome value recorded', async () => {
+      repository.findLatestDeliverySubmission.mockResolvedValue({
+        formDataJson: { child1_delivery_outcome: 'live_birth' },
+      } as never);
+
+      const result = await service.getDeliveryOutcomes('mother-1');
+
+      expect(result).toEqual({ outcomes: [{ birthOrder: 1, outcome: 'live_birth' }] });
+    });
+
+    // Regression test for the bug this birthOrder tagging exists to fix: a
+    // missing MIDDLE slot must not shift the birthOrder of the slot(s)
+    // after it. Before this change, the response was a flat string[] built
+    // by filtering out empty slots — child1 absent + child2 present used to
+    // collapse to `outcomes: ['antepartum_still_birth_fresh']`, which a
+    // consumer had no way to distinguish from "child1 was the stillbirth."
+    it('preserves the correct birthOrder when an earlier slot is empty and a later one is present', async () => {
+      repository.findLatestDeliverySubmission.mockResolvedValue({
+        formDataJson: { child2_delivery_outcome: 'antepartum_still_birth_fresh' },
+      } as never);
+
+      const result = await service.getDeliveryOutcomes('mother-1');
+
+      expect(result).toEqual({
+        outcomes: [{ birthOrder: 2, outcome: 'antepartum_still_birth_fresh' }],
+      });
     });
   });
 });

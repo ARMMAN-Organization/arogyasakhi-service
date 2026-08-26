@@ -16,4 +16,15 @@ describe('SERVICE_ROUTES ordering', () => {
     expect(visitsIndex).toBeGreaterThanOrEqual(0);
     expect(bySakhiIndex).toBeLessThan(visitsIndex);
   });
+
+  it('registers /beneficiaries/:beneficiaryId/delivery-outcomes before the generic /beneficiaries prefix', () => {
+    const deliveryOutcomesIndex = SERVICE_ROUTES.findIndex(
+      (r) => r.prefix === '/beneficiaries/:beneficiaryId/delivery-outcomes',
+    );
+    const beneficiariesIndex = SERVICE_ROUTES.findIndex((r) => r.prefix === '/beneficiaries');
+
+    expect(deliveryOutcomesIndex).toBeGreaterThanOrEqual(0);
+    expect(beneficiariesIndex).toBeGreaterThanOrEqual(0);
+    expect(deliveryOutcomesIndex).toBeLessThan(beneficiariesIndex);
+  });
 });

@@ -174,6 +174,27 @@ export class FormRepository {
   }
 
   /**
+   * The mother's most recent DELIVERY_VISIT submission, if any — used by
+   * GET /beneficiaries/:beneficiaryId/delivery-outcomes so beneficiary-service
+   * can check for a stillbirth outcome before creating a new CHILD case for
+   * that mother (see resolveDeliveryChildren's own outcome !== 'live_birth'
+   * guard, which this endpoint mirrors for the cross-service case). A mother
+   * can only have one live DELIVERY_VISIT submission at a time in practice,
+   * but `findFirst`/`orderBy: submittedAt desc` is used defensively, same
+   * pattern as findLatestVisitSubmission above.
+   */
+  findLatestDeliverySubmission(beneficiaryId: string) {
+    return this.prisma.formSubmission.findFirst({
+      where: {
+        beneficiaryId,
+        isDeleted: false,
+        formVersion: { formDefinition: { formCode: 'DELIVERY_VISIT' } },
+      },
+      orderBy: { submittedAt: 'desc' },
+    });
+  }
+
+  /**
    * Existence + ownership check for a visit-linked submission's visitId,
    * before the insert — visit_instances is owned by this same service
    * (unlike beneficiary_cases/form_versions' cross-service equivalents), so

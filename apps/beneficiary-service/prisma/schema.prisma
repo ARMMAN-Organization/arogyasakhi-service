@@ -306,6 +306,14 @@ model ChildCaseDetails {
   birthWeightKg       Decimal?             @map("birth_weight_kg") @db.Decimal(5, 2)
   birthLengthCm       Decimal?             @map("birth_length_cm") @db.Decimal(5, 2)
   prematureFlag       Boolean?             @map("premature_flag")
+  // 1-based DELIVERY_VISIT child slot (child1/child2/child3) this case
+  // corresponds to — required at create-time only once BeneficiaryService.
+  // create's stillbirth guard finds a stillbirth on the mother's delivery
+  // record (see beneficiary.service.ts), null for a standalone/independent
+  // registration with no DELIVERY_VISIT to have a slot on. NULL on any case
+  // created before this column existed — not backfillable, since no slot
+  // was ever captured for those.
+  birthOrder          Int?                 @map("birth_order")
   linkedAncCase       Boolean              @default(false) @map("linked_anc_case")
   currentPhase        ChildCasePhase       @default(NN) @map("current_phase")
   ccvOpeningRiskState CcvOpeningRiskState? @map("ccv_opening_risk_state")
@@ -318,6 +326,10 @@ model ChildCaseDetails {
 
   beneficiaryCase BeneficiaryCase @relation(fields: [beneficiaryId], references: [id])
 
+  // Prevents two CHILD cases from claiming the same DELIVERY_VISIT slot for
+  // the same mother. NULLs (standalone registrations with no slot) are not
+  // considered equal by Postgres, so this never blocks those.
+  @@unique([motherBeneficiaryId, birthOrder])
   @@map("child_case_details")
 }
 

@@ -494,6 +494,12 @@ export class FormService {
           ? {
               ...dto.formData,
               ...(await this.resolveAncRiskRegistrationAnswers(dto.beneficiaryId)),
+              // Fundal Height's GA-deviation calculation (anc-risk.rulesJson.ts)
+              // needs this visit's own date, per SRS Category 4's
+              // Floor((visit date - LMP) / 7) formula — the server-assigned
+              // submittedAt, not a client-suppliable field, so a caller can't
+              // skew its own GA calculation.
+              visitDate: created.submittedAt.toISOString(),
             }
           : dto.formData;
       await triggerRiskAssessment(
@@ -539,20 +545,28 @@ export class FormService {
    * recorded.
    */
   /**
-   * Fetches the ANC risk pack's registration-time inputs (age and the raw
-   * obstetric-history fields the pack derives Bad Obstetric History from)
-   * from this beneficiary's own MOTHER_REGISTRATION submission — a
-   * same-service, same-DB lookup (no cross-service call needed). Passed
-   * through unchanged; the Bad Obstetric History threshold itself (G>4,
-   * L<P, abortions>=2, prior complications) is business-threshold math and
-   * lives in anc-risk.rulesJson.ts (GoRules), not here — see PR #172 review
-   * on .claude/CLAUDE.md's "business thresholds/rates ... live in GoRules"
-   * rule.
+   * Fetches the ANC risk pack's registration-time inputs (age, the raw
+   * obstetric-history fields the pack derives Bad Obstetric History from,
+   * and LMP for the Fundal Height gestational-age calculation) from this
+   * beneficiary's own MOTHER_REGISTRATION submission — a same-service,
+   * same-DB lookup (no cross-service call needed). Passed through
+   * unchanged; the Bad Obstetric History threshold itself (G>4, L<P,
+   * abortions>=2, prior complications) and the Fundal Height GA-deviation
+   * math are business-threshold logic and live in anc-risk.rulesJson.ts
+   * (GoRules), not here — see PR #172 review on .claude/CLAUDE.md's
+   * "business thresholds/rates ... live in GoRules" rule.
+   *
+   * `lmp_date` is registration's own MOTHER_REGISTRATION field — this is
+   * the single system-wide LMP value (SRS §420/1851: corrected in place via
+   * the Sakhi-sonography/Supervisor-approval flow, not a second competing
+   * value). ANC_VISIT's own `lmp` field is a re-display/edit-request input
+   * for that same approval flow, not an independent LMP source, so it is
+   * deliberately NOT read here.
    *
    * Returns `{}` (no registration answers merged in) if no
    * MOTHER_REGISTRATION submission exists yet for this beneficiary — the
-   * ANC risk pack's age/BOH conditions are simply skipped for that visit
-   * rather than the whole risk evaluation failing.
+   * ANC risk pack's age/BOH/Fundal-Height conditions are simply skipped for
+   * that visit rather than the whole risk evaluation failing.
    */
   private async resolveAncRiskRegistrationAnswers(
     beneficiaryId: string,
@@ -570,6 +584,7 @@ export class FormService {
     const abortions = answers.abortions_pregnancy_losses_before_24_weeks;
     const complications =
       answers.did_you_experience_any_complications_during_birth_delivery_in_previous_pregnancies;
+    const lmpDate = answers.lmp_date;
 
     return {
       ...(typeof age === 'number' ? { age } : {}),
@@ -577,6 +592,7 @@ export class FormService {
       ...(typeof livingChildren === 'number' ? { livingChildren } : {}),
       ...(typeof abortions === 'number' ? { abortions } : {}),
       ...(Array.isArray(complications) ? { priorComplications: complications } : {}),
+      ...(typeof lmpDate === 'string' ? { lmpDate } : {}),
     };
   }
 
@@ -616,7 +632,7 @@ export class FormService {
     };
 
     const childIds = await Promise.all(
-      childPrefixes.map(async (prefix) => {
+      childPrefixes.map(async (prefix, index) => {
         const outcome = dto.formData[`${prefix}_delivery_outcome`];
         if (outcome !== 'live_birth' || !dateOfDelivery) return undefined;
 
@@ -642,6 +658,7 @@ export class FormService {
               typeof birthLengthCm === 'number' || typeof birthLengthCm === 'string'
                 ? Number(birthLengthCm)
                 : undefined,
+            birthOrder: index + 1,
           },
           authorizationHeader,
         );
@@ -795,6 +812,42 @@ export class FormService {
         submission.formDataJson as Record<string, unknown>,
       ),
     };
+  }
+
+  /**
+   * Per-slot delivery outcomes (child1/child2/child3) from this mother's
+   * most recent DELIVERY_VISIT submission, if any — called by
+   * beneficiary-service before creating a new CHILD case, so a stillbirth
+   * recorded here can block a separate child record from being created for
+   * that mother (SRS §G.4: "no child journey is initiated" for a stillbirth
+   * outcome). Mirrors resolveDeliveryChildren's own outcome field reads
+   * (`${prefix}_delivery_outcome`) so both call sites agree on what counts
+   * as a live birth. Returns `{ outcomes: [] }` (not 404) when the mother
+   * has no DELIVERY_VISIT submission yet — that is a valid, current state,
+   * same stance as getLatestVisitVitals's all-null snapshot.
+   *
+   * No ownership check here (unlike getLatestVisitVitals) — this is a
+   * service-to-service call from beneficiary-service's own CHILD-creation
+   * path, gated by trustGatewayIdentity/requireRoles at the route level,
+   * not a Sakhi-facing read of another Sakhi's beneficiary.
+   */
+  async getDeliveryOutcomes(beneficiaryId: string) {
+    const submission = await this.repository.findLatestDeliverySubmission(beneficiaryId);
+    if (!submission) return { outcomes: [] };
+
+    const formData = submission.formDataJson as Record<string, unknown>;
+    const childPrefixes = ['child1', 'child2', 'child3'] as const;
+    const outcomes = childPrefixes
+      .map((prefix, index) => ({
+        birthOrder: index + 1,
+        outcome: formData[`${prefix}_delivery_outcome`],
+      }))
+      .filter(
+        (entry): entry is { birthOrder: number; outcome: string } =>
+          typeof entry.outcome === 'string',
+      );
+
+    return { outcomes };
   }
 }
 

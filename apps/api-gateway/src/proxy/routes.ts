@@ -135,6 +135,19 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
     target: appConfig.VISIT_FORM_SERVICE_URL,
     requiresAuth: true,
   },
+  // GET /beneficiaries/:beneficiaryId/delivery-outcomes — same ownership
+  // reasoning as latest-visit-vitals/visit-history above: owned by
+  // visit-form-service (it owns form_submissions), not beneficiary-service,
+  // which calls this same route server-to-server (via
+  // deliveryOutcomes.client.ts) as part of BeneficiaryService.create's
+  // stillbirth guard. This mount was missing entirely — never routed to
+  // any service — until it was traced live as the root cause of
+  // resolveDeliveryOutcomesBySlot always 404ing through the gateway.
+  {
+    prefix: '/beneficiaries/:beneficiaryId/delivery-outcomes',
+    target: appConfig.VISIT_FORM_SERVICE_URL,
+    requiresAuth: true,
+  },
   { prefix: '/beneficiaries', target: appConfig.BENEFICIARY_SERVICE_URL, requiresAuth: true },
   // UNCONFIRMED alias for GET /beneficiaries/risk-summary — see the route's
   // own doc comment in beneficiary.routes.ts for why this is a best guess.
@@ -237,6 +250,9 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
   { prefix: '/sync', target: appConfig.SYNC_SERVICE_URL, requiresAuth: true },
   { prefix: '/media', target: appConfig.MEDIA_SERVICE_URL, requiresAuth: true },
   { prefix: '/audit', target: appConfig.AUDIT_SERVICE_URL, requiresAuth: true },
+  // SRS FR-S-13.1-13.4 "Learn More" knowledge base — currently the "Content
+  // coming soon" placeholder shell (see cms-content-service's own comments).
+  { prefix: '/learn-more', target: appConfig.CMS_CONTENT_SERVICE_URL, requiresAuth: true },
   // supervisor-operations-service owns six sibling prefixes (events,
   // Training sessions under /gatherings, training topics, inventory
   // items/transactions, call logs). Each enforces its own role guard

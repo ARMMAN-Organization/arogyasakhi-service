@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { encryptPii, type AuthenticatedUser } from '@armman/service-commons';
+import { badGateway, encryptPii, type AuthenticatedUser } from '@armman/service-commons';
 import { BeneficiaryService } from './beneficiary.service';
 import type { BeneficiaryRepository } from './beneficiary.repository';
 import type { CreateBeneficiaryInput } from './dto/create-beneficiary.dto';
@@ -17,6 +17,10 @@ import {
 import { resolveProjectNames } from '../projects/project.client';
 import { resolveRiskConditions } from '../risk-conditions/riskCondition.client';
 import { resolveLatestVisitVitals } from '../visits/visitVitals.client';
+import {
+  isStillbirthOutcome,
+  resolveDeliveryOutcomesBySlot,
+} from '../visits/deliveryOutcomes.client';
 
 jest.mock('../geography/geography.client');
 jest.mock('../lookups/lookup.client');
@@ -24,6 +28,7 @@ jest.mock('../sakhi/sakhi.client');
 jest.mock('../projects/project.client');
 jest.mock('../risk-conditions/riskCondition.client');
 jest.mock('../visits/visitVitals.client');
+jest.mock('../visits/deliveryOutcomes.client');
 
 describe('BeneficiaryService', () => {
   const originalEnv = { ...process.env };
@@ -60,6 +65,8 @@ describe('BeneficiaryService', () => {
   const resolveProjectNamesMock = jest.mocked(resolveProjectNames);
   const resolveRiskConditionsMock = jest.mocked(resolveRiskConditions);
   const resolveLatestVisitVitalsMock = jest.mocked(resolveLatestVisitVitals);
+  const resolveDeliveryOutcomesBySlotMock = jest.mocked(resolveDeliveryOutcomesBySlot);
+  const isStillbirthOutcomeMock = jest.mocked(isStillbirthOutcome);
 
   function caller(overrides: Partial<AuthenticatedUser> = {}): AuthenticatedUser {
     return {
@@ -137,6 +144,13 @@ describe('BeneficiaryService', () => {
     listSakhiNamesForSupervisorMock.mockResolvedValue(new Map());
     resolveRiskConditionsMock.mockResolvedValue(new Map());
     resolveLatestVisitVitalsMock.mockResolvedValue(null);
+    resolveDeliveryOutcomesBySlotMock.mockResolvedValue([]);
+    // jest.mock auto-mocks the whole module, so this pure helper needs its
+    // real logic restored too — beneficiary.service.ts calls it directly,
+    // not just resolveDeliveryOutcomesBySlot.
+    isStillbirthOutcomeMock.mockImplementation((outcome) =>
+      ['antepartum_still_birth_fresh', 'intrapartum_still_birth_macerated'].includes(outcome),
+    );
     service = new BeneficiaryService(repository);
   });
 
@@ -2292,6 +2306,188 @@ describe('BeneficiaryService', () => {
       const call = repository.createEnrollment.mock.calls[0][0];
       expect(call.childDetails?.linkedAncCase).toBe(true);
       expect(call.childDetails?.motherBeneficiaryId).toBe('77777777-7777-7777-7777-777777777777');
+    });
+  });
+
+  describe('create — stillbirth blocks a separate CHILD case (SRS §G.4)', () => {
+    const motherBeneficiaryId = '77777777-7777-7777-7777-777777777777';
+
+    function childDto(birthOrder: number): CreateBeneficiaryInput {
+      return {
+        ...baseChildInput,
+        case: { ...baseChildInput.case, motherBeneficiaryId },
+        childDetails: { dateOfBirth: new Date('2025-12-01'), birthOrder },
+      };
+    }
+
+    it('blocks creating a CHILD case for a slot whose own recorded outcome is a stillbirth', async () => {
+      resolveDeliveryOutcomesBySlotMock.mockResolvedValue([
+        { birthOrder: 1, outcome: 'antepartum_still_birth_fresh' },
+      ]);
+
+      await expect(service.create(childDto(1), CALLER_ID, AUTH_HEADER)).rejects.toMatchObject({
+        status: 422,
+        details: {
+          reason: 'CHILD_ALREADY_STILLBIRTH',
+          birthOrder: 1,
+          outcome: 'antepartum_still_birth_fresh',
+        },
+      });
+      expect(repository.createEnrollment).not.toHaveBeenCalled();
+    });
+
+    it('allows creating a CHILD case for a slot whose own recorded outcome is a live birth, even when a sibling slot was a stillbirth', async () => {
+      resolveDeliveryOutcomesBySlotMock.mockResolvedValue([
+        { birthOrder: 1, outcome: 'antepartum_still_birth_fresh' },
+        { birthOrder: 2, outcome: 'live_birth' },
+      ]);
+      repository.findDuplicateCandidate.mockResolvedValue(null);
+      repository.createEnrollment.mockImplementation((input) =>
+        Promise.resolve({ ...input } as never),
+      );
+
+      await expect(service.create(childDto(2), CALLER_ID, AUTH_HEADER)).resolves.toBeDefined();
+      expect(repository.createEnrollment).toHaveBeenCalled();
+    });
+
+    // The old count-based guard (existingChildCount >= liveBirthCount) was
+    // order-dependent: whichever twin's CHILD case was submitted FIRST
+    // always passed, regardless of which slot it was actually for — so a
+    // bogus/out-of-order request for the stillborn slot could wrongly
+    // consume the "count" and later block the real live twin's legitimate
+    // registration. The slot-based guard has no such dependency: this test
+    // registers the stillborn slot FIRST (as the old bug's trigger case
+    // required), then the live slot, and asserts the live slot is never
+    // blocked by having gone second.
+    it('is not order-dependent — creating the stillborn slot first does not block the live slot afterward', async () => {
+      resolveDeliveryOutcomesBySlotMock.mockResolvedValue([
+        { birthOrder: 1, outcome: 'antepartum_still_birth_fresh' },
+        { birthOrder: 2, outcome: 'live_birth' },
+      ]);
+
+      // Attempt (and expect rejection of) the stillborn slot first.
+      await expect(service.create(childDto(1), CALLER_ID, AUTH_HEADER)).rejects.toMatchObject({
+        status: 422,
+      });
+      expect(repository.createEnrollment).not.toHaveBeenCalled();
+
+      // The live slot's registration must still succeed afterward.
+      repository.findDuplicateCandidate.mockResolvedValue(null);
+      repository.createEnrollment.mockImplementation((input) =>
+        Promise.resolve({ ...input } as never),
+      );
+      await expect(service.create(childDto(2), CALLER_ID, AUTH_HEADER)).resolves.toBeDefined();
+      expect(repository.createEnrollment).toHaveBeenCalled();
+    });
+
+    it('never blocks a slot with no recorded outcome yet', async () => {
+      resolveDeliveryOutcomesBySlotMock.mockResolvedValue([]);
+      repository.findDuplicateCandidate.mockResolvedValue(null);
+      repository.createEnrollment.mockImplementation((input) =>
+        Promise.resolve({ ...input } as never),
+      );
+
+      await expect(service.create(childDto(1), CALLER_ID, AUTH_HEADER)).resolves.toBeDefined();
+      expect(repository.createEnrollment).toHaveBeenCalled();
+    });
+
+    // The standalone Child Registration screen ("registered mother" path —
+    // e.g. a child born before this app was in use, or outside any
+    // recorded delivery session) has no birthOrder field and submits
+    // motherBeneficiaryId without it. This must keep working for a mother
+    // whose delivery record has no stillbirth on it (or no delivery record
+    // at all) — birthOrder is only ever required once a stillbirth is
+    // actually on record for that mother, never merely because
+    // motherBeneficiaryId is present.
+    it('allows a mother-linked CHILD case with no birthOrder when that mother has no stillbirth on record', async () => {
+      resolveDeliveryOutcomesBySlotMock.mockResolvedValue([
+        { birthOrder: 1, outcome: 'live_birth' },
+      ]);
+      repository.findDuplicateCandidate.mockResolvedValue(null);
+      repository.createEnrollment.mockImplementation((input) =>
+        Promise.resolve({ ...input } as never),
+      );
+
+      const dto: CreateBeneficiaryInput = {
+        ...baseChildInput,
+        case: { ...baseChildInput.case, motherBeneficiaryId },
+        childDetails: { dateOfBirth: new Date('2025-12-01') },
+      };
+
+      await expect(service.create(dto, CALLER_ID, AUTH_HEADER)).resolves.toBeDefined();
+      expect(repository.createEnrollment).toHaveBeenCalled();
+    });
+
+    it('allows a mother-linked CHILD case with no birthOrder when that mother has no DELIVERY_VISIT submission at all', async () => {
+      resolveDeliveryOutcomesBySlotMock.mockResolvedValue([]);
+      repository.findDuplicateCandidate.mockResolvedValue(null);
+      repository.createEnrollment.mockImplementation((input) =>
+        Promise.resolve({ ...input } as never),
+      );
+
+      const dto: CreateBeneficiaryInput = {
+        ...baseChildInput,
+        case: { ...baseChildInput.case, motherBeneficiaryId },
+        childDetails: { dateOfBirth: new Date('2025-12-01') },
+      };
+
+      await expect(service.create(dto, CALLER_ID, AUTH_HEADER)).resolves.toBeDefined();
+      expect(repository.createEnrollment).toHaveBeenCalled();
+    });
+
+    it('blocks a mother-linked CHILD case with no birthOrder once that mother has a stillbirth on record', async () => {
+      resolveDeliveryOutcomesBySlotMock.mockResolvedValue([
+        { birthOrder: 1, outcome: 'antepartum_still_birth_fresh' },
+        { birthOrder: 2, outcome: 'live_birth' },
+      ]);
+
+      const dto: CreateBeneficiaryInput = {
+        ...baseChildInput,
+        case: { ...baseChildInput.case, motherBeneficiaryId },
+        childDetails: { dateOfBirth: new Date('2025-12-01') },
+      };
+
+      await expect(service.create(dto, CALLER_ID, AUTH_HEADER)).rejects.toMatchObject({
+        status: 422,
+      });
+      expect(repository.createEnrollment).not.toHaveBeenCalled();
+    });
+
+    it('does not call the delivery-outcomes check for a CHILD case with no motherBeneficiaryId', async () => {
+      repository.findDuplicateCandidate.mockResolvedValue(null);
+      repository.createEnrollment.mockImplementation((input) =>
+        Promise.resolve({ ...input } as never),
+      );
+
+      await service.create(baseChildInput, CALLER_ID, AUTH_HEADER);
+
+      expect(resolveDeliveryOutcomesBySlotMock).not.toHaveBeenCalled();
+    });
+
+    it('does not call the delivery-outcomes check for a MOTHER case', async () => {
+      repository.findDuplicateCandidate.mockResolvedValue(null);
+      repository.createEnrollment.mockImplementation((input) =>
+        Promise.resolve({ ...input } as never),
+      );
+
+      await service.create(baseMotherInput, CALLER_ID, AUTH_HEADER);
+
+      expect(resolveDeliveryOutcomesBySlotMock).not.toHaveBeenCalled();
+    });
+
+    // resolveDeliveryOutcomesBySlot throws badGateway (not a 422) when it
+    // can't reach visit-form-service — this must surface distinctly from a
+    // real CHILD_ALREADY_STILLBIRTH conflict so callers (and their logs)
+    // can tell "the check itself failed" apart from "a real slot conflict."
+    it('surfaces a distinct badGateway error, not a stillbirth conflict, when the delivery-outcomes check itself fails', async () => {
+      resolveDeliveryOutcomesBySlotMock.mockRejectedValue(
+        badGateway('Unable to verify delivery outcomes — visit-form-service is unreachable.'),
+      );
+
+      await expect(service.create(childDto(1), CALLER_ID, AUTH_HEADER)).rejects.toMatchObject({
+        status: 502,
+      });
+      expect(repository.createEnrollment).not.toHaveBeenCalled();
     });
   });
 

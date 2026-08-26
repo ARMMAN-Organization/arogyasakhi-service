@@ -22,6 +22,11 @@ export interface CreateChildBeneficiaryInput {
   sex?: 'MALE' | 'FEMALE' | 'INTERSEX_OTHER';
   birthWeightKg?: number;
   birthLengthCm?: number;
+  /** 1-based DELIVERY_VISIT child slot (child1/child2/child3) this child is
+   * from — required by beneficiary-service's createBeneficiarySchema
+   * whenever motherBeneficiaryId is set (see BeneficiaryService.create's
+   * stillbirth guard, which checks this specific slot's outcome). */
+  birthOrder: number;
 }
 
 /**
@@ -77,6 +82,7 @@ export async function createChildBeneficiary(
       sex: input.sex,
       birthWeightKg: input.birthWeightKg,
       birthLengthCm: input.birthLengthCm,
+      birthOrder: input.birthOrder,
     },
     consent: {
       status: 'GIVEN',
@@ -97,9 +103,16 @@ export async function createChildBeneficiary(
       body: JSON.stringify(body),
     });
     if (!res.ok) {
+      // 5xx/502 here is very likely beneficiary-service's stillbirth guard
+      // failing to reach visit-form-service (its own cross-service check),
+      // not a real validation rejection of this child — surface that
+      // distinction so on-call isn't left guessing which one occurred.
+      const isUpstreamDependencyFailure = res.status >= 500;
       console.warn(
         `Failed to auto-create child beneficiary for mother ${input.motherCase.id} ` +
-          `(beneficiary-service returned ${res.status}); the Delivery submission itself was still saved.`,
+          `(beneficiary-service returned ${res.status}` +
+          `${isUpstreamDependencyFailure ? ' — likely an upstream dependency failure, not a validation rejection' : ''}); ` +
+          `the Delivery submission itself was still saved.`,
       );
       return null;
     }
@@ -108,7 +121,8 @@ export async function createChildBeneficiary(
   } catch (err) {
     console.warn(
       `Unable to reach beneficiary-service to auto-create child beneficiary for mother ` +
-        `${input.motherCase.id}; the Delivery submission itself was still saved. ` +
+        `${input.motherCase.id} — network/connection failure, not a validation rejection; ` +
+        `the Delivery submission itself was still saved. ` +
         `${err instanceof Error ? err.message : String(err)}`,
     );
     return null;

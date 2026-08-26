@@ -171,6 +171,12 @@ const childDetailsSchema = z
     birthWeightKg: z.number().positive().max(10).optional(),
     birthLengthCm: z.number().positive().max(100).optional(),
     prematureFlag: z.boolean().optional(),
+    // 1-based DELIVERY_VISIT child slot (child1/child2/child3) this CHILD
+    // case corresponds to. Optional here — required only when
+    // case.motherBeneficiaryId is set (see createBeneficiarySchema's own
+    // superRefine below, where case is visible) — a standalone/independent
+    // Child Registration has no DELIVERY_VISIT to have a slot on.
+    birthOrder: z.number().int().positive().optional(),
   })
   .strict()
   .superRefine((data, ctx) => {
@@ -344,6 +350,16 @@ export const createBeneficiarySchema = z
           });
         }
       }
+
+      // birthOrder is NOT enforced here. Whether it's actually needed
+      // depends on whether this mother's DELIVERY_VISIT recorded a
+      // stillbirth at all — that requires a cross-service call
+      // (resolveDeliveryOutcomesBySlot), which a synchronous DTO refine
+      // can't make. BeneficiaryService.create() makes that call and only
+      // requires birthOrder once it has confirmed a stillbirth is on
+      // record for this mother; a mother with all live births (or no
+      // DELIVERY_VISIT at all) never requires it. See that method's own
+      // comment for the full reasoning.
     }
   });
 

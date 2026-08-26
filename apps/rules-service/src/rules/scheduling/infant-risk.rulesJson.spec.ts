@@ -226,13 +226,13 @@ describe('infantRiskRulesJson', () => {
     ).toBe(false);
   });
 
-  it('grades Hypothermia SEVERE below 96F and Hyperthermia SEVERE above 100F (documented default)', async () => {
+  it('grades Hypothermia MILD below 96F and Hyperthermia MILD above 100F (issue #191 confirmed)', async () => {
     const cold = await evaluateRulePack(infantRiskRulesJson, {
       ...NORMAL_VITALS_INFANT,
       child_temprature_in_f: 95,
     });
     const hypo = findCondition(cold, CONDITION_IDS.INFANT_HYPOTHERMIA);
-    expect(hypo.grade).toBe('SEVERE');
+    expect(hypo.grade).toBe('MILD');
     expect(hypo.isReferralTrigger).toBe(true);
     expect(hypo.isHrVisitTrigger).toBe(true);
 
@@ -241,7 +241,7 @@ describe('infantRiskRulesJson', () => {
       child_temprature_in_f: 101,
     });
     const hyper = findCondition(hot, CONDITION_IDS.INFANT_HYPERTHERMIA);
-    expect(hyper.grade).toBe('SEVERE');
+    expect(hyper.grade).toBe('MILD');
     expect(hyper.isReferralTrigger).toBe(true);
     expect(hyper.isHrVisitTrigger).toBe(true);
   });
@@ -266,7 +266,7 @@ describe('infantRiskRulesJson', () => {
         isFirstInstance: { INFANT_HYPOTHERMIA: false, INFANT_HYPERTHERMIA: false },
       });
       const hypo = findCondition(cold, CONDITION_IDS.INFANT_HYPOTHERMIA);
-      expect(hypo.grade).toBe('SEVERE');
+      expect(hypo.grade).toBe('MILD');
       expect(hypo.isReferralTrigger).toBe(true);
       expect(hypo.isHrVisitTrigger).toBe(false);
 
@@ -276,13 +276,13 @@ describe('infantRiskRulesJson', () => {
         isFirstInstance: { INFANT_HYPOTHERMIA: false, INFANT_HYPERTHERMIA: false },
       });
       const hyper = findCondition(hot, CONDITION_IDS.INFANT_HYPERTHERMIA);
-      expect(hyper.grade).toBe('SEVERE');
+      expect(hyper.grade).toBe('MILD');
       expect(hyper.isReferralTrigger).toBe(true);
       expect(hyper.isHrVisitTrigger).toBe(false);
     },
   );
 
-  it('grades Cord infection MILD from umbilical_cord_care, triggers referral but not HR visit (undocumented in source sheet)', async () => {
+  it('grades Cord infection MILD from umbilical_cord_care, triggers referral every instance', async () => {
     const result = await evaluateRulePack(infantRiskRulesJson, {
       ...NORMAL_VITALS_NEONATAL,
       umbilical_cord_care: 'redness_discharge_poor_condition',
@@ -291,8 +291,25 @@ describe('infantRiskRulesJson', () => {
     const cord = findCondition(result, CONDITION_IDS.CORD_INFECTION);
     expect(cord.grade).toBe('MILD');
     expect(cord.isReferralTrigger).toBe(true);
-    expect(cord.isHrVisitTrigger).toBe(false);
+    expect(cord.isHrVisitTrigger).toBe(true);
   });
+
+  it(
+    'gates Cord infection HR-visit trigger by first-instance (issue #191 confirmed single-instance), ' +
+      'same treatment as Hypothermia/Hyperthermia',
+    async () => {
+      const result = await evaluateRulePack(infantRiskRulesJson, {
+        ...NORMAL_VITALS_NEONATAL,
+        umbilical_cord_care: 'redness_discharge_poor_condition',
+        isFirstInstance: { CORD_INFECTION: false },
+      });
+
+      const cord = findCondition(result, CONDITION_IDS.CORD_INFECTION);
+      expect(cord.grade).toBe('MILD');
+      expect(cord.isReferralTrigger).toBe(true);
+      expect(cord.isHrVisitTrigger).toBe(false);
+    },
+  );
 
   it('grades Respiratory distress MILD for an abnormal rate, triggers referral but not HR visit', async () => {
     const lowRate = await evaluateRulePack(infantRiskRulesJson, {

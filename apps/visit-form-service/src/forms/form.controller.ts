@@ -85,5 +85,12 @@ export function createFormController(service: FormService) {
       );
       res.json(ok(vitals));
     }),
+
+    getDeliveryOutcomes: asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const { beneficiaryId } = req.params as unknown as { beneficiaryId: string };
+      const outcomes = await service.getDeliveryOutcomes(beneficiaryId);
+      res.json(ok(outcomes));
+    }),
   };
 }
