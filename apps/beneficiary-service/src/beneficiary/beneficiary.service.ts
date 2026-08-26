@@ -43,6 +43,10 @@ import {
 import { resolveProjectNames } from '../projects/project.client';
 import { resolveRiskConditions } from '../risk-conditions/riskCondition.client';
 import { resolveLatestVisitVitals } from '../visits/visitVitals.client';
+import {
+  isStillbirthOutcome,
+  resolveDeliveryOutcomesBySlot,
+} from '../visits/deliveryOutcomes.client';
 
 /**
  * Maps each socioDemographics *LookupId field to the lookup_categories
@@ -1155,6 +1159,41 @@ export class BeneficiaryService {
       throw unprocessable('Consent not received. Registration cannot proceed.');
     }
 
+    // SRS §G.4: a stillbirth "no child journey is initiated" — block a new
+    // CHILD case for a specific DELIVERY_VISIT child slot if that exact
+    // slot's own recorded outcome was a stillbirth. Slot-based (via
+    // childDetails.birthOrder, required by createBeneficiarySchema whenever
+    // motherBeneficiaryId is set), not count-based: the old
+    // `existingChildCount >= liveBirthCount` comparison was order-dependent
+    // — for a twin case (slot 1 stillbirth, slot 2 live birth), whichever
+    // slot's CHILD case was submitted FIRST always passed, so a bogus/
+    // out-of-order request for the stillborn slot could wrongly consume the
+    // count and block the real live twin's later, legitimate registration.
+    // Checking the caller's own claimed slot against that slot's actual
+    // outcome has no such ordering dependency.
+    if (dto.case.caseType === 'CHILD' && dto.case.motherBeneficiaryId) {
+      // Required by the schema whenever motherBeneficiaryId is set (see
+      // createBeneficiarySchema's superRefine) — a defensive fallback only,
+      // never expected to be hit in practice.
+      const birthOrder = dto.childDetails?.birthOrder;
+      if (!birthOrder) {
+        throw unprocessable('childDetails.birthOrder is required when motherBeneficiaryId is set.');
+      }
+
+      const outcomes = await resolveDeliveryOutcomesBySlot(
+        dto.case.motherBeneficiaryId,
+        authorizationHeader,
+      );
+      const slot = outcomes.find((entry) => entry.birthOrder === birthOrder);
+      if (slot && isStillbirthOutcome(slot.outcome)) {
+        throw unprocessable(
+          'This delivery slot was recorded as a stillbirth — a child record cannot be ' +
+            'created for it.',
+          { reason: 'CHILD_ALREADY_STILLBIRTH', birthOrder, outcome: slot.outcome },
+        );
+      }
+    }
+
     const fullName = dto.pii.fullName;
     const searchTokens = buildSearchTokens(dto, fullName);
 
@@ -1184,6 +1223,7 @@ export class BeneficiaryService {
           birthWeightKg: dto.childDetails.birthWeightKg ?? null,
           birthLengthCm: dto.childDetails.birthLengthCm ?? null,
           prematureFlag: dto.childDetails.prematureFlag ?? null,
+          birthOrder: dto.childDetails.birthOrder ?? null,
           linkedAncCase: Boolean(dto.case.motherBeneficiaryId),
         }
       : null;

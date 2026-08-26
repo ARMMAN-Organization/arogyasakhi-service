@@ -171,6 +171,12 @@ const childDetailsSchema = z
     birthWeightKg: z.number().positive().max(10).optional(),
     birthLengthCm: z.number().positive().max(100).optional(),
     prematureFlag: z.boolean().optional(),
+    // 1-based DELIVERY_VISIT child slot (child1/child2/child3) this CHILD
+    // case corresponds to. Optional here — required only when
+    // case.motherBeneficiaryId is set (see createBeneficiarySchema's own
+    // superRefine below, where case is visible) — a standalone/independent
+    // Child Registration has no DELIVERY_VISIT to have a slot on.
+    birthOrder: z.number().int().positive().optional(),
   })
   .strict()
   .superRefine((data, ctx) => {
@@ -343,6 +349,19 @@ export const createBeneficiarySchema = z
               : 'child is outside the 0-12 month (0-365 day) independent enrollment eligibility window',
           });
         }
+      }
+
+      // birthOrder identifies which DELIVERY_VISIT child slot this case is
+      // for (see BeneficiaryService.create's stillbirth guard) — only
+      // meaningful, and only required, when this CHILD case is linked to a
+      // mother who actually has a DELIVERY_VISIT submission to have slots
+      // on. A standalone/independent registration has no slot to name.
+      if (data.case.motherBeneficiaryId && data.childDetails && !data.childDetails.birthOrder) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['childDetails', 'birthOrder'],
+          message: 'childDetails.birthOrder is required when case.motherBeneficiaryId is set',
+        });
       }
     }
   });

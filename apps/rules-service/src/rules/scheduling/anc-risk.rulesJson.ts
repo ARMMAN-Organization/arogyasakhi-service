@@ -55,26 +55,30 @@
  *
  * Postpartum Hemorrhage (PPH) has no referral/HR-visit trigger rule defined
  * in the source sheet (blank cells in §D.4/§D.5) — this pack defaults both
- * trigger flags to `false` for PPH rather than guessing, and that gap
- * should be confirmed with ARMMAN before this pack governs a live PPH case
- * in production. The ANC_VISIT form also has no dedicated PPH field at all
- * (only the shared bleeding_from_vagina danger sign) — PPH is therefore
- * never actually graded from a real ANC_VISIT submission today; the input
- * exists here for forward-compatibility if a dedicated PPH field is added.
+ * trigger flags to `false` for PPH rather than guessing. Issue #191's
+ * answer says PPH should be treated under PP-phase danger-sign/bleeding
+ * logic, but the PPH risk_conditions row is currently seeded as an ANC
+ * condition (anc-risk-conditions.json), not a PP one, and no PP-phase RISK
+ * pack exists yet (see pp.rulesJson.ts's own note) — that ANC-vs-PP scoping
+ * mismatch needs resolving with ARMMAN before this pack's PPH handling is
+ * moved or changed. The ANC_VISIT form also has no dedicated PPH field at
+ * all (only the shared bleeding_from_vagina danger sign) — PPH is
+ * therefore never actually graded from a real ANC_VISIT submission today;
+ * the input exists here for forward-compatibility if a dedicated PPH field
+ * is added.
  *
  * Bad Obstetric History (below) grades only G>4/L<P/abortions>=2/prior
  * complications — Appendix D §1.3 also lists Pre-term delivery and LSCS
  * without spacing as BOH criteria, but neither is captured as a discrete
  * form field on MOTHER_REGISTRATION today, so this pack cannot evaluate
- * them; not implemented pending ARMMAN confirming the criteria and whether
- * new form fields are needed (issue #191).
+ * them; not implemented pending ARMMAN confirming whether new form fields
+ * are needed (issue #191).
  *
  * Sickle Cell is not read or graded by this pack at all. Appendix D's
- * Anemia table ties Sickle Cell Disease to the Moderate tier, but
- * MOTHER_REGISTRATION's own field treats SCD as Severe risk + referral —
- * an unresolved conflict between the two sources (issue #191). Sickle Cell
- * Trait has no stated grading impact anywhere. Not implemented until that
- * conflict and SCT's effect (if any) are confirmed.
+ * Anemia table ties Sickle Cell Disease to the Moderate tier (confirmed,
+ * issue #191) — not yet implemented since MOTHER_REGISTRATION has no
+ * sickle-cell field wired into this pack's input today. Sickle Cell
+ * Trait's effect on grading, if any, is unconfirmed.
  *
  * Age and Bad Obstetric History are captured once at MOTHER_REGISTRATION,
  * not on the recurring ANC_VISIT form — the caller (riskAssessment.service.ts
@@ -101,7 +105,7 @@ export const ancRiskRulesJson = {
       content: `
 const GRADE_RANK = { NORMAL: 0, MILD: 1, MODERATE: 2, SEVERE: 3 };
 
-const handler = (input) => {
+const handler = (input, { dayjs }) => {
   const { conditionIds, isFirstInstance } = input;
   if (!conditionIds || typeof conditionIds !== 'object') {
     throw new Error('conditionIds (conditionCode -> risk_condition_id map) is required.');
@@ -293,8 +297,9 @@ const handler = (input) => {
   });
 
   // --- Postpartum Hemorrhage (PPH). No field exists on ANC_VISIT today -
-  // this input is accepted for forward-compatibility only (see doc
-  // comment); never populated by a real ANC_VISIT submission. ---
+  // this input is accepted for forward-compatibility only (see doc comment
+  // on the ANC-vs-PP scoping question still open with ARMMAN); never
+  // populated by a real ANC_VISIT submission. ---
   const pphBleedingFlag = input.pphHeavyBleedingFlag;
   if (typeof pphBleedingFlag === 'boolean') {
     const pphGrade = pphBleedingFlag ? 'MILD' : 'NORMAL';
@@ -337,18 +342,37 @@ const handler = (input) => {
   }
 
   // --- Fundal Height (deviation from gestational-age expectation, every
-  // instance). fundal_height_in_cm is a raw measurement, not a
-  // pre-computed deviation - the deviation from expected-for-GA is not
-  // computable without a GA-to-expected-fundal-height reference table,
-  // which neither form nor this pack has; this input is accepted as a
-  // pre-computed deviation for forward-compatibility only. ---
-  const fundalHeightDeviationCm = input.fundalHeightDeviationCm;
-  if (typeof fundalHeightDeviationCm === 'number') {
+  // instance). Expected fundal height (cm) == GA in weeks, +/-2cm — no
+  // separate GA-to-expected-fundal-height table exists or is needed (issue
+  // #191, confirmed). GA is computed here as
+  // Floor((visitDate - lmpDate) / 7 days), matching SRS Category 4's own
+  // formula exactly (fundal_height_in_cm's own visibleWhen rule shows this
+  // field only once GA >= 20 weeks, but this pack grades whatever the form
+  // actually submitted rather than re-deriving that visibility gate). Both
+  // lmpDate (from resolveAncRiskRegistrationAnswers, MOTHER_REGISTRATION's
+  // own lmp_date) and visitDate (this submission's server-assigned
+  // submittedAt) must be present — a beneficiary with no registration
+  // submission yet simply skips this condition, same as Age/BOH above. ---
+  const fundalHeightCm = input.fundal_height_in_cm;
+  const lmpDate = input.lmpDate;
+  const visitDate = input.visitDate;
+  if (
+    typeof fundalHeightCm === 'number' &&
+    typeof lmpDate === 'string' &&
+    typeof visitDate === 'string'
+  ) {
+    const gestationalAgeWeeks = dayjs(visitDate).diff(dayjs(lmpDate), 'day') / 7;
+    const fundalHeightDeviationCm = fundalHeightCm - Math.floor(gestationalAgeWeeks);
     const grade = Math.abs(fundalHeightDeviationCm) > 2 ? 'MILD' : 'NORMAL';
-    record('FUNDAL_HEIGHT', grade, { fundalHeightDeviationCm }, {
-      referralTrigger: grade !== 'NORMAL',
-      hrVisitTrigger: grade !== 'NORMAL',
-    });
+    record(
+      'FUNDAL_HEIGHT',
+      grade,
+      { fundalHeightCm, gestationalAgeWeeks: Math.floor(gestationalAgeWeeks), fundalHeightDeviationCm },
+      {
+        referralTrigger: grade !== 'NORMAL',
+        hrVisitTrigger: grade !== 'NORMAL',
+      },
+    );
   }
 
   // --- Gestational Weight Gain (referral: only first instance; HR visit:

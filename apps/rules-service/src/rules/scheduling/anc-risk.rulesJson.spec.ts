@@ -243,15 +243,46 @@ describe('ancRiskRulesJson', () => {
     expect(findCondition(normal, CONDITION_IDS.FETAL_HEART_RATE).grade).toBe('NORMAL');
   });
 
-  it('grades Fundal Height deviation >2cm as MILD and triggers every instance (pre-computed deviation input)', async () => {
+  it('grades Fundal Height deviation >2cm as MILD, computed from GA (issue #191 confirmed formula)', async () => {
+    // GA at visitDate = Floor((2026-08-01 - 2026-01-01) / 7) = 30 weeks.
+    // fundal_height_in_cm 33 - GA 30 = 3cm deviation, > 2cm -> MILD.
     const result = await evaluateRulePack(ancRiskRulesJson, {
       ...NORMAL_VITALS,
-      fundalHeightDeviationCm: 3,
+      fundal_height_in_cm: 33,
+      lmpDate: '2026-01-01',
+      visitDate: '2026-08-01',
     });
 
     const fh = findCondition(result, CONDITION_IDS.FUNDAL_HEIGHT);
     expect(fh.grade).toBe('MILD');
     expect(fh.isReferralTrigger).toBe(true);
+    expect(fh.isHrVisitTrigger).toBe(true);
+  });
+
+  it('grades Fundal Height within 2cm of GA as NORMAL', async () => {
+    // GA at visitDate = 30 weeks; fundal_height_in_cm 31 - GA 30 = 1cm, <= 2cm -> NORMAL.
+    const result = await evaluateRulePack(ancRiskRulesJson, {
+      ...NORMAL_VITALS,
+      fundal_height_in_cm: 31,
+      lmpDate: '2026-01-01',
+      visitDate: '2026-08-01',
+    });
+
+    const fh = findCondition(result, CONDITION_IDS.FUNDAL_HEIGHT);
+    expect(fh.grade).toBe('NORMAL');
+    expect(fh.isReferralTrigger).toBe(false);
+  });
+
+  it('skips Fundal Height when lmpDate is missing (no MOTHER_REGISTRATION submission yet)', async () => {
+    const result = await evaluateRulePack(ancRiskRulesJson, {
+      ...NORMAL_VITALS,
+      fundal_height_in_cm: 33,
+      visitDate: '2026-08-01',
+    });
+
+    expect(result.conditions.some((c) => c.riskConditionId === CONDITION_IDS.FUNDAL_HEIGHT)).toBe(
+      false,
+    );
   });
 
   it('gates MUAC/BMI referral trigger by first-instance but always records the grade', async () => {

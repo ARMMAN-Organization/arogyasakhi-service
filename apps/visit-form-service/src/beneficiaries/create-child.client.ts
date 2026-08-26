@@ -22,6 +22,11 @@ export interface CreateChildBeneficiaryInput {
   sex?: 'MALE' | 'FEMALE' | 'INTERSEX_OTHER';
   birthWeightKg?: number;
   birthLengthCm?: number;
+  /** 1-based DELIVERY_VISIT child slot (child1/child2/child3) this child is
+   * from — required by beneficiary-service's createBeneficiarySchema
+   * whenever motherBeneficiaryId is set (see BeneficiaryService.create's
+   * stillbirth guard, which checks this specific slot's outcome). */
+  birthOrder: number;
 }
 
 /**
@@ -77,6 +82,7 @@ export async function createChildBeneficiary(
       sex: input.sex,
       birthWeightKg: input.birthWeightKg,
       birthLengthCm: input.birthLengthCm,
+      birthOrder: input.birthOrder,
     },
     consent: {
       status: 'GIVEN',

@@ -50,6 +50,29 @@ const vitalsSnapshotSchema = z.object({
   respiratoryRate: z.number().nullable(),
 });
 
+const deliveryOutcomeSchema = z.object({
+  birthOrder: z.number().int().positive().openapi({
+    example: 1,
+    description: '1-based child slot (child1/child2/child3) on the DELIVERY_VISIT form.',
+  }),
+  outcome: z.string().openapi({ example: 'live_birth' }),
+});
+
+const deliveryOutcomesSchema = z.object({
+  outcomes: z.array(deliveryOutcomeSchema).openapi({
+    example: [
+      { birthOrder: 1, outcome: 'live_birth' },
+      { birthOrder: 2, outcome: 'antepartum_still_birth_fresh' },
+    ],
+    description:
+      'One entry per child slot that has a delivery outcome recorded on this ' +
+      "mother's most recent DELIVERY_VISIT submission, each tagged with its own " +
+      'birthOrder — a missing/unanswered slot is simply absent, never shifts the ' +
+      'birthOrder of the slots after it. Empty if the mother has no DELIVERY_VISIT ' +
+      'submission yet.',
+  }),
+});
+
 // Request DTOs annotated with examples for Swagger UI; validation behavior is
 // unchanged (`.openapi()` only attaches documentation metadata).
 const createDraftVersionRequestSchema = createDraftVersionSchema.extend({
@@ -271,5 +294,34 @@ export function registerFormRoutes(doc: DocumentedRouter, service: FormService) 
     requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER'),
     validate(beneficiaryIdParamsSchema, 'params'),
     controller.getLatestVisitVitals,
+  );
+
+  doc.get(
+    '/beneficiaries/:beneficiaryId/delivery-outcomes',
+    {
+      summary:
+        "Per-slot delivery outcomes (child1/child2/child3) from this mother's most recent " +
+        'DELIVERY_VISIT submission, if any. Called by beneficiary-service before creating a ' +
+        'new CHILD case for this mother, to block creating a separate record for a child ' +
+        'already recorded as stillbirth (SRS §G.4: "no child journey is initiated"). ' +
+        'Service-to-service only — SAKHI is the caller identity beneficiary-service forwards, ' +
+        'not a Sakhi reading another beneficiary directly. Returns an empty array (not 404) ' +
+        'when the mother has no DELIVERY_VISIT submission yet.',
+      tags: ['Forms'],
+      params: beneficiaryIdParamsSchema,
+      responses: {
+        200: {
+          description: "The mother's latest DELIVERY_VISIT per-slot outcomes (or none)",
+          schema: envelope(deliveryOutcomesSchema),
+        },
+        400: errorResponse(400, { message: 'beneficiaryId: Invalid uuid' }),
+        401: errorResponse(401),
+        500: errorResponse(500),
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER'),
+    validate(beneficiaryIdParamsSchema, 'params'),
+    controller.getDeliveryOutcomes,
   );
 }

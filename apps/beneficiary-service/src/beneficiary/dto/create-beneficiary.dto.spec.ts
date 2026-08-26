@@ -507,7 +507,7 @@ describe('createBeneficiarySchema', () => {
         caseType: 'CHILD',
         motherBeneficiaryId: '66666666-6666-6666-6666-666666666666',
       },
-      childDetails: { dateOfBirth: dob.toISOString() },
+      childDetails: { dateOfBirth: dob.toISOString(), birthOrder: 1 },
       consent,
     });
     expect(result.success).toBe(true);
@@ -523,10 +523,36 @@ describe('createBeneficiarySchema', () => {
         caseType: 'CHILD',
         motherBeneficiaryId: '66666666-6666-6666-6666-666666666666',
       },
+      childDetails: { dateOfBirth: dob.toISOString(), birthOrder: 1 },
+      consent,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a mother-linked child with no childDetails.birthOrder (CH10)', () => {
+    const dob = new Date();
+    dob.setDate(dob.getDate() - 100);
+    const result = createBeneficiarySchema.safeParse({
+      pii: { ...basePii, fullName: 'Baby Doe', dateOfBirth: dob.toISOString() },
+      case: {
+        ...baseCase,
+        caseType: 'CHILD',
+        motherBeneficiaryId: '66666666-6666-6666-6666-666666666666',
+      },
       childDetails: { dateOfBirth: dob.toISOString() },
       consent,
     });
     expect(result.success).toBe(false);
+  });
+
+  it('accepts an independent (non-mother-linked) child with no birthOrder (CH11)', () => {
+    const result = createBeneficiarySchema.safeParse({
+      pii: { ...basePii, fullName: 'Baby Doe', dateOfBirth: '2025-12-01' },
+      case: { ...baseCase, caseType: 'CHILD' },
+      childDetails: { dateOfBirth: '2025-12-01' },
+      consent,
+    });
+    expect(result.success).toBe(true);
   });
 
   it('rejects a CHILD case where pii.dateOfBirth and childDetails.dateOfBirth differ (CH9)', () => {
