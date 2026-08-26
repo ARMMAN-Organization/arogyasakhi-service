@@ -135,6 +135,19 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
     target: appConfig.VISIT_FORM_SERVICE_URL,
     requiresAuth: true,
   },
+  // GET /beneficiaries/:beneficiaryId/delivery-outcomes — same ownership
+  // reasoning as latest-visit-vitals/visit-history above: owned by
+  // visit-form-service (it owns form_submissions), not beneficiary-service,
+  // which calls this same route server-to-server (via
+  // deliveryOutcomes.client.ts) as part of BeneficiaryService.create's
+  // stillbirth guard. This mount was missing entirely — never routed to
+  // any service — until it was traced live as the root cause of
+  // resolveDeliveryOutcomesBySlot always 404ing through the gateway.
+  {
+    prefix: '/beneficiaries/:beneficiaryId/delivery-outcomes',
+    target: appConfig.VISIT_FORM_SERVICE_URL,
+    requiresAuth: true,
+  },
   { prefix: '/beneficiaries', target: appConfig.BENEFICIARY_SERVICE_URL, requiresAuth: true },
   // UNCONFIRMED alias for GET /beneficiaries/risk-summary — see the route's
   // own doc comment in beneficiary.routes.ts for why this is a best guess.
