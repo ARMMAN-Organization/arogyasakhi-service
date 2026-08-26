@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { encryptPii, type AuthenticatedUser } from '@armman/service-commons';
+import { badGateway, encryptPii, type AuthenticatedUser } from '@armman/service-commons';
 import { BeneficiaryService } from './beneficiary.service';
 import type { BeneficiaryRepository } from './beneficiary.repository';
 import type { CreateBeneficiaryInput } from './dto/create-beneficiary.dto';
@@ -2473,6 +2473,21 @@ describe('BeneficiaryService', () => {
       await service.create(baseMotherInput, CALLER_ID, AUTH_HEADER);
 
       expect(resolveDeliveryOutcomesBySlotMock).not.toHaveBeenCalled();
+    });
+
+    // resolveDeliveryOutcomesBySlot throws badGateway (not a 422) when it
+    // can't reach visit-form-service — this must surface distinctly from a
+    // real CHILD_ALREADY_STILLBIRTH conflict so callers (and their logs)
+    // can tell "the check itself failed" apart from "a real slot conflict."
+    it('surfaces a distinct badGateway error, not a stillbirth conflict, when the delivery-outcomes check itself fails', async () => {
+      resolveDeliveryOutcomesBySlotMock.mockRejectedValue(
+        badGateway('Unable to verify delivery outcomes — visit-form-service is unreachable.'),
+      );
+
+      await expect(service.create(childDto(1), CALLER_ID, AUTH_HEADER)).rejects.toMatchObject({
+        status: 502,
+      });
+      expect(repository.createEnrollment).not.toHaveBeenCalled();
     });
   });
 

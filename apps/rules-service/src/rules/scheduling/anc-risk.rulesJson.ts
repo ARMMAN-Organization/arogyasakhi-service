@@ -352,14 +352,19 @@ const handler = (input, { dayjs }) => {
   // lmpDate (from resolveAncRiskRegistrationAnswers, MOTHER_REGISTRATION's
   // own lmp_date) and visitDate (this submission's server-assigned
   // submittedAt) must be present — a beneficiary with no registration
-  // submission yet simply skips this condition, same as Age/BOH above. ---
+  // submission yet simply skips this condition, same as Age/BOH above.
+  // visitDate is also required to fall on/after lmpDate: an LMP entered or
+  // corrected after this visit was recorded would otherwise produce a
+  // negative GA (Math.floor rounds it further negative) and an ungrounded
+  // deviation grade — skip rather than grade off a nonsensical GA. ---
   const fundalHeightCm = input.fundal_height_in_cm;
   const lmpDate = input.lmpDate;
   const visitDate = input.visitDate;
   if (
     typeof fundalHeightCm === 'number' &&
     typeof lmpDate === 'string' &&
-    typeof visitDate === 'string'
+    typeof visitDate === 'string' &&
+    !dayjs(visitDate).isBefore(dayjs(lmpDate))
   ) {
     const gestationalAgeWeeks = dayjs(visitDate).diff(dayjs(lmpDate), 'day') / 7;
     const fundalHeightDeviationCm = fundalHeightCm - Math.floor(gestationalAgeWeeks);

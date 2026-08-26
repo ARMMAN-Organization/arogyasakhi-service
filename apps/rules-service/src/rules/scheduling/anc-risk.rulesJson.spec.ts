@@ -285,6 +285,19 @@ describe('ancRiskRulesJson', () => {
     );
   });
 
+  it('skips Fundal Height when visitDate is before lmpDate (data-entry error / late LMP correction)', async () => {
+    const result = await evaluateRulePack(ancRiskRulesJson, {
+      ...NORMAL_VITALS,
+      fundal_height_in_cm: 33,
+      lmpDate: '2026-08-01',
+      visitDate: '2026-01-01',
+    });
+
+    expect(result.conditions.some((c) => c.riskConditionId === CONDITION_IDS.FUNDAL_HEIGHT)).toBe(
+      false,
+    );
+  });
+
   it('gates MUAC/BMI referral trigger by first-instance but always records the grade', async () => {
     const first = await evaluateRulePack(ancRiskRulesJson, {
       ...NORMAL_VITALS,
