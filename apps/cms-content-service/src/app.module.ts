@@ -3,19 +3,35 @@ import helmet from 'helmet';
 import { pinoHttp } from 'pino-http';
 import {
   buildLoggerOptions,
+  createSwaggerRouter,
   errorHandler,
   notFoundHandler,
   requestId,
 } from '@armman/service-commons';
 import { appConfig } from './config/app-config';
+import type { PrismaService } from './prisma/prisma.service';
 import { createHealthRouter } from './health/health.controller';
 import { createInfoRouter } from './info/info.controller';
+import { createLearnMoreModule } from './learn-more/learnMore.module';
+import { buildCmsContentServiceOpenApiDocument } from './docs/openapi';
 
 // Re-export shared HTTP helpers so feature routers can import from a single place.
-export { asyncHandler, ok, fail, validateBody, requireRoles, HttpError, ErrorCode } from '@armman/service-commons';
+export {
+  asyncHandler,
+  ok,
+  fail,
+  validate,
+  validateBody,
+  requireRoles,
+  trustGatewayIdentity,
+  createDocumentedRouter,
+  HttpError,
+  ErrorCode,
+  type DocumentedRouter,
+} from '@armman/service-commons';
 
 /** Builds and wires the Express application (replaces NestFactory + AppModule). */
-export function createApp(): Application {
+export function createApp(prisma: PrismaService): Application {
   const app = express();
 
   app.use(pinoHttp(buildLoggerOptions(appConfig.LOG_LEVEL)));
@@ -35,10 +51,17 @@ export function createApp(): Application {
   });
   app.use(requestId);
 
+  const learnMoreModule = createLearnMoreModule(prisma);
+
   // All routes live under the global `api/v1` prefix.
   const api = express.Router();
-  api.use(createHealthRouter());
+  api.use(createHealthRouter(prisma));
   api.use(createInfoRouter());
+  // Built from every feature module's registry — every route registered via
+  // createDocumentedRouter() above is already in the spec, so this can never
+  // drift from what's actually mounted.
+  api.use(createSwaggerRouter(buildCmsContentServiceOpenApiDocument(learnMoreModule.registry)));
+  api.use(learnMoreModule.router);
   app.use('/api/v1', api);
 
   app.use(notFoundHandler);

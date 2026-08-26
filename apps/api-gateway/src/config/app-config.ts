@@ -54,6 +54,7 @@ const schema = z.object({
   SYNC_SERVICE_URL: url('http://localhost:3010'),
   MEDIA_SERVICE_URL: url('http://localhost:3011'),
   AUDIT_SERVICE_URL: url('http://localhost:3013'),
+  CMS_CONTENT_SERVICE_URL: url('http://localhost:3014'),
   SUPERVISOR_OPERATIONS_SERVICE_URL: url('http://localhost:3016'),
 });
 

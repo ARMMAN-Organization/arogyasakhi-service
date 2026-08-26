@@ -237,6 +237,9 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
   { prefix: '/sync', target: appConfig.SYNC_SERVICE_URL, requiresAuth: true },
   { prefix: '/media', target: appConfig.MEDIA_SERVICE_URL, requiresAuth: true },
   { prefix: '/audit', target: appConfig.AUDIT_SERVICE_URL, requiresAuth: true },
+  // SRS FR-S-13.1-13.4 "Learn More" knowledge base — currently the "Content
+  // coming soon" placeholder shell (see cms-content-service's own comments).
+  { prefix: '/learn-more', target: appConfig.CMS_CONTENT_SERVICE_URL, requiresAuth: true },
   // supervisor-operations-service owns six sibling prefixes (events,
   // Training sessions under /gatherings, training topics, inventory
   // items/transactions, call logs). Each enforces its own role guard
