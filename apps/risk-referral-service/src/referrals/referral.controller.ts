@@ -336,6 +336,10 @@ export function createReferralRouter(service: ReferralService) {
         400: { description: 'Validation error', schema: apiErrorSchema },
         401: { description: 'Unauthenticated', schema: apiErrorSchema },
         403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+        409: {
+          description: 'A referral already exists for this visit',
+          schema: apiErrorSchema,
+        },
       },
     },
     trustGatewayIdentity,

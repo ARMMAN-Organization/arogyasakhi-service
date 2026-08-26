@@ -13,6 +13,7 @@ import { BeneficiaryClient } from './beneficiary.client';
 import { listSakhiIdsForSupervisor } from './sakhi.client';
 import { resolveReferralTypeLookupId } from './lookup.client';
 import { IncentiveClient } from './incentive.client';
+import { isUniqueConstraintViolation } from './referral.prisma-errors';
 
 /** Referral domain logic. Data access is delegated to the repository. */
 export class ReferralService {
@@ -26,8 +27,21 @@ export class ReferralService {
     return this.repository.findMany();
   }
 
-  create(dto: CreateReferralInput) {
-    return this.repository.create(dto);
+  /**
+   * Creates a referral. `visitId` is protected by the `visit_referral_once`
+   * unique index (schema.prisma) — at most one referral per visit, referrals
+   * with no visitId are unrestricted. A collision surfaces here as a clean
+   * 409, not the raw Prisma unique-constraint error the DB throws.
+   */
+  async create(dto: CreateReferralInput) {
+    try {
+      return await this.repository.create(dto);
+    } catch (err) {
+      if (isUniqueConstraintViolation(err, 'visit_referral_once')) {
+        throw conflict('A referral already exists for this visit.');
+      }
+      throw err;
+    }
   }
 
   /**

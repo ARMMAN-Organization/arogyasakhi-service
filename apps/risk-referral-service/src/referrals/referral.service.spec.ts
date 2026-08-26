@@ -81,6 +81,51 @@ describe('ReferralService', () => {
     service = new ReferralService(repository, beneficiaryClient);
   });
 
+  describe('create', () => {
+    function dto(overrides: Partial<CreateReferralInput> = {}): CreateReferralInput {
+      return {
+        beneficiaryId: '22222222-2222-2222-2222-222222222222',
+        referralTypeLookupValueId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        referralDate: new Date('2026-08-25'),
+        status: 'INITIATED',
+        supervisorApprovalStatus: 'NOT_REQUIRED',
+        ...overrides,
+      };
+    }
+
+    it('creates and returns the referral when there is no visitId collision', async () => {
+      const created = referral();
+      repository.create.mockResolvedValue(created as never);
+
+      await expect(service.create(dto())).resolves.toBe(created);
+    });
+
+    it('rejects with 409 when a second referral is created for a visitId that already has one', async () => {
+      repository.create.mockRejectedValue({
+        code: 'P2002',
+        meta: { target: ['visit_referral_once'] },
+      });
+
+      await expect(
+        service.create(dto({ visitId: '33333333-3333-3333-3333-333333333333' })),
+      ).rejects.toMatchObject({ status: 409 });
+    });
+
+    it('rethrows a non-unique-constraint error unchanged', async () => {
+      const dbError = new Error('connection reset');
+      repository.create.mockRejectedValue(dbError);
+
+      await expect(service.create(dto())).rejects.toBe(dbError);
+    });
+
+    it('rethrows a P2002 on a different unique constraint unchanged, not as a 409', async () => {
+      const otherViolation = { code: 'P2002', meta: { target: ['some_other_unique_index'] } };
+      repository.create.mockRejectedValue(otherViolation);
+
+      await expect(service.create(dto())).rejects.toBe(otherViolation);
+    });
+  });
+
   describe('decide', () => {
     it('LAPSE: marks a PENDING_FOLLOWUP referral as LAPSED', async () => {
       const pending = referral();
