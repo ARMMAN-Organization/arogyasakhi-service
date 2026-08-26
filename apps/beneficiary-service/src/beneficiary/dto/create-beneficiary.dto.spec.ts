@@ -507,7 +507,7 @@ describe('createBeneficiarySchema', () => {
         caseType: 'CHILD',
         motherBeneficiaryId: '66666666-6666-6666-6666-666666666666',
       },
-      childDetails: { dateOfBirth: dob.toISOString(), birthOrder: 1 },
+      childDetails: { dateOfBirth: dob.toISOString() },
       consent,
     });
     expect(result.success).toBe(true);
@@ -523,13 +523,19 @@ describe('createBeneficiarySchema', () => {
         caseType: 'CHILD',
         motherBeneficiaryId: '66666666-6666-6666-6666-666666666666',
       },
-      childDetails: { dateOfBirth: dob.toISOString(), birthOrder: 1 },
+      childDetails: { dateOfBirth: dob.toISOString() },
       consent,
     });
     expect(result.success).toBe(false);
   });
 
-  it('rejects a mother-linked child with no childDetails.birthOrder (CH10)', () => {
+  // birthOrder is intentionally NOT required by this schema even when
+  // motherBeneficiaryId is set — whether it's actually needed depends on
+  // whether that mother has a stillbirth on record, which only
+  // BeneficiaryService.create() can determine (cross-service call). See
+  // that method's own guard for the real enforcement point (CH12-style
+  // service-level tests live in beneficiary.service.spec.ts).
+  it('accepts a mother-linked child with no childDetails.birthOrder (CH10)', () => {
     const dob = new Date();
     dob.setDate(dob.getDate() - 100);
     const result = createBeneficiarySchema.safeParse({
@@ -542,7 +548,7 @@ describe('createBeneficiarySchema', () => {
       childDetails: { dateOfBirth: dob.toISOString() },
       consent,
     });
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
   });
 
   it('accepts an independent (non-mother-linked) child with no birthOrder (CH11)', () => {

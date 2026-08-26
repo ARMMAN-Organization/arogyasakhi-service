@@ -351,18 +351,15 @@ export const createBeneficiarySchema = z
         }
       }
 
-      // birthOrder identifies which DELIVERY_VISIT child slot this case is
-      // for (see BeneficiaryService.create's stillbirth guard) — only
-      // meaningful, and only required, when this CHILD case is linked to a
-      // mother who actually has a DELIVERY_VISIT submission to have slots
-      // on. A standalone/independent registration has no slot to name.
-      if (data.case.motherBeneficiaryId && data.childDetails && !data.childDetails.birthOrder) {
-        ctx.addIssue({
-          code: 'custom',
-          path: ['childDetails', 'birthOrder'],
-          message: 'childDetails.birthOrder is required when case.motherBeneficiaryId is set',
-        });
-      }
+      // birthOrder is NOT enforced here. Whether it's actually needed
+      // depends on whether this mother's DELIVERY_VISIT recorded a
+      // stillbirth at all — that requires a cross-service call
+      // (resolveDeliveryOutcomesBySlot), which a synchronous DTO refine
+      // can't make. BeneficiaryService.create() makes that call and only
+      // requires birthOrder once it has confirmed a stillbirth is on
+      // record for this mother; a mother with all live births (or no
+      // DELIVERY_VISIT at all) never requires it. See that method's own
+      // comment for the full reasoning.
     }
   });
 

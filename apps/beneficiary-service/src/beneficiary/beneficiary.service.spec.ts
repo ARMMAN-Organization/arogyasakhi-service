@@ -2300,7 +2300,6 @@ describe('BeneficiaryService', () => {
           ...baseChildInput.case,
           motherBeneficiaryId: '77777777-7777-7777-7777-777777777777',
         },
-        childDetails: { dateOfBirth: new Date('2025-12-01'), birthOrder: 1 },
       };
       await service.create(dto, CALLER_ID, AUTH_HEADER);
 
@@ -2390,6 +2389,68 @@ describe('BeneficiaryService', () => {
 
       await expect(service.create(childDto(1), CALLER_ID, AUTH_HEADER)).resolves.toBeDefined();
       expect(repository.createEnrollment).toHaveBeenCalled();
+    });
+
+    // The standalone Child Registration screen ("registered mother" path —
+    // e.g. a child born before this app was in use, or outside any
+    // recorded delivery session) has no birthOrder field and submits
+    // motherBeneficiaryId without it. This must keep working for a mother
+    // whose delivery record has no stillbirth on it (or no delivery record
+    // at all) — birthOrder is only ever required once a stillbirth is
+    // actually on record for that mother, never merely because
+    // motherBeneficiaryId is present.
+    it('allows a mother-linked CHILD case with no birthOrder when that mother has no stillbirth on record', async () => {
+      resolveDeliveryOutcomesBySlotMock.mockResolvedValue([
+        { birthOrder: 1, outcome: 'live_birth' },
+      ]);
+      repository.findDuplicateCandidate.mockResolvedValue(null);
+      repository.createEnrollment.mockImplementation((input) =>
+        Promise.resolve({ ...input } as never),
+      );
+
+      const dto: CreateBeneficiaryInput = {
+        ...baseChildInput,
+        case: { ...baseChildInput.case, motherBeneficiaryId },
+        childDetails: { dateOfBirth: new Date('2025-12-01') },
+      };
+
+      await expect(service.create(dto, CALLER_ID, AUTH_HEADER)).resolves.toBeDefined();
+      expect(repository.createEnrollment).toHaveBeenCalled();
+    });
+
+    it('allows a mother-linked CHILD case with no birthOrder when that mother has no DELIVERY_VISIT submission at all', async () => {
+      resolveDeliveryOutcomesBySlotMock.mockResolvedValue([]);
+      repository.findDuplicateCandidate.mockResolvedValue(null);
+      repository.createEnrollment.mockImplementation((input) =>
+        Promise.resolve({ ...input } as never),
+      );
+
+      const dto: CreateBeneficiaryInput = {
+        ...baseChildInput,
+        case: { ...baseChildInput.case, motherBeneficiaryId },
+        childDetails: { dateOfBirth: new Date('2025-12-01') },
+      };
+
+      await expect(service.create(dto, CALLER_ID, AUTH_HEADER)).resolves.toBeDefined();
+      expect(repository.createEnrollment).toHaveBeenCalled();
+    });
+
+    it('blocks a mother-linked CHILD case with no birthOrder once that mother has a stillbirth on record', async () => {
+      resolveDeliveryOutcomesBySlotMock.mockResolvedValue([
+        { birthOrder: 1, outcome: 'antepartum_still_birth_fresh' },
+        { birthOrder: 2, outcome: 'live_birth' },
+      ]);
+
+      const dto: CreateBeneficiaryInput = {
+        ...baseChildInput,
+        case: { ...baseChildInput.case, motherBeneficiaryId },
+        childDetails: { dateOfBirth: new Date('2025-12-01') },
+      };
+
+      await expect(service.create(dto, CALLER_ID, AUTH_HEADER)).rejects.toMatchObject({
+        status: 422,
+      });
+      expect(repository.createEnrollment).not.toHaveBeenCalled();
     });
 
     it('does not call the delivery-outcomes check for a CHILD case with no motherBeneficiaryId', async () => {
