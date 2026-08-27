@@ -27,7 +27,11 @@ const createReferralFollowupRequestSchema = z.object({
   notVisitedReason: z.string().optional().openapi({ example: 'Facility closed' }),
   treatmentGiven: z.string().optional(),
   outcome: z.string().optional(),
-  casePaperMediaId: z.string().uuid().optional(),
+  mediaAssetIds: z
+    .array(z.string().uuid())
+    .max(10)
+    .optional()
+    .openapi({ example: ['11111111-1111-1111-1111-111111111111'] }),
 });
 
 const apiErrorSchema = z.object({
@@ -54,6 +58,7 @@ const referralFollowupResultSchema = z.object({
       'CANCELLED',
     ]),
   }),
+  mediaAssetIds: z.array(z.string().uuid()),
 });
 
 function envelope<T extends z.ZodTypeAny>(data: T) {
@@ -71,7 +76,9 @@ export function createReferralFollowupRouter(service: ReferralFollowupService) {
         "Submit a referral's follow-up outcome (SRS FR-S-6.3) — did the beneficiary visit " +
         'the facility? true completes the referral; false records it INCOMPLETE and leaves ' +
         'the referral PENDING_FOLLOWUP for Supervisor decision via the existing ' +
-        'PATCH/POST /referrals/:id/decision.',
+        'PATCH/POST /referrals/:id/decision. Accepts up to 10 mediaAssetIds (case paper, ' +
+        'discharge summary, health facility photo, Sakhi-beneficiary photo, investigation ' +
+        "reports) already finalized against media-service with this follow-up's real id.",
       tags: ['Referrals'],
       params: referralIdParamsSchema,
       // zod-to-openapi cannot introspect createReferralFollowupSchema's
@@ -86,6 +93,10 @@ export function createReferralFollowupRouter(service: ReferralFollowupService) {
         403: { description: "Referral is outside this Sakhi's own roster", schema: apiErrorSchema },
         404: { description: 'Referral not found', schema: apiErrorSchema },
         409: { description: 'Referral is not in PENDING_FOLLOWUP status', schema: apiErrorSchema },
+        422: {
+          description: 'One or more mediaAssetIds do not exist or are not viewable by this caller',
+          schema: apiErrorSchema,
+        },
       },
     },
     trustGatewayIdentity,

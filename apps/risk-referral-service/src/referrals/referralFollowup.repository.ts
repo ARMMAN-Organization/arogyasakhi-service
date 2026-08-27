@@ -15,7 +15,7 @@ export class ReferralFollowupRepository {
     referralId: string,
     followupStatus: 'COMPLETED' | 'INCOMPLETE',
     referralStatus: 'COMPLETED' | 'PENDING_FOLLOWUP',
-    data: CreateReferralFollowupInput,
+    data: Omit<CreateReferralFollowupInput, 'mediaAssetIds'>,
     createdByUserId: string,
   ) {
     return this.prisma.$transaction(async (tx) => {

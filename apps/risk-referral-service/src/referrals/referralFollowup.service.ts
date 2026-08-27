@@ -1,7 +1,14 @@
-import { conflict, forbidden, notFound, type AuthenticatedUser } from '@armman/service-commons';
+import {
+  conflict,
+  forbidden,
+  notFound,
+  unprocessable,
+  type AuthenticatedUser,
+} from '@armman/service-commons';
 import type { ReferralFollowupRepository } from './referralFollowup.repository';
 import type { ReferralRepository } from './referral.repository';
 import type { BeneficiaryClient } from './beneficiary.client';
+import { mediaAssetExists } from './mediaAsset.client';
 import type { CreateReferralFollowupInput } from './dto/create-referral-followup.dto';
 
 /**
@@ -47,9 +54,24 @@ export class ReferralFollowupService {
       throw conflict(`Cannot submit a follow-up for a referral with status ${referral.status}.`);
     }
 
+    for (const mediaAssetId of dto.mediaAssetIds) {
+      const exists = await mediaAssetExists(mediaAssetId, authorizationHeader);
+      if (!exists) {
+        throw unprocessable(`mediaAssetIds: "${mediaAssetId}" does not exist or is not viewable.`);
+      }
+    }
+
     const followupStatus = dto.visitedFacilityFlag ? 'COMPLETED' : 'INCOMPLETE';
     const referralStatus = dto.visitedFacilityFlag ? 'COMPLETED' : 'PENDING_FOLLOWUP';
 
-    return this.repository.create(referralId, followupStatus, referralStatus, dto, caller.id);
+    const { mediaAssetIds, ...followupFields } = dto;
+    const result = await this.repository.create(
+      referralId,
+      followupStatus,
+      referralStatus,
+      followupFields,
+      caller.id,
+    );
+    return { ...result, mediaAssetIds };
   }
 }
