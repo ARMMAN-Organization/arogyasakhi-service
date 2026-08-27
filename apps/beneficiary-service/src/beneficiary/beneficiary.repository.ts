@@ -338,6 +338,8 @@ export class BeneficiaryRepository {
         everAtRiskFlag: isEverAtRisk,
         currentReferralTriggerFlag: data.isReferralTrigger,
         currentHrVisitTriggerFlag: data.isHrVisitTrigger,
+        isFirstInstance: data.isFirstInstance,
+        consecutiveNoImprovementCount: data.consecutiveNoImprovementCount,
         sourceRuleVersionId: data.ruleVersionId,
       },
       update: {
@@ -361,6 +363,11 @@ export class BeneficiaryRepository {
           : {}),
         currentReferralTriggerFlag: data.isReferralTrigger,
         currentHrVisitTriggerFlag: data.isHrVisitTrigger,
+        // Always-latest, same as currentReferralTriggerFlag/
+        // currentHrVisitTriggerFlag above — not part of the everHighest
+        // "only move toward more severe" rollup.
+        isFirstInstance: data.isFirstInstance,
+        consecutiveNoImprovementCount: data.consecutiveNoImprovementCount,
         sourceRuleVersionId: data.ruleVersionId,
       },
     });
@@ -793,6 +800,53 @@ export class BeneficiaryRepository {
       villageId: c.pii.villageId,
       padaId: c.pii.padaId,
       latestGrade: worstByBeneficiary.get(c.id)?.grade ?? null,
+    }));
+  }
+
+  /**
+   * Batch risk-condition-summary lookup for `GET /beneficiaries/risk-condition-summary`
+   * — same two-query, no-per-id-looping shape as findByIdsWithRisk above.
+   * `beneficiaryIds` is intersected with `scoping` in the WHERE clause, so an
+   * out-of-scope or nonexistent id is silently absent from the result, never
+   * a 403/404 (same reasoning as findByIdsWithRisk's own doc comment — never
+   * let a caller-supplied id list reveal via an error whether an
+   * out-of-scope id exists). A beneficiary with zero
+   * BeneficiaryRiskConditionSummary rows still appears in the result with an
+   * empty `riskConditionSummaries` array, not omitted.
+   */
+  async findRiskConditionSummariesByBeneficiaryIds(
+    beneficiaryIds: string[],
+    scoping: { sakhiId?: string; sakhiIds?: string[] },
+  ) {
+    if (beneficiaryIds.length === 0) return [];
+
+    const cases = await this.prisma.beneficiaryCase.findMany({
+      where: {
+        id: { in: beneficiaryIds },
+        isDeleted: false,
+        ...(scoping.sakhiId ? { sakhiId: scoping.sakhiId } : {}),
+        ...(scoping.sakhiIds ? { sakhiId: { in: scoping.sakhiIds } } : {}),
+      },
+      select: { id: true },
+    });
+    if (cases.length === 0) return [];
+
+    const summaries = await this.prisma.beneficiaryRiskConditionSummary.findMany({
+      where: { beneficiaryId: { in: cases.map((c) => c.id) } },
+    });
+    const summariesByBeneficiary = new Map<string, typeof summaries>();
+    for (const summary of summaries) {
+      const existing = summariesByBeneficiary.get(summary.beneficiaryId);
+      if (existing) {
+        existing.push(summary);
+      } else {
+        summariesByBeneficiary.set(summary.beneficiaryId, [summary]);
+      }
+    }
+
+    return cases.map((c) => ({
+      beneficiaryId: c.id,
+      riskConditionSummaries: summariesByBeneficiary.get(c.id) ?? [],
     }));
   }
 }

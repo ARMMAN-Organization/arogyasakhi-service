@@ -11,6 +11,7 @@ import {
 } from './dto/summary-query.dto';
 import type { idsQuerySchema } from './dto/ids-query.dto';
 import { parseIdsParam, type byIdsWithRiskQuerySchema } from './dto/by-ids-with-risk-query.dto';
+import type { batchRiskConditionSummaryQuerySchema } from './dto/batch-risk-condition-summary-query.dto';
 
 /**
  * Beneficiary request handlers. Mounted under the global `api/v1` prefix
@@ -52,6 +53,19 @@ export function createBeneficiaryController(service: BeneficiaryService) {
       const ids = parseIdsParam(query.ids);
       res.json(
         ok(await service.getByIdsWithRisk(ids, query.search, req.user, authorizationHeader)),
+      );
+    }),
+
+    getRiskConditionSummaryBatch: asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const query = req.query as unknown as z.infer<typeof batchRiskConditionSummaryQuerySchema>;
+      const beneficiaryIds = parseIdsParam(query.beneficiaryIds);
+      res.json(
+        ok(
+          await service.getRiskConditionSummaryBatch(beneficiaryIds, req.user, authorizationHeader),
+        ),
       );
     }),
 

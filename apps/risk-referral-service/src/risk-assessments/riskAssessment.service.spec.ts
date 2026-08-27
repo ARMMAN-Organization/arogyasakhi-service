@@ -441,6 +441,174 @@ describe('RiskAssessmentService', () => {
     });
   });
 
+  describe('isFirstInstance / consecutiveNoImprovementCount pushed to beneficiary-service', () => {
+    beforeEach(() => {
+      repository.findBySubmissionId.mockResolvedValue(null);
+      repository.create.mockResolvedValue({ id: 'assessment-1' } as never);
+    });
+
+    it('pushes isFirstInstance: true for a condition never flagged before', async () => {
+      repository.findConditionIdsByPhase.mockResolvedValue(new Map([['ANEMIA', 'cond-1']]));
+      repository.findEverFlaggedConditionCodes.mockResolvedValue(new Set());
+      repository.findPhasesByConditionIds.mockResolvedValue(new Map([['cond-1', 'ANC']]));
+      evaluateRuleSetMock.mockResolvedValue({
+        ruleVersionId: 'rule-version-1',
+        overallRiskCategory: 'MEDIUM',
+        conditions: [
+          {
+            riskConditionId: 'cond-1',
+            grade: 'MODERATE',
+            gradeRank: 2,
+            isReferralTrigger: false,
+            isEducationTrigger: false,
+            isHrVisitTrigger: false,
+            observedValueJson: null,
+          },
+        ],
+      });
+
+      await service.create(dto, caller(), AUTH_HEADER);
+
+      expect(pushRiskConditionSummaryMock).toHaveBeenCalledWith(
+        dto.beneficiaryId,
+        expect.objectContaining({ riskConditionId: 'cond-1', isFirstInstance: true }),
+        AUTH_HEADER,
+      );
+    });
+
+    it('pushes isFirstInstance: false for a condition already flagged before', async () => {
+      repository.findConditionIdsByPhase.mockResolvedValue(new Map([['ANEMIA', 'cond-1']]));
+      repository.findEverFlaggedConditionCodes.mockResolvedValue(new Set(['ANEMIA']));
+      repository.findPhasesByConditionIds.mockResolvedValue(new Map([['cond-1', 'ANC']]));
+      evaluateRuleSetMock.mockResolvedValue({
+        ruleVersionId: 'rule-version-1',
+        overallRiskCategory: 'MEDIUM',
+        conditions: [
+          {
+            riskConditionId: 'cond-1',
+            grade: 'MODERATE',
+            gradeRank: 2,
+            isReferralTrigger: false,
+            isEducationTrigger: false,
+            isHrVisitTrigger: false,
+            observedValueJson: null,
+          },
+        ],
+      });
+
+      await service.create(dto, caller(), AUTH_HEADER);
+
+      expect(pushRiskConditionSummaryMock).toHaveBeenCalledWith(
+        dto.beneficiaryId,
+        expect.objectContaining({ riskConditionId: 'cond-1', isFirstInstance: false }),
+        AUTH_HEADER,
+      );
+    });
+
+    it.each([['NN' as const], ['INC' as const], ['CCV' as const]])(
+      'pushes the resolved consecutiveNoImprovementCount for the %s phase',
+      async (riskPhase) => {
+        repository.findConditionIdsByPhase.mockResolvedValue(
+          new Map([['WASTING', 'cond-wasting']]),
+        );
+        repository.findEverFlaggedConditionCodes.mockResolvedValue(new Set());
+        repository.findConsecutiveNoImprovementCount.mockResolvedValue(new Map([['WASTING', 3]]));
+        repository.findPhasesByConditionIds.mockResolvedValue(
+          new Map([['cond-wasting', riskPhase]]),
+        );
+        evaluateRuleSetMock.mockResolvedValue({
+          ruleVersionId: 'rule-version-1',
+          overallRiskCategory: 'MEDIUM',
+          conditions: [
+            {
+              riskConditionId: 'cond-wasting',
+              grade: 'MODERATE',
+              gradeRank: 2,
+              isReferralTrigger: false,
+              isEducationTrigger: false,
+              isHrVisitTrigger: false,
+              observedValueJson: null,
+            },
+          ],
+        });
+
+        await service.create({ ...dto, riskPhase }, caller(), AUTH_HEADER);
+
+        expect(pushRiskConditionSummaryMock).toHaveBeenCalledWith(
+          dto.beneficiaryId,
+          expect.objectContaining({
+            riskConditionId: 'cond-wasting',
+            consecutiveNoImprovementCount: 3,
+          }),
+          AUTH_HEADER,
+        );
+      },
+    );
+
+    it('pushes consecutiveNoImprovementCount: null for a non-tracked phase (ANC)', async () => {
+      repository.findConditionIdsByPhase.mockResolvedValue(new Map([['ANEMIA', 'cond-1']]));
+      repository.findEverFlaggedConditionCodes.mockResolvedValue(new Set());
+      repository.findPhasesByConditionIds.mockResolvedValue(new Map([['cond-1', 'ANC']]));
+      evaluateRuleSetMock.mockResolvedValue({
+        ruleVersionId: 'rule-version-1',
+        overallRiskCategory: 'MEDIUM',
+        conditions: [
+          {
+            riskConditionId: 'cond-1',
+            grade: 'MODERATE',
+            gradeRank: 2,
+            isReferralTrigger: false,
+            isEducationTrigger: false,
+            isHrVisitTrigger: false,
+            observedValueJson: null,
+          },
+        ],
+      });
+
+      await service.create({ ...dto, riskPhase: 'ANC' }, caller(), AUTH_HEADER);
+
+      expect(pushRiskConditionSummaryMock).toHaveBeenCalledWith(
+        dto.beneficiaryId,
+        expect.objectContaining({
+          riskConditionId: 'cond-1',
+          consecutiveNoImprovementCount: null,
+        }),
+        AUTH_HEADER,
+      );
+    });
+
+    it('still returns the persisted assessment (no rollback) when the push payload computation runs alongside a beneficiary-service failure', async () => {
+      repository.findConditionIdsByPhase.mockResolvedValue(new Map([['ANEMIA', 'cond-1']]));
+      repository.findEverFlaggedConditionCodes.mockResolvedValue(new Set());
+      repository.findPhasesByConditionIds.mockResolvedValue(new Map([['cond-1', 'ANC']]));
+      evaluateRuleSetMock.mockResolvedValue({
+        ruleVersionId: 'rule-version-1',
+        overallRiskCategory: 'MEDIUM',
+        conditions: [
+          {
+            riskConditionId: 'cond-1',
+            grade: 'MODERATE',
+            gradeRank: 2,
+            isReferralTrigger: false,
+            isEducationTrigger: false,
+            isHrVisitTrigger: false,
+            observedValueJson: null,
+          },
+        ],
+      });
+      const assessment = { id: 'assessment-1' };
+      repository.create.mockResolvedValue(assessment as never);
+      pushRiskConditionSummaryMock.mockResolvedValue({ ok: false, error: 'network blip' });
+
+      await expect(service.create(dto, caller(), AUTH_HEADER)).resolves.toBe(assessment);
+      expect(pushRiskConditionSummaryMock).toHaveBeenCalledWith(
+        dto.beneficiaryId,
+        expect.objectContaining({ isFirstInstance: true, consecutiveNoImprovementCount: null }),
+        AUTH_HEADER,
+      );
+    });
+  });
+
   it('propagates rules-service evaluation failures (e.g. 422 no published version)', async () => {
     repository.findBySubmissionId.mockResolvedValue(null);
     const evalError = { status: 422, message: 'No published rule pack version found.' };

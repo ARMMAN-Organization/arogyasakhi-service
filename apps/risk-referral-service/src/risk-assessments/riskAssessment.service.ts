@@ -129,6 +129,11 @@ export class RiskAssessmentService {
       conditionCodes.map((code) => [code, !everFlaggedCodes.has(code)]),
     );
     const consecutiveNoImprovementCount = Object.fromEntries(consecutiveNoImprovementByCode);
+    // Reverse of conditionIdsByCode — the push loop below only has each
+    // condition's riskConditionId (from evaluation.conditions), but
+    // isFirstInstance/consecutiveNoImprovementByCode above are keyed by
+    // conditionCode (what the rule pack itself understands).
+    const conditionCodeById = new Map([...conditionIdsByCode].map(([code, id]) => [id, code]));
 
     const evaluation = await evaluateRuleSet(
       dto.ruleSetId,
@@ -193,6 +198,7 @@ export class RiskAssessmentService {
         );
         continue;
       }
+      const conditionCode = conditionCodeById.get(condition.riskConditionId);
       const result = await pushRiskConditionSummary(
         dto.beneficiaryId,
         {
@@ -207,6 +213,15 @@ export class RiskAssessmentService {
           isReferralTrigger: condition.isReferralTrigger,
           isHrVisitTrigger: condition.isHrVisitTrigger,
           ruleVersionId: evaluation.ruleVersionId,
+          // conditionCode is always resolvable here (evaluation.conditions'
+          // riskConditionIds all originate from conditionIdsByCode, which
+          // conditionCodeById is the exact reverse of) — the `?? true`/`?? null`
+          // fallbacks exist only to satisfy the type checker, not because this
+          // path is expected to be hit.
+          isFirstInstance: conditionCode ? isFirstInstance[conditionCode] : true,
+          consecutiveNoImprovementCount: conditionCode
+            ? (consecutiveNoImprovementCount[conditionCode] ?? null)
+            : null,
         },
         authorizationHeader,
       );
