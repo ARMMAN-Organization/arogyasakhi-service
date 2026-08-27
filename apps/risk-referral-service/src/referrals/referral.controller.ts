@@ -329,7 +329,9 @@ export function createReferralRouter(service: ReferralService) {
   doc.post(
     '/referrals',
     {
-      summary: 'Create a referral',
+      summary:
+        'Create a referral. validTill is server-computed as referralDate + 7 days and cannot ' +
+        'be set by the caller.',
       tags: ['Referrals'],
       responses: {
         201: { description: 'Referral created', schema: envelope(referralSchema) },

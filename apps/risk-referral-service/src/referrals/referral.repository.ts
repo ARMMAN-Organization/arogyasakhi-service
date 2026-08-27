@@ -49,7 +49,12 @@ export class ReferralRepository {
     });
   }
 
-  create(data: CreateReferralInput) {
+  /**
+   * `validTill` is not part of CreateReferralInput (the request DTO) — it's
+   * server-computed by ReferralService.create() and passed in here
+   * separately, never caller-supplied.
+   */
+  create(data: CreateReferralInput & { validTill: Date }) {
     return this.prisma.referral.create({ data });
   }
 

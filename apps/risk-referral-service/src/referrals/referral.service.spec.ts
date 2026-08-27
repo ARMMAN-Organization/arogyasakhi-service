@@ -100,6 +100,20 @@ describe('ReferralService', () => {
       await expect(service.create(dto())).resolves.toBe(created);
     });
 
+    it('computes validTill as referralDate + 7 days, ignoring any caller-supplied value', async () => {
+      repository.create.mockImplementation(((data: Record<string, unknown>) =>
+        Promise.resolve(referral(data))) as never);
+
+      const result = await service.create(
+        dto({ referralDate: new Date('2026-08-01T00:00:00.000Z') }),
+      );
+
+      expect(result.validTill).toEqual(new Date('2026-08-08T00:00:00.000Z'));
+      expect(repository.create).toHaveBeenCalledWith(
+        expect.objectContaining({ validTill: new Date('2026-08-08T00:00:00.000Z') }),
+      );
+    });
+
     it('rejects with 409 when a second referral is created for a visitId that already has one', async () => {
       repository.create.mockRejectedValue({
         code: 'P2002',
@@ -469,52 +483,6 @@ describe('ReferralService', () => {
     ];
     repository.findMany.mockResolvedValue(rows);
     await expect(service.list()).resolves.toBe(rows);
-  });
-
-  it('creates via repository with the given data', async () => {
-    const dto: CreateReferralInput = {
-      beneficiaryId: '22222222-2222-2222-2222-222222222222',
-      referralTypeLookupValueId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
-      referralDate: new Date('2026-07-01'),
-      status: 'INITIATED',
-      supervisorApprovalStatus: 'NOT_REQUIRED',
-    };
-    const created = {
-      id: '11111111-1111-1111-1111-111111111111',
-      beneficiaryId: dto.beneficiaryId,
-      visitId: null,
-      sourceSubmissionId: null,
-      referralTypeLookupValueId: dto.referralTypeLookupValueId,
-      referralDate: dto.referralDate,
-      triggerConditionListJson: null,
-      facilityType: null,
-      facilityName: null,
-      photoEvidenceMediaAssetId: null,
-      status: dto.status,
-      validTill: null,
-      supervisorApprovalStatus: dto.supervisorApprovalStatus,
-      createdAt: new Date(),
-      createdByUserId: null,
-      updatedAt: new Date(),
-      updatedByUserId: null,
-      isDeleted: false,
-      deletedAt: null,
-    };
-    repository.create.mockResolvedValue(created);
-    await expect(service.create(dto)).resolves.toBe(created);
-    expect(repository.create).toHaveBeenCalledWith(dto);
-  });
-
-  it('propagates repository errors on create', async () => {
-    repository.create.mockRejectedValue(new Error('db down'));
-    const dto: CreateReferralInput = {
-      beneficiaryId: '22222222-2222-2222-2222-222222222222',
-      referralTypeLookupValueId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
-      referralDate: new Date('2026-07-01'),
-      status: 'INITIATED',
-      supervisorApprovalStatus: 'NOT_REQUIRED',
-    };
-    await expect(service.create(dto)).rejects.toThrow('db down');
   });
 
   describe('getDecisionStatusByIds', () => {

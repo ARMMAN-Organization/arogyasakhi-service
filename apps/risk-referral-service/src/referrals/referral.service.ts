@@ -1,3 +1,4 @@
+import { addDays } from '@armman/core';
 import {
   badGateway,
   conflict,
@@ -28,14 +29,20 @@ export class ReferralService {
   }
 
   /**
-   * Creates a referral. `visitId` is protected by the `visit_referral_once`
-   * unique index (schema.prisma) — at most one referral per visit, referrals
-   * with no visitId are unrestricted. A collision surfaces here as a clean
-   * 409, not the raw Prisma unique-constraint error the DB throws.
+   * Creates a referral. `validTill` is always computed as `referralDate + 7
+   * days` (SRS FR-S-6.2's 7-day follow-up window) — never caller-supplied,
+   * so the app can't skew it via clock drift/offline queueing (Bharath's
+   * referral-lifecycle request, 2026-08-27, item #195).
+   *
+   * `visitId` is protected by the `visit_referral_once` unique index
+   * (schema.prisma) — at most one referral per visit, referrals with no
+   * visitId are unrestricted. A collision surfaces here as a clean 409, not
+   * the raw Prisma unique-constraint error the DB throws.
    */
   async create(dto: CreateReferralInput) {
+    const validTill = addDays(dto.referralDate, 7);
     try {
-      return await this.repository.create(dto);
+      return await this.repository.create({ ...dto, validTill });
     } catch (err) {
       if (isUniqueConstraintViolation(err, 'visit_referral_once')) {
         throw conflict('A referral already exists for this visit.');
