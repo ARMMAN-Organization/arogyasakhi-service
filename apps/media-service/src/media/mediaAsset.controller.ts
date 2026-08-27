@@ -65,8 +65,9 @@ function toFinalizeResponse(asset: MediaAsset) {
  */
 export function createMediaAssetController(service: MediaAssetService) {
   return {
-    list: asyncHandler(async (_req, res) => {
-      res.json(ok((await service.list()).map(toResponse)));
+    list: asyncHandler(async (req, res) => {
+      const { followupId } = req.query as { followupId?: string };
+      res.json(ok((await service.list(followupId ? { followupId } : undefined)).map(toResponse)));
     }),
 
     getById: asyncHandler(async (req, res, next) => {

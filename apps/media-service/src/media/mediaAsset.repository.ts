@@ -10,8 +10,22 @@ import type { Prisma } from '../../../../node_modules/.prisma/client-media-servi
 export class MediaAssetRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  findMany() {
-    return this.prisma.mediaAsset.findMany({ orderBy: { createdAt: 'desc' }, take: 50 });
+  /**
+   * `filters.followupId` narrows to one referral follow-up's evidence media
+   * (case paper, discharge summary, facility photo, etc.) — omitted, this
+   * is the unfiltered "50 most recent" list. Also excludes soft-deleted
+   * assets (a fix bundled here — the unfiltered list previously did not
+   * apply this filter at all).
+   */
+  findMany(filters?: { followupId?: string }) {
+    return this.prisma.mediaAsset.findMany({
+      where: {
+        isDeleted: false,
+        ...(filters?.followupId ? { followupId: filters.followupId } : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
   }
 
   findById(id: string) {

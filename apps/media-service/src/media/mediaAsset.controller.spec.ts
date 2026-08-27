@@ -73,11 +73,41 @@ describe('createMediaAssetController', () => {
     const controller = createMediaAssetController(service);
     const { json, res } = mockRes();
 
-    await controller.list({} as Request, res, jest.fn());
+    await controller.list({ query: {} } as unknown as Request, res, jest.fn());
 
     const [{ data }] = json.mock.calls[0];
     expect(data[0].checksum).toBe('bf48f6236dae5154c342cf06397b396e');
     expect(typeof data[0].checksum).toBe('string');
+  });
+
+  it('passes followupId through to service.list when given as a query param', async () => {
+    const service = {
+      list: jest.fn().mockResolvedValue([]),
+    } as unknown as jest.Mocked<MediaAssetService>;
+    const controller = createMediaAssetController(service);
+    const { res } = mockRes();
+
+    await controller.list(
+      { query: { followupId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' } } as unknown as Request,
+      res,
+      jest.fn(),
+    );
+
+    expect(service.list).toHaveBeenCalledWith({
+      followupId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+    });
+  });
+
+  it('calls service.list with undefined when followupId is not given', async () => {
+    const service = {
+      list: jest.fn().mockResolvedValue([]),
+    } as unknown as jest.Mocked<MediaAssetService>;
+    const controller = createMediaAssetController(service);
+    const { res } = mockRes();
+
+    await controller.list({ query: {} } as unknown as Request, res, jest.fn());
+
+    expect(service.list).toHaveBeenCalledWith(undefined);
   });
 
   it('returns only viewUrl + uploadedByName on getById (GET /media/:id) — no id/mimeType/other metadata, forwarding the caller and bearer token', async () => {
