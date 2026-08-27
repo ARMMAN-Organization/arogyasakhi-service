@@ -53,6 +53,7 @@ describe('ReferralService', () => {
     findMany: jest.fn(),
     findById: jest.fn(),
     findManyByIds: jest.fn(),
+    findByVisitId: jest.fn(),
     findFollowupSummary: jest.fn(),
     create: jest.fn(),
     updateStatus: jest.fn(),
@@ -93,11 +94,14 @@ describe('ReferralService', () => {
       };
     }
 
-    it('creates and returns the referral when there is no visitId collision', async () => {
+    it('creates and returns the referral (alreadyExisted: false) when there is no visitId collision', async () => {
       const created = referral();
       repository.create.mockResolvedValue(created as never);
 
-      await expect(service.create(dto())).resolves.toBe(created);
+      await expect(service.create(dto())).resolves.toEqual({
+        referral: created,
+        alreadyExisted: false,
+      });
     });
 
     it('computes validTill as referralDate + 7 days, ignoring any caller-supplied value', async () => {
@@ -108,21 +112,36 @@ describe('ReferralService', () => {
         dto({ referralDate: new Date('2026-08-01T00:00:00.000Z') }),
       );
 
-      expect(result.validTill).toEqual(new Date('2026-08-08T00:00:00.000Z'));
+      expect(result.referral.validTill).toEqual(new Date('2026-08-08T00:00:00.000Z'));
       expect(repository.create).toHaveBeenCalledWith(
         expect.objectContaining({ validTill: new Date('2026-08-08T00:00:00.000Z') }),
       );
     });
 
-    it('rejects with 409 when a second referral is created for a visitId that already has one', async () => {
+    it('returns the existing referral (alreadyExisted: true) instead of throwing, on a visitId collision', async () => {
+      const collidingVisitId = '33333333-3333-3333-3333-333333333333';
+      const existing = referral({ visitId: collidingVisitId });
       repository.create.mockRejectedValue({
         code: 'P2002',
         meta: { target: ['visit_referral_once'] },
       });
+      repository.findByVisitId.mockResolvedValue(existing as never);
+
+      const result = await service.create(dto({ visitId: collidingVisitId }));
+
+      expect(result).toEqual({ referral: existing, alreadyExisted: true });
+    });
+
+    it('throws badGateway if the collision lookup itself finds nothing (race: row gone between insert-fail and re-read)', async () => {
+      repository.create.mockRejectedValue({
+        code: 'P2002',
+        meta: { target: ['visit_referral_once'] },
+      });
+      repository.findByVisitId.mockResolvedValue(null);
 
       await expect(
-        service.create(dto({ visitId: '33333333-3333-3333-3333-333333333333' })),
-      ).rejects.toMatchObject({ status: 409 });
+        service.create(dto({ visitId: '44444444-4444-4444-4444-444444444444' })),
+      ).rejects.toMatchObject({ status: 502 });
     });
 
     it('rethrows a non-unique-constraint error unchanged', async () => {

@@ -331,15 +331,21 @@ export function createReferralRouter(service: ReferralService) {
     {
       summary:
         'Create a referral. validTill is server-computed as referralDate + 7 days and cannot ' +
-        'be set by the caller.',
+        'be set by the caller. Idempotent on visitId: a second create for a visit that ' +
+        'already has a referral returns the existing one (200) instead of erroring — the ' +
+        'app is offline-first and a dropped-connection retry is a legitimate case.',
       tags: ['Referrals'],
       responses: {
+        200: {
+          description: 'An identical referral already existed for this visit — returned as-is',
+          schema: envelope(referralSchema),
+        },
         201: { description: 'Referral created', schema: envelope(referralSchema) },
         400: { description: 'Validation error', schema: apiErrorSchema },
         401: { description: 'Unauthenticated', schema: apiErrorSchema },
         403: { description: 'Caller role not permitted', schema: apiErrorSchema },
-        409: {
-          description: 'A referral already exists for this visit',
+        502: {
+          description: 'A visit collision occurred but the existing referral could not be resolved',
           schema: apiErrorSchema,
         },
       },
@@ -348,8 +354,8 @@ export function createReferralRouter(service: ReferralService) {
     requireRoles('SAKHI'),
     validateBody(createReferralRequestSchema),
     asyncHandler(async (req, res) => {
-      const created = await service.create(req.body);
-      res.status(201).json(ok(created));
+      const { referral, alreadyExisted } = await service.create(req.body);
+      res.status(alreadyExisted ? 200 : 201).json(ok(referral));
     }),
   );
 

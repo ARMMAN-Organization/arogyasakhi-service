@@ -14,6 +14,16 @@ export class ReferralRepository {
   }
 
   /**
+   * The existing referral for a visitId, if any — used by create()'s
+   * idempotent-return-existing path after a visit_referral_once collision.
+   * Only ever called with a non-null visitId (visitId: null referrals are
+   * unrestricted by that constraint, so a collision can't happen for them).
+   */
+  findByVisitId(visitId: string) {
+    return this.prisma.referral.findFirst({ where: { visitId, isDeleted: false } });
+  }
+
+  /**
    * Incomplete-followup count and the most recent followup's own
    * notVisitedReason/outcome for one referral — for Quick Response's
    * REFERRAL_INCOMPLETE card enrichment ("# referrals missed", "reason").

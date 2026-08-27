@@ -7,6 +7,7 @@ import {
   unprocessable,
   type AuthenticatedUser,
 } from '@armman/service-commons';
+import type { Referral } from '../../../../node_modules/.prisma/client-risk-referral-service';
 import type { ReferralRepository } from './referral.repository';
 import type { CreateReferralInput } from './dto/create-referral.dto';
 import type { DecideReferralInput } from './dto/decide-referral.dto';
@@ -29,25 +30,35 @@ export class ReferralService {
   }
 
   /**
-   * Creates a referral. `validTill` is always computed as `referralDate + 7
-   * days` (SRS FR-S-6.2's 7-day follow-up window) — never caller-supplied,
-   * so the app can't skew it via clock drift/offline queueing (Bharath's
-   * referral-lifecycle request, 2026-08-27, item #195).
+   * Creates a referral, or returns the existing one for this visitId if a
+   * second create is attempted for the same visit — the app is offline-
+   * first and retries a dropped-connection create, so this must be
+   * idempotent rather than erroring on a legitimate retry (Bharath's
+   * referral-lifecycle request, 2026-08-27, item #197).
+   *
+   * `validTill` is always computed as `referralDate + 7 days` (SRS
+   * FR-S-6.2's 7-day follow-up window) — never caller-supplied, so the app
+   * can't skew it via clock drift/offline queueing (same request, item
+   * #195).
    *
    * `visitId` is protected by the `visit_referral_once` unique index
    * (schema.prisma) — at most one referral per visit, referrals with no
-   * visitId are unrestricted. A collision surfaces here as a clean 409, not
-   * the raw Prisma unique-constraint error the DB throws.
+   * visitId are unrestricted.
    */
-  async create(dto: CreateReferralInput) {
+  async create(dto: CreateReferralInput): Promise<{ referral: Referral; alreadyExisted: boolean }> {
     const validTill = addDays(dto.referralDate, 7);
     try {
-      return await this.repository.create({ ...dto, validTill });
+      const referral = await this.repository.create({ ...dto, validTill });
+      return { referral, alreadyExisted: false };
     } catch (err) {
-      if (isUniqueConstraintViolation(err, 'visit_referral_once')) {
-        throw conflict('A referral already exists for this visit.');
+      if (!isUniqueConstraintViolation(err, 'visit_referral_once')) throw err;
+      const existing = dto.visitId ? await this.repository.findByVisitId(dto.visitId) : null;
+      if (!existing) {
+        throw badGateway(
+          'A referral for this visit could not be created, and the existing one could not be found.',
+        );
       }
-      throw err;
+      return { referral: existing, alreadyExisted: true };
     }
   }
 
