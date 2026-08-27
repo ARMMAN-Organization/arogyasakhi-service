@@ -11,6 +11,7 @@ export const createReferralFollowupSchema = z
     visitedFacilityFlag: z.boolean(),
     followupDate: z.coerce.date(),
     notVisitedReason: z.string().trim().min(1).max(255).optional(),
+    diagnosis: z.string().trim().min(1).optional(),
     treatmentGiven: z.string().trim().min(1).optional(),
     outcome: z.string().trim().min(1).max(255).optional(),
     // Media evidence — case paper, discharge summary, facility photo,

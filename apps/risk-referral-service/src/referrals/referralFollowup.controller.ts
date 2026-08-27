@@ -25,6 +25,7 @@ const createReferralFollowupRequestSchema = z.object({
   visitedFacilityFlag: z.boolean().openapi({ example: true }),
   followupDate: z.coerce.date().openapi({ example: '2026-08-27' }),
   notVisitedReason: z.string().optional().openapi({ example: 'Facility closed' }),
+  diagnosis: z.string().optional(),
   treatmentGiven: z.string().optional(),
   outcome: z.string().optional(),
   mediaAssetIds: z

@@ -110,6 +110,30 @@ describe('ReferralFollowupService', () => {
     );
   });
 
+  it('passes diagnosis through to the repository when provided', async () => {
+    referralRepository.findById.mockResolvedValue(referral() as never);
+    beneficiaryClient.getById.mockResolvedValue({ id: 'ben-1', sakhiId: SAKHI_ID });
+    followupRepository.create.mockResolvedValue({
+      followup: { id: 'fu-1' },
+      referral: referral({ status: 'COMPLETED' }),
+    } as never);
+
+    await service.create(
+      'ref-1',
+      dto({ visitedFacilityFlag: true, diagnosis: 'yyy' }),
+      caller(),
+      AUTH_HEADER,
+    );
+
+    expect(followupRepository.create).toHaveBeenCalledWith(
+      'ref-1',
+      'COMPLETED',
+      'COMPLETED',
+      expect.objectContaining({ diagnosis: 'yyy' }),
+      SAKHI_ID,
+    );
+  });
+
   it('marks INCOMPLETE and leaves the referral PENDING_FOLLOWUP when visitedFacilityFlag is false', async () => {
     referralRepository.findById.mockResolvedValue(referral() as never);
     beneficiaryClient.getById.mockResolvedValue({ id: 'ben-1', sakhiId: SAKHI_ID });
