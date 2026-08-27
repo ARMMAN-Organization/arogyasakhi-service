@@ -181,4 +181,29 @@ export class ReferralRepository {
     });
     return result.count > 0;
   }
+
+  /**
+   * Converts a referral's type (Standard -> Accompanied) — only updates a
+   * row still at `fromReferralTypeLookupValueId` and still PENDING_FOLLOWUP,
+   * same updateMany-as-concurrency-guard pattern as updateStatus: a 0
+   * affected-count means the referral was already converted/decided between
+   * the caller's read and this call, and the service turns that into a 409
+   * rather than silently overwriting a since-changed referral.
+   */
+  async updateType(
+    id: string,
+    fromReferralTypeLookupValueId: string,
+    toReferralTypeLookupValueId: string,
+  ): Promise<boolean> {
+    const result = await this.prisma.referral.updateMany({
+      where: {
+        id,
+        isDeleted: false,
+        status: 'PENDING_FOLLOWUP',
+        referralTypeLookupValueId: fromReferralTypeLookupValueId,
+      },
+      data: { referralTypeLookupValueId: toReferralTypeLookupValueId },
+    });
+    return result.count > 0;
+  }
 }
