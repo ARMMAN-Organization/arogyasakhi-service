@@ -51,7 +51,7 @@ export class ReferralService {
       const referral = await this.repository.create({ ...dto, validTill });
       return { referral, alreadyExisted: false };
     } catch (err) {
-      if (!isUniqueConstraintViolation(err, 'visit_referral_once')) throw err;
+      if (!isUniqueConstraintViolation(err, 'visit_id')) throw err;
       const existing = dto.visitId ? await this.repository.findByVisitId(dto.visitId) : null;
       if (!existing) {
         throw badGateway(

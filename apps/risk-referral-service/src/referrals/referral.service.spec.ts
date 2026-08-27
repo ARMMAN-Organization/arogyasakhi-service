@@ -123,7 +123,7 @@ describe('ReferralService', () => {
       const existing = referral({ visitId: collidingVisitId });
       repository.create.mockRejectedValue({
         code: 'P2002',
-        meta: { target: ['visit_referral_once'] },
+        meta: { target: ['visit_id'] },
       });
       repository.findByVisitId.mockResolvedValue(existing as never);
 
@@ -135,7 +135,7 @@ describe('ReferralService', () => {
     it('throws badGateway if the collision lookup itself finds nothing (race: row gone between insert-fail and re-read)', async () => {
       repository.create.mockRejectedValue({
         code: 'P2002',
-        meta: { target: ['visit_referral_once'] },
+        meta: { target: ['visit_id'] },
       });
       repository.findByVisitId.mockResolvedValue(null);
 
@@ -152,7 +152,7 @@ describe('ReferralService', () => {
     });
 
     it('rethrows a P2002 on a different unique constraint unchanged, not as a 409', async () => {
-      const otherViolation = { code: 'P2002', meta: { target: ['some_other_unique_index'] } };
+      const otherViolation = { code: 'P2002', meta: { target: ['some_other_column'] } };
       repository.create.mockRejectedValue(otherViolation);
 
       await expect(service.create(dto())).rejects.toBe(otherViolation);
