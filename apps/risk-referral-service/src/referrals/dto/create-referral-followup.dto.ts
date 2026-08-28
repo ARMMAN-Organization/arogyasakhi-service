@@ -15,13 +15,25 @@ export const createReferralFollowupSchema = z
     treatmentGiven: z.string().trim().min(1).optional(),
     outcome: z.string().trim().min(1).max(255).optional(),
     // Media evidence — case paper, discharge summary, facility photo,
-    // Sakhi-beneficiary photo, investigation reports — is uploaded to
-    // media-service directly (POST /media/upload-url then POST /media,
-    // tagged with this follow-up's real id and the correct assetType per
-    // asset) BEFORE this call; this field only lists the resulting ids so
-    // ReferralFollowupService can confirm each one actually exists and is
-    // viewable by this caller (mediaAssetExists) before accepting the
-    // follow-up as evidenced. Capped at 10 — a sane bound, not an SRS number.
+    // Sakhi-beneficiary photo, investigation reports — is finalized against
+    // media-service (POST /media/upload-url then POST /media) AFTER this
+    // call succeeds, since ReferralFollowup.id is server-generated inside
+    // this endpoint's own transaction and cannot be known beforehand (PR
+    // #199 review — a prior version of this comment incorrectly said
+    // "before this call", which is impossible: a client has no real id to
+    // tag media with until this response comes back). mediaAssetIds here is
+    // therefore only useful on a SECOND call after evidence has already been
+    // finalized with the real followupId — e.g. a client that submits the
+    // follow-up first with an empty list, then calls this again is not
+    // supported today (this repository.create only ever creates a new
+    // ReferralFollowup, it cannot attach media to an existing one). For now
+    // this field exists so ReferralFollowupService can confirm any ids
+    // already submitted actually exist and are viewable (mediaAssetExists)
+    // before accepting the follow-up as evidenced; the realistic near-term
+    // client flow is to leave this empty and finalize media separately,
+    // tagged with the returned followupId, then use GET
+    // /media?followupId=<id> to confirm what's attached. Capped at 10 — a
+    // sane bound, not an SRS number.
     mediaAssetIds: z.array(z.string().uuid()).max(10).default([]),
   })
   .strict()
