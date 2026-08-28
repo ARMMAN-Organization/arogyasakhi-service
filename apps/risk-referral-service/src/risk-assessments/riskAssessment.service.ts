@@ -199,6 +199,26 @@ export class RiskAssessmentService {
         continue;
       }
       const conditionCode = conditionCodeById.get(condition.riskConditionId);
+      if (!conditionCode) {
+        // conditionCode is expected to always be resolvable here
+        // (evaluation.conditions' riskConditionIds all originate from
+        // conditionIdsByCode, which conditionCodeById is the exact reverse
+        // of) — if this is ever hit (e.g. a stale/mismatched rule-pack
+        // version returning a riskConditionId outside the current phase's
+        // active condition set), isFirstInstance/consecutiveNoImprovementCount
+        // cannot be looked up at all. Skipping the push (same as the
+        // unresolvable-phase branch above) rather than guessing
+        // isFirstInstance: true is deliberate: a silent wrong guess could
+        // misreport a long-standing chronic condition as a first instance,
+        // with real behavioral consequences (referral/education triggers
+        // gate on this) — a loud skip is safer than a silent wrong value
+        // (PR #199 review).
+        console.error(
+          `Risk condition ${condition.riskConditionId} has no resolvable conditionCode — ` +
+            `skipping risk-condition-summary push for beneficiary ${dto.beneficiaryId}.`,
+        );
+        continue;
+      }
       const result = await pushRiskConditionSummary(
         dto.beneficiaryId,
         {
@@ -213,15 +233,8 @@ export class RiskAssessmentService {
           isReferralTrigger: condition.isReferralTrigger,
           isHrVisitTrigger: condition.isHrVisitTrigger,
           ruleVersionId: evaluation.ruleVersionId,
-          // conditionCode is always resolvable here (evaluation.conditions'
-          // riskConditionIds all originate from conditionIdsByCode, which
-          // conditionCodeById is the exact reverse of) — the `?? true`/`?? null`
-          // fallbacks exist only to satisfy the type checker, not because this
-          // path is expected to be hit.
-          isFirstInstance: conditionCode ? isFirstInstance[conditionCode] : true,
-          consecutiveNoImprovementCount: conditionCode
-            ? (consecutiveNoImprovementCount[conditionCode] ?? null)
-            : null,
+          isFirstInstance: isFirstInstance[conditionCode],
+          consecutiveNoImprovementCount: consecutiveNoImprovementCount[conditionCode] ?? null,
         },
         authorizationHeader,
       );
