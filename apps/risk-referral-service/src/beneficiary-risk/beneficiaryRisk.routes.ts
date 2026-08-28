@@ -24,6 +24,15 @@ const riskStateSnapshotSchema = z.object({
   createdAt: z.string().datetime(),
 });
 
+const educationContentSchema = z
+  .object({
+    topicCode: z.string(),
+    topicName: z.string(),
+    mediaType: z.string(),
+    contentUrl: z.string().nullable(),
+  })
+  .nullable();
+
 const riskFlagViewSchema = z.object({
   id: z.string().uuid(),
   conditionCode: z.string(),
@@ -33,6 +42,14 @@ const riskFlagViewSchema = z.object({
   isReferralTrigger: z.boolean(),
   isEducationTrigger: z.boolean(),
   isHrVisitTrigger: z.boolean(),
+  educationContent: educationContentSchema.openapi({
+    description:
+      'Resolved via cms-content-service when isEducationTrigger is true; null when ' +
+      'isEducationTrigger is false, or when content resolution failed/degraded (this call ' +
+      'never fails the overall request — see educationContent.client.ts). Currently always ' +
+      'the same seeded "Content coming soon" placeholder topic — ARMMAN has not yet ' +
+      'delivered per-condition content (SRS Open Item 12).',
+  }),
 });
 
 const riskAssessmentViewSchema = z.object({
@@ -93,8 +110,11 @@ function envelope<T extends z.ZodTypeAny>(data: T) {
  * prefix. Backs the reference Android app's "Beneficiary Data Download"
  * screen — offline reference of a beneficiary's current risk state plus her
  * full assessment/flag history. Not part of the SRS/ERD/HLD; reverse
- * engineered from that reference app. A pure read projection over this
- * service's own tables — no writes, no cross-service calls.
+ * engineered from that reference app. A read projection over this service's
+ * own tables, plus one best-effort cross-service call to cms-content-service
+ * per GET /beneficiaries/:beneficiaryId/risk call (to resolve educationContent
+ * — degrades to null on failure, never fails the read; see
+ * beneficiaryRisk.service.ts's getRiskProfile).
  */
 export function registerBeneficiaryRiskRoutes(
   doc: DocumentedRouter,
@@ -107,10 +127,11 @@ export function registerBeneficiaryRiskRoutes(
     {
       summary:
         "A beneficiary's risk profile: currentState (most recent RiskStateSnapshot per " +
-        'phase) plus assessments (full RiskAssessment history, each with its RiskFlag rows ' +
-        'and their human-readable RiskCondition code/name). A SAKHI may only read her own ' +
-        'beneficiary; a SUPERVISOR only a beneficiary on their own roster (resolved via ' +
-        'beneficiary-service). MANAGER/ADMIN are unscoped.',
+        'phase) plus assessments (full RiskAssessment history, each with its RiskFlag rows, ' +
+        'their human-readable RiskCondition code/name, and resolved educationContent where ' +
+        'isEducationTrigger is true). A SAKHI may only read her own beneficiary; a SUPERVISOR ' +
+        'only a beneficiary on their own roster (resolved via beneficiary-service). ' +
+        'MANAGER/ADMIN are unscoped.',
       tags: ['Beneficiary Risk'],
       params: beneficiaryRiskParamsSchema,
       responses: {
