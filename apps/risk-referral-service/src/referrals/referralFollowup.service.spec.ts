@@ -1,6 +1,9 @@
 import type { AuthenticatedUser } from '@armman/service-commons';
 import { ReferralFollowupService } from './referralFollowup.service';
-import type { ReferralFollowupRepository } from './referralFollowup.repository';
+import {
+  ReferralNoLongerPendingFollowupError,
+  type ReferralFollowupRepository,
+} from './referralFollowup.repository';
 import type { ReferralRepository } from './referral.repository';
 import type { BeneficiaryClient } from './beneficiary.client';
 import type { CreateReferralFollowupInput } from './dto/create-referral-followup.dto';
@@ -202,6 +205,16 @@ describe('ReferralFollowupService', () => {
       ),
     ).rejects.toMatchObject({ status: 422, message: expect.stringContaining(badId) });
     expect(followupRepository.create).not.toHaveBeenCalled();
+  });
+
+  it('409s when the referral is no longer PENDING_FOLLOWUP by the time the transaction commits (concurrent submission)', async () => {
+    referralRepository.findById.mockResolvedValue(referral() as never);
+    beneficiaryClient.getById.mockResolvedValue({ id: 'ben-1', sakhiId: SAKHI_ID });
+    followupRepository.create.mockRejectedValue(new ReferralNoLongerPendingFollowupError());
+
+    await expect(
+      service.create('ref-1', dto({ visitedFacilityFlag: true }), caller(), AUTH_HEADER),
+    ).rejects.toMatchObject({ status: 409 });
   });
 
   it('defaults to an empty media list when none are submitted', async () => {
