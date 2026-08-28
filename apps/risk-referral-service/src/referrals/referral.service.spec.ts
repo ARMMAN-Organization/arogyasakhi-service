@@ -132,6 +132,54 @@ describe('ReferralService', () => {
       expect(result).toEqual({ referral: existing, alreadyExisted: true });
     });
 
+    it('409s on a visitId collision when the existing referral has a different beneficiaryId', async () => {
+      const collidingVisitId = '33333333-3333-3333-3333-333333333333';
+      const existing = referral({
+        visitId: collidingVisitId,
+        beneficiaryId: '99999999-9999-9999-9999-999999999999',
+      });
+      repository.create.mockRejectedValue({
+        code: 'P2002',
+        meta: { target: ['visit_id'] },
+      });
+      repository.findByVisitId.mockResolvedValue(existing as never);
+
+      await expect(service.create(dto({ visitId: collidingVisitId }))).rejects.toMatchObject({
+        status: 409,
+      });
+    });
+
+    it('409s on a visitId collision when the existing referral has a different referralTypeLookupValueId', async () => {
+      const collidingVisitId = '33333333-3333-3333-3333-333333333333';
+      const existing = referral({
+        visitId: collidingVisitId,
+        referralTypeLookupValueId: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+      });
+      repository.create.mockRejectedValue({
+        code: 'P2002',
+        meta: { target: ['visit_id'] },
+      });
+      repository.findByVisitId.mockResolvedValue(existing as never);
+
+      await expect(service.create(dto({ visitId: collidingVisitId }))).rejects.toMatchObject({
+        status: 409,
+      });
+    });
+
+    it('409s on a visitId collision when the existing referral has a different facilityName', async () => {
+      const collidingVisitId = '33333333-3333-3333-3333-333333333333';
+      const existing = referral({ visitId: collidingVisitId, facilityName: 'Old Facility' });
+      repository.create.mockRejectedValue({
+        code: 'P2002',
+        meta: { target: ['visit_id'] },
+      });
+      repository.findByVisitId.mockResolvedValue(existing as never);
+
+      await expect(
+        service.create(dto({ visitId: collidingVisitId, facilityName: 'New Facility' })),
+      ).rejects.toMatchObject({ status: 409 });
+    });
+
     it('throws badGateway if the collision lookup itself finds nothing (race: row gone between insert-fail and re-read)', async () => {
       repository.create.mockRejectedValue({
         code: 'P2002',

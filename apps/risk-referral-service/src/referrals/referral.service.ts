@@ -44,6 +44,15 @@ export class ReferralService {
    * `visitId` is protected by the `visit_referral_once` unique index
    * (schema.prisma) — at most one referral per visit, referrals with no
    * visitId are unrestricted.
+   *
+   * The idempotent-retry path only returns the pre-existing row as-is when
+   * its business-identifying fields (beneficiaryId, referralTypeLookupValueId,
+   * facilityType, facilityName) match this dto — if they differ, this is not
+   * a harmless retry of the same request but a genuinely different second
+   * referral attempt for the same visit (e.g. a corrected
+   * referralTypeLookupValueId after a mistake, or visitId reused for a
+   * different beneficiary), so it 409s instead of silently returning the
+   * stale/wrong row as a 200 success (PR #199 review).
    */
   async create(dto: CreateReferralInput): Promise<{ referral: Referral; alreadyExisted: boolean }> {
     const validTill = addDays(dto.referralDate, 7);
@@ -56,6 +65,16 @@ export class ReferralService {
       if (!existing) {
         throw badGateway(
           'A referral for this visit could not be created, and the existing one could not be found.',
+        );
+      }
+      if (
+        existing.beneficiaryId !== dto.beneficiaryId ||
+        existing.referralTypeLookupValueId !== dto.referralTypeLookupValueId ||
+        existing.facilityType !== (dto.facilityType ?? null) ||
+        existing.facilityName !== (dto.facilityName ?? null)
+      ) {
+        throw conflict(
+          'A different referral already exists for this visit — this looks like a new referral attempt, not a retry of the same request.',
         );
       }
       return { referral: existing, alreadyExisted: true };
