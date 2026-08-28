@@ -12,6 +12,10 @@ export interface BeneficiaryCaseRecord {
   currentStatus: string;
 }
 
+export interface BeneficiaryCaseDetail extends BeneficiaryCaseRecord {
+  pii: { fullName: string };
+}
+
 /**
  * Reactivates a CLOSED beneficiary case by calling beneficiary-service's
  * PATCH /beneficiaries/:id/reactivate through the gateway, forwarding the
@@ -102,7 +106,7 @@ export class BeneficiaryClient {
   async getById(
     beneficiaryId: string,
     authorizationHeader: string,
-  ): Promise<BeneficiaryCaseRecord> {
+  ): Promise<BeneficiaryCaseDetail> {
     let res: Response;
     try {
       res = await fetch(`${API_GATEWAY_BASE_URL}/api/v1/beneficiaries/${beneficiaryId}`, {
@@ -122,7 +126,7 @@ export class BeneficiaryClient {
       );
     }
 
-    const body = (await res.json()) as { data: BeneficiaryCaseRecord };
+    const body = (await res.json()) as { data: BeneficiaryCaseDetail };
     return body.data;
   }
 }

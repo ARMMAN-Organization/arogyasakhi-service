@@ -5,6 +5,7 @@ import type { NotificationClient } from './notification.client';
 import type { ApprovalClient } from './approval.client';
 import type { LookupClient } from './lookup.client';
 import type { BeneficiaryClient } from './beneficiary.client';
+import type { SakhiClient } from './sakhi.client';
 import type { CreateReopenRequestInput } from './dto/create-reopen-request.dto';
 import type { DecideReopenRequestInput } from './dto/decide-reopen-request.dto';
 
@@ -50,6 +51,7 @@ describe('ReopenRequestService', () => {
     reactivateCase: jest.fn(),
     getById: jest.fn(),
   } as unknown as jest.Mocked<BeneficiaryClient>;
+  const sakhiClient = { getById: jest.fn() } as unknown as jest.Mocked<SakhiClient>;
   let service: ReopenRequestService;
   const supervisorId = '44444444-4444-4444-4444-444444444444';
   const authHeader = 'Bearer token';
@@ -66,6 +68,7 @@ describe('ReopenRequestService', () => {
     beneficiaryClient.getById.mockResolvedValue({
       id: '22222222-2222-2222-2222-222222222222',
       currentStatus: 'CLOSED',
+      pii: { fullName: 'Asha Devi' },
     });
     service = new ReopenRequestService(
       repository,
@@ -74,6 +77,7 @@ describe('ReopenRequestService', () => {
       approvalClient,
       lookupClient,
       beneficiaryClient,
+      sakhiClient,
     );
   });
 
@@ -85,7 +89,11 @@ describe('ReopenRequestService', () => {
     const beneficiaryId = '22222222-2222-2222-2222-222222222222';
 
     it('returns the reopen requests when the beneficiary lookup succeeds', async () => {
-      beneficiaryClient.getById.mockResolvedValue({ id: beneficiaryId, currentStatus: 'CLOSED' });
+      beneficiaryClient.getById.mockResolvedValue({
+        id: beneficiaryId,
+        currentStatus: 'CLOSED',
+        pii: { fullName: 'Asha Devi' },
+      });
       const rows = [reopenRequest()];
       repository.findByBeneficiaryId.mockResolvedValue(rows);
 
@@ -94,7 +102,11 @@ describe('ReopenRequestService', () => {
     });
 
     it('returns an empty array when the beneficiary has no reopen requests', async () => {
-      beneficiaryClient.getById.mockResolvedValue({ id: beneficiaryId, currentStatus: 'CLOSED' });
+      beneficiaryClient.getById.mockResolvedValue({
+        id: beneficiaryId,
+        currentStatus: 'CLOSED',
+        pii: { fullName: 'Asha Devi' },
+      });
       repository.findByBeneficiaryId.mockResolvedValue([]);
 
       await expect(service.listByBeneficiaryId(beneficiaryId, authHeader)).resolves.toEqual([]);
@@ -292,6 +304,61 @@ describe('ReopenRequestService', () => {
       expect.any(String),
       expect.any(String),
       authHeader,
+      { linkedEntityType: 'ReopenRequest', linkedEntityId: pending.id },
+    );
+  });
+
+  it('interpolates the resolved Sakhi and beneficiary names into the title/body', async () => {
+    const pending = reopenRequest();
+    const decided = reopenRequest({ supervisorStatus: 'APPROVED', decidedByUserId: supervisorId });
+    repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(decided);
+    repository.decide.mockResolvedValue(true);
+    beneficiaryClient.getById.mockResolvedValue({
+      id: pending.beneficiaryId,
+      currentStatus: 'CLOSED',
+      pii: { fullName: 'Asha Devi' },
+    });
+    sakhiClient.getById.mockResolvedValue({
+      sakhiId: pending.requestedByUserId,
+      displayName: 'Priya Sakhi',
+      mobileNumber: '+919000000123',
+    });
+
+    await service.decide(pending.id, supervisorId, { decision: 'APPROVED' }, authHeader);
+
+    expect(notificationClient.notify).toHaveBeenCalledWith(
+      pending.requestedByUserId,
+      'REOPEN_UPDATE',
+      'Reopen request — Priya Sakhi',
+      "Asha Devi's reopen request was approved",
+      authHeader,
+      { linkedEntityType: 'ReopenRequest', linkedEntityId: pending.id },
+    );
+  });
+
+  it('falls back to a generic title when the Sakhi name lookup fails, keeping the beneficiary name already in hand', async () => {
+    const pending = reopenRequest();
+    const decided = reopenRequest({ supervisorStatus: 'APPROVED', decidedByUserId: supervisorId });
+    repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(decided);
+    repository.decide.mockResolvedValue(true);
+    beneficiaryClient.getById.mockResolvedValue({
+      id: pending.beneficiaryId,
+      currentStatus: 'CLOSED',
+      pii: { fullName: 'Asha Devi' },
+    });
+    sakhiClient.getById.mockRejectedValue(new Error('auth-service down'));
+
+    await expect(
+      service.decide(pending.id, supervisorId, { decision: 'APPROVED' }, authHeader),
+    ).resolves.toBe(decided);
+
+    expect(notificationClient.notify).toHaveBeenCalledWith(
+      pending.requestedByUserId,
+      'REOPEN_UPDATE',
+      'Reopen request decided',
+      "Asha Devi's reopen request was approved",
+      authHeader,
+      { linkedEntityType: 'ReopenRequest', linkedEntityId: pending.id },
     );
   });
 
@@ -363,6 +430,7 @@ describe('ReopenRequestService', () => {
       beneficiaryClient.getById.mockResolvedValue({
         id: pending.beneficiaryId,
         currentStatus: 'CLOSED',
+        pii: { fullName: 'Asha Devi' },
       });
 
       await expect(

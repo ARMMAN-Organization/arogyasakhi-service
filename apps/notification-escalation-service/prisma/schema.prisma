@@ -63,6 +63,15 @@ enum NotificationType {
   REOPEN_UPDATE
   CLOSURE_UPDATE
   LMP_CHANGE_UPDATE
+  // Quick Response decision-outcome types (approval-service/closure-reopen-service
+  // notify() calls) — added alongside REOPEN_UPDATE/LMP_CHANGE_UPDATE/CLOSURE_UPDATE
+  // above, which this enum already had; these three were missing entirely, so
+  // POST /notifications 400'd on them and the notification was silently never
+  // created (best-effort try/catch at every call site swallowed the failure).
+  REFERRAL_INCOMPLETE_UPDATE
+  ACCOMPANIED_REFERRAL_UPDATE
+  DATA_RESTORE_UPDATE
+  CLOSURE_REVIEW_UPDATE
   FORM_UPDATE
   DATA_SYNC_STATUS
   VISIT_NEAR_MISS

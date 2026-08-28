@@ -153,9 +153,9 @@ export class EscalationClient {
     }
 
     if (!res.ok) {
-      // 501 is passed through deliberately, not masked as a generic 502 —
-      // it's the service's own "TRANSFER isn't built yet" business signal
-      // (see decideMissedVisit's own doc comment), not an infra fault.
+      // 4xx/501 are passed through deliberately, not masked as a generic
+      // 502 — they're the downstream service's own business-rule signals
+      // (e.g. wrong status for a transition), not an infra fault.
       if ((res.status >= 400 && res.status < 500) || res.status === 501) {
         const body = (await res.json().catch(() => null)) as { message?: string } | null;
         throw new HttpError(

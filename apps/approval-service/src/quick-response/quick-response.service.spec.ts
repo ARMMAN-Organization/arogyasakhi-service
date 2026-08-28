@@ -1104,6 +1104,64 @@ describe('QuickResponseService', () => {
         expect.any(String),
         expect.any(String),
         authHeader,
+        { linkedEntityType: 'QuickResponseCard', linkedEntityId: card.id },
+      );
+      expect(result.decision).toBe('APPROVE');
+    });
+
+    it("approves: title interpolates the Sakhi's resolved display name", async () => {
+      const card = dataRestoreRequest();
+      repository.findById.mockResolvedValue(card);
+      userClient.reactivateUser.mockResolvedValue({
+        id: card.requestedByUserId as string,
+        status: 'ACTIVE',
+      });
+      sakhiClient.getById.mockResolvedValue({
+        sakhiId: card.requestedByUserId as string,
+        displayName: 'Meena Kumari',
+        mobileNumber: '+919000000456',
+      });
+
+      await service.decide(
+        card.id as string,
+        { cardSource: 'approval_requests', decision: 'APPROVE' },
+        DECIDED_BY_USER_ID,
+        authHeader,
+      );
+
+      expect(notificationClient.notify).toHaveBeenCalledWith(
+        card.requestedByUserId,
+        'DATA_RESTORE_UPDATE',
+        'Data restore request — Meena Kumari',
+        'Your account has been reactivated.',
+        authHeader,
+        { linkedEntityType: 'QuickResponseCard', linkedEntityId: card.id },
+      );
+    });
+
+    it('approves: falls back to generic title when the Sakhi name lookup fails', async () => {
+      const card = dataRestoreRequest();
+      repository.findById.mockResolvedValue(card);
+      userClient.reactivateUser.mockResolvedValue({
+        id: card.requestedByUserId as string,
+        status: 'ACTIVE',
+      });
+      sakhiClient.getById.mockRejectedValue(new Error('auth-service down'));
+
+      const result = await service.decide(
+        card.id as string,
+        { cardSource: 'approval_requests', decision: 'APPROVE' },
+        DECIDED_BY_USER_ID,
+        authHeader,
+      );
+
+      expect(notificationClient.notify).toHaveBeenCalledWith(
+        card.requestedByUserId,
+        'DATA_RESTORE_UPDATE',
+        'Data restore request decided',
+        expect.any(String),
+        authHeader,
+        { linkedEntityType: 'QuickResponseCard', linkedEntityId: card.id },
       );
       expect(result.decision).toBe('APPROVE');
     });
@@ -1427,8 +1485,80 @@ describe('QuickResponseService', () => {
         expect.any(String),
         expect.any(String),
         authHeader,
+        { linkedEntityType: 'QuickResponseCard', linkedEntityId: card.id },
       );
       expect(result.decision).toBe('APPROVE');
+    });
+
+    it('approves: title/body interpolate the resolved Sakhi and beneficiary names', async () => {
+      const card = referralIncompleteRequest();
+      repository.findById.mockResolvedValue(card);
+      referralClient.decide.mockResolvedValue({
+        id: card.referralId as unknown as string,
+        beneficiaryId: card.beneficiaryId as string,
+        status: 'LAPSED',
+      });
+      sakhiClient.getById.mockResolvedValue({
+        sakhiId: card.requestedByUserId as string,
+        displayName: 'Priya Sakhi',
+        mobileNumber: '+919000000123',
+      });
+      beneficiaryClient.getById.mockResolvedValue({
+        id: card.beneficiaryId as string,
+        sakhiId: '88888888-8888-8888-8888-888888888888',
+        pii: { fullName: 'Asha Devi', padaId: null },
+        motherCaseDetails: null,
+        riskConditionSummaries: [],
+      });
+
+      await service.decide(
+        card.id as string,
+        { cardSource: 'approval_requests', decision: 'APPROVE' },
+        DECIDED_BY_USER_ID,
+        authHeader,
+      );
+
+      expect(beneficiaryClient.getById).toHaveBeenCalledWith(card.beneficiaryId, authHeader);
+      expect(notificationClient.notify).toHaveBeenCalledWith(
+        card.requestedByUserId,
+        'REFERRAL_INCOMPLETE_UPDATE',
+        'Referral follow-up — Priya Sakhi',
+        "Asha Devi's referral follow-up was marked Lapsed",
+        authHeader,
+        { linkedEntityType: 'QuickResponseCard', linkedEntityId: card.id },
+      );
+    });
+
+    it('approves: falls back to a generic body when the card has no linked beneficiary', async () => {
+      const card = referralIncompleteRequest({ beneficiaryId: null });
+      repository.findById.mockResolvedValue(card);
+      referralClient.decide.mockResolvedValue({
+        id: card.referralId as unknown as string,
+        beneficiaryId: '22222222-2222-2222-2222-222222222222',
+        status: 'LAPSED',
+      });
+      sakhiClient.getById.mockResolvedValue({
+        sakhiId: card.requestedByUserId as string,
+        displayName: 'Priya Sakhi',
+        mobileNumber: '+919000000123',
+      });
+
+      await service.decide(
+        card.id as string,
+        { cardSource: 'approval_requests', decision: 'APPROVE' },
+        DECIDED_BY_USER_ID,
+        authHeader,
+      );
+
+      expect(beneficiaryClient.getById).not.toHaveBeenCalled();
+      expect(notificationClient.notify).toHaveBeenCalledWith(
+        card.requestedByUserId,
+        'REFERRAL_INCOMPLETE_UPDATE',
+        'Referral follow-up — Priya Sakhi',
+        'Your referral follow-up was marked Lapsed by your Supervisor.',
+        authHeader,
+        { linkedEntityType: 'QuickResponseCard', linkedEntityId: card.id },
+      );
     });
 
     it('rejects: decides via ReferralClient with REFILL', async () => {
@@ -1530,7 +1660,7 @@ describe('QuickResponseService', () => {
       });
     }
 
-    it('approves: completes the referral, resolves the Sakhi, triggers the incentive, notifies', async () => {
+    it('approves: completes the referral, resolves the Sakhi, triggers the incentive, notifies with interpolated names', async () => {
       const card = accompaniedReferralRequest();
       repository.findById.mockResolvedValue(card);
       referralClient.decide.mockResolvedValue({
@@ -1545,6 +1675,11 @@ describe('QuickResponseService', () => {
         motherCaseDetails: null,
         riskConditionSummaries: [],
       });
+      sakhiClient.getById.mockResolvedValue({
+        sakhiId: card.requestedByUserId as string,
+        displayName: 'Priya Sakhi',
+        mobileNumber: '+919000000123',
+      });
 
       const result = await service.decide(
         card.id as string,
@@ -1555,6 +1690,7 @@ describe('QuickResponseService', () => {
 
       expect(referralClient.decide).toHaveBeenCalledWith(card.referralId, 'COMPLETE', authHeader);
       expect(beneficiaryClient.getById).toHaveBeenCalledWith(card.beneficiaryId, authHeader);
+      expect(beneficiaryClient.getById).toHaveBeenCalledTimes(1);
       expect(incentiveClient.triggerAccompaniedReferral).toHaveBeenCalledWith(
         '88888888-8888-8888-8888-888888888888',
         card.referralId,
@@ -1563,9 +1699,10 @@ describe('QuickResponseService', () => {
       expect(notificationClient.notify).toHaveBeenCalledWith(
         card.requestedByUserId,
         'ACCOMPANIED_REFERRAL_UPDATE',
-        expect.any(String),
-        expect.any(String),
+        'Accompanied referral — Priya Sakhi',
+        "Test Beneficiary's accompanied referral was approved and completed",
         authHeader,
+        { linkedEntityType: 'QuickResponseCard', linkedEntityId: card.id },
       );
       expect(result.decision).toBe('APPROVE');
     });
@@ -1756,6 +1893,66 @@ describe('QuickResponseService', () => {
         expect.any(String),
         expect.any(String),
         authHeader,
+        { linkedEntityType: 'QuickResponseCard', linkedEntityId: card.id },
+      );
+      expect(result.decision).toBe('APPROVE');
+    });
+
+    it('approves: title/body interpolate the resolved Sakhi and beneficiary names', async () => {
+      const card = lmpChangeRequest();
+      repository.findById.mockResolvedValue(card);
+      beneficiaryClient.applyLmpChange.mockResolvedValue({ id: card.beneficiaryId as string });
+      sakhiClient.getById.mockResolvedValue({
+        sakhiId: card.requestedByUserId as string,
+        displayName: 'Priya Sakhi',
+        mobileNumber: '+919000000123',
+      });
+      beneficiaryClient.getById.mockResolvedValue({
+        id: card.beneficiaryId as string,
+        sakhiId: '88888888-8888-8888-8888-888888888888',
+        pii: { fullName: 'Asha Devi', padaId: null },
+        motherCaseDetails: null,
+        riskConditionSummaries: [],
+      });
+
+      await service.decide(
+        card.id as string,
+        { cardSource: 'approval_requests', decision: 'APPROVE' },
+        DECIDED_BY_USER_ID,
+        authHeader,
+      );
+
+      expect(notificationClient.notify).toHaveBeenCalledWith(
+        card.requestedByUserId,
+        'LMP_CHANGE_UPDATE',
+        'LMP change request — Priya Sakhi',
+        "Asha Devi's LMP change was approved",
+        authHeader,
+        { linkedEntityType: 'QuickResponseCard', linkedEntityId: card.id },
+      );
+    });
+
+    it('approves: falls back to generic title/body when name lookups fail', async () => {
+      const card = lmpChangeRequest();
+      repository.findById.mockResolvedValue(card);
+      beneficiaryClient.applyLmpChange.mockResolvedValue({ id: card.beneficiaryId as string });
+      sakhiClient.getById.mockRejectedValue(new Error('auth-service down'));
+      beneficiaryClient.getById.mockRejectedValue(new Error('beneficiary-service down'));
+
+      const result = await service.decide(
+        card.id as string,
+        { cardSource: 'approval_requests', decision: 'APPROVE' },
+        DECIDED_BY_USER_ID,
+        authHeader,
+      );
+
+      expect(notificationClient.notify).toHaveBeenCalledWith(
+        card.requestedByUserId,
+        'LMP_CHANGE_UPDATE',
+        'LMP change request decided',
+        'Your LMP change request was approved.',
+        authHeader,
+        { linkedEntityType: 'QuickResponseCard', linkedEntityId: card.id },
       );
       expect(result.decision).toBe('APPROVE');
     });

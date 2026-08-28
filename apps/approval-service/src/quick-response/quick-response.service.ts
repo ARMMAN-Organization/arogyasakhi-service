@@ -81,6 +81,38 @@ function mapStatusForEscalations(status: string): string | null {
 /** Quick Response's domain logic: merges approval_requests + escalation_events
  * into one feed, and dispatches decisions per card type. */
 export class QuickResponseService {
+  /** Best-effort — a name lookup failure falls back to no name (generic
+   * notification text) rather than blocking the decision it's attached to. */
+  private async resolveSakhiName(
+    sakhiId: string,
+    authorizationHeader: string,
+  ): Promise<string | null> {
+    try {
+      const sakhi = await this.sakhiClient.getById(sakhiId, authorizationHeader);
+      return sakhi?.displayName ?? null;
+    } catch (err) {
+      console.error(`Failed to resolve Sakhi ${sakhiId}'s name for a notification:`, err);
+      return null;
+    }
+  }
+
+  /** Best-effort — see resolveSakhiName. */
+  private async resolveBeneficiaryName(
+    beneficiaryId: string,
+    authorizationHeader: string,
+  ): Promise<string | null> {
+    try {
+      const beneficiary = await this.beneficiaryClient.getById(beneficiaryId, authorizationHeader);
+      return beneficiary?.pii.fullName ?? null;
+    } catch (err) {
+      console.error(
+        `Failed to resolve beneficiary ${beneficiaryId}'s name for a notification:`,
+        err,
+      );
+      return null;
+    }
+  }
+
   constructor(
     private readonly repository: QuickResponseRepository,
     private readonly lookupClient: LookupClient,
@@ -600,12 +632,12 @@ export class QuickResponseService {
   /**
    * EDD_NEARING supports only OKAY (acknowledge-only: no audit_log, no
    * notify — spec's explicit exemption). MISSED_VISIT supports TRANSFER/
-   * CLOSE, not APPROVE/REJECT; TRANSFER itself still 501s (see
-   * EscalationService.decideMissedVisit's own doc comment for why). Both
-   * branches delegate the actual write to notification-escalation-service
-   * via EscalationClient — this dispatch never persists anything itself,
-   * so a second decide on an already-decided card surfaces that service's
-   * own 409 rather than faking a second success.
+   * CLOSE, not APPROVE/REJECT; both are fully implemented downstream (see
+   * EscalationService.decideMissedVisit). Both branches delegate the
+   * actual write to notification-escalation-service via EscalationClient —
+   * this dispatch never persists anything itself, so a second decide on an
+   * already-decided card surfaces that service's own 409 rather than
+   * faking a second success.
    */
   private async decideEscalationCard(
     cardId: string,
@@ -870,14 +902,23 @@ export class QuickResponseService {
     }
 
     try {
+      const [sakhiName, beneficiaryName] = await Promise.all([
+        this.resolveSakhiName(existing.requestedByUserId, authorizationHeader),
+        existing.beneficiaryId
+          ? this.resolveBeneficiaryName(existing.beneficiaryId, authorizationHeader)
+          : Promise.resolve(null),
+      ]);
       await this.notificationClient.notify(
         existing.requestedByUserId,
         'LMP_CHANGE_UPDATE',
-        'LMP change request decided',
-        dto.decision === 'APPROVE'
-          ? 'Your LMP change request was approved.'
-          : 'Your LMP change request was rejected.',
+        sakhiName ? `LMP change request — ${sakhiName}` : 'LMP change request decided',
+        beneficiaryName
+          ? `${beneficiaryName}'s LMP change was ${dto.decision === 'APPROVE' ? 'approved' : 'rejected'}`
+          : dto.decision === 'APPROVE'
+            ? 'Your LMP change request was approved.'
+            : 'Your LMP change request was rejected.',
         authorizationHeader,
+        { linkedEntityType: 'QuickResponseCard', linkedEntityId: cardId },
       );
     } catch (err) {
       console.error(
@@ -942,7 +983,11 @@ export class QuickResponseService {
    */
   private async decideReferralIncompleteCard(
     cardId: string,
-    existing: { referralId: string | null; requestedByUserId: string },
+    existing: {
+      referralId: string | null;
+      beneficiaryId: string | null;
+      requestedByUserId: string;
+    },
     dto: DecideQuickResponseInput,
     authorizationHeader: string,
   ) {
@@ -963,14 +1008,25 @@ export class QuickResponseService {
     );
 
     try {
+      const [sakhiName, beneficiaryName] = await Promise.all([
+        this.resolveSakhiName(existing.requestedByUserId, authorizationHeader),
+        existing.beneficiaryId
+          ? this.resolveBeneficiaryName(existing.beneficiaryId, authorizationHeader)
+          : Promise.resolve(null),
+      ]);
       await this.notificationClient.notify(
         existing.requestedByUserId,
         'REFERRAL_INCOMPLETE_UPDATE',
-        'Referral follow-up decided',
-        dto.decision === 'APPROVE'
-          ? 'Your referral follow-up was marked Lapsed by your Supervisor.'
-          : 'Please refill the referral follow-up form.',
+        sakhiName ? `Referral follow-up — ${sakhiName}` : 'Referral follow-up decided',
+        beneficiaryName
+          ? dto.decision === 'APPROVE'
+            ? `${beneficiaryName}'s referral follow-up was marked Lapsed`
+            : `${beneficiaryName}'s referral follow-up needs to be refilled`
+          : dto.decision === 'APPROVE'
+            ? 'Your referral follow-up was marked Lapsed by your Supervisor.'
+            : 'Please refill the referral follow-up form.',
         authorizationHeader,
+        { linkedEntityType: 'QuickResponseCard', linkedEntityId: cardId },
       );
     } catch (err) {
       console.error(
@@ -1028,6 +1084,7 @@ export class QuickResponseService {
       throw new HttpError(500, 'This ACCOMPANIED_REFERRAL card has no linked referral.');
     }
 
+    let approvedBeneficiaryName: string | null = null;
     if (dto.decision === 'APPROVE') {
       await this.referralClient.decide(existing.referralId, 'COMPLETE', authorizationHeader);
 
@@ -1041,6 +1098,7 @@ export class QuickResponseService {
       if (!beneficiary) {
         throw notFound('The beneficiary linked to this referral was not found.');
       }
+      approvedBeneficiaryName = beneficiary.pii.fullName;
       try {
         await this.incentiveClient.triggerAccompaniedReferral(
           beneficiary.sakhiId,
@@ -1058,14 +1116,27 @@ export class QuickResponseService {
     }
 
     try {
+      const [sakhiName, beneficiaryName] = await Promise.all([
+        this.resolveSakhiName(existing.requestedByUserId, authorizationHeader),
+        approvedBeneficiaryName
+          ? Promise.resolve(approvedBeneficiaryName)
+          : existing.beneficiaryId
+            ? this.resolveBeneficiaryName(existing.beneficiaryId, authorizationHeader)
+            : Promise.resolve(null),
+      ]);
       await this.notificationClient.notify(
         existing.requestedByUserId,
         'ACCOMPANIED_REFERRAL_UPDATE',
-        'Accompanied referral decided',
-        dto.decision === 'APPROVE'
-          ? 'Your accompanied referral was approved and completed.'
-          : 'Your accompanied referral was rejected.',
+        sakhiName ? `Accompanied referral — ${sakhiName}` : 'Accompanied referral decided',
+        beneficiaryName
+          ? dto.decision === 'APPROVE'
+            ? `${beneficiaryName}'s accompanied referral was approved and completed`
+            : `${beneficiaryName}'s accompanied referral was rejected`
+          : dto.decision === 'APPROVE'
+            ? 'Your accompanied referral was approved and completed.'
+            : 'Your accompanied referral was rejected.',
         authorizationHeader,
+        { linkedEntityType: 'QuickResponseCard', linkedEntityId: cardId },
       );
     } catch (err) {
       console.error(
@@ -1110,14 +1181,19 @@ export class QuickResponseService {
     }
 
     try {
+      const sakhiName = await this.resolveSakhiName(
+        existing.requestedByUserId,
+        authorizationHeader,
+      );
       await this.notificationClient.notify(
         existing.requestedByUserId,
         'DATA_RESTORE_UPDATE',
-        'Data restore request decided',
+        sakhiName ? `Data restore request — ${sakhiName}` : 'Data restore request decided',
         dto.decision === 'APPROVE'
           ? 'Your account has been reactivated.'
           : 'Your data restore request was rejected.',
         authorizationHeader,
+        { linkedEntityType: 'QuickResponseCard', linkedEntityId: cardId },
       );
     } catch (err) {
       console.error(
