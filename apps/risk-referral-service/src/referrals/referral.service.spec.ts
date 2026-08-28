@@ -53,6 +53,7 @@ describe('ReferralService', () => {
     findMany: jest.fn(),
     findById: jest.fn(),
     findManyByIds: jest.fn(),
+    findByVisitId: jest.fn(),
     findFollowupSummary: jest.fn(),
     create: jest.fn(),
     updateStatus: jest.fn(),
@@ -79,6 +80,131 @@ describe('ReferralService', () => {
     // needing to override this per test.
     resolveReferralTypeLookupIdMock.mockResolvedValue('lookup-accompanied');
     service = new ReferralService(repository, beneficiaryClient);
+  });
+
+  describe('create', () => {
+    function dto(overrides: Partial<CreateReferralInput> = {}): CreateReferralInput {
+      return {
+        beneficiaryId: '22222222-2222-2222-2222-222222222222',
+        referralTypeLookupValueId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        referralDate: new Date('2026-08-25'),
+        status: 'INITIATED',
+        supervisorApprovalStatus: 'NOT_REQUIRED',
+        ...overrides,
+      };
+    }
+
+    it('creates and returns the referral (alreadyExisted: false) when there is no visitId collision', async () => {
+      const created = referral();
+      repository.create.mockResolvedValue(created as never);
+
+      await expect(service.create(dto())).resolves.toEqual({
+        referral: created,
+        alreadyExisted: false,
+      });
+    });
+
+    it('computes validTill as referralDate + 7 days, ignoring any caller-supplied value', async () => {
+      repository.create.mockImplementation(((data: Record<string, unknown>) =>
+        Promise.resolve(referral(data))) as never);
+
+      const result = await service.create(
+        dto({ referralDate: new Date('2026-08-01T00:00:00.000Z') }),
+      );
+
+      expect(result.referral.validTill).toEqual(new Date('2026-08-08T00:00:00.000Z'));
+      expect(repository.create).toHaveBeenCalledWith(
+        expect.objectContaining({ validTill: new Date('2026-08-08T00:00:00.000Z') }),
+      );
+    });
+
+    it('returns the existing referral (alreadyExisted: true) instead of throwing, on a visitId collision', async () => {
+      const collidingVisitId = '33333333-3333-3333-3333-333333333333';
+      const existing = referral({ visitId: collidingVisitId });
+      repository.create.mockRejectedValue({
+        code: 'P2002',
+        meta: { target: ['visit_id'] },
+      });
+      repository.findByVisitId.mockResolvedValue(existing as never);
+
+      const result = await service.create(dto({ visitId: collidingVisitId }));
+
+      expect(result).toEqual({ referral: existing, alreadyExisted: true });
+    });
+
+    it('409s on a visitId collision when the existing referral has a different beneficiaryId', async () => {
+      const collidingVisitId = '33333333-3333-3333-3333-333333333333';
+      const existing = referral({
+        visitId: collidingVisitId,
+        beneficiaryId: '99999999-9999-9999-9999-999999999999',
+      });
+      repository.create.mockRejectedValue({
+        code: 'P2002',
+        meta: { target: ['visit_id'] },
+      });
+      repository.findByVisitId.mockResolvedValue(existing as never);
+
+      await expect(service.create(dto({ visitId: collidingVisitId }))).rejects.toMatchObject({
+        status: 409,
+      });
+    });
+
+    it('409s on a visitId collision when the existing referral has a different referralTypeLookupValueId', async () => {
+      const collidingVisitId = '33333333-3333-3333-3333-333333333333';
+      const existing = referral({
+        visitId: collidingVisitId,
+        referralTypeLookupValueId: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+      });
+      repository.create.mockRejectedValue({
+        code: 'P2002',
+        meta: { target: ['visit_id'] },
+      });
+      repository.findByVisitId.mockResolvedValue(existing as never);
+
+      await expect(service.create(dto({ visitId: collidingVisitId }))).rejects.toMatchObject({
+        status: 409,
+      });
+    });
+
+    it('409s on a visitId collision when the existing referral has a different facilityName', async () => {
+      const collidingVisitId = '33333333-3333-3333-3333-333333333333';
+      const existing = referral({ visitId: collidingVisitId, facilityName: 'Old Facility' });
+      repository.create.mockRejectedValue({
+        code: 'P2002',
+        meta: { target: ['visit_id'] },
+      });
+      repository.findByVisitId.mockResolvedValue(existing as never);
+
+      await expect(
+        service.create(dto({ visitId: collidingVisitId, facilityName: 'New Facility' })),
+      ).rejects.toMatchObject({ status: 409 });
+    });
+
+    it('throws badGateway if the collision lookup itself finds nothing (race: row gone between insert-fail and re-read)', async () => {
+      repository.create.mockRejectedValue({
+        code: 'P2002',
+        meta: { target: ['visit_id'] },
+      });
+      repository.findByVisitId.mockResolvedValue(null);
+
+      await expect(
+        service.create(dto({ visitId: '44444444-4444-4444-4444-444444444444' })),
+      ).rejects.toMatchObject({ status: 502 });
+    });
+
+    it('rethrows a non-unique-constraint error unchanged', async () => {
+      const dbError = new Error('connection reset');
+      repository.create.mockRejectedValue(dbError);
+
+      await expect(service.create(dto())).rejects.toBe(dbError);
+    });
+
+    it('rethrows a P2002 on a different unique constraint unchanged, not as a 409', async () => {
+      const otherViolation = { code: 'P2002', meta: { target: ['some_other_column'] } };
+      repository.create.mockRejectedValue(otherViolation);
+
+      await expect(service.create(dto())).rejects.toBe(otherViolation);
+    });
   });
 
   describe('decide', () => {
@@ -424,52 +550,6 @@ describe('ReferralService', () => {
     ];
     repository.findMany.mockResolvedValue(rows);
     await expect(service.list()).resolves.toBe(rows);
-  });
-
-  it('creates via repository with the given data', async () => {
-    const dto: CreateReferralInput = {
-      beneficiaryId: '22222222-2222-2222-2222-222222222222',
-      referralTypeLookupValueId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
-      referralDate: new Date('2026-07-01'),
-      status: 'INITIATED',
-      supervisorApprovalStatus: 'NOT_REQUIRED',
-    };
-    const created = {
-      id: '11111111-1111-1111-1111-111111111111',
-      beneficiaryId: dto.beneficiaryId,
-      visitId: null,
-      sourceSubmissionId: null,
-      referralTypeLookupValueId: dto.referralTypeLookupValueId,
-      referralDate: dto.referralDate,
-      triggerConditionListJson: null,
-      facilityType: null,
-      facilityName: null,
-      photoEvidenceMediaAssetId: null,
-      status: dto.status,
-      validTill: null,
-      supervisorApprovalStatus: dto.supervisorApprovalStatus,
-      createdAt: new Date(),
-      createdByUserId: null,
-      updatedAt: new Date(),
-      updatedByUserId: null,
-      isDeleted: false,
-      deletedAt: null,
-    };
-    repository.create.mockResolvedValue(created);
-    await expect(service.create(dto)).resolves.toBe(created);
-    expect(repository.create).toHaveBeenCalledWith(dto);
-  });
-
-  it('propagates repository errors on create', async () => {
-    repository.create.mockRejectedValue(new Error('db down'));
-    const dto: CreateReferralInput = {
-      beneficiaryId: '22222222-2222-2222-2222-222222222222',
-      referralTypeLookupValueId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
-      referralDate: new Date('2026-07-01'),
-      status: 'INITIATED',
-      supervisorApprovalStatus: 'NOT_REQUIRED',
-    };
-    await expect(service.create(dto)).rejects.toThrow('db down');
   });
 
   describe('getDecisionStatusByIds', () => {

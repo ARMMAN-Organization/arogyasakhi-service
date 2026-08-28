@@ -20,8 +20,8 @@ export class MediaAssetService {
     private readonly beneficiaryClient: BeneficiaryClient = new BeneficiaryClient(),
   ) {}
 
-  list() {
-    return this.repository.findMany();
+  list(filters?: { followupId?: string }) {
+    return this.repository.findMany(filters);
   }
 
   /**

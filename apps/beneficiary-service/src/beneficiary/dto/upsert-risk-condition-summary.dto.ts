@@ -28,6 +28,14 @@ export const upsertRiskConditionSummarySchema = z
     isReferralTrigger: z.boolean(),
     isHrVisitTrigger: z.boolean(),
     ruleVersionId: z.string().uuid().nullable().optional(),
+    // Whether this grading pass is the first time this condition has ever
+    // been flagged for this beneficiary — always-latest, not "ever" (see
+    // BeneficiaryRepository.upsertRiskConditionSummary), same as
+    // isReferralTrigger/isHrVisitTrigger above.
+    isFirstInstance: z.boolean(),
+    // Length of the current "no improvement" streak, for phases that track
+    // it (NN/INC/CCV) — null for phases where this doesn't apply.
+    consecutiveNoImprovementCount: z.number().int().nullable(),
   })
   .strict();
 

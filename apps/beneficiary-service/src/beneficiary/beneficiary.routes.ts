@@ -17,6 +17,7 @@ import { listBeneficiariesQuerySchema } from './dto/list-beneficiaries.dto';
 import { summaryQuerySchema } from './dto/summary-query.dto';
 import { idsQuerySchema } from './dto/ids-query.dto';
 import { byIdsWithRiskQuerySchema } from './dto/by-ids-with-risk-query.dto';
+import { batchRiskConditionSummaryQuerySchema } from './dto/batch-risk-condition-summary-query.dto';
 import { upsertSocioDemographicsSchema } from './dto/upsert-socio-demographics.dto';
 import { upsertRiskConditionSummarySchema } from './dto/upsert-risk-condition-summary.dto';
 import { applyLmpChangeSchema } from './dto/apply-lmp-change.dto';
@@ -81,6 +82,11 @@ const riskConditionSummarySchema = z.object({
   gradeScale: z
     .enum(['BINARY', 'NORMAL_MILD_MODERATE_SEVERE', 'NORMAL_LOW_MEDIUM_HIGH'])
     .nullable(),
+  // Always-latest (reflects the most recent grading pass only), pushed by
+  // risk-referral-service alongside currentReferralTriggerFlag/
+  // currentHrVisitTriggerFlag above — see riskAssessment.service.ts.
+  isFirstInstance: z.boolean(),
+  consecutiveNoImprovementCount: z.number().int().nullable(),
 });
 
 const statusHistoryEntrySchema = z.object({
@@ -418,6 +424,46 @@ export function registerBeneficiaryRoutes(doc: DocumentedRouter, service: Benefi
     requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
     validate(byIdsWithRiskQuerySchema, 'query'),
     controller.getByIdsWithRisk,
+  );
+
+  doc.get(
+    '/beneficiaries/risk-condition-summary',
+    {
+      summary:
+        'Batch risk-condition-summary lookup for a set of beneficiaries — mirrors ' +
+        "by-ids-with-risk's scoping/silent-drop semantics. `beneficiaryIds` is a " +
+        "comma-separated list, further intersected server-side with the caller's own scope " +
+        '(SAKHI: own; SUPERVISOR: roster; MANAGER/ADMIN: unscoped) — an id outside that scope, ' +
+        'or simply not found, is absent from the result, not a 404 or 403 (never trust a ' +
+        'caller-supplied id list as pre-scoped). A beneficiary with no ' +
+        'BeneficiaryRiskConditionSummary rows still appears with an empty array, not omitted. ' +
+        'conditionCode/conditionName/gradeScale are resolved once across every distinct ' +
+        'riskConditionId in the whole result set, degrading to null on an unresolved id or an ' +
+        'unreachable risk-referral-service rather than failing the request.',
+      tags: ['Beneficiaries'],
+      responses: {
+        200: {
+          description: 'Per-beneficiary risk condition summaries',
+          schema: envelope(
+            z.array(
+              z.object({
+                beneficiaryId: z.string().uuid(),
+                riskConditionSummaries: z.array(riskConditionSummarySchema),
+              }),
+            ),
+          ),
+        },
+        400: errorResponse(400, {
+          message: 'beneficiaryIds: String must contain at least 1 character(s)',
+        }),
+        401: errorResponse(401),
+        500: errorResponse(500),
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(batchRiskConditionSummaryQuerySchema, 'query'),
+    controller.getRiskConditionSummaryBatch,
   );
 
   doc.get(

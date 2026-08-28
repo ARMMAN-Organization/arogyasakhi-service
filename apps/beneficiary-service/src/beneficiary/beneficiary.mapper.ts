@@ -130,6 +130,8 @@ export function withDecryptedName<T extends { pii: PiiRow; [k: string]: unknown 
       everAtRiskFlag: r.everAtRiskFlag,
       currentReferralTriggerFlag: r.currentReferralTriggerFlag,
       currentHrVisitTriggerFlag: r.currentHrVisitTriggerFlag,
+      isFirstInstance: r.isFirstInstance,
+      consecutiveNoImprovementCount: r.consecutiveNoImprovementCount,
       conditionCode: null as string | null,
       conditionName: null as string | null,
       gradeScale: null as string | null,

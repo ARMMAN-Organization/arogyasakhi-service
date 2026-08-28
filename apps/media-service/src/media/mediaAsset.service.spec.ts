@@ -49,10 +49,24 @@ describe('MediaAssetService', () => {
     service = new MediaAssetService(repository, beneficiaryClient);
   });
 
-  it('lists via repository', async () => {
-    repository.findMany.mockResolvedValue([]);
-    await expect(service.list()).resolves.toEqual([]);
-    expect(repository.findMany).toHaveBeenCalledTimes(1);
+  describe('list', () => {
+    it('passes no filter to the repository when followupId is omitted', async () => {
+      repository.findMany.mockResolvedValue([]);
+
+      await expect(service.list()).resolves.toEqual([]);
+
+      expect(repository.findMany).toHaveBeenCalledWith(undefined);
+    });
+
+    it('filters by followupId when given', async () => {
+      repository.findMany.mockResolvedValue([]);
+
+      await service.list({ followupId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' });
+
+      expect(repository.findMany).toHaveBeenCalledWith({
+        followupId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      });
+    });
   });
 
   describe('getById', () => {

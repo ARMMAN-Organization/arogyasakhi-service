@@ -23,6 +23,16 @@ export interface RiskConditionSummaryPush {
   isReferralTrigger: boolean;
   isHrVisitTrigger: boolean;
   ruleVersionId: string | null;
+  /** Whether this is the first time this condition has ever been flagged
+   * (non-NORMAL grade) for this beneficiary, as of this specific grading
+   * pass — the same isFirstInstance value fed as a rule-pack evaluation
+   * input, not recomputed. */
+  isFirstInstance: boolean;
+  /** Length of the current "no improvement" streak (consecutive gradings
+   * with a non-decreasing gradeRank) for this condition, for phases that
+   * track it (NN/INC/CCV) — null for phases where this concept doesn't
+   * apply (ANC/REGISTRATION/DELIVERY/PP). */
+  consecutiveNoImprovementCount: number | null;
 }
 
 export async function pushRiskConditionSummary(

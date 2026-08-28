@@ -132,6 +132,8 @@ export interface UpsertRiskConditionSummaryData {
   isReferralTrigger: boolean;
   isHrVisitTrigger: boolean;
   ruleVersionId: string | null;
+  isFirstInstance: boolean;
+  consecutiveNoImprovementCount: number | null;
 }
 
 export interface CreateEnrollmentInput {
