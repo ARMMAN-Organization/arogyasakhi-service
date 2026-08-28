@@ -148,6 +148,7 @@ model HealthEducationMessage {
   isDeleted       Boolean                  @default(false) @map("is_deleted")
   deletedAt       DateTime?                @map("deleted_at")
 
+  @@unique([conditionLabel, stage, messageOrder])
   @@index([riskConditionId])
   @@map("health_education_messages")
 }
