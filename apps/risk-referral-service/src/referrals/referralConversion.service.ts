@@ -1,13 +1,8 @@
-import {
-  badGateway,
-  conflict,
-  forbidden,
-  notFound,
-  type AuthenticatedUser,
-} from '@armman/service-commons';
+import { badGateway, conflict, notFound, type AuthenticatedUser } from '@armman/service-commons';
 import type { ReferralRepository } from './referral.repository';
 import type { BeneficiaryClient } from './beneficiary.client';
 import { resolveReferralTypeLookupId } from './lookup.client';
+import { assertSakhiOwnsReferral } from './assertSakhiOwnsReferral';
 
 /**
  * Standard -> Accompanied referral conversion (SRS FR-S-6.3, Appendix E.2:
@@ -23,8 +18,9 @@ export class ReferralConversionService {
 
   /**
    * Same SAKHI-owns-beneficiary ownership check as
-   * ReferralFollowupService.create — referrals carries no sakhiId column,
-   * so this is resolved via beneficiary-service.
+   * ReferralFollowupService.create, extracted into assertSakhiOwnsReferral
+   * after PR #199 review flagged the duplication — referrals carries no
+   * sakhiId column, so this is resolved via beneficiary-service.
    */
   async convertToAccompanied(
     referralId: string,
@@ -34,13 +30,7 @@ export class ReferralConversionService {
     const referral = await this.repository.findById(referralId);
     if (!referral) throw notFound('Referral not found.');
 
-    const beneficiary = await this.beneficiaryClient.getById(
-      referral.beneficiaryId,
-      authorizationHeader,
-    );
-    if (!beneficiary || beneficiary.sakhiId !== caller.id) {
-      throw forbidden('This referral does not belong to your own roster.');
-    }
+    await assertSakhiOwnsReferral(referral, caller, this.beneficiaryClient, authorizationHeader);
 
     if (referral.status !== 'PENDING_FOLLOWUP') {
       throw conflict(`Cannot convert a referral with status ${referral.status}.`);
