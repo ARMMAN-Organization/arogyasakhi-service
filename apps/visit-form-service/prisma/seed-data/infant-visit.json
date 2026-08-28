@@ -322,6 +322,7 @@
       "required": true,
       "input_type": "multiselect",
       "question_code": "feeding_concerns",
+      "learnMoreTopicCode": "COMING_SOON",
       "visibleWhen": {
         "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
         "operator": "eq",

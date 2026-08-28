@@ -80,6 +80,7 @@
       "required": true,
       "input_type": "multiselect",
       "question_code": "danger_signs_since_delivery_or_last_visit",
+      "learnMoreTopicCode": "COMING_SOON",
       "visibleWhen": { "field": "is_mother_alive", "operator": "eq", "value": "yes" }
     },
     {

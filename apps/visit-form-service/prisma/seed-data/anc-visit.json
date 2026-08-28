@@ -90,6 +90,7 @@
       "required": true,
       "input_type": "date",
       "question_code": "lmp",
+      "learnMoreTopicCode": "COMING_SOON",
       "visibleWhen": {
         "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
         "operator": "eq",
@@ -213,6 +214,7 @@
       "input_type": "number",
       "computedFrom": "BMI",
       "question_code": "bmi",
+      "learnMoreTopicCode": "COMING_SOON",
       "visibleWhen": {
         "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
         "operator": "eq",
@@ -238,6 +240,7 @@
       "input_type": "radio",
       "computedFrom": "GESTATIONAL_WEIGHT_GAIN",
       "question_code": "gestational_weight_gain",
+      "learnMoreTopicCode": "COMING_SOON",
       "visibleWhen": {
         "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
         "operator": "eq",

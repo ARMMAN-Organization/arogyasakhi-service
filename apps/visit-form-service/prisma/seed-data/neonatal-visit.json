@@ -126,6 +126,7 @@
       "required": true,
       "input_type": "multiselect",
       "question_code": "danger_signs",
+      "learnMoreTopicCode": "COMING_SOON",
       "visibleWhen": { "field": "is_newborn_alive_now", "operator": "eq", "value": "yes" }
     },
     {
@@ -212,6 +213,7 @@
       "required": true,
       "input_type": "multiselect",
       "question_code": "feeding_concerns",
+      "learnMoreTopicCode": "COMING_SOON",
       "visibleWhen": { "field": "is_newborn_alive_now", "operator": "eq", "value": "yes" }
     },
     {
@@ -224,6 +226,7 @@
       "required": true,
       "input_type": "radio",
       "question_code": "deformity_observed",
+      "learnMoreTopicCode": "COMING_SOON",
       "visibleWhen": { "field": "is_newborn_alive_now", "operator": "eq", "value": "yes" }
     },
     {
