@@ -15,8 +15,9 @@ export interface EducationContent {
  * the FR-S-13 Learn More placeholder shell rather than building a second
  * content model. Every isEducationTrigger:true flag resolves to the same
  * seeded COMING_SOON topic today (no RiskCondition -> topicCode mapping
- * exists yet — ARMMAN has not delivered per-condition content; see this
- * feature's implementation plan doc).
+ * exists yet — ARMMAN has not delivered per-condition content; see
+ * issue #200 for the open mapping/stage-vocabulary/precedence/delivery
+ * decisions this is blocked on).
  *
  * Deliberately swallows every failure (network error, non-2xx, malformed
  * body) and returns null rather than throwing: this is reference/placeholder
