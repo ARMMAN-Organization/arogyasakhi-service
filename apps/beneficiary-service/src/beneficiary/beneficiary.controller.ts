@@ -12,6 +12,7 @@ import {
 import type { idsQuerySchema } from './dto/ids-query.dto';
 import { parseIdsParam, type byIdsWithRiskQuerySchema } from './dto/by-ids-with-risk-query.dto';
 import type { batchRiskConditionSummaryQuerySchema } from './dto/batch-risk-condition-summary-query.dto';
+import type { postEddPendingQuerySchema } from './dto/post-edd-pending-query.dto';
 
 /**
  * Beneficiary request handlers. Mounted under the global `api/v1` prefix
@@ -35,6 +36,16 @@ export function createBeneficiaryController(service: BeneficiaryService) {
       if (!authorizationHeader) return next(unauthorized());
       const query = req.query as unknown as z.infer<typeof idsQuerySchema>;
       res.json(ok(await service.getIds(query.sakhiId, req.user, authorizationHeader)));
+    }),
+
+    getPostEddPending: asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const query = req.query as unknown as z.infer<typeof postEddPendingQuerySchema>;
+      res.json(
+        ok(
+          await service.getPostEddPendingBeneficiaries(query.cutoffDate, query.limit, query.cursor),
+        ),
+      );
     }),
 
     getPadaBreakdown: asyncHandler(async (req, res, next) => {

@@ -18,6 +18,7 @@ import { summaryQuerySchema } from './dto/summary-query.dto';
 import { idsQuerySchema } from './dto/ids-query.dto';
 import { byIdsWithRiskQuerySchema } from './dto/by-ids-with-risk-query.dto';
 import { batchRiskConditionSummaryQuerySchema } from './dto/batch-risk-condition-summary-query.dto';
+import { postEddPendingQuerySchema } from './dto/post-edd-pending-query.dto';
 import { upsertSocioDemographicsSchema } from './dto/upsert-socio-demographics.dto';
 import { upsertRiskConditionSummarySchema } from './dto/upsert-risk-condition-summary.dto';
 import { applyLmpChangeSchema } from './dto/apply-lmp-change.dto';
@@ -542,9 +543,53 @@ export function registerBeneficiaryRoutes(doc: DocumentedRouter, service: Benefi
   );
 
   doc.get(
+    '/beneficiaries/internal/post-edd-pending',
+    {
+      summary:
+        'SYSTEM-only: MOTHER beneficiaries still in the ANC phase (no delivery outcome ' +
+        'submitted yet) whose EDD is on or before `cutoffDate` — the candidate set for ' +
+        "visit-form-service's post-EDD visit-generation job (EDD+7 delivery-form-pending " +
+        'detection). Cursor-paginated via cursor/limit (default 200, max 500). Unscoped — ' +
+        'unlike every human-facing list endpoint, there is no sakhiId/roster filter: the ' +
+        'only caller is a background job acting system-wide.',
+      tags: ['Beneficiaries'],
+      responses: {
+        200: {
+          description: 'Post-EDD-pending MOTHER beneficiaries retrieved',
+          schema: envelope(
+            z.object({
+              items: z.array(
+                z.object({
+                  beneficiaryId: z.string().uuid(),
+                  registrationDate: z.string().datetime(),
+                  eddDate: z.string().datetime(),
+                }),
+              ),
+              nextCursor: z.string().nullable(),
+            }),
+          ),
+        },
+        400: errorResponse(400, { message: 'cutoffDate: must be a date-only string (YYYY-MM-DD)' }),
+        401: errorResponse(401),
+        403: errorResponse(403),
+        500: errorResponse(500),
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SYSTEM'),
+    validate(postEddPendingQuerySchema, 'query'),
+    controller.getPostEddPending,
+  );
+
+  doc.get(
     '/beneficiaries/:id',
     {
-      summary: 'Get a beneficiary case by id — profile, current phase, risk state, status history',
+      summary:
+        'Get a beneficiary case by id — profile, current phase, risk state, status history. ' +
+        "SYSTEM is included alongside the human roles so visit-form-service's post-EDD " +
+        'visit-generation job (and any other privileged system caller) can resolve a ' +
+        "beneficiary via VisitScheduleService.generateSchedule's assertCanTouchBeneficiary " +
+        'check without a human identity.',
       tags: ['Beneficiaries'],
       responses: {
         200: {
@@ -559,7 +604,7 @@ export function registerBeneficiaryRoutes(doc: DocumentedRouter, service: Benefi
       },
     },
     trustGatewayIdentity,
-    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER'),
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'SYSTEM'),
     validate(idParamsSchema, 'params'),
     controller.getById,
   );
