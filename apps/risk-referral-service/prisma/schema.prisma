@@ -346,3 +346,16 @@ model ReferralFollowup {
 
   @@map("referral_followups")
 }
+
+// Not in the ERD — a DB-backed advisory lock for the in-process node-cron
+// overdue-follow-up job in this service. Without it, running more than one
+// replica of this service would process the same overdue follow-ups once
+// per replica per tick. See libs/service-commons/src/jobs/job-lock.ts.
+model JobRun {
+  id          String   @id @default(uuid()) @map("job_run_id")
+  jobName     String   @unique @map("job_name") @db.VarChar(80)
+  lockedUntil DateTime @map("locked_until")
+  lastRunAt   DateTime @map("last_run_at")
+
+  @@map("job_runs")
+}
