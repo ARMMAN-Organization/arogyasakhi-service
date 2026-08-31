@@ -41,7 +41,10 @@ describe('ClosureService', () => {
     create: jest.fn(),
     decide: jest.fn(),
   } as unknown as jest.Mocked<ClosureRepository>;
-  const approvalClient = { create: jest.fn() } as unknown as jest.Mocked<ApprovalClient>;
+  const approvalClient = {
+    create: jest.fn(),
+    findByClosureId: jest.fn(),
+  } as unknown as jest.Mocked<ApprovalClient>;
   const lookupClient = {
     resolveApprovalStatusId: jest.fn(),
     resolveClosureReasonCode: jest.fn(),
@@ -55,12 +58,14 @@ describe('ClosureService', () => {
   let service: ClosureService;
   const authHeader = 'Bearer token';
   const supervisorId = '44444444-4444-4444-4444-444444444444';
+  const approvalRequestId = '55555555-5555-5555-5555-555555555555';
   let consoleErrorSpy: jest.SpyInstance;
 
   beforeEach(() => {
     jest.resetAllMocks();
     consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
     repository.findByLocalClosureUuid.mockResolvedValue(null);
+    approvalClient.findByClosureId.mockResolvedValue({ id: approvalRequestId });
     beneficiaryClient.closeCase.mockResolvedValue({
       id: '22222222-2222-2222-2222-222222222222',
       currentStatus: 'CLOSED',
@@ -338,7 +343,7 @@ describe('ClosureService', () => {
         expect.any(String),
         expect.any(String),
         authHeader,
-        { linkedEntityType: 'Closure', linkedEntityId: pending.id },
+        { linkedEntityType: 'QuickResponseCard', linkedEntityId: approvalRequestId },
       );
     });
 
@@ -366,7 +371,7 @@ describe('ClosureService', () => {
         'Closure review — Priya Sakhi',
         "Asha Devi's closure request was approved",
         authHeader,
-        { linkedEntityType: 'Closure', linkedEntityId: pending.id },
+        { linkedEntityType: 'QuickResponseCard', linkedEntityId: approvalRequestId },
       );
     });
 
@@ -392,7 +397,7 @@ describe('ClosureService', () => {
         'Closure review decided',
         "Asha Devi's closure request was approved",
         authHeader,
-        { linkedEntityType: 'Closure', linkedEntityId: pending.id },
+        { linkedEntityType: 'QuickResponseCard', linkedEntityId: approvalRequestId },
       );
     });
 
@@ -578,6 +583,72 @@ describe('ClosureService', () => {
         service.decide(pending.id, supervisorId, { decision: 'APPROVED' }, authHeader),
       ).resolves.toBe(decided);
       expect(consoleErrorSpy).toHaveBeenCalled();
+    });
+
+    describe('Quick Response card linking', () => {
+      it('links the notification to the approval_requests id, not the closure id', async () => {
+        const pending = pendingClosure();
+        const decided = { ...pending, supervisorStatus: 'APPROVED' as const, supervisorId };
+        repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(decided);
+        repository.decide.mockResolvedValue(true);
+
+        await service.decide(pending.id, supervisorId, { decision: 'APPROVED' }, authHeader);
+
+        expect(approvalClient.findByClosureId).toHaveBeenCalledWith(pending.id, authHeader);
+        expect(notificationClient.notify).toHaveBeenCalledWith(
+          pending.submittedByUserId,
+          'CLOSURE_REVIEW_UPDATE',
+          expect.any(String),
+          expect.any(String),
+          authHeader,
+          { linkedEntityType: 'QuickResponseCard', linkedEntityId: approvalRequestId },
+        );
+      });
+
+      it('sends the notification without a linkedEntity when no approval request is found for the closure', async () => {
+        const pending = pendingClosure();
+        const decided = { ...pending, supervisorStatus: 'APPROVED' as const, supervisorId };
+        repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(decided);
+        repository.decide.mockResolvedValue(true);
+        approvalClient.findByClosureId.mockResolvedValue(null);
+
+        await expect(
+          service.decide(pending.id, supervisorId, { decision: 'APPROVED' }, authHeader),
+        ).resolves.toBe(decided);
+
+        expect(notificationClient.notify).toHaveBeenCalledWith(
+          pending.submittedByUserId,
+          'CLOSURE_REVIEW_UPDATE',
+          expect.any(String),
+          expect.any(String),
+          authHeader,
+          undefined,
+        );
+      });
+
+      it('sends the notification without a linkedEntity, and does not fail the decision, when the lookup throws', async () => {
+        const pending = pendingClosure();
+        const decided = { ...pending, supervisorStatus: 'APPROVED' as const, supervisorId };
+        repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(decided);
+        repository.decide.mockResolvedValue(true);
+        approvalClient.findByClosureId.mockRejectedValue(
+          Object.assign(new Error('Bad gateway'), { status: 502 }),
+        );
+
+        await expect(
+          service.decide(pending.id, supervisorId, { decision: 'APPROVED' }, authHeader),
+        ).resolves.toBe(decided);
+
+        expect(notificationClient.notify).toHaveBeenCalledWith(
+          pending.submittedByUserId,
+          'CLOSURE_REVIEW_UPDATE',
+          expect.any(String),
+          expect.any(String),
+          authHeader,
+          undefined,
+        );
+        expect(consoleErrorSpy).toHaveBeenCalled();
+      });
     });
   });
 });

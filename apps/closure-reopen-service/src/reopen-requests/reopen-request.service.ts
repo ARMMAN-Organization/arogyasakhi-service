@@ -47,6 +47,34 @@ export class ReopenRequestService {
   }
 
   /**
+   * Best-effort — this reopen request's Quick Response card id
+   * (approval_requests.id), used to link the decision notification so
+   * GET /quick-response/:cardId can resolve it. A failure here (no matching
+   * approval request, or approval-service unreachable) must not block the
+   * decision — the notification is simply sent without a linkedEntity rather
+   * than with a reopen_requests-table id GET /quick-response/:cardId doesn't
+   * recognise.
+   */
+  private async resolveQuickResponseCardId(
+    reopenRequestId: string,
+    authorizationHeader: string,
+  ): Promise<string | null> {
+    try {
+      const approvalRequest = await this.approvalClient.findByReopenRequestId(
+        reopenRequestId,
+        authorizationHeader,
+      );
+      return approvalRequest?.id ?? null;
+    } catch (err) {
+      console.error(
+        `Failed to resolve the Quick Response card id for reopen request ${reopenRequestId}:`,
+        err,
+      );
+      return null;
+    }
+  }
+
+  /**
    * All reopen requests for one beneficiary, most-recent first — for the
    * app's "Reopen pending review" state (any entry with
    * supervisorStatus: 'PENDING'), which currentStatus alone can't show since
@@ -237,10 +265,10 @@ export class ReopenRequestService {
         { decision: dto.decision, decisionNotes: dto.decisionNotes ?? null },
         authorizationHeader,
       );
-      const sakhiName = await this.resolveSakhiName(
-        existing.requestedByUserId,
-        authorizationHeader,
-      );
+      const [sakhiName, cardId] = await Promise.all([
+        this.resolveSakhiName(existing.requestedByUserId, authorizationHeader),
+        this.resolveQuickResponseCardId(id, authorizationHeader),
+      ]);
       const beneficiaryName = beneficiary?.pii.fullName ?? null;
       await this.notificationClient.notify(
         existing.requestedByUserId,
@@ -254,7 +282,7 @@ export class ReopenRequestService {
             ? 'Your reopen request was approved.'
             : 'Your reopen request was rejected.',
         authorizationHeader,
-        { linkedEntityType: 'ReopenRequest', linkedEntityId: id },
+        cardId ? { linkedEntityType: 'QuickResponseCard', linkedEntityId: cardId } : undefined,
       );
     } catch (err) {
       console.error(

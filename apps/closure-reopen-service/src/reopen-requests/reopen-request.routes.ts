@@ -17,7 +17,15 @@ import {
 extendZodWithOpenApi(z);
 
 const reopenRequestIdParamsSchema = z
-  .object({ id: z.string().uuid().openapi({ example: '123e4567-e89b-12d3-a456-426614174000' }) })
+  .object({
+    id: z
+      .string()
+      .uuid()
+      .openapi({
+        param: { name: 'id', in: 'path' },
+        example: '123e4567-e89b-12d3-a456-426614174000',
+      }),
+  })
   .strict();
 
 const listByBeneficiaryQuerySchema = z

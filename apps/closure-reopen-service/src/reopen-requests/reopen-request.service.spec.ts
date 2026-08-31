@@ -43,7 +43,10 @@ describe('ReopenRequestService', () => {
   } as unknown as jest.Mocked<ReopenRequestRepository>;
   const auditClient = { log: jest.fn() } as unknown as jest.Mocked<AuditClient>;
   const notificationClient = { notify: jest.fn() } as unknown as jest.Mocked<NotificationClient>;
-  const approvalClient = { create: jest.fn() } as unknown as jest.Mocked<ApprovalClient>;
+  const approvalClient = {
+    create: jest.fn(),
+    findByReopenRequestId: jest.fn(),
+  } as unknown as jest.Mocked<ApprovalClient>;
   const lookupClient = {
     resolveApprovalStatusId: jest.fn(),
   } as unknown as jest.Mocked<LookupClient>;
@@ -55,12 +58,14 @@ describe('ReopenRequestService', () => {
   let service: ReopenRequestService;
   const supervisorId = '44444444-4444-4444-4444-444444444444';
   const authHeader = 'Bearer token';
+  const approvalRequestId = '77777777-7777-7777-7777-777777777777';
   let consoleErrorSpy: jest.SpyInstance;
 
   beforeEach(() => {
     jest.resetAllMocks();
     consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
     repository.findByLocalReopenRequestUuid.mockResolvedValue(null);
+    approvalClient.findByReopenRequestId.mockResolvedValue({ id: approvalRequestId });
     beneficiaryClient.reactivateCase.mockResolvedValue({
       id: '22222222-2222-2222-2222-222222222222',
       currentStatus: 'ACTIVE',
@@ -304,7 +309,7 @@ describe('ReopenRequestService', () => {
       expect.any(String),
       expect.any(String),
       authHeader,
-      { linkedEntityType: 'ReopenRequest', linkedEntityId: pending.id },
+      { linkedEntityType: 'QuickResponseCard', linkedEntityId: approvalRequestId },
     );
   });
 
@@ -332,7 +337,7 @@ describe('ReopenRequestService', () => {
       'Reopen request — Priya Sakhi',
       "Asha Devi's reopen request was approved",
       authHeader,
-      { linkedEntityType: 'ReopenRequest', linkedEntityId: pending.id },
+      { linkedEntityType: 'QuickResponseCard', linkedEntityId: approvalRequestId },
     );
   });
 
@@ -358,7 +363,7 @@ describe('ReopenRequestService', () => {
       'Reopen request decided',
       "Asha Devi's reopen request was approved",
       authHeader,
-      { linkedEntityType: 'ReopenRequest', linkedEntityId: pending.id },
+      { linkedEntityType: 'QuickResponseCard', linkedEntityId: approvalRequestId },
     );
   });
 
@@ -561,5 +566,80 @@ describe('ReopenRequestService', () => {
     // failure isn't a reason to also skip the audit trail or Sakhi notice.
     expect(auditClient.log).toHaveBeenCalled();
     expect(notificationClient.notify).toHaveBeenCalled();
+  });
+
+  describe('Quick Response card linking', () => {
+    it('links the notification to the approval_requests id, not the reopen request id', async () => {
+      const pending = reopenRequest();
+      const decided = reopenRequest({
+        supervisorStatus: 'APPROVED',
+        decidedByUserId: supervisorId,
+      });
+      repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(decided);
+      repository.decide.mockResolvedValue(true);
+
+      await service.decide(pending.id, supervisorId, { decision: 'APPROVED' }, authHeader);
+
+      expect(approvalClient.findByReopenRequestId).toHaveBeenCalledWith(pending.id, authHeader);
+      expect(notificationClient.notify).toHaveBeenCalledWith(
+        pending.requestedByUserId,
+        'REOPEN_UPDATE',
+        expect.any(String),
+        expect.any(String),
+        authHeader,
+        { linkedEntityType: 'QuickResponseCard', linkedEntityId: approvalRequestId },
+      );
+    });
+
+    it('sends the notification without a linkedEntity when no approval request is found for the reopen request', async () => {
+      const pending = reopenRequest();
+      const decided = reopenRequest({
+        supervisorStatus: 'APPROVED',
+        decidedByUserId: supervisorId,
+      });
+      repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(decided);
+      repository.decide.mockResolvedValue(true);
+      approvalClient.findByReopenRequestId.mockResolvedValue(null);
+
+      await expect(
+        service.decide(pending.id, supervisorId, { decision: 'APPROVED' }, authHeader),
+      ).resolves.toBe(decided);
+
+      expect(notificationClient.notify).toHaveBeenCalledWith(
+        pending.requestedByUserId,
+        'REOPEN_UPDATE',
+        expect.any(String),
+        expect.any(String),
+        authHeader,
+        undefined,
+      );
+    });
+
+    it('sends the notification without a linkedEntity, and does not fail the decision, when the lookup throws', async () => {
+      const pending = reopenRequest();
+      const decided = reopenRequest({
+        supervisorStatus: 'APPROVED',
+        decidedByUserId: supervisorId,
+      });
+      repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(decided);
+      repository.decide.mockResolvedValue(true);
+      approvalClient.findByReopenRequestId.mockRejectedValue(
+        Object.assign(new Error('Bad gateway'), { status: 502 }),
+      );
+
+      await expect(
+        service.decide(pending.id, supervisorId, { decision: 'APPROVED' }, authHeader),
+      ).resolves.toBe(decided);
+
+      expect(notificationClient.notify).toHaveBeenCalledWith(
+        pending.requestedByUserId,
+        'REOPEN_UPDATE',
+        expect.any(String),
+        expect.any(String),
+        authHeader,
+        undefined,
+      );
+      expect(consoleErrorSpy).toHaveBeenCalled();
+    });
   });
 });

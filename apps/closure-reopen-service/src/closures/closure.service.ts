@@ -52,6 +52,30 @@ export class ClosureService {
     }
   }
 
+  /**
+   * Best-effort — this closure's Quick Response card id (approval_requests.id),
+   * used to link the decision notification so GET /quick-response/:cardId can
+   * resolve it. A failure here (no matching approval request, or
+   * approval-service unreachable) must not block the decision — the
+   * notification is simply sent without a linkedEntity rather than with a
+   * closures-table id GET /quick-response/:cardId doesn't recognise.
+   */
+  private async resolveQuickResponseCardId(
+    closureId: string,
+    authorizationHeader: string,
+  ): Promise<string | null> {
+    try {
+      const approvalRequest = await this.approvalClient.findByClosureId(
+        closureId,
+        authorizationHeader,
+      );
+      return approvalRequest?.id ?? null;
+    } catch (err) {
+      console.error(`Failed to resolve the Quick Response card id for closure ${closureId}:`, err);
+      return null;
+    }
+  }
+
   list() {
     return this.repository.findMany();
   }
@@ -244,10 +268,10 @@ export class ClosureService {
     }
 
     try {
-      const sakhiName = await this.resolveSakhiName(
-        existing.submittedByUserId,
-        authorizationHeader,
-      );
+      const [sakhiName, cardId] = await Promise.all([
+        this.resolveSakhiName(existing.submittedByUserId, authorizationHeader),
+        this.resolveQuickResponseCardId(id, authorizationHeader),
+      ]);
       const beneficiaryName = beneficiary?.pii.fullName ?? null;
       await this.notificationClient.notify(
         existing.submittedByUserId,
@@ -261,7 +285,7 @@ export class ClosureService {
             ? 'Your closure request was approved.'
             : 'Your closure request was rejected.',
         authorizationHeader,
-        { linkedEntityType: 'Closure', linkedEntityId: id },
+        cardId ? { linkedEntityType: 'QuickResponseCard', linkedEntityId: cardId } : undefined,
       );
     } catch (err) {
       console.error(
