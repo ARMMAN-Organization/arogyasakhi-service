@@ -138,6 +138,11 @@ export class AuthRepository {
     return this.prisma.role.findUnique({ where: { roleCode } });
   }
 
+  /** Looks up a machine identity by its client id — the service-token counterpart of findUserByUsername. */
+  findServiceAccountByClientId(clientId: string) {
+    return this.prisma.serviceAccount.findUnique({ where: { clientId } });
+  }
+
   /**
    * Creates the user and their initial role assignment atomically. When
    * `sakhiProfile` is supplied (roleCode SAKHI — see AuthService.createUser),
