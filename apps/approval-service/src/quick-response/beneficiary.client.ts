@@ -64,6 +64,42 @@ export class BeneficiaryClient {
     return body.data;
   }
 
+  /**
+   * Batch-resolves beneficiaryName for a page of Quick Response cards via
+   * beneficiary-service's GET /beneficiaries/by-ids-with-risk — one call per
+   * page instead of one per row. Ids outside the caller's scope, or simply
+   * not found, are silently absent from the result (server-side behavior,
+   * not a 404/403), so callers should treat a missing id as "name
+   * unavailable" rather than an error.
+   */
+  async getManyWithRisk(
+    beneficiaryIds: string[],
+    authorizationHeader: string,
+  ): Promise<Map<string, string>> {
+    if (beneficiaryIds.length === 0) return new Map();
+
+    let res: Response;
+    try {
+      res = await fetch(
+        `${appConfig.API_GATEWAY_BASE_URL}/api/v1/beneficiaries/by-ids-with-risk?ids=${beneficiaryIds.join(',')}`,
+        { headers: { Authorization: authorizationHeader } },
+      );
+    } catch {
+      throw badGateway('Unable to resolve beneficiaries — beneficiary-service is unreachable.');
+    }
+
+    if (!res.ok) {
+      if (res.status >= 400 && res.status < 500) {
+        const body = (await res.json().catch(() => null)) as { message?: string } | null;
+        throw new HttpError(res.status, body?.message ?? 'Unable to resolve beneficiaries.');
+      }
+      throw badGateway('Unable to resolve beneficiaries — beneficiary-service returned an error.');
+    }
+
+    const body = (await res.json()) as { data: Array<{ id: string; beneficiaryName: string }> };
+    return new Map(body.data.map((row) => [row.id, row.beneficiaryName]));
+  }
+
   async applyLmpChange(
     beneficiaryId: string,
     lmpDate: string,

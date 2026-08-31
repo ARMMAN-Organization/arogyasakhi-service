@@ -42,6 +42,8 @@ interface ApprovalRequestCard {
   cardSource: 'approval_requests';
   beneficiaryId: string | null;
   raisedAt: string;
+  beneficiaryName: string | null;
+  sakhiName: string | null;
 }
 
 type QuickResponseCard = ApprovalRequestCard | EscalationCard;
@@ -113,6 +115,48 @@ export class QuickResponseService {
     }
   }
 
+  /**
+   * Page-level batch lookup for list() — one call for every beneficiary on
+   * the page, instead of one per row (see resolveBeneficiaryName for the
+   * single-id version getCardDetail() uses). Best-effort: a failure here
+   * degrades the whole page's beneficiaryName to null rather than failing
+   * the list.
+   */
+  private async resolveBeneficiaryNamesById(
+    beneficiaryIds: string[],
+    authorizationHeader: string,
+  ): Promise<Map<string, string>> {
+    if (beneficiaryIds.length === 0) return new Map();
+    try {
+      return await this.beneficiaryClient.getManyWithRisk(beneficiaryIds, authorizationHeader);
+    } catch (err) {
+      console.error('Failed to batch-resolve beneficiary names for the Quick Response list:', err);
+      return new Map();
+    }
+  }
+
+  /**
+   * Page-level Sakhi name lookup for list() — one call per unique Sakhi on
+   * the page rather than per row, since auth-service exposes no batch-by-ids
+   * route for Sakhis. Each id resolves independently via safeResolve, so one
+   * Sakhi lookup failing doesn't affect another Sakhi's cards on the same
+   * page.
+   */
+  private async resolveSakhiNamesById(
+    sakhiIds: string[],
+    authorizationHeader: string,
+  ): Promise<Map<string, string>> {
+    const entries = await Promise.all(
+      sakhiIds.map(async (sakhiId) => {
+        const sakhi = await this.safeResolve<SakhiRecord>('Sakhi', () =>
+          this.sakhiClient.getById(sakhiId, authorizationHeader),
+        );
+        return [sakhiId, sakhi?.displayName ?? null] as const;
+      }),
+    );
+    return new Map(entries.filter((entry): entry is [string, string] => entry[1] !== null));
+  }
+
   constructor(
     private readonly repository: QuickResponseRepository,
     private readonly lookupClient: LookupClient,
@@ -158,12 +202,29 @@ export class QuickResponseService {
         ? await this.filterStillPending(typedRows, authorizationHeader)
         : typedRows;
 
+    let beneficiaryNames = new Map<string, string>();
+    let sakhiNames = new Map<string, string>();
+    if (reconciledRows.length > 0) {
+      const beneficiaryIds = Array.from(
+        new Set(
+          reconciledRows.map((row) => row.beneficiaryId).filter((id): id is string => id != null),
+        ),
+      );
+      const sakhiIds = Array.from(new Set(reconciledRows.map((row) => row.requestedByUserId)));
+      [beneficiaryNames, sakhiNames] = await Promise.all([
+        this.resolveBeneficiaryNamesById(beneficiaryIds, authorizationHeader),
+        this.resolveSakhiNamesById(sakhiIds, authorizationHeader),
+      ]);
+    }
+
     const approvalCards: ApprovalRequestCard[] = reconciledRows.map((row) => ({
       cardId: row.id,
       cardType: row.requestType,
       cardSource: 'approval_requests' as const,
       beneficiaryId: row.beneficiaryId,
       raisedAt: row.createdAt.toISOString(),
+      beneficiaryName: row.beneficiaryId ? (beneficiaryNames.get(row.beneficiaryId) ?? null) : null,
+      sakhiName: sakhiNames.get(row.requestedByUserId) ?? null,
     }));
 
     const escalationStatus = mapStatusForEscalations(query.status);

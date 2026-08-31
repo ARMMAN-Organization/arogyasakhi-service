@@ -83,6 +83,7 @@ describe('QuickResponseService', () => {
   const beneficiaryClient = {
     applyLmpChange: jest.fn(),
     getById: jest.fn(),
+    getManyWithRisk: jest.fn(),
   } as unknown as jest.Mocked<BeneficiaryClient>;
   const notificationClient = { notify: jest.fn() } as unknown as jest.Mocked<NotificationClient>;
   const closureClient = {
@@ -130,6 +131,10 @@ describe('QuickResponseService', () => {
     referralClient.getDecisionStatusByIds.mockImplementation(
       async (ids: string[]) => new Map(ids.map((id) => [id, 'PENDING_FOLLOWUP'])),
     );
+    // Default so list() tests that don't care about name enrichment aren't
+    // affected by it — tests asserting the batch-enrichment behavior itself
+    // override these per-call.
+    beneficiaryClient.getManyWithRisk.mockResolvedValue(new Map());
     service = new QuickResponseService(
       repository,
       lookupClient,
@@ -205,6 +210,147 @@ describe('QuickResponseService', () => {
       await expect(
         service.list({ status: 'PENDING', cursor: 'not-valid!!', limit: 50 }, authHeader),
       ).rejects.toMatchObject({ status: 400 });
+    });
+
+    describe('batch-enriching approval_requests cards with names', () => {
+      it('populates beneficiaryName and sakhiName for approval cards on the page', async () => {
+        repository.findMany.mockResolvedValue([approvalRequest()]);
+        escalationClient.list.mockResolvedValue({ cards: [], nextCursor: null });
+        beneficiaryClient.getManyWithRisk.mockResolvedValue(
+          new Map([['22222222-2222-2222-2222-222222222222', 'Sita Kumari']]),
+        );
+        sakhiClient.getById.mockResolvedValue({
+          sakhiId: '44444444-4444-4444-4444-444444444444',
+          displayName: 'Asha Devi',
+          mobileNumber: '9999999999',
+          supervisorId: null,
+        });
+
+        const result = await service.list({ status: 'PENDING', limit: 50 }, authHeader);
+        expect(result.cards[0]).toMatchObject({
+          beneficiaryName: 'Sita Kumari',
+          sakhiName: 'Asha Devi',
+        });
+      });
+
+      it('leaves escalation cards unenriched (no beneficiaryName/sakhiName fields added)', async () => {
+        repository.findMany.mockResolvedValue([]);
+        escalationClient.list.mockResolvedValue({ cards: [escalationCard()], nextCursor: null });
+
+        const result = await service.list({ status: 'PENDING', limit: 50 }, authHeader);
+        expect(result.cards[0]).not.toHaveProperty('beneficiaryName');
+        expect(result.cards[0]).not.toHaveProperty('sakhiName');
+      });
+
+      it('calls getManyWithRisk once with a deduped beneficiaryId list', async () => {
+        repository.findMany.mockResolvedValue([
+          approvalRequest({ id: 'card-1' }),
+          approvalRequest({ id: 'card-2' }),
+        ]);
+        escalationClient.list.mockResolvedValue({ cards: [], nextCursor: null });
+
+        await service.list({ status: 'PENDING', limit: 50 }, authHeader);
+
+        expect(beneficiaryClient.getManyWithRisk).toHaveBeenCalledTimes(1);
+        expect(beneficiaryClient.getManyWithRisk).toHaveBeenCalledWith(
+          ['22222222-2222-2222-2222-222222222222'],
+          authHeader,
+        );
+      });
+
+      it('calls sakhiClient.getById once per unique requestedByUserId, not once per row', async () => {
+        repository.findMany.mockResolvedValue([
+          approvalRequest({ id: 'card-1' }),
+          approvalRequest({ id: 'card-2' }),
+        ]);
+        escalationClient.list.mockResolvedValue({ cards: [], nextCursor: null });
+
+        await service.list({ status: 'PENDING', limit: 50 }, authHeader);
+
+        expect(sakhiClient.getById).toHaveBeenCalledTimes(1);
+        expect(sakhiClient.getById).toHaveBeenCalledWith(
+          '44444444-4444-4444-4444-444444444444',
+          authHeader,
+        );
+      });
+
+      it('resolves DATA_RESTORE sakhiName from requestedByUserId', async () => {
+        repository.findMany.mockResolvedValue([
+          approvalRequest({ requestType: 'DATA_RESTORE', beneficiaryId: null }),
+        ]);
+        escalationClient.list.mockResolvedValue({ cards: [], nextCursor: null });
+        sakhiClient.getById.mockResolvedValue({
+          sakhiId: '44444444-4444-4444-4444-444444444444',
+          displayName: 'Meena Kumari',
+          mobileNumber: '9999999999',
+          supervisorId: null,
+        });
+
+        const result = await service.list({ status: 'PENDING', limit: 50 }, authHeader);
+        expect(result.cards[0]).toMatchObject({ sakhiName: 'Meena Kumari', beneficiaryName: null });
+      });
+
+      it('sets beneficiaryName to null and excludes the row from the batch call when beneficiaryId is absent', async () => {
+        repository.findMany.mockResolvedValue([
+          approvalRequest({ requestType: 'DATA_RESTORE', beneficiaryId: null }),
+        ]);
+        escalationClient.list.mockResolvedValue({ cards: [], nextCursor: null });
+
+        const result = await service.list({ status: 'PENDING', limit: 50 }, authHeader);
+        expect(result.cards[0]).toMatchObject({ beneficiaryName: null });
+        expect(beneficiaryClient.getManyWithRisk).not.toHaveBeenCalled();
+      });
+
+      it('skips both batch lookups entirely when the page has no approval_requests cards', async () => {
+        repository.findMany.mockResolvedValue([]);
+        escalationClient.list.mockResolvedValue({ cards: [escalationCard()], nextCursor: null });
+
+        await service.list({ status: 'PENDING', limit: 50 }, authHeader);
+
+        expect(beneficiaryClient.getManyWithRisk).not.toHaveBeenCalled();
+        expect(sakhiClient.getById).not.toHaveBeenCalled();
+      });
+
+      it('degrades beneficiaryName to null for the whole page, without failing list(), when the batch call throws', async () => {
+        repository.findMany.mockResolvedValue([approvalRequest()]);
+        escalationClient.list.mockResolvedValue({ cards: [], nextCursor: null });
+        beneficiaryClient.getManyWithRisk.mockRejectedValue(new Error('beneficiary-service down'));
+
+        const result = await service.list({ status: 'PENDING', limit: 50 }, authHeader);
+        expect(result.cards[0]).toMatchObject({ beneficiaryName: null });
+        expect(consoleErrorSpy).toHaveBeenCalled();
+      });
+
+      it('resolves one Sakhi failing to null without affecting a different Sakhi on the same page', async () => {
+        repository.findMany.mockResolvedValue([
+          approvalRequest({
+            id: 'card-1',
+            requestedByUserId: 'sakhi-a',
+            beneficiaryId: 'beneficiary-a',
+          }),
+          approvalRequest({
+            id: 'card-2',
+            requestedByUserId: 'sakhi-b',
+            beneficiaryId: 'beneficiary-b',
+          }),
+        ]);
+        escalationClient.list.mockResolvedValue({ cards: [], nextCursor: null });
+        sakhiClient.getById.mockImplementation(async (sakhiId: string) => {
+          if (sakhiId === 'sakhi-a') throw new Error('auth-service unreachable');
+          return {
+            sakhiId: 'sakhi-b',
+            displayName: 'Reachable Sakhi',
+            mobileNumber: '9999999999',
+            supervisorId: null,
+          };
+        });
+
+        const result = await service.list({ status: 'PENDING', limit: 50 }, authHeader);
+        const card1 = result.cards.find((c) => c.cardId === 'card-1');
+        const card2 = result.cards.find((c) => c.cardId === 'card-2');
+        expect(card1).toMatchObject({ sakhiName: null });
+        expect(card2).toMatchObject({ sakhiName: 'Reachable Sakhi' });
+      });
     });
 
     describe('reconciling stale PENDING cards against their backing resource', () => {
@@ -382,6 +528,7 @@ describe('QuickResponseService', () => {
 
     beforeEach(() => {
       sakhiClient.getById.mockResolvedValue({
+        supervisorId: null,
         sakhiId: '88888888-8888-8888-8888-888888888888',
         displayName: 'Priya Sharma',
         mobileNumber: '+919000000123',
@@ -767,6 +914,7 @@ describe('QuickResponseService', () => {
         }),
       );
       sakhiClient.getById.mockResolvedValue({
+        supervisorId: null,
         sakhiId: 'sakhi-user-1',
         displayName: 'Meena Kumari',
         mobileNumber: '+919000000456',
@@ -1117,6 +1265,7 @@ describe('QuickResponseService', () => {
         status: 'ACTIVE',
       });
       sakhiClient.getById.mockResolvedValue({
+        supervisorId: null,
         sakhiId: card.requestedByUserId as string,
         displayName: 'Meena Kumari',
         mobileNumber: '+919000000456',
@@ -1499,6 +1648,7 @@ describe('QuickResponseService', () => {
         status: 'LAPSED',
       });
       sakhiClient.getById.mockResolvedValue({
+        supervisorId: null,
         sakhiId: card.requestedByUserId as string,
         displayName: 'Priya Sakhi',
         mobileNumber: '+919000000123',
@@ -1538,6 +1688,7 @@ describe('QuickResponseService', () => {
         status: 'LAPSED',
       });
       sakhiClient.getById.mockResolvedValue({
+        supervisorId: null,
         sakhiId: card.requestedByUserId as string,
         displayName: 'Priya Sakhi',
         mobileNumber: '+919000000123',
@@ -1676,6 +1827,7 @@ describe('QuickResponseService', () => {
         riskConditionSummaries: [],
       });
       sakhiClient.getById.mockResolvedValue({
+        supervisorId: null,
         sakhiId: card.requestedByUserId as string,
         displayName: 'Priya Sakhi',
         mobileNumber: '+919000000123',
@@ -1903,6 +2055,7 @@ describe('QuickResponseService', () => {
       repository.findById.mockResolvedValue(card);
       beneficiaryClient.applyLmpChange.mockResolvedValue({ id: card.beneficiaryId as string });
       sakhiClient.getById.mockResolvedValue({
+        supervisorId: null,
         sakhiId: card.requestedByUserId as string,
         displayName: 'Priya Sakhi',
         mobileNumber: '+919000000123',
