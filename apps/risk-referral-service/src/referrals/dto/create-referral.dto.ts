@@ -57,7 +57,8 @@ export const createReferralSchema = z
       'SKIPPED',
       'CANCELLED',
     ]),
-    validTill: z.coerce.date().optional(),
+    // validTill is server-computed (referralDate + 7 days) — see
+    // ReferralService.create(). Not caller-settable.
     supervisorApprovalStatus: z
       .enum(['NOT_REQUIRED', 'PENDING', 'APPROVED', 'REJECTED'])
       .default('NOT_REQUIRED'),

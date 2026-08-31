@@ -4,6 +4,7 @@ import type { MediaAssetService } from './mediaAsset.service';
 import { createMediaAssetController } from './mediaAsset.controller';
 import { createMediaAssetSchema } from './dto/create-mediaAsset.dto';
 import { createUploadUrlSchema } from './dto/create-upload-url.dto';
+import { listMediaAssetsQuerySchema } from './dto/list-mediaAssets.dto';
 import {
   requireRoles,
   trustGatewayIdentity,
@@ -139,16 +140,19 @@ export function registerMediaAssetRoutes(doc: DocumentedRouter, service: MediaAs
   doc.get(
     '/media',
     {
-      summary: 'List media assets',
+      summary: "List media assets, optionally filtered to one referral follow-up's evidence",
       tags: ['Media'],
+      query: listMediaAssetsQuerySchema,
       responses: {
         200: { description: 'Media assets', schema: envelope(z.array(mediaAssetSchema)) },
+        400: { description: 'Validation error', schema: apiErrorSchema },
         401: { description: 'Unauthenticated', schema: apiErrorSchema },
         403: { description: 'Caller role not permitted', schema: apiErrorSchema },
       },
     },
     trustGatewayIdentity,
     requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER'),
+    validate(listMediaAssetsQuerySchema, 'query'),
     controller.list,
   );
 

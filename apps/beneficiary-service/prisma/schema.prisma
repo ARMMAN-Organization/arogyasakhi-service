@@ -395,6 +395,17 @@ model BeneficiaryRiskConditionSummary {
   everAtRiskFlag               Boolean      @default(false) @map("ever_at_risk_flag")
   currentReferralTriggerFlag   Boolean      @default(false) @map("current_referral_trigger_flag")
   currentHrVisitTriggerFlag    Boolean      @default(false) @map("current_hr_visit_trigger_flag")
+  // Whether risk-referral-service's most recent grading pass for this
+  // condition was the first time it was ever flagged for this beneficiary —
+  // always-latest (like currentReferralTriggerFlag above), not an "ever"
+  // rollup. Existing rows default to true since they predate this column;
+  // the value only becomes meaningful again once the next grading pass
+  // updates it.
+  isFirstInstance               Boolean      @default(true) @map("is_first_instance")
+  // Length of the current "no improvement" streak (NN/INC/CCV phases only —
+  // null for phases that don't track this) as of the most recent grading
+  // pass. See risk-referral-service's findConsecutiveNoImprovementCount.
+  consecutiveNoImprovementCount Int?         @map("consecutive_no_improvement_count")
   // rule_versions.rule_version_id — owned by another service (rules-service).
   sourceRuleVersionId          String?      @map("source_rule_version_id")
   updatedAt                    DateTime     @updatedAt @map("updated_at")

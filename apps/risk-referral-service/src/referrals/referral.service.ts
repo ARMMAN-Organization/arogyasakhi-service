@@ -1,3 +1,4 @@
+import { addDays } from '@armman/core';
 import {
   badGateway,
   conflict,
@@ -6,6 +7,7 @@ import {
   unprocessable,
   type AuthenticatedUser,
 } from '@armman/service-commons';
+import type { Referral } from '../../../../node_modules/.prisma/client-risk-referral-service';
 import type { ReferralRepository } from './referral.repository';
 import type { CreateReferralInput } from './dto/create-referral.dto';
 import type { DecideReferralInput } from './dto/decide-referral.dto';
@@ -13,6 +15,7 @@ import { BeneficiaryClient } from './beneficiary.client';
 import { listSakhiIdsForSupervisor } from './sakhi.client';
 import { resolveReferralTypeLookupId } from './lookup.client';
 import { IncentiveClient } from './incentive.client';
+import { isUniqueConstraintViolation } from './referral.prisma-errors';
 
 /** Referral domain logic. Data access is delegated to the repository. */
 export class ReferralService {
@@ -26,8 +29,56 @@ export class ReferralService {
     return this.repository.findMany();
   }
 
-  create(dto: CreateReferralInput) {
-    return this.repository.create(dto);
+  /**
+   * Creates a referral, or returns the existing one for this visitId if a
+   * second create is attempted for the same visit — the app is offline-
+   * first and retries a dropped-connection create, so this must be
+   * idempotent rather than erroring on a legitimate retry (Bharath's
+   * referral-lifecycle request, 2026-08-27, item #197).
+   *
+   * `validTill` is always computed as `referralDate + 7 days` (SRS
+   * FR-S-6.2's 7-day follow-up window) — never caller-supplied, so the app
+   * can't skew it via clock drift/offline queueing (same request, item
+   * #195).
+   *
+   * `visitId` is protected by the `visit_referral_once` unique index
+   * (schema.prisma) — at most one referral per visit, referrals with no
+   * visitId are unrestricted.
+   *
+   * The idempotent-retry path only returns the pre-existing row as-is when
+   * its business-identifying fields (beneficiaryId, referralTypeLookupValueId,
+   * facilityType, facilityName) match this dto — if they differ, this is not
+   * a harmless retry of the same request but a genuinely different second
+   * referral attempt for the same visit (e.g. a corrected
+   * referralTypeLookupValueId after a mistake, or visitId reused for a
+   * different beneficiary), so it 409s instead of silently returning the
+   * stale/wrong row as a 200 success (PR #199 review).
+   */
+  async create(dto: CreateReferralInput): Promise<{ referral: Referral; alreadyExisted: boolean }> {
+    const validTill = addDays(dto.referralDate, 7);
+    try {
+      const referral = await this.repository.create({ ...dto, validTill });
+      return { referral, alreadyExisted: false };
+    } catch (err) {
+      if (!isUniqueConstraintViolation(err, 'visit_id')) throw err;
+      const existing = dto.visitId ? await this.repository.findByVisitId(dto.visitId) : null;
+      if (!existing) {
+        throw badGateway(
+          'A referral for this visit could not be created, and the existing one could not be found.',
+        );
+      }
+      if (
+        existing.beneficiaryId !== dto.beneficiaryId ||
+        existing.referralTypeLookupValueId !== dto.referralTypeLookupValueId ||
+        existing.facilityType !== (dto.facilityType ?? null) ||
+        existing.facilityName !== (dto.facilityName ?? null)
+      ) {
+        throw conflict(
+          'A different referral already exists for this visit — this looks like a new referral attempt, not a retry of the same request.',
+        );
+      }
+      return { referral: existing, alreadyExisted: true };
+    }
   }
 
   /**

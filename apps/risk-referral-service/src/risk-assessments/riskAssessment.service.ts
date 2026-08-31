@@ -129,6 +129,11 @@ export class RiskAssessmentService {
       conditionCodes.map((code) => [code, !everFlaggedCodes.has(code)]),
     );
     const consecutiveNoImprovementCount = Object.fromEntries(consecutiveNoImprovementByCode);
+    // Reverse of conditionIdsByCode — the push loop below only has each
+    // condition's riskConditionId (from evaluation.conditions), but
+    // isFirstInstance/consecutiveNoImprovementByCode above are keyed by
+    // conditionCode (what the rule pack itself understands).
+    const conditionCodeById = new Map([...conditionIdsByCode].map(([code, id]) => [id, code]));
 
     const evaluation = await evaluateRuleSet(
       dto.ruleSetId,
@@ -193,6 +198,27 @@ export class RiskAssessmentService {
         );
         continue;
       }
+      const conditionCode = conditionCodeById.get(condition.riskConditionId);
+      if (!conditionCode) {
+        // conditionCode is expected to always be resolvable here
+        // (evaluation.conditions' riskConditionIds all originate from
+        // conditionIdsByCode, which conditionCodeById is the exact reverse
+        // of) — if this is ever hit (e.g. a stale/mismatched rule-pack
+        // version returning a riskConditionId outside the current phase's
+        // active condition set), isFirstInstance/consecutiveNoImprovementCount
+        // cannot be looked up at all. Skipping the push (same as the
+        // unresolvable-phase branch above) rather than guessing
+        // isFirstInstance: true is deliberate: a silent wrong guess could
+        // misreport a long-standing chronic condition as a first instance,
+        // with real behavioral consequences (referral/education triggers
+        // gate on this) — a loud skip is safer than a silent wrong value
+        // (PR #199 review).
+        console.error(
+          `Risk condition ${condition.riskConditionId} has no resolvable conditionCode — ` +
+            `skipping risk-condition-summary push for beneficiary ${dto.beneficiaryId}.`,
+        );
+        continue;
+      }
       const result = await pushRiskConditionSummary(
         dto.beneficiaryId,
         {
@@ -207,6 +233,8 @@ export class RiskAssessmentService {
           isReferralTrigger: condition.isReferralTrigger,
           isHrVisitTrigger: condition.isHrVisitTrigger,
           ruleVersionId: evaluation.ruleVersionId,
+          isFirstInstance: isFirstInstance[conditionCode],
+          consecutiveNoImprovementCount: consecutiveNoImprovementCount[conditionCode] ?? null,
         },
         authorizationHeader,
       );

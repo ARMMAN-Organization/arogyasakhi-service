@@ -568,6 +568,70 @@ export class BeneficiaryService {
     }));
   }
 
+  /**
+   * Batch risk-condition-summary read — same ownership-scoping/silent-drop
+   * pattern as getByIdsWithRisk above (never trust caller-supplied
+   * beneficiaryIds as pre-scoped; an out-of-scope or nonexistent id is
+   * simply absent from the result). Condition names are resolved in ONE
+   * batched call to risk-referral-service across every distinct
+   * riskConditionId in the whole result set, not per-beneficiary — avoids an
+   * N+1 cross-service call pattern for a multi-beneficiary batch.
+   */
+  async getRiskConditionSummaryBatch(
+    beneficiaryIds: string[],
+    caller: AuthenticatedUser,
+    authorizationHeader: string,
+  ) {
+    const scoping = await resolveSakhiScoping(undefined, caller, authorizationHeader);
+    const rows = await this.repository.findRiskConditionSummariesByBeneficiaryIds(
+      beneficiaryIds,
+      scoping,
+    );
+
+    const allConditionIds = [
+      ...new Set(rows.flatMap((r) => r.riskConditionSummaries.map((s) => s.riskConditionId))),
+    ];
+    let resolvedConditions: Map<
+      string,
+      { conditionCode: string; conditionName: string; gradeScale: string }
+    >;
+    try {
+      resolvedConditions =
+        allConditionIds.length > 0
+          ? await resolveRiskConditions(allConditionIds, authorizationHeader)
+          : new Map();
+    } catch (err) {
+      console.error(
+        `Failed to resolve risk condition names for ids [${allConditionIds.join(', ')}] — ` +
+          'returning riskConditionSummaries with null conditionCode/conditionName/gradeScale.',
+        err,
+      );
+      resolvedConditions = new Map();
+    }
+
+    return rows.map((row) => ({
+      beneficiaryId: row.beneficiaryId,
+      riskConditionSummaries: row.riskConditionSummaries.map((s) => {
+        const match = resolvedConditions.get(s.riskConditionId);
+        return {
+          riskConditionId: s.riskConditionId,
+          phase: s.phase,
+          latestGrade: s.latestGrade,
+          latestAssessedAt: s.latestAssessedAt,
+          everHighestGrade: s.everHighestGrade,
+          everAtRiskFlag: s.everAtRiskFlag,
+          currentReferralTriggerFlag: s.currentReferralTriggerFlag,
+          currentHrVisitTriggerFlag: s.currentHrVisitTriggerFlag,
+          isFirstInstance: s.isFirstInstance,
+          consecutiveNoImprovementCount: s.consecutiveNoImprovementCount,
+          conditionCode: match?.conditionCode ?? null,
+          conditionName: match?.conditionName ?? null,
+          gradeScale: match?.gradeScale ?? null,
+        };
+      }),
+    }));
+  }
+
   async getRegistrationSummary(
     query: SummaryQueryInput,
     caller: AuthenticatedUser,
@@ -654,6 +718,8 @@ export class BeneficiaryService {
       isReferralTrigger: dto.isReferralTrigger,
       isHrVisitTrigger: dto.isHrVisitTrigger,
       ruleVersionId: dto.ruleVersionId ?? null,
+      isFirstInstance: dto.isFirstInstance,
+      consecutiveNoImprovementCount: dto.consecutiveNoImprovementCount,
     });
   }
 

@@ -158,6 +158,204 @@ describe('BeneficiaryRepository', () => {
     });
   });
 
+  describe('upsertRiskConditionSummary', () => {
+    const BENEFICIARY_ID = 'ben-1';
+    const RISK_CONDITION_ID = 'cond-1';
+    const baseData = {
+      riskConditionId: RISK_CONDITION_ID,
+      phase: 'ANC',
+      grade: 'HIGH',
+      gradeRank: 3,
+      observedValueJson: null,
+      visitId: null,
+      submissionId: null,
+      assessedAt: new Date('2026-01-01'),
+      isReferralTrigger: true,
+      isHrVisitTrigger: false,
+      ruleVersionId: null,
+      isFirstInstance: true,
+      consecutiveNoImprovementCount: null,
+    };
+
+    function buildPrismaMock(existing: unknown) {
+      const findUnique = jest.fn().mockResolvedValue(existing);
+      const upsert = jest.fn().mockResolvedValue({ id: 'summary-1' });
+      const prismaMock = {
+        beneficiaryRiskConditionSummary: { findUnique, upsert },
+      } as never;
+      return { prismaMock, findUnique, upsert };
+    }
+
+    it('persists isFirstInstance/consecutiveNoImprovementCount on the create branch (no existing row)', async () => {
+      const { prismaMock, upsert } = buildPrismaMock(null);
+      const txRepository = new BeneficiaryRepository(prismaMock);
+
+      await txRepository.upsertRiskConditionSummary(BENEFICIARY_ID, {
+        ...baseData,
+        isFirstInstance: true,
+        consecutiveNoImprovementCount: null,
+      });
+
+      expect(upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({
+            isFirstInstance: true,
+            consecutiveNoImprovementCount: null,
+          }),
+        }),
+      );
+    });
+
+    it('always overwrites isFirstInstance/consecutiveNoImprovementCount on the update branch, unconditionally', async () => {
+      const { prismaMock, upsert } = buildPrismaMock({
+        everHighestGradeRank: 5,
+        everAtRiskFlag: true,
+      });
+      const txRepository = new BeneficiaryRepository(prismaMock);
+
+      await txRepository.upsertRiskConditionSummary(BENEFICIARY_ID, {
+        ...baseData,
+        gradeRank: 1, // lower than existing everHighestGradeRank(5) -> everHighest fields not overwritten
+        isFirstInstance: false,
+        consecutiveNoImprovementCount: 2,
+      });
+
+      expect(upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          update: expect.objectContaining({
+            isFirstInstance: false,
+            consecutiveNoImprovementCount: 2,
+          }),
+        }),
+      );
+      // everHighestGrade fields must NOT appear in the update payload since
+      // gradeRank(1) does not outrank the existing everHighestGradeRank(5) —
+      // proves isFirstInstance/consecutiveNoImprovementCount are always-latest,
+      // independent of the everHighest "only move toward more severe" gate.
+      const updateArg = upsert.mock.calls[0][0].update;
+      expect(updateArg.everHighestGrade).toBeUndefined();
+    });
+  });
+
+  describe('findRiskConditionSummariesByBeneficiaryIds', () => {
+    function buildPrismaMock(cases: unknown[], summaries: unknown[]) {
+      const findMany = jest.fn().mockResolvedValueOnce(cases).mockResolvedValueOnce(summaries);
+      const prismaMock = {
+        beneficiaryCase: { findMany },
+        beneficiaryRiskConditionSummary: { findMany },
+      } as never;
+      return { prismaMock, findMany };
+    }
+
+    it('returns an empty array immediately for an empty beneficiaryIds input, without querying', async () => {
+      const findMany = jest.fn();
+      const repository = new BeneficiaryRepository({
+        beneficiaryCase: { findMany },
+        beneficiaryRiskConditionSummary: { findMany },
+      } as never);
+
+      const result = await repository.findRiskConditionSummariesByBeneficiaryIds([], {});
+
+      expect(result).toEqual([]);
+      expect(findMany).not.toHaveBeenCalled();
+    });
+
+    it('intersects beneficiaryIds with sakhiId scoping in the WHERE clause (SAKHI own-roster)', async () => {
+      const { prismaMock, findMany } = buildPrismaMock([{ id: 'ben-1' }], []);
+      const repository = new BeneficiaryRepository(prismaMock);
+
+      await repository.findRiskConditionSummariesByBeneficiaryIds(['ben-1', 'ben-2'], {
+        sakhiId: 'sakhi-1',
+      });
+
+      expect(findMany).toHaveBeenNthCalledWith(1, {
+        where: {
+          id: { in: ['ben-1', 'ben-2'] },
+          isDeleted: false,
+          sakhiId: 'sakhi-1',
+        },
+        select: { id: true },
+      });
+    });
+
+    it('intersects beneficiaryIds with sakhiIds roster scoping (SUPERVISOR)', async () => {
+      const { prismaMock, findMany } = buildPrismaMock([{ id: 'ben-1' }], []);
+      const repository = new BeneficiaryRepository(prismaMock);
+
+      await repository.findRiskConditionSummariesByBeneficiaryIds(['ben-1'], {
+        sakhiIds: ['sakhi-1', 'sakhi-2'],
+      });
+
+      expect(findMany).toHaveBeenNthCalledWith(1, {
+        where: {
+          id: { in: ['ben-1'] },
+          isDeleted: false,
+          sakhiId: { in: ['sakhi-1', 'sakhi-2'] },
+        },
+        select: { id: true },
+      });
+    });
+
+    it('returns an empty array when no case matches the scoped ids (out-of-scope id silently dropped)', async () => {
+      const { prismaMock, findMany } = buildPrismaMock([], []);
+      const repository = new BeneficiaryRepository(prismaMock);
+
+      const result = await repository.findRiskConditionSummariesByBeneficiaryIds(
+        ['out-of-scope-id'],
+        { sakhiId: 'sakhi-1' },
+      );
+
+      expect(result).toEqual([]);
+      // Only the first findMany (beneficiaryCase) ran — no point querying
+      // BeneficiaryRiskConditionSummary for zero matched cases.
+      expect(findMany).toHaveBeenCalledTimes(1);
+    });
+
+    it('includes a beneficiary with zero summary rows, with an empty riskConditionSummaries array', async () => {
+      const { prismaMock } = buildPrismaMock(
+        [{ id: 'ben-1' }, { id: 'ben-2' }],
+        [{ beneficiaryId: 'ben-1', riskConditionId: 'cond-1' }],
+      );
+      const repository = new BeneficiaryRepository(prismaMock);
+
+      const result = await repository.findRiskConditionSummariesByBeneficiaryIds(
+        ['ben-1', 'ben-2'],
+        {},
+      );
+
+      expect(result).toEqual([
+        {
+          beneficiaryId: 'ben-1',
+          riskConditionSummaries: [{ beneficiaryId: 'ben-1', riskConditionId: 'cond-1' }],
+        },
+        { beneficiaryId: 'ben-2', riskConditionSummaries: [] },
+      ]);
+    });
+
+    it('groups multiple summary rows under the same beneficiary', async () => {
+      const { prismaMock } = buildPrismaMock(
+        [{ id: 'ben-1' }],
+        [
+          { beneficiaryId: 'ben-1', riskConditionId: 'cond-1' },
+          { beneficiaryId: 'ben-1', riskConditionId: 'cond-2' },
+        ],
+      );
+      const repository = new BeneficiaryRepository(prismaMock);
+
+      const result = await repository.findRiskConditionSummariesByBeneficiaryIds(['ben-1'], {});
+
+      expect(result).toEqual([
+        {
+          beneficiaryId: 'ben-1',
+          riskConditionSummaries: [
+            { beneficiaryId: 'ben-1', riskConditionId: 'cond-1' },
+            { beneficiaryId: 'ben-1', riskConditionId: 'cond-2' },
+          ],
+        },
+      ]);
+    });
+  });
+
   describe('findOwnershipById', () => {
     it('selects only id/sakhiId/caseType, not the full enriched projection', async () => {
       const findFirst = jest

@@ -12,6 +12,8 @@ import { appConfig } from './config/app-config';
 import { PrismaService } from './prisma/prisma.service';
 import { createHealthRouter } from './health/health.controller';
 import { createReferralModule } from './referrals/referral.module';
+import { createReferralFollowupModule } from './referrals/referralFollowup.module';
+import { createReferralConversionModule } from './referrals/referralConversion.module';
 import { createRiskAssessmentModule } from './risk-assessments/riskAssessment.module';
 import { createRiskConditionModule } from './risk-conditions/riskCondition.module';
 import { createRiskParameterModule } from './risk-parameters/riskParameter.module';
@@ -59,6 +61,8 @@ export function createApp(prisma: PrismaService): Application {
   app.use(requestId);
 
   const referralModule = createReferralModule(prisma);
+  const referralFollowupModule = createReferralFollowupModule(prisma);
+  const referralConversionModule = createReferralConversionModule(prisma);
   const riskAssessmentModule = createRiskAssessmentModule(prisma);
   const riskConditionModule = createRiskConditionModule(prisma);
   const riskParameterModule = createRiskParameterModule(prisma);
@@ -76,6 +80,8 @@ export function createApp(prisma: PrismaService): Application {
     createSwaggerRouter(
       buildRiskReferralServiceOpenApiDocument(
         referralModule.registry,
+        referralFollowupModule.registry,
+        referralConversionModule.registry,
         riskAssessmentModule.registry,
         riskConditionModule.registry,
         riskParameterModule.registry,
@@ -86,6 +92,8 @@ export function createApp(prisma: PrismaService): Application {
     ),
   );
   api.use(referralModule.router);
+  api.use(referralFollowupModule.router);
+  api.use(referralConversionModule.router);
   api.use(riskAssessmentModule.router);
   api.use(riskConditionModule.router);
   api.use(riskParameterModule.router);

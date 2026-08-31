@@ -50,6 +50,7 @@ describe('BeneficiaryService', () => {
     findIdsGroupedByPada: jest.fn(),
     findByIdsWithRisk: jest.fn(),
     upsertRiskConditionSummary: jest.fn(),
+    findRiskConditionSummariesByBeneficiaryIds: jest.fn(),
   } as unknown as jest.Mocked<BeneficiaryRepository>;
   let service: BeneficiaryService;
 
@@ -2878,6 +2879,185 @@ describe('BeneficiaryService', () => {
     );
   });
 
+  describe('getRiskConditionSummaryBatch', () => {
+    function summaryRow(overrides: Record<string, unknown> = {}) {
+      return {
+        riskConditionId: 'risk-1',
+        phase: 'ANC',
+        latestGrade: 'HIGH',
+        latestAssessedAt: '2026-01-01T00:00:00.000Z',
+        everHighestGrade: 'HIGH',
+        everAtRiskFlag: true,
+        currentReferralTriggerFlag: true,
+        currentHrVisitTriggerFlag: false,
+        isFirstInstance: true,
+        consecutiveNoImprovementCount: null,
+        ...overrides,
+      };
+    }
+
+    it('scopes a SAKHI caller to their own roster', async () => {
+      repository.findRiskConditionSummariesByBeneficiaryIds.mockResolvedValue([]);
+
+      await service.getRiskConditionSummaryBatch(['b1'], caller(), AUTH_HEADER);
+
+      expect(repository.findRiskConditionSummariesByBeneficiaryIds).toHaveBeenCalledWith(
+        ['b1'],
+        expect.objectContaining({ sakhiId: CALLER_ID }),
+      );
+    });
+
+    it('scopes a SUPERVISOR caller to their roster', async () => {
+      listSakhiIdsForSupervisorMock.mockResolvedValue(['sakhi-a', 'sakhi-b']);
+      repository.findRiskConditionSummariesByBeneficiaryIds.mockResolvedValue([]);
+
+      await service.getRiskConditionSummaryBatch(
+        ['b1'],
+        caller({ roles: ['SUPERVISOR'] }),
+        AUTH_HEADER,
+      );
+
+      expect(repository.findRiskConditionSummariesByBeneficiaryIds).toHaveBeenCalledWith(
+        ['b1'],
+        expect.objectContaining({ sakhiIds: ['sakhi-a', 'sakhi-b'] }),
+      );
+    });
+
+    it('leaves a MANAGER/ADMIN caller unscoped', async () => {
+      repository.findRiskConditionSummariesByBeneficiaryIds.mockResolvedValue([]);
+
+      await service.getRiskConditionSummaryBatch(
+        ['b1'],
+        caller({ roles: ['MANAGER'] }),
+        AUTH_HEADER,
+      );
+
+      expect(repository.findRiskConditionSummariesByBeneficiaryIds).toHaveBeenCalledWith(
+        ['b1'],
+        expect.not.objectContaining({ sakhiId: expect.anything() }),
+      );
+    });
+
+    it('an out-of-scope or nonexistent id is silently absent from the result (repository already filtered it)', async () => {
+      repository.findRiskConditionSummariesByBeneficiaryIds.mockResolvedValue([]);
+
+      const result = await service.getRiskConditionSummaryBatch(
+        ['out-of-scope-id'],
+        caller(),
+        AUTH_HEADER,
+      );
+
+      expect(result).toEqual([]);
+    });
+
+    it('includes a beneficiary with zero summary rows, with an empty riskConditionSummaries array', async () => {
+      repository.findRiskConditionSummariesByBeneficiaryIds.mockResolvedValue([
+        { beneficiaryId: 'ben-1', riskConditionSummaries: [] },
+      ]);
+
+      const result = await service.getRiskConditionSummaryBatch(['ben-1'], caller(), AUTH_HEADER);
+
+      expect(result).toEqual([{ beneficiaryId: 'ben-1', riskConditionSummaries: [] }]);
+      expect(resolveRiskConditionsMock).not.toHaveBeenCalled();
+    });
+
+    it('includes isFirstInstance/consecutiveNoImprovementCount straight from the repository row', async () => {
+      repository.findRiskConditionSummariesByBeneficiaryIds.mockResolvedValue([
+        {
+          beneficiaryId: 'ben-1',
+          riskConditionSummaries: [
+            summaryRow({ isFirstInstance: false, consecutiveNoImprovementCount: 3 }),
+          ],
+        },
+      ] as never);
+      resolveRiskConditionsMock.mockResolvedValue(new Map());
+
+      const result = await service.getRiskConditionSummaryBatch(['ben-1'], caller(), AUTH_HEADER);
+
+      expect(result[0].riskConditionSummaries[0]).toEqual(
+        expect.objectContaining({ isFirstInstance: false, consecutiveNoImprovementCount: 3 }),
+      );
+    });
+
+    it('resolves condition names in a single call across every distinct riskConditionId in the whole batch', async () => {
+      repository.findRiskConditionSummariesByBeneficiaryIds.mockResolvedValue([
+        {
+          beneficiaryId: 'ben-1',
+          riskConditionSummaries: [summaryRow({ riskConditionId: 'risk-1' })],
+        },
+        {
+          beneficiaryId: 'ben-2',
+          riskConditionSummaries: [summaryRow({ riskConditionId: 'risk-1' })],
+        },
+        {
+          beneficiaryId: 'ben-3',
+          riskConditionSummaries: [summaryRow({ riskConditionId: 'risk-2' })],
+        },
+      ] as never);
+      resolveRiskConditionsMock.mockResolvedValue(
+        new Map([
+          [
+            'risk-1',
+            {
+              conditionCode: 'ANEMIA',
+              conditionName: 'Anemia',
+              gradeScale: 'NORMAL_MILD_MODERATE_SEVERE',
+            },
+          ],
+          [
+            'risk-2',
+            {
+              conditionCode: 'HYPERTENSION_HIGH_BP',
+              conditionName: 'Hypertension / High BP',
+              gradeScale: 'NORMAL_LOW_MEDIUM_HIGH',
+            },
+          ],
+        ]),
+      );
+
+      const result = await service.getRiskConditionSummaryBatch(
+        ['ben-1', 'ben-2', 'ben-3'],
+        caller(),
+        AUTH_HEADER,
+      );
+
+      expect(resolveRiskConditionsMock).toHaveBeenCalledTimes(1);
+      expect(resolveRiskConditionsMock).toHaveBeenCalledWith(
+        expect.arrayContaining(['risk-1', 'risk-2']),
+        AUTH_HEADER,
+      );
+      expect(resolveRiskConditionsMock.mock.calls[0][0]).toHaveLength(2);
+      expect(result[0].riskConditionSummaries[0]).toEqual(
+        expect.objectContaining({ conditionCode: 'ANEMIA', conditionName: 'Anemia' }),
+      );
+      expect(result[2].riskConditionSummaries[0]).toEqual(
+        expect.objectContaining({ conditionCode: 'HYPERTENSION_HIGH_BP' }),
+      );
+    });
+
+    it('degrades to null conditionCode/conditionName/gradeScale, without failing the request, when risk-referral-service is unreachable', async () => {
+      repository.findRiskConditionSummariesByBeneficiaryIds.mockResolvedValue([
+        { beneficiaryId: 'ben-1', riskConditionSummaries: [summaryRow()] },
+      ] as never);
+      resolveRiskConditionsMock.mockRejectedValue(
+        Object.assign(new Error('bad gateway'), { status: 502 }),
+      );
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+
+      const result = await service.getRiskConditionSummaryBatch(['ben-1'], caller(), AUTH_HEADER);
+
+      expect(result[0].riskConditionSummaries[0]).toEqual(
+        expect.objectContaining({
+          conditionCode: null,
+          conditionName: null,
+          gradeScale: null,
+        }),
+      );
+      expect(consoleErrorSpy).toHaveBeenCalled();
+      consoleErrorSpy.mockRestore();
+    });
+  });
+
   describe('getRegistrationSummary', () => {
     it('scopes a SAKHI caller to their own cases', async () => {
       repository.countByCaseType.mockResolvedValue({
@@ -3056,6 +3236,8 @@ describe('BeneficiaryService', () => {
       assessedAt: new Date('2026-01-01'),
       isReferralTrigger: true,
       isHrVisitTrigger: false,
+      isFirstInstance: true,
+      consecutiveNoImprovementCount: null,
     };
 
     it('404s when the beneficiary case does not exist', async () => {
@@ -3164,6 +3346,8 @@ describe('BeneficiaryService', () => {
           assessedAt: new Date('2026-01-01'),
           isReferralTrigger: false,
           isHrVisitTrigger: false,
+          isFirstInstance: true,
+          consecutiveNoImprovementCount: null,
         },
         caller({ id: CALLER_ID, roles: ['SAKHI'] }),
         AUTH_HEADER,

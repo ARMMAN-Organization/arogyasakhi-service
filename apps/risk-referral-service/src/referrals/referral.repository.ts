@@ -14,6 +14,16 @@ export class ReferralRepository {
   }
 
   /**
+   * The existing referral for a visitId, if any — used by create()'s
+   * idempotent-return-existing path after a visit_referral_once collision.
+   * Only ever called with a non-null visitId (visitId: null referrals are
+   * unrestricted by that constraint, so a collision can't happen for them).
+   */
+  findByVisitId(visitId: string) {
+    return this.prisma.referral.findFirst({ where: { visitId, isDeleted: false } });
+  }
+
+  /**
    * Incomplete-followup count and the most recent followup's own
    * notVisitedReason/outcome for one referral — for Quick Response's
    * REFERRAL_INCOMPLETE card enrichment ("# referrals missed", "reason").
@@ -49,7 +59,12 @@ export class ReferralRepository {
     });
   }
 
-  create(data: CreateReferralInput) {
+  /**
+   * `validTill` is not part of CreateReferralInput (the request DTO) — it's
+   * server-computed by ReferralService.create() and passed in here
+   * separately, never caller-supplied.
+   */
+  create(data: CreateReferralInput & { validTill: Date }) {
     return this.prisma.referral.create({ data });
   }
 
@@ -163,6 +178,31 @@ export class ReferralRepository {
     const result = await this.prisma.referral.updateMany({
       where: { id, isDeleted: false, status: fromStatus },
       data: { status: toStatus },
+    });
+    return result.count > 0;
+  }
+
+  /**
+   * Converts a referral's type (Standard -> Accompanied) — only updates a
+   * row still at `fromReferralTypeLookupValueId` and still PENDING_FOLLOWUP,
+   * same updateMany-as-concurrency-guard pattern as updateStatus: a 0
+   * affected-count means the referral was already converted/decided between
+   * the caller's read and this call, and the service turns that into a 409
+   * rather than silently overwriting a since-changed referral.
+   */
+  async updateType(
+    id: string,
+    fromReferralTypeLookupValueId: string,
+    toReferralTypeLookupValueId: string,
+  ): Promise<boolean> {
+    const result = await this.prisma.referral.updateMany({
+      where: {
+        id,
+        isDeleted: false,
+        status: 'PENDING_FOLLOWUP',
+        referralTypeLookupValueId: fromReferralTypeLookupValueId,
+      },
+      data: { referralTypeLookupValueId: toReferralTypeLookupValueId },
     });
     return result.count > 0;
   }
