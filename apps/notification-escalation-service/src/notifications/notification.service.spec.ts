@@ -15,6 +15,7 @@ describe('NotificationService', () => {
   const authHeader = 'Bearer token';
   const supervisor = { id: 'supervisor-1', roles: ['SUPERVISOR'] };
   const admin = { id: 'admin-1', roles: ['ADMIN'] };
+  const system = { id: 'system-1', roles: ['SYSTEM'] };
   const sakhi = { id: 'jane.sakhi', roles: ['SAKHI'] };
 
   const dto: CreateNotificationInput = {
@@ -39,6 +40,16 @@ describe('NotificationService', () => {
   it('ADMIN may notify any recipient without an ownership check', async () => {
     repository.create.mockResolvedValue({ id: '1' } as never);
     await service.create(dto, admin, authHeader);
+    expect(sakhiClient.findById).not.toHaveBeenCalled();
+    expect(repository.create).toHaveBeenCalledWith(dto);
+  });
+
+  it('SYSTEM may notify any recipient without an ownership check', async () => {
+    // The missed-visit/referral-followup/sync-delay cron jobs' service-
+    // account token sends recipientUserId values that are Supervisors, not
+    // Sakhis — the Sakhi-roster ownership check below doesn't apply to it.
+    repository.create.mockResolvedValue({ id: '1' } as never);
+    await service.create(dto, system, authHeader);
     expect(sakhiClient.findById).not.toHaveBeenCalled();
     expect(repository.create).toHaveBeenCalledWith(dto);
   });
@@ -121,7 +132,7 @@ describe('NotificationService', () => {
       });
     });
 
-    it('also notifies the assigned Supervisor for DATA_RESTORE_UPDATE', async () => {
+    it('does NOT notify the assigned Supervisor for DATA_RESTORE_UPDATE', async () => {
       repository.create.mockResolvedValue({ id: '1' } as never);
       sakhiClient.findById.mockResolvedValue({
         sakhiId: 'sakhi-1',
@@ -130,14 +141,11 @@ describe('NotificationService', () => {
 
       await service.create(dataRestoreDto, admin, authHeader);
 
-      expect(repository.create).toHaveBeenCalledTimes(2);
-      expect(repository.create).toHaveBeenNthCalledWith(2, {
-        ...dataRestoreDto,
-        recipientUserId: 'supervisor-9',
-      });
+      expect(repository.create).toHaveBeenCalledTimes(1);
+      expect(repository.create).toHaveBeenCalledWith(dataRestoreDto);
     });
 
-    it('also notifies the assigned Supervisor for CLOSURE_REVIEW_UPDATE', async () => {
+    it('does NOT notify the assigned Supervisor for CLOSURE_REVIEW_UPDATE', async () => {
       repository.create.mockResolvedValue({ id: '1' } as never);
       sakhiClient.findById.mockResolvedValue({
         sakhiId: 'sakhi-1',
@@ -146,11 +154,17 @@ describe('NotificationService', () => {
 
       await service.create(closureReviewDto, admin, authHeader);
 
-      expect(repository.create).toHaveBeenCalledTimes(2);
-      expect(repository.create).toHaveBeenNthCalledWith(2, {
-        ...closureReviewDto,
-        recipientUserId: 'supervisor-9',
-      });
+      expect(repository.create).toHaveBeenCalledTimes(1);
+      expect(repository.create).toHaveBeenCalledWith(closureReviewDto);
+    });
+
+    it('does NOT notify the assigned Supervisor when the Sakhi has no assigned Supervisor for DATA_RESTORE_UPDATE', async () => {
+      repository.create.mockResolvedValue({ id: '1' } as never);
+      sakhiClient.findById.mockResolvedValue({ sakhiId: 'sakhi-1', supervisorId: null });
+
+      await service.create(dataRestoreDto, admin, authHeader);
+
+      expect(repository.create).toHaveBeenCalledTimes(1);
     });
 
     it('does not fan out for non-escalation notification types', async () => {

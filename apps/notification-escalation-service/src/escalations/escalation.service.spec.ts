@@ -33,6 +33,7 @@ function row(overrides: { id?: string; escalationType?: EscalationType; createdA
   return {
     id: overrides.id ?? '11111111-1111-1111-1111-111111111111',
     beneficiaryId: '22222222-2222-2222-2222-222222222222',
+    sakhiUserId: null,
     visitId: null,
     referralId: null,
     escalationType: overrides.escalationType ?? ('ANC_2_MISSED' as const),
@@ -60,6 +61,7 @@ describe('EscalationService', () => {
     findMany: jest.fn(),
     findById: jest.fn(),
     create: jest.fn(),
+    findOpenDuplicate: jest.fn(),
     updateStatus: jest.fn(),
     updatePendingReason: jest.fn(),
   } as unknown as jest.Mocked<EscalationRepository>;
@@ -88,6 +90,7 @@ describe('EscalationService', () => {
     );
     beneficiaryClient.getById.mockResolvedValue(beneficiaryRecord());
     sakhiClient.findById.mockResolvedValue(sakhiRecord());
+    repository.findOpenDuplicate.mockResolvedValue(null);
   });
 
   it('groups every *_MISSED escalation type under MISSED_VISIT', async () => {
@@ -266,6 +269,33 @@ describe('EscalationService', () => {
 
       expect(repository.create).toHaveBeenCalledWith(input, 'admin-user-id');
     });
+
+    it('returns the existing OPEN escalation instead of inserting a duplicate', async () => {
+      const existing = row({ escalationType: 'ANC_2_MISSED' });
+      repository.findOpenDuplicate.mockResolvedValue(existing);
+
+      const result = await service.create(
+        { beneficiaryId: existing.beneficiaryId, escalationType: 'ANC_2_MISSED' },
+        'system-account-id',
+      );
+
+      expect(result).toBe(existing);
+      expect(repository.create).not.toHaveBeenCalled();
+    });
+
+    it('inserts when no OPEN duplicate exists', async () => {
+      repository.findOpenDuplicate.mockResolvedValue(null);
+      const created = row({ escalationType: 'SYNC_DELAY' });
+      repository.create.mockResolvedValue(created);
+
+      const result = await service.create(
+        { sakhiUserId: 'sakhi-user-1', escalationType: 'SYNC_DELAY' },
+        'system-account-id',
+      );
+
+      expect(result).toBe(created);
+      expect(repository.create).toHaveBeenCalled();
+    });
   });
 
   describe('findById', () => {
@@ -289,6 +319,12 @@ describe('EscalationService', () => {
       const result = await service.findById('unknown-id', AUTH_HEADER);
       expect(result).toBeNull();
       expect(beneficiaryClient.getById).not.toHaveBeenCalled();
+    });
+
+    it('resolves POST_EDD_MISSED to a MISSED_VISIT card (was previously omitted)', async () => {
+      repository.findById.mockResolvedValue(row({ escalationType: 'POST_EDD_MISSED' }));
+      const result = await service.findById('11111111-1111-1111-1111-111111111111', AUTH_HEADER);
+      expect(result).toMatchObject({ cardType: 'MISSED_VISIT', escalationType: 'POST_EDD_MISSED' });
     });
 
     it('returns null for an escalation type outside the 8 supported card types', async () => {
@@ -388,6 +424,7 @@ describe('EscalationService', () => {
       ['INC_HR_MISSED', 'INC-HR'],
       ['CCV_MISSED', 'CCV'],
       ['CCV_HR_MISSED', 'CCV-HR'],
+      ['POST_EDD_MISSED', 'ANC_POST_EDD'],
     ])('maps %s to visitType %s', async (escalationType, visitType) => {
       repository.findById.mockResolvedValue({
         ...row({ escalationType: escalationType as EscalationType }),
@@ -622,6 +659,18 @@ describe('EscalationService', () => {
           linkedEntityId: pending.id,
         }),
       );
+    });
+
+    it('CLOSE: accepts a POST_EDD_MISSED escalation (was previously rejected as unsupported)', async () => {
+      const pending = row({ escalationType: 'POST_EDD_MISSED' });
+      const resolved = { ...pending, status: 'RESOLVED' as const, actionTaken: 'CLOSE' };
+      repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(resolved);
+      repository.updateStatus.mockResolvedValue(true);
+
+      const result = await closeService.decideMissedVisit(pending.id, 'CLOSE', AUTH_HEADER);
+
+      expect(result).toBe(resolved);
+      expect(repository.updateStatus).toHaveBeenCalledWith(pending.id, 'OPEN', 'RESOLVED', 'CLOSE');
     });
 
     it("CLOSE: also notifies the Sakhi's assigned Supervisor", async () => {

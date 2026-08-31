@@ -21,6 +21,28 @@ function toCardType(escalationType: string): 'MISSED_VISIT' | 'EDD_NEARING' | nu
   return null;
 }
 
+/**
+ * `EscalationEvent.beneficiaryId` is nullable at the schema/DTO level only
+ * because SYNC_DELAY escalations carry `sakhiUserId` instead (see
+ * createEscalationEventSchema's doc comment) — every other escalationType
+ * still always has one. Every call site below only ever handles a row whose
+ * type is known not to be SYNC_DELAY (MISSED_VISIT/EDD_NEARING cards,
+ * CLOSURE_PENDING, missed-visit TRANSFER), so a null here is a genuine data
+ * invariant violation, not a normal case to silently degrade — this throws
+ * rather than letting a cross-service call proceed with `null` as an id.
+ */
+function requireBeneficiaryId(row: {
+  beneficiaryId: string | null;
+  escalationType: string;
+}): string {
+  if (!row.beneficiaryId) {
+    throw new Error(
+      `Escalation ${row.escalationType} row has no beneficiaryId — expected one for this type.`,
+    );
+  }
+  return row.beneficiaryId;
+}
+
 /** Missed Visit Escalation detail's own status vocabulary — distinct from the
  * persisted EscalationStatus. Statuses this card type doesn't actually use
  * (e.g. ACKNOWLEDGED, CLOSE_REQUESTED) fall back to PENDING. */
@@ -84,7 +106,7 @@ export class EscalationService {
     rows: EscalationEventRow[],
     authorizationHeader: string,
   ): Promise<Map<string, RowEnrichment>> {
-    const beneficiaryIds = [...new Set(rows.map((row) => row.beneficiaryId))];
+    const beneficiaryIds = [...new Set(rows.map((row) => requireBeneficiaryId(row)))];
     const beneficiaries = new Map(
       await Promise.all(
         beneficiaryIds.map(async (id) => {
@@ -118,9 +140,10 @@ export class EscalationService {
 
     const result = new Map<string, RowEnrichment>();
     for (const row of rows) {
-      const beneficiary = beneficiaries.get(row.beneficiaryId) ?? null;
+      const beneficiaryId = requireBeneficiaryId(row);
+      const beneficiary = beneficiaries.get(beneficiaryId) ?? null;
       const sakhi = beneficiary?.sakhiId ? (sakhis.get(beneficiary.sakhiId) ?? null) : null;
-      result.set(row.beneficiaryId, { beneficiary, sakhi });
+      result.set(beneficiaryId, { beneficiary, sakhi });
     }
     return result;
   }
@@ -180,19 +203,27 @@ export class EscalationService {
     );
 
     const cards = supported.map(({ row, cardType }) =>
-      this.toEnrichedCard(row, cardType, enrichment.get(row.beneficiaryId) ?? null),
+      this.toEnrichedCard(row, cardType, enrichment.get(requireBeneficiaryId(row)) ?? null),
     );
 
     return { cards, nextCursor };
   }
 
   /**
-   * Raises a new escalation event. ADMIN-only (see escalation.routes.ts) —
-   * in production these rows come from an automated rules/cron process, so
-   * there is no Sakhi-ownership check to delegate here, unlike closures/
-   * reopen-requests/referrals.
+   * Raises a new escalation event. ADMIN/SYSTEM-only (see
+   * escalation.routes.ts) — in production these rows come from an automated
+   * rules/cron process, so there is no Sakhi-ownership check to delegate
+   * here, unlike closures/reopen-requests/referrals.
+   *
+   * Idempotent: if an OPEN escalation already exists for the same natural
+   * key (see findOpenDuplicate), that existing row is returned instead of
+   * inserting a duplicate — a cron job re-raising the same missed
+   * visit/follow-up/sync-delay on its next tick (before a Supervisor has
+   * resolved the first one) must not pile up repeat OPEN escalations.
    */
-  create(input: CreateEscalationEventInput, createdByUserId: string) {
+  async create(input: CreateEscalationEventInput, createdByUserId: string) {
+    const existing = await this.repository.findOpenDuplicate(input);
+    if (existing) return existing;
     return this.repository.create(input, createdByUserId);
   }
 
@@ -211,7 +242,7 @@ export class EscalationService {
     if (!cardType) return null;
 
     const beneficiary = await this.beneficiaryClient.getById(
-      row.beneficiaryId,
+      requireBeneficiaryId(row),
       authorizationHeader,
     );
     const sakhi = beneficiary.sakhiId
@@ -262,7 +293,7 @@ export class EscalationService {
     }
 
     const beneficiary = await this.beneficiaryClient.getById(
-      row.beneficiaryId,
+      requireBeneficiaryId(row),
       authorizationHeader,
     );
     const eddDate = beneficiary.motherCaseDetails?.eddDate?.slice(0, 10) ?? null;
@@ -328,7 +359,7 @@ export class EscalationService {
     // (SAKHI-own-case / SUPERVISOR-roster / MANAGER-unrestricted) — same pattern
     // submitClosurePendingReason already uses. Without this, a Supervisor could
     // decide (TRANSFER or CLOSE) an escalation outside their own roster (IDOR).
-    await this.beneficiaryClient.getById(existing.beneficiaryId, authorizationHeader);
+    await this.beneficiaryClient.getById(requireBeneficiaryId(existing), authorizationHeader);
 
     if (action === 'TRANSFER') {
       return decideTransfer(
@@ -351,7 +382,7 @@ export class EscalationService {
 
     try {
       const beneficiary = await this.beneficiaryClient.getById(
-        existing.beneficiaryId,
+        requireBeneficiaryId(existing),
         authorizationHeader,
       );
       const notificationDto = {
@@ -415,7 +446,7 @@ export class EscalationService {
       throw unprocessable('This endpoint only accepts CLOSURE_PENDING escalations.');
     }
 
-    await this.beneficiaryClient.getById(existing.beneficiaryId, authorizationHeader);
+    await this.beneficiaryClient.getById(requireBeneficiaryId(existing), authorizationHeader);
 
     const reasonCode = await this.lookupClient.resolveClosurePendingReasonCode(
       input.pendingReasonLookupValueId,

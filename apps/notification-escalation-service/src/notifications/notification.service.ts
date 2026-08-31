@@ -21,18 +21,24 @@ export class NotificationService {
   }
 
   /**
-   * ADMIN may notify anyone. A SUPERVISOR (the role widened for approval-
-   * service's Quick Response decisions to forward through) may only notify
-   * a Sakhi actually assigned to them — verified via auth-service, same
-   * ownership check supervisor-operations-service already applies to its
-   * own Sakhi-scoped endpoints. Without this, the widened role would let
-   * any Supervisor notify any recipientUserId.
+   * ADMIN and SYSTEM may notify anyone — SYSTEM is a machine identity (the
+   * missed-visit/referral-followup/sync-delay cron jobs' service-account
+   * token, per requireRoles('ADMIN', 'SUPERVISOR', 'SYSTEM') on this route)
+   * sending recipientUserId values that are Supervisors, not Sakhis, so the
+   * Sakhi-roster ownership check below doesn't apply to it (and would always
+   * 403 it, since sakhiClient.findById on a Supervisor id resolves to
+   * nothing). A SUPERVISOR (the role widened for approval-service's Quick
+   * Response decisions to forward through) may only notify a Sakhi actually
+   * assigned to them — verified via auth-service, same ownership check
+   * supervisor-operations-service already applies to its own Sakhi-scoped
+   * endpoints. Without this, the widened role would let any Supervisor
+   * notify any recipientUserId.
    *
    * For escalation/operational notification types, also best-effort fans
    * out a copy to the Sakhi's assigned Supervisor (see supervisor-fanout.ts).
    */
   async create(dto: CreateNotificationInput, caller: CallerIdentity, authorizationHeader: string) {
-    if (!caller.roles.includes('ADMIN')) {
+    if (!caller.roles.includes('ADMIN') && !caller.roles.includes('SYSTEM')) {
       const sakhi = await this.sakhiClient.findById(dto.recipientUserId, authorizationHeader);
       if (!sakhi || sakhi.supervisorId !== caller.id) {
         throw forbidden('You do not have access to notify this Sakhi.');

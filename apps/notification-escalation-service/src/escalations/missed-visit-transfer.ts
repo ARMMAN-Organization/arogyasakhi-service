@@ -52,6 +52,12 @@ export async function decideTransfer(
   } = deps;
   const id = existing.id;
   const reviewDeadlineAt = new Date(Date.now() + MANAGER_REVIEW_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  // TRANSFER only ever applies to a MISSED_VISIT-type escalation, which
+  // always carries beneficiaryId (only SYNC_DELAY uses sakhiUserId instead —
+  // see EscalationEvent.beneficiaryId's schema doc comment).
+  if (!existing.beneficiaryId) {
+    throw new Error(`Escalation ${existing.escalationType} row has no beneficiaryId.`);
+  }
 
   await beneficiaryClient.markPendingTransfer(existing.beneficiaryId, authorizationHeader);
 

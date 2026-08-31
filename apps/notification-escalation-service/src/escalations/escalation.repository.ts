@@ -42,7 +42,8 @@ export class EscalationRepository {
   create(input: CreateEscalationEventInput, createdByUserId: string) {
     return this.prisma.escalationEvent.create({
       data: {
-        beneficiaryId: input.beneficiaryId,
+        beneficiaryId: input.beneficiaryId ?? null,
+        sakhiUserId: input.sakhiUserId ?? null,
         escalationType: input.escalationType,
         visitId: input.visitId ?? null,
         referralId: input.referralId ?? null,
@@ -50,6 +51,31 @@ export class EscalationRepository {
         assignedSupervisorId: input.assignedSupervisorId ?? null,
         status: 'OPEN',
         createdByUserId,
+      },
+    });
+  }
+
+  /**
+   * Finds an existing OPEN escalation sharing the same natural key as
+   * `input` — the idempotency guard EscalationService.create checks before
+   * inserting, so an automated job re-raising the same missed
+   * visit/follow-up/sync-delay on its next tick no-ops instead of piling up
+   * duplicate OPEN rows. The natural key varies by how the event was raised
+   * (visitId for a missed visit, referralId for a follow-up, sakhiUserId
+   * for a sync delay) — only the fields actually present on `input` narrow
+   * the match, so e.g. a visit-driven escalation is never matched against
+   * one raised for a different visitId on the same beneficiary.
+   */
+  findOpenDuplicate(input: CreateEscalationEventInput) {
+    return this.prisma.escalationEvent.findFirst({
+      where: {
+        status: 'OPEN',
+        isDeleted: false,
+        escalationType: input.escalationType,
+        ...(input.beneficiaryId ? { beneficiaryId: input.beneficiaryId } : {}),
+        ...(input.sakhiUserId ? { sakhiUserId: input.sakhiUserId } : {}),
+        ...(input.visitId ? { visitId: input.visitId } : {}),
+        ...(input.referralId ? { referralId: input.referralId } : {}),
       },
     });
   }

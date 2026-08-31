@@ -10,13 +10,9 @@ interface SakhiLookup {
 
 /** Notification types relevant enough to a Supervisor's own roster that she
  * should get a copy too, distinct from purely personal decision-outcome
- * notifications (e.g. LMP_CHANGE_UPDATE) that stay Sakhi-only. */
-const SUPERVISOR_FANOUT_TYPES = new Set([
-  'MISSED_VISIT_ESCALATION',
-  'BENEFICIARY_TRANSFER_NOTICE',
-  'DATA_RESTORE_UPDATE',
-  'CLOSURE_REVIEW_UPDATE',
-]);
+ * notifications (e.g. LMP_CHANGE_UPDATE, DATA_RESTORE_UPDATE,
+ * CLOSURE_REVIEW_UPDATE, REOPEN_UPDATE) that stay Sakhi-only. */
+const SUPERVISOR_FANOUT_TYPES = new Set(['MISSED_VISIT_ESCALATION', 'BENEFICIARY_TRANSFER_NOTICE']);
 
 /**
  * Best-effort: also creates a copy of the notification addressed to the

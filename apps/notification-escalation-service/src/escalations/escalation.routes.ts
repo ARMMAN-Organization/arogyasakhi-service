@@ -61,7 +61,8 @@ const listEscalationEventsResponseSchema = z.object({
 // state (status/resolvedAt/actionTaken), not the card-list projection.
 const escalationEventSchema = z.object({
   id: z.string().uuid(),
-  beneficiaryId: z.string().uuid(),
+  beneficiaryId: z.string().uuid().nullable(),
+  sakhiUserId: z.string().uuid().nullable(),
   visitId: z.string().uuid().nullable(),
   referralId: z.string().uuid().nullable(),
   escalationType: z.string().openapi({ example: 'EDD_NEARING' }),
@@ -156,7 +157,7 @@ export function registerEscalationRoutes(doc: DocumentedRouter, service: Escalat
       },
     },
     trustGatewayIdentity,
-    requireRoles('ADMIN'),
+    requireRoles('ADMIN', 'SYSTEM'),
     validateBody(createEscalationEventSchema),
     controller.create,
   );

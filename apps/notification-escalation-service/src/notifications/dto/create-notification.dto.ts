@@ -14,6 +14,7 @@ export const createNotificationSchema = z
     recipientUserId: z.string().trim().min(1),
     notificationType: z.enum([
       'MISSED_VISIT_ESCALATION',
+      'HR_MISSED_VISIT_ESCALATION',
       'BENEFICIARY_TRANSFER_NOTICE',
       'REFERRAL_UPDATE',
       'REFERRAL_FOLLOWUP_DUE',
