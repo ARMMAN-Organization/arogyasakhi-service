@@ -5,6 +5,7 @@ export interface SakhiRecord {
   sakhiId: string;
   displayName: string;
   mobileNumber: string;
+  supervisorId: string | null;
 }
 
 /**

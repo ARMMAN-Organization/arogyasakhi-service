@@ -3,9 +3,11 @@ import { z } from 'zod';
 import type { ApprovalRequestService } from './approvalRequest.service';
 import { createApprovalRequestController } from './approvalRequest.controller';
 import { createApprovalRequestSchema } from './dto/create-approvalRequest.dto';
+import { getApprovalBySourceSchema } from './dto/get-approval-by-source.dto';
 import {
   requireRoles,
   trustGatewayIdentity,
+  validate,
   validateBody,
   type DocumentedRouter,
 } from '../app.module';
@@ -103,6 +105,29 @@ export function registerApprovalRequestRoutes(
     trustGatewayIdentity,
     requireRoles('SUPERVISOR', 'MANAGER'),
     controller.list,
+  );
+
+  doc.get(
+    '/approvals/by-source',
+    {
+      summary:
+        'Resolve the approval_requests row raised for a closure or reopen request — used by ' +
+        "closure-reopen-service to recover the id it needs (this endpoint's response `id`) to " +
+        'link a Closure Review/Reopen decision notification to its Quick Response card. Provide ' +
+        'exactly one of closureId or reopenRequestId.',
+      tags: ['Approvals'],
+      responses: {
+        200: { description: 'Matching approval request', schema: envelope(approvalRequestSchema) },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+        404: { description: 'No matching approval request', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER'),
+    validate(getApprovalBySourceSchema, 'query'),
+    controller.getBySource,
   );
 
   doc.post(
