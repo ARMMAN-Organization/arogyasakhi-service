@@ -9,6 +9,17 @@ import type {
 import type { NotificationClient } from '../quick-response/notification.client';
 import type { ApprovalRequest } from '../../../../node_modules/.prisma/client-approval-service';
 
+/**
+ * notifySupervisor is fired-and-forgotten by create() (see its own doc
+ * comment) — its internal await chain (Sakhi lookup -> beneficiary lookup ->
+ * notify) hasn't necessarily finished by the time create()'s own promise
+ * resolves. A macrotask tick lets every already-scheduled microtask in that
+ * chain drain before assertions run.
+ */
+function flushPromises(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
 describe('ApprovalRequestService', () => {
   const authorizationHeader = 'Bearer test-token';
 
@@ -131,6 +142,7 @@ describe('ApprovalRequestService', () => {
     beneficiaryClient.getById.mockResolvedValue(beneficiaryRecord);
 
     await service.create(baseDto, authorizationHeader);
+    await flushPromises();
 
     expect(notificationClient.notify).toHaveBeenCalledTimes(1);
     expect(notificationClient.notify).toHaveBeenCalledWith(
@@ -158,6 +170,7 @@ describe('ApprovalRequestService', () => {
     sakhiClient.getById.mockResolvedValue(sakhiRecord);
 
     await service.create(transferDto, authorizationHeader);
+    await flushPromises();
 
     expect(beneficiaryClient.getById).not.toHaveBeenCalled();
     expect(notificationClient.notify).toHaveBeenCalledTimes(1);
@@ -179,6 +192,7 @@ describe('ApprovalRequestService', () => {
     beneficiaryClient.getById.mockResolvedValue(beneficiaryRecord);
 
     await service.create(dto, authorizationHeader);
+    await flushPromises();
 
     expect(notificationClient.notify).toHaveBeenCalledTimes(1);
   });
@@ -188,6 +202,7 @@ describe('ApprovalRequestService', () => {
     sakhiClient.getById.mockResolvedValue({ ...sakhiRecord, supervisorId: null });
 
     await expect(service.create(baseDto, authorizationHeader)).resolves.toBe(created);
+    await flushPromises();
     expect(notificationClient.notify).not.toHaveBeenCalled();
   });
 
@@ -196,6 +211,7 @@ describe('ApprovalRequestService', () => {
     sakhiClient.getById.mockResolvedValue(null);
 
     await expect(service.create(baseDto, authorizationHeader)).resolves.toBe(created);
+    await flushPromises();
     expect(notificationClient.notify).not.toHaveBeenCalled();
   });
 
@@ -207,6 +223,7 @@ describe('ApprovalRequestService', () => {
     });
 
     await expect(service.create(baseDto, authorizationHeader)).resolves.toBe(created);
+    await flushPromises();
     expect(notificationClient.notify).not.toHaveBeenCalled();
   });
 
@@ -215,6 +232,7 @@ describe('ApprovalRequestService', () => {
     sakhiClient.getById.mockRejectedValue(new Error('auth-service unreachable'));
 
     await expect(service.create(baseDto, authorizationHeader)).resolves.toBe(created);
+    await flushPromises();
     expect(notificationClient.notify).not.toHaveBeenCalled();
     expect(consoleErrorSpy).toHaveBeenCalled();
   });
@@ -225,6 +243,7 @@ describe('ApprovalRequestService', () => {
     beneficiaryClient.getById.mockRejectedValue(new Error('beneficiary-service unreachable'));
 
     await expect(service.create(baseDto, authorizationHeader)).resolves.toBe(created);
+    await flushPromises();
     expect(notificationClient.notify).toHaveBeenCalledTimes(1);
     expect(notificationClient.notify.mock.calls[0][3]).not.toContain('Sita Kumari');
   });
@@ -236,6 +255,7 @@ describe('ApprovalRequestService', () => {
     notificationClient.notify.mockRejectedValue(new Error('notification-escalation-service down'));
 
     await expect(service.create(baseDto, authorizationHeader)).resolves.toBe(created);
+    await flushPromises();
     expect(consoleErrorSpy).toHaveBeenCalled();
   });
 

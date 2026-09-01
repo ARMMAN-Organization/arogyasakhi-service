@@ -215,7 +215,18 @@ export class QuickResponseService {
   ): Promise<string[] | null> {
     if (isPrivileged(caller)) return null;
     if (!caller.projectId) return [];
-    return this.sakhiClient.getOwnSakhiIds(caller.projectId, authorizationHeader);
+    try {
+      return await this.sakhiClient.getOwnSakhiIds(caller.projectId, authorizationHeader);
+    } catch (err) {
+      // Fails closed to zero accessible Sakhis, matching the !caller.projectId
+      // branch above — a transient auth-service error must not 500 the
+      // entire Quick Response list/detail for every SUPERVISOR.
+      console.error(
+        `Failed to resolve SUPERVISOR ${caller.id}'s own Sakhi roster — failing closed to empty:`,
+        err,
+      );
+      return [];
+    }
   }
 
   async list(query: ListQuickResponseInput, caller: CallerScope, authorizationHeader: string) {
@@ -674,13 +685,13 @@ export class QuickResponseService {
   async decide(
     cardId: string,
     dto: DecideQuickResponseInput,
-    decidedByUserId: string,
+    caller: CallerScope,
     authorizationHeader: string,
   ) {
     if (dto.cardSource === 'escalation_events') {
       return this.decideEscalationCard(cardId, dto, authorizationHeader);
     }
-    return this.decideApprovalRequestCard(cardId, dto, decidedByUserId, authorizationHeader);
+    return this.decideApprovalRequestCard(cardId, dto, caller, authorizationHeader);
   }
 
   /**
@@ -694,7 +705,7 @@ export class QuickResponseService {
   async decideLmpChangeRequest(
     id: string,
     dto: DecideLmpChangeRequestInput,
-    decidedByUserId: string,
+    caller: CallerScope,
     authorizationHeader: string,
   ) {
     const existing = await this.repository.findById(id);
@@ -704,7 +715,7 @@ export class QuickResponseService {
     return this.decide(
       id,
       { cardSource: 'approval_requests', ...dto },
-      decidedByUserId,
+      caller,
       authorizationHeader,
     );
   }
@@ -808,11 +819,20 @@ export class QuickResponseService {
   private async decideApprovalRequestCard(
     cardId: string,
     dto: DecideQuickResponseInput,
-    decidedByUserId: string,
+    caller: CallerScope,
     authorizationHeader: string,
   ) {
+    const decidedByUserId = caller.id;
     const existing = await this.repository.findById(cardId);
     if (!existing) throw notFound('Quick Response card not found.');
+
+    // Same roster scoping getCardDetail() applies to the read path — a
+    // SUPERVISOR must not be able to decide a card raised by a Sakhi outside
+    // their own roster just because they know/guessed its cardId.
+    const sakhiIds = await this.resolveOwnSakhiIds(caller, authorizationHeader);
+    if (sakhiIds && !sakhiIds.includes(existing.requestedByUserId)) {
+      throw forbidden('You do not have access to this Quick Response card.');
+    }
 
     // Cheap pre-check, shared by every card type: a card already decided by
     // the time we even read it here is rejected before any side effect is
@@ -1210,13 +1230,19 @@ export class QuickResponseService {
       if (!existing.beneficiaryId) {
         throw new HttpError(500, 'This ACCOMPANIED_REFERRAL card has no linked beneficiary.');
       }
-      // The beneficiary lookup only needs the already-known beneficiaryId —
-      // it has no dependency on the referral decision's result — so run it
-      // concurrently with referralClient.decide() instead of after it.
-      const [, beneficiary] = await Promise.all([
-        this.referralClient.decide(existing.referralId, 'COMPLETE', authorizationHeader),
-        this.beneficiaryClient.getById(existing.beneficiaryId, authorizationHeader),
-      ]);
+      // Sequential, not parallel: the incentive-trigger catch block below is
+      // written on the assumption that referralClient.decide() has already
+      // succeeded by the time it runs. Running the beneficiary lookup
+      // concurrently means a beneficiary-service error can reject this call
+      // while decide() is still in flight (and may still succeed
+      // unobserved) — the caller would see a failure while the referral is
+      // silently marked COMPLETE with no incentive trigger and no
+      // manual-follow-up log line.
+      await this.referralClient.decide(existing.referralId, 'COMPLETE', authorizationHeader);
+      const beneficiary = await this.beneficiaryClient.getById(
+        existing.beneficiaryId,
+        authorizationHeader,
+      );
       if (!beneficiary) {
         throw notFound('The beneficiary linked to this referral was not found.');
       }

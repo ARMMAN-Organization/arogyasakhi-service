@@ -36,6 +36,18 @@ export interface JobRunDelegate {
  * else already holds it or it isn't due yet) or, on the very first run for a
  * `jobName`, creating the row — racing that create against another replica
  * relies on the column's own unique constraint (P2002) to decide the loser.
+ *
+ * The lease is fixed-duration with no renewal/heartbeat: `lockedUntil` is
+ * set once, at acquire time, and never extended while the job runs. This is
+ * a hard caller contract, not an implementation detail — `lockDurationMs`
+ * MUST be sized well above the job's real worst-case runtime. If the job is
+ * still running when `lockedUntil` passes, a second replica's next tick will
+ * re-acquire the same lock and run concurrently with the first — the exact
+ * double-processing this helper exists to prevent. There is currently no
+ * consumer of this function in the repo; a future one processing an
+ * unbounded or highly variable-sized batch should build its own
+ * renewal/heartbeat on top of this rather than assuming a fixed
+ * `lockDurationMs` is safe.
  */
 export async function acquireJobLock(
   prisma: JobRunDelegate,

@@ -3,6 +3,9 @@ import { badGateway, HttpError } from '../http/http-error';
 // Read directly (not via each service's appConfig) so importing this client
 // doesn't force a specific config schema on every consumer — matches the
 // per-service *.client.ts convention of reading API_GATEWAY_BASE_URL directly.
+// Validated eagerly in the constructor below (not just read here) so a
+// malformed value fails when a consuming service instantiates this client,
+// not silently on the first token-mint attempt.
 const API_GATEWAY_BASE_URL = process.env.API_GATEWAY_BASE_URL ?? 'http://localhost:3000';
 
 interface ServiceTokenResponse {
@@ -26,7 +29,15 @@ export class ServiceTokenClient {
   constructor(
     private readonly clientId: string,
     private readonly clientSecret: string,
-  ) {}
+  ) {
+    // Fail fast at construction (service boot, for a consumer that builds
+    // this eagerly) rather than at the first getToken() call.
+    try {
+      new URL(API_GATEWAY_BASE_URL);
+    } catch {
+      throw new Error(`ServiceTokenClient: API_GATEWAY_BASE_URL is not a valid URL.`);
+    }
+  }
 
   /** Returns a cached token if it has more than 30s left, otherwise mints a new one. */
   async getToken(): Promise<string> {

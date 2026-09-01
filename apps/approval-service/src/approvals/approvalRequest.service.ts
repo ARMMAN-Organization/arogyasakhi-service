@@ -49,7 +49,13 @@ export class ApprovalRequestService {
 
   async create(dto: CreateApprovalRequestInput, authorizationHeader: string) {
     const created = await this.repository.create(dto);
-    await this.notifySupervisor(created.id, dto, authorizationHeader);
+    // Fired without awaiting — the row is already committed, and
+    // notifySupervisor's own try/catch means this never rejects. Awaiting it
+    // would hold the HTTP response open for up to 3 chained downstream calls
+    // (Sakhi lookup -> beneficiary lookup -> notify), risking a client/
+    // gateway timeout-and-retry that creates a duplicate row for the same
+    // submission.
+    void this.notifySupervisor(created.id, dto, authorizationHeader);
     return created;
   }
 

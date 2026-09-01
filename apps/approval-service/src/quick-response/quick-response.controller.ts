@@ -31,7 +31,7 @@ export function createQuickResponseController(service: QuickResponseService) {
       const result = await service.decide(
         req.params.cardId,
         req.body,
-        req.user.id,
+        req.user,
         authorizationHeader,
       );
       res.json(ok(result));
