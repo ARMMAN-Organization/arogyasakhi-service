@@ -27,7 +27,7 @@ function referral(overrides: Partial<Record<string, unknown>> = {}) {
     beneficiaryId: '22222222-2222-2222-2222-222222222222',
     status: 'PENDING_FOLLOWUP' as const,
     referralTypeLookupValueId: STANDARD_LOOKUP_ID,
-    validTill: new Date('2026-09-01T00:00:00.000Z'),
+    validTill: new Date(Date.now() + 24 * 60 * 60 * 1000),
     isDeleted: false,
     ...overrides,
   };
