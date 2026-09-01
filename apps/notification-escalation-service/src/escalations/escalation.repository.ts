@@ -49,47 +49,72 @@ export class EscalationRepository {
   }
 
   /**
-   * Raises a new escalation event, always OPEN — status is never a create
-   * input (see createEscalationEventSchema's doc comment).
+   * Raises a new escalation event, always OPEN (status is never a create
+   * input — see createEscalationEventSchema's doc comment) — or, if an OPEN
+   * escalation already exists for the same natural key, returns that row
+   * instead (self-healing its assignedSupervisorId to the incoming value if
+   * it's changed, e.g. after a beneficiary/Sakhi reassignment) so an
+   * automated job re-raising the same missed visit/follow-up/sync-delay on
+   * its next tick no-ops instead of piling up duplicate OPEN rows.
+   *
+   * The natural key varies by how the event was raised (visitId for a
+   * missed visit, referralId for a follow-up, sakhiUserId for a sync
+   * delay) — only the fields actually present on `input` narrow the match,
+   * so e.g. a visit-driven escalation is never matched against one raised
+   * for a different visitId on the same beneficiary.
+   *
+   * The find-then-write is wrapped in a transaction holding a Postgres
+   * advisory lock keyed on the natural key, so two concurrent calls for the
+   * same key serialize instead of both passing the "no existing row" check
+   * and inserting duplicates — there's no DB-level unique constraint
+   * backing this natural key (it's conditional on which fields are
+   * present), so the lock is what actually closes the race.
    */
-  create(input: CreateEscalationEventInput, createdByUserId: string) {
-    return this.prisma.escalationEvent.create({
-      data: {
-        beneficiaryId: input.beneficiaryId ?? null,
-        sakhiUserId: input.sakhiUserId ?? null,
-        escalationType: input.escalationType,
-        visitId: input.visitId ?? null,
-        referralId: input.referralId ?? null,
-        visitsMissedCount: input.visitsMissedCount ?? null,
-        assignedSupervisorId: input.assignedSupervisorId ?? null,
-        status: 'OPEN',
-        createdByUserId,
-      },
-    });
-  }
+  createOrReuseOpen(input: CreateEscalationEventInput, createdByUserId: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const lockKey = [
+        input.escalationType,
+        input.beneficiaryId ?? '',
+        input.sakhiUserId ?? '',
+        input.visitId ?? '',
+        input.referralId ?? '',
+      ].join('|');
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
 
-  /**
-   * Finds an existing OPEN escalation sharing the same natural key as
-   * `input` — the idempotency guard EscalationService.create checks before
-   * inserting, so an automated job re-raising the same missed
-   * visit/follow-up/sync-delay on its next tick no-ops instead of piling up
-   * duplicate OPEN rows. The natural key varies by how the event was raised
-   * (visitId for a missed visit, referralId for a follow-up, sakhiUserId
-   * for a sync delay) — only the fields actually present on `input` narrow
-   * the match, so e.g. a visit-driven escalation is never matched against
-   * one raised for a different visitId on the same beneficiary.
-   */
-  findOpenDuplicate(input: CreateEscalationEventInput) {
-    return this.prisma.escalationEvent.findFirst({
-      where: {
-        status: 'OPEN',
-        isDeleted: false,
-        escalationType: input.escalationType,
-        ...(input.beneficiaryId ? { beneficiaryId: input.beneficiaryId } : {}),
-        ...(input.sakhiUserId ? { sakhiUserId: input.sakhiUserId } : {}),
-        ...(input.visitId ? { visitId: input.visitId } : {}),
-        ...(input.referralId ? { referralId: input.referralId } : {}),
-      },
+      const existing = await tx.escalationEvent.findFirst({
+        where: {
+          status: 'OPEN',
+          isDeleted: false,
+          escalationType: input.escalationType,
+          ...(input.beneficiaryId ? { beneficiaryId: input.beneficiaryId } : {}),
+          ...(input.sakhiUserId ? { sakhiUserId: input.sakhiUserId } : {}),
+          ...(input.visitId ? { visitId: input.visitId } : {}),
+          ...(input.referralId ? { referralId: input.referralId } : {}),
+        },
+      });
+      if (existing) {
+        if (existing.assignedSupervisorId !== input.assignedSupervisorId) {
+          return tx.escalationEvent.update({
+            where: { id: existing.id },
+            data: { assignedSupervisorId: input.assignedSupervisorId },
+          });
+        }
+        return existing;
+      }
+
+      return tx.escalationEvent.create({
+        data: {
+          beneficiaryId: input.beneficiaryId ?? null,
+          sakhiUserId: input.sakhiUserId ?? null,
+          escalationType: input.escalationType,
+          visitId: input.visitId ?? null,
+          referralId: input.referralId ?? null,
+          visitsMissedCount: input.visitsMissedCount ?? null,
+          assignedSupervisorId: input.assignedSupervisorId,
+          status: 'OPEN',
+          createdByUserId,
+        },
+      });
     });
   }
 

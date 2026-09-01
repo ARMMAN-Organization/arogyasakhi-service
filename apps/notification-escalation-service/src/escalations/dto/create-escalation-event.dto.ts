@@ -46,11 +46,22 @@ export const createEscalationEventSchema = z
     visitId: z.string().uuid().optional(),
     referralId: z.string().uuid().optional(),
     visitsMissedCount: z.number().int().optional(),
-    assignedSupervisorId: z.string().uuid().optional(),
+    // Required, not derived server-side: this service has no roster lookup of
+    // its own, so the raiser (cron/rules process) must resolve and supply the
+    // owning Supervisor. Every row list() serves is scoped by this field, so
+    // an omitted value silently orphans the row from every Supervisor's feed.
+    assignedSupervisorId: z.string().uuid(),
   })
   .strict()
   .refine((v) => Boolean(v.beneficiaryId) !== Boolean(v.sakhiUserId), {
     message: 'Exactly one of beneficiaryId or sakhiUserId must be provided.',
-  });
+  })
+  .refine(
+    (v) => (v.escalationType === 'SYNC_DELAY' ? Boolean(v.sakhiUserId) : Boolean(v.beneficiaryId)),
+    {
+      message:
+        'SYNC_DELAY escalations must provide sakhiUserId; every other escalationType must provide beneficiaryId.',
+    },
+  );
 
 export type CreateEscalationEventInput = z.infer<typeof createEscalationEventSchema>;

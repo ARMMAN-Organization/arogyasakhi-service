@@ -28,9 +28,10 @@ export function createEscalationController(service: EscalationService) {
     }),
 
     findById: asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
       const authorizationHeader = req.header('authorization');
       if (!authorizationHeader) return next(unauthorized());
-      const card = await service.findById(req.params.id, authorizationHeader);
+      const card = await service.findById(req.params.id, req.user, authorizationHeader);
       if (!card) throw notFound('Escalation event not found.');
       res.json(ok(card));
     }),

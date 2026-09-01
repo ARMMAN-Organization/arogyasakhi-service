@@ -29,7 +29,14 @@ function sakhiRecord(overrides: Partial<SakhiRecord> = {}): SakhiRecord {
   };
 }
 
-function row(overrides: { id?: string; escalationType?: EscalationType; createdAt?: Date } = {}) {
+function row(
+  overrides: {
+    id?: string;
+    escalationType?: EscalationType;
+    createdAt?: Date;
+    assignedSupervisorId?: string | null;
+  } = {},
+) {
   return {
     id: overrides.id ?? '11111111-1111-1111-1111-111111111111',
     beneficiaryId: '22222222-2222-2222-2222-222222222222',
@@ -39,7 +46,7 @@ function row(overrides: { id?: string; escalationType?: EscalationType; createdA
     escalationType: overrides.escalationType ?? ('ANC_2_MISSED' as const),
     triggerRuleVersionId: null,
     status: 'OPEN' as const,
-    assignedSupervisorId: null,
+    assignedSupervisorId: overrides.assignedSupervisorId ?? null,
     visitsMissedCount: null,
     resolvedAt: null,
     reviewDeadlineAt: null,
@@ -60,8 +67,7 @@ describe('EscalationService', () => {
   const repository = {
     findMany: jest.fn(),
     findById: jest.fn(),
-    create: jest.fn(),
-    findOpenDuplicate: jest.fn(),
+    createOrReuseOpen: jest.fn(),
     updateStatus: jest.fn(),
     updatePendingReason: jest.fn(),
   } as unknown as jest.Mocked<EscalationRepository>;
@@ -96,7 +102,6 @@ describe('EscalationService', () => {
     );
     beneficiaryClient.getById.mockResolvedValue(beneficiaryRecord());
     sakhiClient.findById.mockResolvedValue(sakhiRecord());
-    repository.findOpenDuplicate.mockResolvedValue(null);
   });
 
   it('groups every *_MISSED escalation type under MISSED_VISIT', async () => {
@@ -249,84 +254,49 @@ describe('EscalationService', () => {
   });
 
   describe('create', () => {
-    it('creates a Missed-Visit-type escalation row', async () => {
+    const SUPERVISOR_ID = '55555555-5555-5555-5555-555555555555';
+
+    it('delegates to the repository, returning whatever it resolves', async () => {
       const created = row({ escalationType: 'ANC_2_MISSED' });
-      repository.create.mockResolvedValue(created);
+      repository.createOrReuseOpen.mockResolvedValue(created);
+      const input = {
+        beneficiaryId: created.beneficiaryId,
+        escalationType: 'ANC_2_MISSED' as const,
+        assignedSupervisorId: SUPERVISOR_ID,
+      };
 
-      const result = await service.create(
-        { beneficiaryId: created.beneficiaryId, escalationType: 'ANC_2_MISSED' },
-        'admin-user-id',
-      );
-
-      expect(result).toBe(created);
-      expect(repository.create).toHaveBeenCalledWith(
-        { beneficiaryId: created.beneficiaryId, escalationType: 'ANC_2_MISSED' },
-        'admin-user-id',
-      );
-    });
-
-    it('creates an EDD_NEARING escalation row', async () => {
-      const created = row({ escalationType: 'EDD_NEARING' });
-      repository.create.mockResolvedValue(created);
-
-      const result = await service.create(
-        { beneficiaryId: created.beneficiaryId, escalationType: 'EDD_NEARING' },
-        'admin-user-id',
-      );
+      const result = await service.create(input, 'admin-user-id');
 
       expect(result).toBe(created);
-      expect(result.status).toBe('OPEN');
+      expect(repository.createOrReuseOpen).toHaveBeenCalledWith(input, 'admin-user-id');
     });
 
     it('passes optional fields through to the repository unchanged', async () => {
       const created = row({ escalationType: 'ANC_2_MISSED' });
-      repository.create.mockResolvedValue(created);
+      repository.createOrReuseOpen.mockResolvedValue(created);
       const input = {
         beneficiaryId: created.beneficiaryId,
         escalationType: 'ANC_2_MISSED' as const,
         visitId: '33333333-3333-3333-3333-333333333333',
         referralId: '44444444-4444-4444-4444-444444444444',
         visitsMissedCount: 2,
-        assignedSupervisorId: '55555555-5555-5555-5555-555555555555',
+        assignedSupervisorId: SUPERVISOR_ID,
       };
 
       await service.create(input, 'admin-user-id');
 
-      expect(repository.create).toHaveBeenCalledWith(input, 'admin-user-id');
-    });
-
-    it('returns the existing OPEN escalation instead of inserting a duplicate', async () => {
-      const existing = row({ escalationType: 'ANC_2_MISSED' });
-      repository.findOpenDuplicate.mockResolvedValue(existing);
-
-      const result = await service.create(
-        { beneficiaryId: existing.beneficiaryId, escalationType: 'ANC_2_MISSED' },
-        'system-account-id',
-      );
-
-      expect(result).toBe(existing);
-      expect(repository.create).not.toHaveBeenCalled();
-    });
-
-    it('inserts when no OPEN duplicate exists', async () => {
-      repository.findOpenDuplicate.mockResolvedValue(null);
-      const created = row({ escalationType: 'SYNC_DELAY' });
-      repository.create.mockResolvedValue(created);
-
-      const result = await service.create(
-        { sakhiUserId: 'sakhi-user-1', escalationType: 'SYNC_DELAY' },
-        'system-account-id',
-      );
-
-      expect(result).toBe(created);
-      expect(repository.create).toHaveBeenCalled();
+      expect(repository.createOrReuseOpen).toHaveBeenCalledWith(input, 'admin-user-id');
     });
   });
 
   describe('findById', () => {
     it('returns the enriched card shape for a supported card type', async () => {
       repository.findById.mockResolvedValue(row({ escalationType: 'EDD_NEARING' }));
-      const result = await service.findById('11111111-1111-1111-1111-111111111111', AUTH_HEADER);
+      const result = await service.findById(
+        '11111111-1111-1111-1111-111111111111',
+        managerCaller,
+        AUTH_HEADER,
+      );
       expect(result).toMatchObject({
         cardType: 'EDD_NEARING',
         cardSource: 'escalation_events',
@@ -341,20 +311,28 @@ describe('EscalationService', () => {
 
     it('returns null when the row does not exist', async () => {
       repository.findById.mockResolvedValue(null);
-      const result = await service.findById('unknown-id', AUTH_HEADER);
+      const result = await service.findById('unknown-id', managerCaller, AUTH_HEADER);
       expect(result).toBeNull();
       expect(beneficiaryClient.getById).not.toHaveBeenCalled();
     });
 
     it('resolves POST_EDD_MISSED to a MISSED_VISIT card (was previously omitted)', async () => {
       repository.findById.mockResolvedValue(row({ escalationType: 'POST_EDD_MISSED' }));
-      const result = await service.findById('11111111-1111-1111-1111-111111111111', AUTH_HEADER);
+      const result = await service.findById(
+        '11111111-1111-1111-1111-111111111111',
+        managerCaller,
+        AUTH_HEADER,
+      );
       expect(result).toMatchObject({ cardType: 'MISSED_VISIT', escalationType: 'POST_EDD_MISSED' });
     });
 
     it('returns null for an escalation type outside the 8 supported card types', async () => {
       repository.findById.mockResolvedValue(row({ escalationType: 'SYNC_DELAY' }));
-      const result = await service.findById('11111111-1111-1111-1111-111111111111', AUTH_HEADER);
+      const result = await service.findById(
+        '11111111-1111-1111-1111-111111111111',
+        managerCaller,
+        AUTH_HEADER,
+      );
       expect(result).toBeNull();
       expect(beneficiaryClient.getById).not.toHaveBeenCalled();
     });
@@ -362,7 +340,11 @@ describe('EscalationService', () => {
     it('does not call the Sakhi client when the beneficiary has no sakhiId', async () => {
       repository.findById.mockResolvedValue(row({ escalationType: 'EDD_NEARING' }));
       beneficiaryClient.getById.mockResolvedValue(beneficiaryRecord({ sakhiId: '' }));
-      const result = await service.findById('11111111-1111-1111-1111-111111111111', AUTH_HEADER);
+      const result = await service.findById(
+        '11111111-1111-1111-1111-111111111111',
+        managerCaller,
+        AUTH_HEADER,
+      );
       expect(sakhiClient.findById).not.toHaveBeenCalled();
       expect(result).toMatchObject({ sakhiName: null, sakhiContact: null });
     });
@@ -371,7 +353,7 @@ describe('EscalationService', () => {
       repository.findById.mockResolvedValue(row({ escalationType: 'EDD_NEARING' }));
       beneficiaryClient.getById.mockRejectedValue(new Error('beneficiary-service down'));
       await expect(
-        service.findById('11111111-1111-1111-1111-111111111111', AUTH_HEADER),
+        service.findById('11111111-1111-1111-1111-111111111111', managerCaller, AUTH_HEADER),
       ).rejects.toThrow('beneficiary-service down');
     });
 
@@ -379,8 +361,47 @@ describe('EscalationService', () => {
       repository.findById.mockResolvedValue(row({ escalationType: 'EDD_NEARING' }));
       sakhiClient.findById.mockRejectedValue(new Error('auth-service down'));
       await expect(
-        service.findById('11111111-1111-1111-1111-111111111111', AUTH_HEADER),
+        service.findById('11111111-1111-1111-1111-111111111111', managerCaller, AUTH_HEADER),
       ).rejects.toThrow('auth-service down');
+    });
+
+    describe('roster scoping', () => {
+      it('returns null for a SUPERVISOR requesting a card assigned to a different supervisor (IDOR)', async () => {
+        repository.findById.mockResolvedValue(
+          row({ escalationType: 'EDD_NEARING', assignedSupervisorId: 'other-supervisor' }),
+        );
+        const result = await service.findById(
+          '11111111-1111-1111-1111-111111111111',
+          supervisorCaller('supervisor-1'),
+          AUTH_HEADER,
+        );
+        expect(result).toBeNull();
+        expect(beneficiaryClient.getById).not.toHaveBeenCalled();
+      });
+
+      it('returns the card for a SUPERVISOR requesting their own assigned card', async () => {
+        repository.findById.mockResolvedValue(
+          row({ escalationType: 'EDD_NEARING', assignedSupervisorId: 'supervisor-1' }),
+        );
+        const result = await service.findById(
+          '11111111-1111-1111-1111-111111111111',
+          supervisorCaller('supervisor-1'),
+          AUTH_HEADER,
+        );
+        expect(result).toMatchObject({ cardType: 'EDD_NEARING' });
+      });
+
+      it('returns the card for a MANAGER/ADMIN caller regardless of assignedSupervisorId', async () => {
+        repository.findById.mockResolvedValue(
+          row({ escalationType: 'EDD_NEARING', assignedSupervisorId: 'some-other-supervisor' }),
+        );
+        const result = await service.findById(
+          '11111111-1111-1111-1111-111111111111',
+          managerCaller,
+          AUTH_HEADER,
+        );
+        expect(result).toMatchObject({ cardType: 'EDD_NEARING' });
+      });
     });
   });
 

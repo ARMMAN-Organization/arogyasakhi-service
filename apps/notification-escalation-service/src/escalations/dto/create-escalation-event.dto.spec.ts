@@ -4,6 +4,7 @@ describe('createEscalationEventSchema', () => {
   const baseInput = {
     beneficiaryId: '22222222-2222-2222-2222-222222222222',
     escalationType: 'ANC_2_MISSED' as const,
+    assignedSupervisorId: '55555555-5555-5555-5555-555555555555',
   };
 
   it('accepts a minimal Missed-Visit-type payload', () => {
@@ -32,6 +33,15 @@ describe('createEscalationEventSchema', () => {
 
   it('rejects a missing beneficiaryId', () => {
     const result = createEscalationEventSchema.safeParse({
+      escalationType: baseInput.escalationType,
+      assignedSupervisorId: baseInput.assignedSupervisorId,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a missing assignedSupervisorId', () => {
+    const result = createEscalationEventSchema.safeParse({
+      beneficiaryId: baseInput.beneficiaryId,
       escalationType: baseInput.escalationType,
     });
     expect(result.success).toBe(false);
@@ -65,6 +75,7 @@ describe('createEscalationEventSchema', () => {
     const result = createEscalationEventSchema.safeParse({
       sakhiUserId: '66666666-6666-6666-6666-666666666666',
       escalationType: 'SYNC_DELAY' as const,
+      assignedSupervisorId: baseInput.assignedSupervisorId,
     });
     expect(result.success).toBe(true);
   });
@@ -80,6 +91,25 @@ describe('createEscalationEventSchema', () => {
   it('rejects neither beneficiaryId nor sakhiUserId set', () => {
     const result = createEscalationEventSchema.safeParse({
       escalationType: baseInput.escalationType,
+      assignedSupervisorId: baseInput.assignedSupervisorId,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a SYNC_DELAY payload carrying beneficiaryId instead of sakhiUserId', () => {
+    const result = createEscalationEventSchema.safeParse({
+      beneficiaryId: baseInput.beneficiaryId,
+      escalationType: 'SYNC_DELAY' as const,
+      assignedSupervisorId: baseInput.assignedSupervisorId,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a non-SYNC_DELAY type carrying sakhiUserId instead of beneficiaryId', () => {
+    const result = createEscalationEventSchema.safeParse({
+      sakhiUserId: '66666666-6666-6666-6666-666666666666',
+      escalationType: 'ANC_2_MISSED' as const,
+      assignedSupervisorId: baseInput.assignedSupervisorId,
     });
     expect(result.success).toBe(false);
   });

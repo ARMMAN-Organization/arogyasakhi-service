@@ -86,7 +86,7 @@ const missedVisitDetailSchema = z.object({
   id: z.string().uuid(),
   beneficiaryId: z.string().uuid(),
   visitsMissedCount: z.number().int().nullable(),
-  visitType: z.enum(['ANC', 'PP', 'NN', 'INC', 'INC-HR', 'CCV', 'CCV-HR']),
+  visitType: z.enum(['ANC', 'PP', 'NN', 'INC', 'INC-HR', 'CCV', 'CCV-HR', 'ANC_POST_EDD']),
   requestedAt: z.string().datetime(),
   status: z.enum(['PENDING', 'TRANSFERRED', 'CLOSED']),
 });

@@ -129,7 +129,8 @@ export class EscalationService {
         beneficiaryIds.map(async (id) => {
           try {
             return [id, await this.beneficiaryClient.getById(id, authorizationHeader)] as const;
-          } catch {
+          } catch (err) {
+            console.error(`Failed to enrich escalation card with beneficiary ${id}:`, err);
             return [id, null] as const;
           }
         }),
@@ -148,7 +149,8 @@ export class EscalationService {
         sakhiIds.map(async (id) => {
           try {
             return [id, await this.sakhiClient.findById(id, authorizationHeader)] as const;
-          } catch {
+          } catch (err) {
+            console.error(`Failed to enrich escalation card with sakhi ${id}:`, err);
             return [id, null] as const;
           }
         }),
@@ -186,7 +188,7 @@ export class EscalationService {
       beneficiaryPhone: enrichment?.beneficiary?.pii.mobileNumber ?? null,
       riskLevel: enrichment?.beneficiary?.riskLevel ?? null,
       assignedSupervisorId: row.assignedSupervisorId,
-      sakhiId: enrichment?.beneficiary?.sakhiId ?? null,
+      sakhiId: enrichment?.beneficiary?.sakhiId || null,
       sakhiName: enrichment?.sakhi?.displayName ?? null,
       sakhiContact: enrichment?.sakhi?.mobileNumber ?? null,
       visitId: row.visitId,
@@ -234,27 +236,32 @@ export class EscalationService {
    * here, unlike closures/reopen-requests/referrals.
    *
    * Idempotent: if an OPEN escalation already exists for the same natural
-   * key (see findOpenDuplicate), that existing row is returned instead of
-   * inserting a duplicate — a cron job re-raising the same missed
-   * visit/follow-up/sync-delay on its next tick (before a Supervisor has
-   * resolved the first one) must not pile up repeat OPEN escalations.
+   * key, that existing row is returned (with its assignedSupervisorId
+   * self-healed to the incoming value if it's changed) instead of inserting
+   * a duplicate — a cron job re-raising the same missed visit/follow-up/
+   * sync-delay on its next tick (before a Supervisor has resolved the first
+   * one) must not pile up repeat OPEN escalations. See
+   * EscalationRepository.createOrReuseOpen for how the check-then-write is
+   * made race-safe.
    */
-  async create(input: CreateEscalationEventInput, createdByUserId: string) {
-    const existing = await this.repository.findOpenDuplicate(input);
-    if (existing) return existing;
-    return this.repository.create(input, createdByUserId);
+  create(input: CreateEscalationEventInput, createdByUserId: string) {
+    return this.repository.createOrReuseOpen(input, createdByUserId);
   }
 
   /**
    * Fetches a single escalation event shaped as an enriched Quick Response
    * card, or null if it doesn't exist (or isn't one of the 8 supported card
-   * types). Unlike list()'s best-effort enrichment, a beneficiary/Sakhi
-   * lookup failure here propagates — for a single card the enrichment IS
-   * the payload, same philosophy as getEddNearingDetail.
+   * types), or if a non-privileged caller doesn't own it — same
+   * assignedSupervisorId roster scoping list() applies, so a Supervisor
+   * can't fetch another Supervisor's card by guessing/enumerating its id.
+   * Unlike list()'s best-effort enrichment, a beneficiary/Sakhi lookup
+   * failure here propagates — for a single card the enrichment IS the
+   * payload, same philosophy as getEddNearingDetail.
    */
-  async findById(id: string, authorizationHeader: string) {
+  async findById(id: string, caller: CallerScope, authorizationHeader: string) {
     const row = await this.repository.findById(id);
     if (!row) return null;
+    if (!isPrivileged(caller) && row.assignedSupervisorId !== caller.id) return null;
 
     const cardType = toCardType(row.escalationType);
     if (!cardType) return null;
