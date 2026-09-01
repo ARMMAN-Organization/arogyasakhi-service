@@ -1,5 +1,6 @@
 import { badGateway, HttpError } from '@armman/service-commons';
 import { appConfig } from '../config/app-config';
+import { DOWNSTREAM_FETCH_TIMEOUT_MS } from './fetch-timeout';
 
 interface LookupValue {
   id: string;
@@ -16,16 +17,22 @@ interface LookupCategory {
  * lookup_value_id for the current environment, since
  * approval_requests.decision_status_lookup_id is an environment-specific FK,
  * not a stable literal (unlike rules-service's hardcoded rule-version seed).
+ *
+ * Fetched fresh on every call — no in-process cache. This service has no
+ * Redis wiring (unlike auth-service's rate limiter), and per root CLAUDE.md
+ * §15 ("stateless services — sessions/cache in Redis, not memory"), caching
+ * this in a private instance field would leave each replica behind the load
+ * balancer holding its own independently-stale copy. If this call's latency
+ * becomes a real problem, the fix is a Redis-backed cache, not an in-process
+ * one.
  */
 export class LookupClient {
-  async resolveApprovalStatusId(
-    valueCode: string,
-    authorizationHeader: string,
-  ): Promise<string | null> {
+  private async fetchCategory(authorizationHeader: string): Promise<LookupCategory | null> {
     let res: Response;
     try {
       res = await fetch(`${appConfig.API_GATEWAY_BASE_URL}/api/v1/lookups/APPROVAL_STATUS`, {
         headers: { Authorization: authorizationHeader },
+        signal: AbortSignal.timeout(DOWNSTREAM_FETCH_TIMEOUT_MS),
       });
     } catch {
       throw badGateway('Unable to resolve APPROVAL_STATUS — auth-service is unreachable.');
@@ -41,7 +48,15 @@ export class LookupClient {
     }
 
     const body = (await res.json()) as { data: LookupCategory };
-    return body.data.values.find((v) => v.valueCode === valueCode)?.id ?? null;
+    return body.data;
+  }
+
+  async resolveApprovalStatusId(
+    valueCode: string,
+    authorizationHeader: string,
+  ): Promise<string | null> {
+    const category = await this.fetchCategory(authorizationHeader);
+    return category?.values.find((v) => v.valueCode === valueCode)?.id ?? null;
   }
 
   /**
@@ -55,17 +70,12 @@ export class LookupClient {
     lookupValueId: string,
     authorizationHeader: string,
   ): Promise<string | null> {
-    let res: Response;
+    let category: LookupCategory | null;
     try {
-      res = await fetch(`${appConfig.API_GATEWAY_BASE_URL}/api/v1/lookups/APPROVAL_STATUS`, {
-        headers: { Authorization: authorizationHeader },
-      });
+      category = await this.fetchCategory(authorizationHeader);
     } catch {
       return null;
     }
-    if (!res.ok) return null;
-
-    const body = (await res.json()) as { data: LookupCategory };
-    return body.data.values.find((v) => v.id === lookupValueId)?.valueCode ?? null;
+    return category?.values.find((v) => v.id === lookupValueId)?.valueCode ?? null;
   }
 }

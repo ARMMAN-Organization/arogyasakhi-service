@@ -1,5 +1,6 @@
 import { badGateway, HttpError } from '@armman/service-commons';
 import { appConfig } from '../config/app-config';
+import { DOWNSTREAM_FETCH_TIMEOUT_MS } from './fetch-timeout';
 
 export interface ReferralRecord {
   id: string;
@@ -39,6 +40,7 @@ export class ReferralClient {
         method: 'PATCH',
         headers: { Authorization: authorizationHeader, 'Content-Type': 'application/json' },
         body: JSON.stringify({ decision }),
+        signal: AbortSignal.timeout(DOWNSTREAM_FETCH_TIMEOUT_MS),
       });
     } catch {
       throw badGateway('Unable to decide the referral — risk-referral-service is unreachable.');
@@ -74,7 +76,10 @@ export class ReferralClient {
     try {
       res = await fetch(
         `${appConfig.API_GATEWAY_BASE_URL}/api/v1/referrals/decision-status?ids=${ids.join(',')}`,
-        { headers: { Authorization: authorizationHeader } },
+        {
+          headers: { Authorization: authorizationHeader },
+          signal: AbortSignal.timeout(DOWNSTREAM_FETCH_TIMEOUT_MS),
+        },
       );
     } catch {
       throw badGateway(
@@ -111,6 +116,7 @@ export class ReferralClient {
     try {
       res = await fetch(`${appConfig.API_GATEWAY_BASE_URL}/api/v1/referrals/${id}`, {
         headers: { Authorization: authorizationHeader },
+        signal: AbortSignal.timeout(DOWNSTREAM_FETCH_TIMEOUT_MS),
       });
     } catch {
       throw badGateway('Unable to fetch the referral — risk-referral-service is unreachable.');

@@ -1,4 +1,11 @@
-import { badRequest, conflict, notFound, unprocessable, HttpError } from '@armman/service-commons';
+import {
+  badRequest,
+  conflict,
+  forbidden,
+  notFound,
+  unprocessable,
+  HttpError,
+} from '@armman/service-commons';
 import type { QuickResponseRepository } from './quick-response.repository';
 import type { LookupClient } from './lookup.client';
 import type { EscalationClient, EscalationCard } from './escalation.client';
@@ -42,9 +49,28 @@ interface ApprovalRequestCard {
   cardSource: 'approval_requests';
   beneficiaryId: string | null;
   raisedAt: string;
+  beneficiaryName: string | null;
+  sakhiName: string | null;
 }
 
 type QuickResponseCard = ApprovalRequestCard | EscalationCard;
+
+/** The calling principal's own scope, as carried on their JWT/trusted-identity headers. */
+export interface CallerScope {
+  readonly id: string;
+  readonly roles: string[];
+  readonly projectId: string | null;
+}
+
+/**
+ * MANAGER/ADMIN are unrestricted across Quick Response's supervisor-scoping
+ * checks — checked as the absence of an elevated role, not the presence of
+ * a restrictive one (SUPERVISOR), since a caller can hold multiple role
+ * assignments at once. Matches auth-service's own isPrivileged() pattern.
+ */
+function isPrivileged(caller: CallerScope): boolean {
+  return caller.roles.includes('MANAGER') || caller.roles.includes('ADMIN');
+}
 
 function decodeCursor(cursor: string): { createdAt: Date; id: string } {
   let decoded: string;
@@ -81,6 +107,78 @@ function mapStatusForEscalations(status: string): string | null {
 /** Quick Response's domain logic: merges approval_requests + escalation_events
  * into one feed, and dispatches decisions per card type. */
 export class QuickResponseService {
+  /** Best-effort — a name lookup failure falls back to no name (generic
+   * notification text) rather than blocking the decision it's attached to. */
+  private async resolveSakhiName(
+    sakhiId: string,
+    authorizationHeader: string,
+  ): Promise<string | null> {
+    try {
+      const sakhi = await this.sakhiClient.getById(sakhiId, authorizationHeader);
+      return sakhi?.displayName ?? null;
+    } catch (err) {
+      console.error(`Failed to resolve Sakhi ${sakhiId}'s name for a notification:`, err);
+      return null;
+    }
+  }
+
+  /** Best-effort — see resolveSakhiName. */
+  private async resolveBeneficiaryName(
+    beneficiaryId: string,
+    authorizationHeader: string,
+  ): Promise<string | null> {
+    try {
+      const beneficiary = await this.beneficiaryClient.getById(beneficiaryId, authorizationHeader);
+      return beneficiary?.pii.fullName ?? null;
+    } catch (err) {
+      console.error(
+        `Failed to resolve beneficiary ${beneficiaryId}'s name for a notification:`,
+        err,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Page-level batch lookup for list() — one call for every beneficiary on
+   * the page, instead of one per row (see resolveBeneficiaryName for the
+   * single-id version getCardDetail() uses). Best-effort: a failure here
+   * degrades the whole page's beneficiaryName to null rather than failing
+   * the list.
+   */
+  private async resolveBeneficiaryNamesById(
+    beneficiaryIds: string[],
+    authorizationHeader: string,
+  ): Promise<Map<string, string>> {
+    if (beneficiaryIds.length === 0) return new Map();
+    try {
+      return await this.beneficiaryClient.getManyWithRisk(beneficiaryIds, authorizationHeader);
+    } catch (err) {
+      console.error('Failed to batch-resolve beneficiary names for the Quick Response list:', err);
+      return new Map();
+    }
+  }
+
+  /**
+   * Page-level Sakhi name lookup for list() — one batch call for every
+   * unique Sakhi on the page via auth-service's GET /sakhis/by-ids, instead
+   * of one call per Sakhi (see sakhi.client.ts's getManyByIds). Best-effort:
+   * a failure here degrades the whole page's sakhiName to null rather than
+   * failing the list, matching resolveBeneficiaryNamesById's contract.
+   */
+  private async resolveSakhiNamesById(
+    sakhiIds: string[],
+    authorizationHeader: string,
+  ): Promise<Map<string, string>> {
+    if (sakhiIds.length === 0) return new Map();
+    try {
+      return await this.sakhiClient.getManyByIds(sakhiIds, authorizationHeader);
+    } catch (err) {
+      console.error('Failed to batch-resolve Sakhi names for the Quick Response list:', err);
+      return new Map();
+    }
+  }
+
   constructor(
     private readonly repository: QuickResponseRepository,
     private readonly lookupClient: LookupClient,
@@ -104,15 +202,42 @@ export class QuickResponseService {
    * concurrent writes between page fetches — an accepted trade-off at this
    * scale, not solved further here.
    */
-  async list(query: ListQuickResponseInput, authorizationHeader: string) {
+  /**
+   * Resolves the caller's own scope for the approval_requests half of the
+   * Quick Response feed — `null` (unrestricted) for MANAGER/ADMIN, or the
+   * caller's own assigned Sakhi ids (via auth-service, possibly empty) for
+   * a SUPERVISOR. A SUPERVISOR with no projectId on their scope fails
+   * closed to zero accessible Sakhis rather than making an unscoped call.
+   */
+  private async resolveOwnSakhiIds(
+    caller: CallerScope,
+    authorizationHeader: string,
+  ): Promise<string[] | null> {
+    if (isPrivileged(caller)) return null;
+    if (!caller.projectId) return [];
+    try {
+      return await this.sakhiClient.getOwnSakhiIds(caller.projectId, authorizationHeader);
+    } catch (err) {
+      // Fails closed to zero accessible Sakhis, matching the !caller.projectId
+      // branch above — a transient auth-service error must not 500 the
+      // entire Quick Response list/detail for every SUPERVISOR.
+      console.error(
+        `Failed to resolve SUPERVISOR ${caller.id}'s own Sakhi roster — failing closed to empty:`,
+        err,
+      );
+      return [];
+    }
+  }
+
+  async list(query: ListQuickResponseInput, caller: CallerScope, authorizationHeader: string) {
     const cursor = query.cursor ? decodeCursor(query.cursor) : null;
 
-    const approvalStatusId = await this.lookupClient.resolveApprovalStatusId(
-      query.status,
-      authorizationHeader,
-    );
+    const [approvalStatusId, sakhiIds] = await Promise.all([
+      this.lookupClient.resolveApprovalStatusId(query.status, authorizationHeader),
+      this.resolveOwnSakhiIds(caller, authorizationHeader),
+    ]);
     const approvalRows = approvalStatusId
-      ? await this.repository.findMany(approvalStatusId, query.limit, cursor)
+      ? await this.repository.findMany(approvalStatusId, query.limit, cursor, sakhiIds)
       : [];
     const typedRows = approvalRows.filter((row) =>
       APPROVAL_REQUEST_CARD_TYPES.has(row.requestType),
@@ -120,11 +245,38 @@ export class QuickResponseService {
 
     // Only a PENDING page can be stale in the way reconciliation fixes (see
     // filterStillPending's doc comment) — APPROVED/REJECTED queries return
-    // typedRows as-is.
-    const reconciledRows =
+    // typedRows as-is. Run alongside the escalation-events fetch below since
+    // neither depends on the other's result — sequential awaits here were
+    // pushing PENDING responses past the mobile client's timeout.
+    const escalationStatus = mapStatusForEscalations(query.status);
+    const [reconciledRows, escalationResult] = await Promise.all([
       query.status === 'PENDING'
-        ? await this.filterStillPending(typedRows, authorizationHeader)
-        : typedRows;
+        ? this.filterStillPending(typedRows, authorizationHeader)
+        : Promise.resolve(typedRows),
+      escalationStatus
+        ? this.escalationClient.list(
+            escalationStatus,
+            query.cursor,
+            query.limit,
+            authorizationHeader,
+          )
+        : Promise.resolve({ cards: [], nextCursor: null }),
+    ]);
+
+    let beneficiaryNames = new Map<string, string>();
+    let sakhiNames = new Map<string, string>();
+    if (reconciledRows.length > 0) {
+      const beneficiaryIds = Array.from(
+        new Set(
+          reconciledRows.map((row) => row.beneficiaryId).filter((id): id is string => id != null),
+        ),
+      );
+      const sakhiIds = Array.from(new Set(reconciledRows.map((row) => row.requestedByUserId)));
+      [beneficiaryNames, sakhiNames] = await Promise.all([
+        this.resolveBeneficiaryNamesById(beneficiaryIds, authorizationHeader),
+        this.resolveSakhiNamesById(sakhiIds, authorizationHeader),
+      ]);
+    }
 
     const approvalCards: ApprovalRequestCard[] = reconciledRows.map((row) => ({
       cardId: row.id,
@@ -132,17 +284,9 @@ export class QuickResponseService {
       cardSource: 'approval_requests' as const,
       beneficiaryId: row.beneficiaryId,
       raisedAt: row.createdAt.toISOString(),
+      beneficiaryName: row.beneficiaryId ? (beneficiaryNames.get(row.beneficiaryId) ?? null) : null,
+      sakhiName: sakhiNames.get(row.requestedByUserId) ?? null,
     }));
-
-    const escalationStatus = mapStatusForEscalations(query.status);
-    const escalationResult = escalationStatus
-      ? await this.escalationClient.list(
-          escalationStatus,
-          query.cursor,
-          query.limit,
-          authorizationHeader,
-        )
-      : { cards: [], nextCursor: null };
 
     const merged: QuickResponseCard[] = [...approvalCards, ...escalationResult.cards].sort(
       (a, b) => new Date(b.raisedAt).getTime() - new Date(a.raisedAt).getTime(),
@@ -175,9 +319,13 @@ export class QuickResponseService {
    * built"). Closure Review's "completion tracker" is likewise omitted —
    * no backing data source was identified for it.
    */
-  async getCardDetail(cardId: string, authorizationHeader: string) {
+  async getCardDetail(cardId: string, caller: CallerScope, authorizationHeader: string) {
     const approvalRow = await this.repository.findById(cardId);
     if (approvalRow) {
+      const sakhiIds = await this.resolveOwnSakhiIds(caller, authorizationHeader);
+      if (sakhiIds && !sakhiIds.includes(approvalRow.requestedByUserId)) {
+        throw forbidden('You do not have access to this Quick Response card.');
+      }
       return this.enrichApprovalRequestCard(approvalRow, authorizationHeader);
     }
 
@@ -279,9 +427,10 @@ export class QuickResponseService {
       // resolve, so fall back to the thin shape rather than throwing.
       return this.thinCard(row);
     }
-    const common = await this.resolveCommonFields(row.beneficiaryId, authorizationHeader);
+    const beneficiaryId = row.beneficiaryId;
 
     if (row.requestType === 'LMP_CHANGE') {
+      const common = await this.resolveCommonFields(beneficiaryId, authorizationHeader);
       const payload = row.requestPayloadJson as {
         newLmpDate?: string;
         sonographyImageAssetId?: string;
@@ -300,11 +449,16 @@ export class QuickResponseService {
     }
 
     if (row.requestType === 'CLOSURE_REVIEW') {
-      const closure = row.closureId
-        ? await this.safeResolve('closure', () =>
-            this.closureClient.getById(row.closureId as string, authorizationHeader),
-          )
-        : null;
+      // resolveCommonFields and the closure fetch have no dependency on each
+      // other — run them concurrently instead of stacking their latency.
+      const [common, closure] = await Promise.all([
+        this.resolveCommonFields(beneficiaryId, authorizationHeader),
+        row.closureId
+          ? this.safeResolve('closure', () =>
+              this.closureClient.getById(row.closureId as string, authorizationHeader),
+            )
+          : Promise.resolve(null),
+      ]);
       return {
         ...this.thinCard(row),
         padaName: common.padaName,
@@ -320,11 +474,15 @@ export class QuickResponseService {
     }
 
     if (row.requestType === 'REOPEN') {
-      const reopenRequest = row.reopenRequestId
-        ? await this.safeResolve('reopen request', () =>
-            this.reopenRequestClient.getById(row.reopenRequestId as string, authorizationHeader),
-          )
-        : null;
+      // Same independence as CLOSURE_REVIEW above — run concurrently.
+      const [common, reopenRequest] = await Promise.all([
+        this.resolveCommonFields(beneficiaryId, authorizationHeader),
+        row.reopenRequestId
+          ? this.safeResolve('reopen request', () =>
+              this.reopenRequestClient.getById(row.reopenRequestId as string, authorizationHeader),
+            )
+          : Promise.resolve(null),
+      ]);
       return {
         ...this.thinCard(row),
         padaName: common.padaName,
@@ -338,12 +496,18 @@ export class QuickResponseService {
 
     // ACCOMPANIED_REFERRAL / REFERRAL_INCOMPLETE — both key off referralId
     // on the same underlying referrals table (see referral-type guard in
-    // risk-referral-service's ReferralService.decide).
-    const referral = row.referralId
-      ? await this.safeResolve('referral', () =>
-          this.referralClient.getById(row.referralId as string, authorizationHeader),
-        )
-      : null;
+    // risk-referral-service's ReferralService.decide). The referral fetch has
+    // no dependency on resolveCommonFields, so the two run concurrently; only
+    // REFERRAL_INCOMPLETE's visit fetch below has a real dependency (it needs
+    // referral.visitId) and stays sequential after referral resolves.
+    const [common, referral] = await Promise.all([
+      this.resolveCommonFields(beneficiaryId, authorizationHeader),
+      row.referralId
+        ? this.safeResolve('referral', () =>
+            this.referralClient.getById(row.referralId as string, authorizationHeader),
+          )
+        : Promise.resolve(null),
+    ]);
 
     if (row.requestType === 'ACCOMPANIED_REFERRAL') {
       return {
@@ -521,13 +685,13 @@ export class QuickResponseService {
   async decide(
     cardId: string,
     dto: DecideQuickResponseInput,
-    decidedByUserId: string,
+    caller: CallerScope,
     authorizationHeader: string,
   ) {
     if (dto.cardSource === 'escalation_events') {
       return this.decideEscalationCard(cardId, dto, authorizationHeader);
     }
-    return this.decideApprovalRequestCard(cardId, dto, decidedByUserId, authorizationHeader);
+    return this.decideApprovalRequestCard(cardId, dto, caller, authorizationHeader);
   }
 
   /**
@@ -541,7 +705,7 @@ export class QuickResponseService {
   async decideLmpChangeRequest(
     id: string,
     dto: DecideLmpChangeRequestInput,
-    decidedByUserId: string,
+    caller: CallerScope,
     authorizationHeader: string,
   ) {
     const existing = await this.repository.findById(id);
@@ -551,7 +715,7 @@ export class QuickResponseService {
     return this.decide(
       id,
       { cardSource: 'approval_requests', ...dto },
-      decidedByUserId,
+      caller,
       authorizationHeader,
     );
   }
@@ -600,12 +764,12 @@ export class QuickResponseService {
   /**
    * EDD_NEARING supports only OKAY (acknowledge-only: no audit_log, no
    * notify — spec's explicit exemption). MISSED_VISIT supports TRANSFER/
-   * CLOSE, not APPROVE/REJECT; TRANSFER itself still 501s (see
-   * EscalationService.decideMissedVisit's own doc comment for why). Both
-   * branches delegate the actual write to notification-escalation-service
-   * via EscalationClient — this dispatch never persists anything itself,
-   * so a second decide on an already-decided card surfaces that service's
-   * own 409 rather than faking a second success.
+   * CLOSE, not APPROVE/REJECT; both are fully implemented downstream (see
+   * EscalationService.decideMissedVisit). Both branches delegate the
+   * actual write to notification-escalation-service via EscalationClient —
+   * this dispatch never persists anything itself, so a second decide on an
+   * already-decided card surfaces that service's own 409 rather than
+   * faking a second success.
    */
   private async decideEscalationCard(
     cardId: string,
@@ -655,11 +819,20 @@ export class QuickResponseService {
   private async decideApprovalRequestCard(
     cardId: string,
     dto: DecideQuickResponseInput,
-    decidedByUserId: string,
+    caller: CallerScope,
     authorizationHeader: string,
   ) {
+    const decidedByUserId = caller.id;
     const existing = await this.repository.findById(cardId);
     if (!existing) throw notFound('Quick Response card not found.');
+
+    // Same roster scoping getCardDetail() applies to the read path — a
+    // SUPERVISOR must not be able to decide a card raised by a Sakhi outside
+    // their own roster just because they know/guessed its cardId.
+    const sakhiIds = await this.resolveOwnSakhiIds(caller, authorizationHeader);
+    if (sakhiIds && !sakhiIds.includes(existing.requestedByUserId)) {
+      throw forbidden('You do not have access to this Quick Response card.');
+    }
 
     // Cheap pre-check, shared by every card type: a card already decided by
     // the time we even read it here is rejected before any side effect is
@@ -870,14 +1043,23 @@ export class QuickResponseService {
     }
 
     try {
+      const [sakhiName, beneficiaryName] = await Promise.all([
+        this.resolveSakhiName(existing.requestedByUserId, authorizationHeader),
+        existing.beneficiaryId
+          ? this.resolveBeneficiaryName(existing.beneficiaryId, authorizationHeader)
+          : Promise.resolve(null),
+      ]);
       await this.notificationClient.notify(
         existing.requestedByUserId,
         'LMP_CHANGE_UPDATE',
-        'LMP change request decided',
-        dto.decision === 'APPROVE'
-          ? 'Your LMP change request was approved.'
-          : 'Your LMP change request was rejected.',
+        sakhiName ? `LMP change request — ${sakhiName}` : 'LMP change request decided',
+        beneficiaryName
+          ? `${beneficiaryName}'s LMP change was ${dto.decision === 'APPROVE' ? 'approved' : 'rejected'}`
+          : dto.decision === 'APPROVE'
+            ? 'Your LMP change request was approved.'
+            : 'Your LMP change request was rejected.',
         authorizationHeader,
+        { linkedEntityType: 'QuickResponseCard', linkedEntityId: cardId },
       );
     } catch (err) {
       console.error(
@@ -942,7 +1124,11 @@ export class QuickResponseService {
    */
   private async decideReferralIncompleteCard(
     cardId: string,
-    existing: { referralId: string | null; requestedByUserId: string },
+    existing: {
+      referralId: string | null;
+      beneficiaryId: string | null;
+      requestedByUserId: string;
+    },
     dto: DecideQuickResponseInput,
     authorizationHeader: string,
   ) {
@@ -963,14 +1149,25 @@ export class QuickResponseService {
     );
 
     try {
+      const [sakhiName, beneficiaryName] = await Promise.all([
+        this.resolveSakhiName(existing.requestedByUserId, authorizationHeader),
+        existing.beneficiaryId
+          ? this.resolveBeneficiaryName(existing.beneficiaryId, authorizationHeader)
+          : Promise.resolve(null),
+      ]);
       await this.notificationClient.notify(
         existing.requestedByUserId,
         'REFERRAL_INCOMPLETE_UPDATE',
-        'Referral follow-up decided',
-        dto.decision === 'APPROVE'
-          ? 'Your referral follow-up was marked Lapsed by your Supervisor.'
-          : 'Please refill the referral follow-up form.',
+        sakhiName ? `Referral follow-up — ${sakhiName}` : 'Referral follow-up decided',
+        beneficiaryName
+          ? dto.decision === 'APPROVE'
+            ? `${beneficiaryName}'s referral follow-up was marked Lapsed`
+            : `${beneficiaryName}'s referral follow-up needs to be refilled`
+          : dto.decision === 'APPROVE'
+            ? 'Your referral follow-up was marked Lapsed by your Supervisor.'
+            : 'Please refill the referral follow-up form.',
         authorizationHeader,
+        { linkedEntityType: 'QuickResponseCard', linkedEntityId: cardId },
       );
     } catch (err) {
       console.error(
@@ -1028,12 +1225,20 @@ export class QuickResponseService {
       throw new HttpError(500, 'This ACCOMPANIED_REFERRAL card has no linked referral.');
     }
 
+    let approvedBeneficiaryName: string | null = null;
     if (dto.decision === 'APPROVE') {
-      await this.referralClient.decide(existing.referralId, 'COMPLETE', authorizationHeader);
-
       if (!existing.beneficiaryId) {
         throw new HttpError(500, 'This ACCOMPANIED_REFERRAL card has no linked beneficiary.');
       }
+      // Sequential, not parallel: the incentive-trigger catch block below is
+      // written on the assumption that referralClient.decide() has already
+      // succeeded by the time it runs. Running the beneficiary lookup
+      // concurrently means a beneficiary-service error can reject this call
+      // while decide() is still in flight (and may still succeed
+      // unobserved) — the caller would see a failure while the referral is
+      // silently marked COMPLETE with no incentive trigger and no
+      // manual-follow-up log line.
+      await this.referralClient.decide(existing.referralId, 'COMPLETE', authorizationHeader);
       const beneficiary = await this.beneficiaryClient.getById(
         existing.beneficiaryId,
         authorizationHeader,
@@ -1041,6 +1246,7 @@ export class QuickResponseService {
       if (!beneficiary) {
         throw notFound('The beneficiary linked to this referral was not found.');
       }
+      approvedBeneficiaryName = beneficiary.pii.fullName;
       try {
         await this.incentiveClient.triggerAccompaniedReferral(
           beneficiary.sakhiId,
@@ -1058,14 +1264,27 @@ export class QuickResponseService {
     }
 
     try {
+      const [sakhiName, beneficiaryName] = await Promise.all([
+        this.resolveSakhiName(existing.requestedByUserId, authorizationHeader),
+        approvedBeneficiaryName
+          ? Promise.resolve(approvedBeneficiaryName)
+          : existing.beneficiaryId
+            ? this.resolveBeneficiaryName(existing.beneficiaryId, authorizationHeader)
+            : Promise.resolve(null),
+      ]);
       await this.notificationClient.notify(
         existing.requestedByUserId,
         'ACCOMPANIED_REFERRAL_UPDATE',
-        'Accompanied referral decided',
-        dto.decision === 'APPROVE'
-          ? 'Your accompanied referral was approved and completed.'
-          : 'Your accompanied referral was rejected.',
+        sakhiName ? `Accompanied referral — ${sakhiName}` : 'Accompanied referral decided',
+        beneficiaryName
+          ? dto.decision === 'APPROVE'
+            ? `${beneficiaryName}'s accompanied referral was approved and completed`
+            : `${beneficiaryName}'s accompanied referral was rejected`
+          : dto.decision === 'APPROVE'
+            ? 'Your accompanied referral was approved and completed.'
+            : 'Your accompanied referral was rejected.',
         authorizationHeader,
+        { linkedEntityType: 'QuickResponseCard', linkedEntityId: cardId },
       );
     } catch (err) {
       console.error(
@@ -1110,14 +1329,19 @@ export class QuickResponseService {
     }
 
     try {
+      const sakhiName = await this.resolveSakhiName(
+        existing.requestedByUserId,
+        authorizationHeader,
+      );
       await this.notificationClient.notify(
         existing.requestedByUserId,
         'DATA_RESTORE_UPDATE',
-        'Data restore request decided',
+        sakhiName ? `Data restore request — ${sakhiName}` : 'Data restore request decided',
         dto.decision === 'APPROVE'
           ? 'Your account has been reactivated.'
           : 'Your data restore request was rejected.',
         authorizationHeader,
+        { linkedEntityType: 'QuickResponseCard', linkedEntityId: cardId },
       );
     } catch (err) {
       console.error(

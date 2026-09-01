@@ -1,5 +1,6 @@
 import { badGateway, HttpError } from '@armman/service-commons';
 import { appConfig } from '../config/app-config';
+import { DOWNSTREAM_FETCH_TIMEOUT_MS } from './fetch-timeout';
 
 export interface EscalationCard {
   cardId: string;
@@ -44,7 +45,10 @@ export class EscalationClient {
     try {
       res = await fetch(
         `${appConfig.API_GATEWAY_BASE_URL}/api/v1/escalation-events?${params.toString()}`,
-        { headers: { Authorization: authorizationHeader } },
+        {
+          headers: { Authorization: authorizationHeader },
+          signal: AbortSignal.timeout(DOWNSTREAM_FETCH_TIMEOUT_MS),
+        },
       );
     } catch {
       throw badGateway('Unable to fetch escalation events — the service is unreachable.');
@@ -68,6 +72,7 @@ export class EscalationClient {
     try {
       res = await fetch(`${appConfig.API_GATEWAY_BASE_URL}/api/v1/escalation-events/${id}`, {
         headers: { Authorization: authorizationHeader },
+        signal: AbortSignal.timeout(DOWNSTREAM_FETCH_TIMEOUT_MS),
       });
     } catch {
       throw badGateway('Unable to fetch the escalation event — the service is unreachable.');
@@ -101,7 +106,11 @@ export class EscalationClient {
     try {
       res = await fetch(
         `${appConfig.API_GATEWAY_BASE_URL}/api/v1/edd-nearing-requests/${id}/acknowledge`,
-        { method: 'POST', headers: { Authorization: authorizationHeader } },
+        {
+          method: 'POST',
+          headers: { Authorization: authorizationHeader },
+          signal: AbortSignal.timeout(DOWNSTREAM_FETCH_TIMEOUT_MS),
+        },
       );
     } catch {
       throw badGateway('Unable to acknowledge the EDD Nearing card — the service is unreachable.');
@@ -144,6 +153,7 @@ export class EscalationClient {
           method: 'POST',
           headers: { Authorization: authorizationHeader, 'Content-Type': 'application/json' },
           body: JSON.stringify({ action }),
+          signal: AbortSignal.timeout(DOWNSTREAM_FETCH_TIMEOUT_MS),
         },
       );
     } catch {
@@ -153,9 +163,9 @@ export class EscalationClient {
     }
 
     if (!res.ok) {
-      // 501 is passed through deliberately, not masked as a generic 502 —
-      // it's the service's own "TRANSFER isn't built yet" business signal
-      // (see decideMissedVisit's own doc comment), not an infra fault.
+      // 4xx/501 are passed through deliberately, not masked as a generic
+      // 502 — they're the downstream service's own business-rule signals
+      // (e.g. wrong status for a transition), not an infra fault.
       if ((res.status >= 400 && res.status < 500) || res.status === 501) {
         const body = (await res.json().catch(() => null)) as { message?: string } | null;
         throw new HttpError(

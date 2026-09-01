@@ -1,5 +1,6 @@
 import { badGateway, HttpError } from '@armman/service-commons';
 import { appConfig } from '../config/app-config';
+import { DOWNSTREAM_FETCH_TIMEOUT_MS } from './fetch-timeout';
 
 export interface ClosureRecord {
   id: string;
@@ -35,6 +36,7 @@ export class ClosureClient {
         method: 'PATCH',
         headers: { Authorization: authorizationHeader, 'Content-Type': 'application/json' },
         body: JSON.stringify({ decision, supervisorNotes }),
+        signal: AbortSignal.timeout(DOWNSTREAM_FETCH_TIMEOUT_MS),
       });
     } catch {
       throw badGateway('Unable to decide the closure — closure-reopen-service is unreachable.');
@@ -70,7 +72,10 @@ export class ClosureClient {
     try {
       res = await fetch(
         `${appConfig.API_GATEWAY_BASE_URL}/api/v1/closures/decision-status?ids=${ids.join(',')}`,
-        { headers: { Authorization: authorizationHeader } },
+        {
+          headers: { Authorization: authorizationHeader },
+          signal: AbortSignal.timeout(DOWNSTREAM_FETCH_TIMEOUT_MS),
+        },
       );
     } catch {
       throw badGateway(
@@ -107,6 +112,7 @@ export class ClosureClient {
     try {
       res = await fetch(`${appConfig.API_GATEWAY_BASE_URL}/api/v1/closures/${id}`, {
         headers: { Authorization: authorizationHeader },
+        signal: AbortSignal.timeout(DOWNSTREAM_FETCH_TIMEOUT_MS),
       });
     } catch {
       throw badGateway('Unable to fetch the closure — closure-reopen-service is unreachable.');

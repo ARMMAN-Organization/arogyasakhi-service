@@ -121,7 +121,7 @@ export function registerLmpChangeRequestRoutes(
       const result = await service.decideLmpChangeRequest(
         req.params.id,
         req.body,
-        req.user.id,
+        req.user,
         authorizationHeader,
       );
       res.json(ok(result));

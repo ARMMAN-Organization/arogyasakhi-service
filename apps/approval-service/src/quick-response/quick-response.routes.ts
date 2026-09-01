@@ -32,6 +32,10 @@ const quickResponseCardSchema = z
     cardSource: z.enum(['approval_requests', 'escalation_events']),
     beneficiaryId: z.string().uuid().nullable(),
     raisedAt: z.string().datetime(),
+    // Only populated for cardSource: 'approval_requests' — escalation_events
+    // cards' own name enrichment is owned by notification-escalation-service.
+    beneficiaryName: z.string().nullable().optional(),
+    sakhiName: z.string().nullable().optional(),
   })
   .passthrough();
 
