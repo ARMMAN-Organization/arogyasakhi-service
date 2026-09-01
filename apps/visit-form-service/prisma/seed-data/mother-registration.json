@@ -54,7 +54,8 @@
         "minDaysFrom": { "field": "registration_date", "days": 30 },
         "maxDaysFrom": { "field": "registration_date", "days": 240 }
       },
-      "question_code": "lmp_date"
+      "question_code": "lmp_date",
+      "learnMoreTopicCode": "COMING_SOON"
     },
     {
       "label": "EDD",

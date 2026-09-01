@@ -77,3 +77,78 @@ model LearnMoreTopic {
 
   @@map("learn_more_topics")
 }
+
+enum HealthEducationMediaType {
+  TEXT
+  IMAGE
+  AUDIO
+  VIDEO
+}
+
+// Ingested from ARMMAN's "Revised App Form Final 20.3.26 - Health
+// education message.csv" (32 rows, delivered 2026-08-28) — SRS FR-S-5.2(c)
+// ("queues a health education message for display"). Distinct from
+// LearnMoreSection/LearnMoreTopic (FR-S-13.2's two-level Sections>Topics
+// structure, still just a placeholder) — this model's shape (long body
+// text, condition/stage linkage, ordered multi-message sequences per
+// condition) doesn't fit that hierarchy.
+//
+// riskConditionId is nullable and a plain scalar with NO Prisma @relation —
+// cross-service reference to risk-referral-service's risk_conditions table,
+// same pattern beneficiary-service's own riskConditionId column already
+// established (forklift rule: no cross-service joins). NULL for
+// general/stage-triggered messages with no specific risk condition (e.g.
+// Primigravida, Breastfeeding, Birth preparedness) — about a third of the
+// source CSV's rows are this kind, confirmed during ingestion (Task 2).
+//
+// stage is free text, copied verbatim from the CSV's Stage column — NOT an
+// enum. The source data's ~15 distinct phrases ("as soon as detected during
+// ANC visit", "postpartum (PP1 or PP2 whichever is attended)", "All INC
+// visit", "Show this for all the ANC visits", etc.) are not a clean,
+// confirmed vocabulary — inventing an enum now risks being wrong once
+// ARMMAN/product later confirms the real set (explicit product decision,
+// 2026-08-28).
+//
+// bodyMarathi is a literal "Marathi coming soon" placeholder string on
+// every row, not a translated value — ARMMAN's Marathi translation for
+// this specific content is still undelivered (confirmed: the source CSV's
+// own "Marathi translation" column is entirely empty across all 32 rows).
+model HealthEducationMessage {
+  id              String                   @id @default(uuid()) @map("health_education_message_id")
+  // risk_conditions.risk_condition_id (risk-referral-service) — no
+  // @relation, see model doc comment above. NULL for general/stage-only
+  // messages.
+  riskConditionId String?                  @map("risk_condition_id")
+  // Verbatim from the CSV's Condition column, kept even when
+  // riskConditionId is set — the CSV's own condition name may differ
+  // slightly in wording from risk_conditions.conditionName, and this
+  // preserves exactly what ARMMAN actually wrote, for audit/traceability.
+  conditionLabel  String                   @map("condition_label") @db.VarChar(200)
+  // Verbatim from the CSV's Stage column — see model doc comment.
+  stage           String                   @map("stage") @db.VarChar(300)
+  // The CSV's "message N" ordering within one condition's sequence (e.g.
+  // Anemia: message 1 "as soon as detected", message 2 at postpartum).
+  messageOrder    Int                      @map("message_order")
+  titleEn         String?                  @map("title_en") @db.VarChar(200)
+  bodyEn          String                   @map("body_en")
+  // Literal placeholder text, not a real translation — see model doc
+  // comment. Never null; every row gets this same placeholder until a real
+  // Marathi ingestion pass replaces it.
+  bodyMarathi     String                   @default("Marathi content coming soon") @map("body_marathi")
+  mediaType       HealthEducationMediaType @default(TEXT) @map("media_type")
+  // CSV's Media file column — a bare filename/label today (e.g.
+  // "marathi_immunization.mp4"), NOT a resolvable URL. Stored as-is; no
+  // CDN/hosting has been set up (confirmed unresolved, out of scope here).
+  mediaFile       String?                  @map("media_file") @db.VarChar(200)
+  sortOrder       Int                      @default(0) @map("sort_order")
+  createdAt       DateTime                 @default(now()) @map("created_at")
+  createdByUserId String?                  @map("created_by_user_id")
+  updatedAt       DateTime                 @updatedAt @map("updated_at")
+  updatedByUserId String?                  @map("updated_by_user_id")
+  isDeleted       Boolean                  @default(false) @map("is_deleted")
+  deletedAt       DateTime?                @map("deleted_at")
+
+  @@unique([conditionLabel, stage, messageOrder])
+  @@index([riskConditionId])
+  @@map("health_education_messages")
+}

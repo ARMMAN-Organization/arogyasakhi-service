@@ -253,6 +253,9 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
   // SRS FR-S-13.1-13.4 "Learn More" knowledge base — currently the "Content
   // coming soon" placeholder shell (see cms-content-service's own comments).
   { prefix: '/learn-more', target: appConfig.CMS_CONTENT_SERVICE_URL, requiresAuth: true },
+  // SRS FR-S-5.2(c) health education messages — ARMMAN's delivered English
+  // content, placeholder Marathi (see cms-content-service's own comments).
+  { prefix: '/health-education', target: appConfig.CMS_CONTENT_SERVICE_URL, requiresAuth: true },
   // supervisor-operations-service owns six sibling prefixes (events,
   // Training sessions under /gatherings, training topics, inventory
   // items/transactions, call logs). Each enforces its own role guard

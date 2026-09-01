@@ -13,6 +13,7 @@ import type { PrismaService } from './prisma/prisma.service';
 import { createHealthRouter } from './health/health.controller';
 import { createInfoRouter } from './info/info.controller';
 import { createLearnMoreModule } from './learn-more/learnMore.module';
+import { createHealthEducationModule } from './health-education/healthEducation.module';
 import { buildCmsContentServiceOpenApiDocument } from './docs/openapi';
 
 // Re-export shared HTTP helpers so feature routers can import from a single place.
@@ -25,6 +26,7 @@ export {
   requireRoles,
   trustGatewayIdentity,
   createDocumentedRouter,
+  errorResponse,
   HttpError,
   ErrorCode,
   type DocumentedRouter,
@@ -52,6 +54,7 @@ export function createApp(prisma: PrismaService): Application {
   app.use(requestId);
 
   const learnMoreModule = createLearnMoreModule(prisma);
+  const healthEducationModule = createHealthEducationModule(prisma);
 
   // All routes live under the global `api/v1` prefix.
   const api = express.Router();
@@ -60,8 +63,16 @@ export function createApp(prisma: PrismaService): Application {
   // Built from every feature module's registry — every route registered via
   // createDocumentedRouter() above is already in the spec, so this can never
   // drift from what's actually mounted.
-  api.use(createSwaggerRouter(buildCmsContentServiceOpenApiDocument(learnMoreModule.registry)));
+  api.use(
+    createSwaggerRouter(
+      buildCmsContentServiceOpenApiDocument(
+        learnMoreModule.registry,
+        healthEducationModule.registry,
+      ),
+    ),
+  );
   api.use(learnMoreModule.router);
+  api.use(healthEducationModule.router);
   app.use('/api/v1', api);
 
   app.use(notFoundHandler);

@@ -3,6 +3,7 @@ import type { BeneficiaryRiskRepository } from './beneficiaryRisk.repository';
 import { BeneficiaryClient } from './beneficiary.client';
 import { listSakhiIdsForSupervisor } from './sakhi.client';
 import { resolveRiskGrades } from './riskGrade.client';
+import { resolveEducationContent, type EducationContent } from './educationContent.client';
 
 type StateSnapshotRow = Awaited<
   ReturnType<BeneficiaryRiskRepository['findStateSnapshots']>
@@ -65,10 +66,20 @@ export class BeneficiaryRiskService {
       this.repository.findAssessmentsWithFlags(beneficiaryId),
     ]);
 
+    const hasTriggeredFlag = assessments.some((a) => a.riskFlags.some((f) => f.isEducationTrigger));
+    // Resolved once per call, not once per flag — every isEducationTrigger
+    // flag maps to the same COMING_SOON topic today (see this feature's
+    // implementation plan doc for why there's no per-condition mapping yet).
+    const comingSoonContent = hasTriggeredFlag
+      ? await resolveEducationContent('COMING_SOON', authorizationHeader)
+      : null;
+
     return {
       beneficiaryId,
       currentState: this.toCurrentStatePerPhase(snapshots),
-      assessments: assessments.map((assessment) => this.toAssessmentView(assessment)),
+      assessments: assessments.map((assessment) =>
+        this.toAssessmentView(assessment, comingSoonContent),
+      ),
     };
   }
 
@@ -218,7 +229,10 @@ export class BeneficiaryRiskService {
   }
 
   /** Flattens each RiskFlag's nested RiskCondition into conditionCode/conditionName. */
-  private toAssessmentView(assessment: AssessmentWithFlagsRow) {
+  private toAssessmentView(
+    assessment: AssessmentWithFlagsRow,
+    comingSoonContent: EducationContent | null,
+  ) {
     return {
       id: assessment.id,
       evaluatedAt: assessment.evaluatedAt,
@@ -234,6 +248,7 @@ export class BeneficiaryRiskService {
         isReferralTrigger: flag.isReferralTrigger,
         isEducationTrigger: flag.isEducationTrigger,
         isHrVisitTrigger: flag.isHrVisitTrigger,
+        educationContent: flag.isEducationTrigger ? comingSoonContent : null,
       })),
     };
   }

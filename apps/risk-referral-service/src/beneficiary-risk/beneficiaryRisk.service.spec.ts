@@ -4,9 +4,11 @@ import type { BeneficiaryRiskRepository } from './beneficiaryRisk.repository';
 import { BeneficiaryClient } from './beneficiary.client';
 import { listSakhiIdsForSupervisor } from './sakhi.client';
 import { resolveRiskGrades } from './riskGrade.client';
+import { resolveEducationContent } from './educationContent.client';
 
 jest.mock('./sakhi.client');
 jest.mock('./riskGrade.client');
+jest.mock('./educationContent.client');
 
 const BENEFICIARY_ID = '11111111-1111-1111-1111-111111111111';
 const AUTH_HEADER = 'Bearer test-token';
@@ -68,6 +70,7 @@ describe('BeneficiaryRiskService', () => {
   } as unknown as jest.Mocked<BeneficiaryClient>;
   const listSakhiIdsForSupervisorMock = jest.mocked(listSakhiIdsForSupervisor);
   const resolveRiskGradesMock = jest.mocked(resolveRiskGrades);
+  const resolveEducationContentMock = jest.mocked(resolveEducationContent);
   let service: BeneficiaryRiskService;
 
   beforeEach(() => {
@@ -109,6 +112,7 @@ describe('BeneficiaryRiskService', () => {
               isReferralTrigger: true,
               isEducationTrigger: false,
               isHrVisitTrigger: true,
+              educationContent: null,
             },
           ],
         },
@@ -257,6 +261,99 @@ describe('BeneficiaryRiskService', () => {
         ),
       ).rejects.toThrow('Beneficiary not found.');
       expect(repository.findStateSnapshots).not.toHaveBeenCalled();
+    });
+
+    it('attaches educationContent to a flag with isEducationTrigger true', async () => {
+      const COMING_SOON = {
+        topicCode: 'COMING_SOON',
+        topicName: 'Content coming soon',
+        mediaType: 'QNA_TEXT',
+        contentUrl: null,
+      };
+      resolveEducationContentMock.mockResolvedValue(COMING_SOON);
+      repository.findStateSnapshots.mockResolvedValue([]);
+      repository.findAssessmentsWithFlags.mockResolvedValue([
+        assessment({
+          riskFlags: [
+            {
+              id: 'flag-1',
+              riskGradeLookupValueId: 'grade-1',
+              observedValueJson: null,
+              isReferralTrigger: false,
+              isEducationTrigger: true,
+              isHrVisitTrigger: false,
+              riskCondition: { conditionCode: 'ANEMIA', conditionName: 'Anemia' },
+            },
+          ],
+        }),
+      ] as never);
+
+      const result = await service.getRiskProfile(BENEFICIARY_ID, caller(), AUTH_HEADER);
+
+      expect(result.assessments[0].flags[0].educationContent).toEqual(COMING_SOON);
+      expect(resolveEducationContentMock).toHaveBeenCalledWith('COMING_SOON', AUTH_HEADER);
+    });
+
+    it('does not call resolveEducationContent for a flag with isEducationTrigger false', async () => {
+      repository.findStateSnapshots.mockResolvedValue([]);
+      repository.findAssessmentsWithFlags.mockResolvedValue([assessment()] as never); // isEducationTrigger: false
+
+      const result = await service.getRiskProfile(BENEFICIARY_ID, caller(), AUTH_HEADER);
+
+      expect(result.assessments[0].flags[0].educationContent).toBeNull();
+      expect(resolveEducationContentMock).not.toHaveBeenCalled();
+    });
+
+    it('sets educationContent to null (not an error) when cms-content-service resolution fails', async () => {
+      resolveEducationContentMock.mockResolvedValue(null);
+      repository.findStateSnapshots.mockResolvedValue([]);
+      repository.findAssessmentsWithFlags.mockResolvedValue([
+        assessment({
+          riskFlags: [
+            {
+              id: 'flag-1',
+              riskGradeLookupValueId: 'grade-1',
+              observedValueJson: null,
+              isReferralTrigger: false,
+              isEducationTrigger: true,
+              isHrVisitTrigger: false,
+              riskCondition: { conditionCode: 'ANEMIA', conditionName: 'Anemia' },
+            },
+          ],
+        }),
+      ] as never);
+
+      const result = await service.getRiskProfile(BENEFICIARY_ID, caller(), AUTH_HEADER);
+
+      expect(result.assessments[0].flags[0].educationContent).toBeNull();
+    });
+
+    it('resolves COMING_SOON only once even with multiple triggered flags across assessments', async () => {
+      const COMING_SOON = {
+        topicCode: 'COMING_SOON',
+        topicName: 'Content coming soon',
+        mediaType: 'QNA_TEXT',
+        contentUrl: null,
+      };
+      resolveEducationContentMock.mockResolvedValue(COMING_SOON);
+      repository.findStateSnapshots.mockResolvedValue([]);
+      const triggeredFlag = (id: string) => ({
+        id,
+        riskGradeLookupValueId: 'grade-1',
+        observedValueJson: null,
+        isReferralTrigger: false,
+        isEducationTrigger: true,
+        isHrVisitTrigger: false,
+        riskCondition: { conditionCode: 'ANEMIA', conditionName: 'Anemia' },
+      });
+      repository.findAssessmentsWithFlags.mockResolvedValue([
+        assessment({ id: 'a-1', riskFlags: [triggeredFlag('flag-1'), triggeredFlag('flag-2')] }),
+        assessment({ id: 'a-2', riskFlags: [triggeredFlag('flag-3')] }),
+      ] as never);
+
+      await service.getRiskProfile(BENEFICIARY_ID, caller(), AUTH_HEADER);
+
+      expect(resolveEducationContentMock).toHaveBeenCalledTimes(1);
     });
   });
 
