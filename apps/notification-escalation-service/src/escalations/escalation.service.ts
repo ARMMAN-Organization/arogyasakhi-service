@@ -2,12 +2,14 @@ import { badRequest, conflict, notFound, unprocessable } from '@armman/service-c
 import type { EscalationRepository } from './escalation.repository';
 import type { ListEscalationEventsInput } from './dto/list-escalation-events.dto';
 import type { CreateEscalationEventInput } from './dto/create-escalation-event.dto';
-import { BeneficiaryClient } from './beneficiary.client';
+import { BeneficiaryClient, type BeneficiaryRecord } from './beneficiary.client';
 import { ManagerNoticeClient } from './manager-notice.client';
 import { LookupClient } from './lookup.client';
+import { SakhiClient, type SakhiRecord } from './sakhi.client';
 import { decideTransfer } from './missed-visit-transfer';
 import { MISSED_VISIT_TYPES, MISSED_VISIT_TYPE_MAP } from './missed-visit-types';
 import type { NotificationRepository } from '../notifications/notification.repository';
+import { fanOutToSupervisor } from '../notifications/supervisor-fanout';
 import type { SubmitClosurePendingReasonInput } from './dto/submit-closure-pending-reason.dto';
 
 /** Quick Response's fixed card type for an escalation row — everything else in
@@ -17,6 +19,28 @@ function toCardType(escalationType: string): 'MISSED_VISIT' | 'EDD_NEARING' | nu
   if (MISSED_VISIT_TYPES.has(escalationType)) return 'MISSED_VISIT';
   if (escalationType === 'EDD_NEARING') return 'EDD_NEARING';
   return null;
+}
+
+/**
+ * `EscalationEvent.beneficiaryId` is nullable at the schema/DTO level only
+ * because SYNC_DELAY escalations carry `sakhiUserId` instead (see
+ * createEscalationEventSchema's doc comment) — every other escalationType
+ * still always has one. Every call site below only ever handles a row whose
+ * type is known not to be SYNC_DELAY (MISSED_VISIT/EDD_NEARING cards,
+ * CLOSURE_PENDING, missed-visit TRANSFER), so a null here is a genuine data
+ * invariant violation, not a normal case to silently degrade — this throws
+ * rather than letting a cross-service call proceed with `null` as an id.
+ */
+function requireBeneficiaryId(row: {
+  beneficiaryId: string | null;
+  escalationType: string;
+}): string {
+  if (!row.beneficiaryId) {
+    throw new Error(
+      `Escalation ${row.escalationType} row has no beneficiaryId — expected one for this type.`,
+    );
+  }
+  return row.beneficiaryId;
 }
 
 /** Missed Visit Escalation detail's own status vocabulary — distinct from the
@@ -53,6 +77,30 @@ function encodeCursor(row: { createdAt: Date; id: string }): string {
   return Buffer.from(`${row.createdAt.toISOString()}|${row.id}`, 'utf8').toString('base64url');
 }
 
+type EscalationEventRow = NonNullable<Awaited<ReturnType<EscalationRepository['findById']>>>;
+
+/** The calling principal's own scope, as carried on their JWT/trusted-identity headers. */
+export interface CallerScope {
+  readonly id: string;
+  readonly roles: string[];
+  readonly projectId: string | null;
+}
+
+/**
+ * MANAGER/ADMIN are unrestricted across this service's supervisor-scoping
+ * checks — checked as the absence of an elevated role, not the presence of
+ * a restrictive one (SUPERVISOR), since a caller can hold multiple role
+ * assignments at once. Matches auth-service's own isPrivileged() pattern.
+ */
+function isPrivileged(caller: CallerScope): boolean {
+  return caller.roles.includes('MANAGER') || caller.roles.includes('ADMIN');
+}
+
+interface RowEnrichment {
+  beneficiary: BeneficiaryRecord | null;
+  sakhi: SakhiRecord | null;
+}
+
 /** Escalation event domain logic. Data access is delegated to the repository. */
 export class EscalationService {
   constructor(
@@ -61,67 +109,172 @@ export class EscalationService {
     private readonly beneficiaryClient: BeneficiaryClient = new BeneficiaryClient(),
     private readonly managerNoticeClient: ManagerNoticeClient = new ManagerNoticeClient(),
     private readonly lookupClient: LookupClient = new LookupClient(),
+    private readonly sakhiClient: SakhiClient = new SakhiClient(),
   ) {}
 
-  async list(query: ListEscalationEventsInput) {
-    const cursor = query.cursor ? decodeCursor(query.cursor) : null;
-    const rows = await this.repository.findMany(query, cursor);
+  /**
+   * Resolves beneficiary + Sakhi details for the Supervisor app's card view
+   * (SRS FR-SV-4.3 / PRD lines 143-150 — a card must show a name, not a bare
+   * id). Best-effort per unique beneficiary/Sakhi: a page of up to 100 cards
+   * shouldn't 502 in full because one referenced beneficiary record is gone —
+   * that row's enrichment fields just come back null instead.
+   */
+  private async enrichRows(
+    rows: EscalationEventRow[],
+    authorizationHeader: string,
+  ): Promise<Map<string, RowEnrichment>> {
+    const beneficiaryIds = [...new Set(rows.map((row) => requireBeneficiaryId(row)))];
+    const beneficiaries = new Map(
+      await Promise.all(
+        beneficiaryIds.map(async (id) => {
+          try {
+            return [id, await this.beneficiaryClient.getById(id, authorizationHeader)] as const;
+          } catch (err) {
+            console.error(`Failed to enrich escalation card with beneficiary ${id}:`, err);
+            return [id, null] as const;
+          }
+        }),
+      ),
+    );
 
-    const hasMore = rows.length > query.limit;
-    const page = hasMore ? rows.slice(0, query.limit) : rows;
-    const nextCursor = hasMore ? encodeCursor(page[page.length - 1]) : null;
+    const sakhiIds = [
+      ...new Set(
+        [...beneficiaries.values()]
+          .map((beneficiary) => beneficiary?.sakhiId)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
+    const sakhis = new Map(
+      await Promise.all(
+        sakhiIds.map(async (id) => {
+          try {
+            return [id, await this.sakhiClient.findById(id, authorizationHeader)] as const;
+          } catch (err) {
+            console.error(`Failed to enrich escalation card with sakhi ${id}:`, err);
+            return [id, null] as const;
+          }
+        }),
+      ),
+    );
 
-    const cards = page
-      .map((row) => ({ row, cardType: toCardType(row.escalationType) }))
-      .filter(
-        (r): r is { row: (typeof page)[number]; cardType: 'MISSED_VISIT' | 'EDD_NEARING' } =>
-          r.cardType !== null,
-      )
-      .map(({ row, cardType }) => ({
-        cardId: row.id,
-        cardType,
-        cardSource: 'escalation_events' as const,
-        beneficiaryId: row.beneficiaryId,
-        visitId: row.visitId,
-        referralId: row.referralId,
-        escalationType: row.escalationType,
-        status: row.status,
-        raisedAt: row.createdAt.toISOString(),
-      }));
-
-    return { cards, nextCursor };
+    const result = new Map<string, RowEnrichment>();
+    for (const row of rows) {
+      const beneficiaryId = requireBeneficiaryId(row);
+      const beneficiary = beneficiaries.get(beneficiaryId) ?? null;
+      const sakhi = beneficiary?.sakhiId ? (sakhis.get(beneficiary.sakhiId) ?? null) : null;
+      result.set(beneficiaryId, { beneficiary, sakhi });
+    }
+    return result;
   }
 
   /**
-   * Raises a new escalation event. ADMIN-only (see escalation.routes.ts) —
-   * in production these rows come from an automated rules/cron process, so
-   * there is no Sakhi-ownership check to delegate here, unlike closures/
-   * reopen-requests/referrals.
+   * Quick Response's existing card fields (cardId/cardType/cardSource/
+   * raisedAt/...) are kept as-is — approval-service's merged card list
+   * depends on them for sort/pagination/dispatch. Beneficiary/Sakhi/risk
+   * fields are additive, sourced from beneficiary-service and auth-service
+   * (this table carries none of them itself — see the forklift rule).
    */
-  create(input: CreateEscalationEventInput, createdByUserId: string) {
-    return this.repository.create(input, createdByUserId);
-  }
-
-  /** Fetches a single escalation event shaped as a Quick Response card, or
-   * null if it doesn't exist (or isn't one of the 8 supported card types). */
-  async findById(id: string) {
-    const row = await this.repository.findById(id);
-    if (!row) return null;
-
-    const cardType = toCardType(row.escalationType);
-    if (!cardType) return null;
-
+  private toEnrichedCard(
+    row: EscalationEventRow,
+    cardType: 'MISSED_VISIT' | 'EDD_NEARING',
+    enrichment: RowEnrichment | null,
+  ) {
     return {
       cardId: row.id,
       cardType,
       cardSource: 'escalation_events' as const,
       beneficiaryId: row.beneficiaryId,
+      beneficiaryName: enrichment?.beneficiary?.pii.fullName ?? null,
+      beneficiaryPhone: enrichment?.beneficiary?.pii.mobileNumber ?? null,
+      riskLevel: enrichment?.beneficiary?.riskLevel ?? null,
+      assignedSupervisorId: row.assignedSupervisorId,
+      sakhiId: enrichment?.beneficiary?.sakhiId || null,
+      sakhiName: enrichment?.sakhi?.displayName ?? null,
+      sakhiContact: enrichment?.sakhi?.mobileNumber ?? null,
       visitId: row.visitId,
       referralId: row.referralId,
       escalationType: row.escalationType,
       status: row.status,
+      resolvedAt: row.resolvedAt ? row.resolvedAt.toISOString() : null,
+      actionTaken: row.actionTaken,
       raisedAt: row.createdAt.toISOString(),
     };
+  }
+
+  async list(query: ListEscalationEventsInput, caller: CallerScope, authorizationHeader: string) {
+    const cursor = query.cursor ? decodeCursor(query.cursor) : null;
+    const assignedSupervisorId = isPrivileged(caller) ? undefined : caller.id;
+    const rows = await this.repository.findMany(query, cursor, assignedSupervisorId);
+
+    const hasMore = rows.length > query.limit;
+    const page = hasMore ? rows.slice(0, query.limit) : rows;
+    const nextCursor = hasMore ? encodeCursor(page[page.length - 1]) : null;
+
+    const supported = page
+      .map((row) => ({ row, cardType: toCardType(row.escalationType) }))
+      .filter(
+        (r): r is { row: (typeof page)[number]; cardType: 'MISSED_VISIT' | 'EDD_NEARING' } =>
+          r.cardType !== null,
+      );
+
+    const enrichment = await this.enrichRows(
+      supported.map(({ row }) => row),
+      authorizationHeader,
+    );
+
+    const cards = supported.map(({ row, cardType }) =>
+      this.toEnrichedCard(row, cardType, enrichment.get(requireBeneficiaryId(row)) ?? null),
+    );
+
+    return { cards, nextCursor };
+  }
+
+  /**
+   * Raises a new escalation event. ADMIN/SYSTEM-only (see
+   * escalation.routes.ts) — in production these rows come from an automated
+   * rules/cron process, so there is no Sakhi-ownership check to delegate
+   * here, unlike closures/reopen-requests/referrals.
+   *
+   * Idempotent: if an OPEN escalation already exists for the same natural
+   * key, that existing row is returned (with its assignedSupervisorId
+   * self-healed to the incoming value if it's changed) instead of inserting
+   * a duplicate — a cron job re-raising the same missed visit/follow-up/
+   * sync-delay on its next tick (before a Supervisor has resolved the first
+   * one) must not pile up repeat OPEN escalations. See
+   * EscalationRepository.createOrReuseOpen for how the check-then-write is
+   * made race-safe.
+   */
+  create(input: CreateEscalationEventInput, createdByUserId: string) {
+    return this.repository.createOrReuseOpen(input, createdByUserId);
+  }
+
+  /**
+   * Fetches a single escalation event shaped as an enriched Quick Response
+   * card, or null if it doesn't exist (or isn't one of the 8 supported card
+   * types), or if a non-privileged caller doesn't own it — same
+   * assignedSupervisorId roster scoping list() applies, so a Supervisor
+   * can't fetch another Supervisor's card by guessing/enumerating its id.
+   * Unlike list()'s best-effort enrichment, a beneficiary/Sakhi lookup
+   * failure here propagates — for a single card the enrichment IS the
+   * payload, same philosophy as getEddNearingDetail.
+   */
+  async findById(id: string, caller: CallerScope, authorizationHeader: string) {
+    const row = await this.repository.findById(id);
+    if (!row) return null;
+    if (!isPrivileged(caller) && row.assignedSupervisorId !== caller.id) return null;
+
+    const cardType = toCardType(row.escalationType);
+    if (!cardType) return null;
+
+    const beneficiary = await this.beneficiaryClient.getById(
+      requireBeneficiaryId(row),
+      authorizationHeader,
+    );
+    const sakhi = beneficiary.sakhiId
+      ? await this.sakhiClient.findById(beneficiary.sakhiId, authorizationHeader)
+      : null;
+
+    return this.toEnrichedCard(row, cardType, { beneficiary, sakhi });
   }
 
   /**
@@ -165,7 +318,7 @@ export class EscalationService {
     }
 
     const beneficiary = await this.beneficiaryClient.getById(
-      row.beneficiaryId,
+      requireBeneficiaryId(row),
       authorizationHeader,
     );
     const eddDate = beneficiary.motherCaseDetails?.eddDate?.slice(0, 10) ?? null;
@@ -231,7 +384,7 @@ export class EscalationService {
     // (SAKHI-own-case / SUPERVISOR-roster / MANAGER-unrestricted) — same pattern
     // submitClosurePendingReason already uses. Without this, a Supervisor could
     // decide (TRANSFER or CLOSE) an escalation outside their own roster (IDOR).
-    await this.beneficiaryClient.getById(existing.beneficiaryId, authorizationHeader);
+    await this.beneficiaryClient.getById(requireBeneficiaryId(existing), authorizationHeader);
 
     if (action === 'TRANSFER') {
       return decideTransfer(
@@ -241,6 +394,7 @@ export class EscalationService {
           notificationRepository: this.notificationRepository,
           beneficiaryClient: this.beneficiaryClient,
           managerNoticeClient: this.managerNoticeClient,
+          sakhiClient: this.sakhiClient,
         },
         authorizationHeader,
       );
@@ -253,19 +407,26 @@ export class EscalationService {
 
     try {
       const beneficiary = await this.beneficiaryClient.getById(
-        existing.beneficiaryId,
+        requireBeneficiaryId(existing),
         authorizationHeader,
       );
-      await this.notificationRepository.create({
+      const notificationDto = {
         recipientUserId: beneficiary.sakhiId,
-        notificationType: 'MISSED_VISIT_ESCALATION',
+        notificationType: 'MISSED_VISIT_ESCALATION' as const,
         title: 'Closure form needed',
         body: 'A beneficiary with a missed-visit escalation needs a closure form filled in.',
         priority: 5,
         linkedEntityType: 'EscalationEvent',
         linkedEntityId: id,
-        status: 'UNREAD',
-      });
+        status: 'UNREAD' as const,
+      };
+      await this.notificationRepository.create(notificationDto);
+      await fanOutToSupervisor(
+        this.notificationRepository,
+        this.sakhiClient,
+        notificationDto,
+        authorizationHeader,
+      );
     } catch (err) {
       console.error(
         `Missed Visit Escalation ${id} was closed but notifying the Sakhi failed:`,
@@ -310,7 +471,7 @@ export class EscalationService {
       throw unprocessable('This endpoint only accepts CLOSURE_PENDING escalations.');
     }
 
-    await this.beneficiaryClient.getById(existing.beneficiaryId, authorizationHeader);
+    await this.beneficiaryClient.getById(requireBeneficiaryId(existing), authorizationHeader);
 
     const reasonCode = await this.lookupClient.resolveClosurePendingReasonCode(
       input.pendingReasonLookupValueId,

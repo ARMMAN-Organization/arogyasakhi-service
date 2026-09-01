@@ -12,9 +12,12 @@ import type { SubmitClosurePendingReasonInput } from './dto/submit-closure-pendi
  */
 export function createEscalationController(service: EscalationService) {
   return {
-    list: asyncHandler(async (req, res) => {
+    list: asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
       const query = req.query as unknown as ListEscalationEventsInput;
-      res.json(ok(await service.list(query)));
+      res.json(ok(await service.list(query, req.user, authorizationHeader)));
     }),
 
     create: asyncHandler(async (req, res, next) => {
@@ -24,8 +27,11 @@ export function createEscalationController(service: EscalationService) {
       res.status(201).json(ok(row));
     }),
 
-    findById: asyncHandler(async (req, res) => {
-      const card = await service.findById(req.params.id);
+    findById: asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const card = await service.findById(req.params.id, req.user, authorizationHeader);
       if (!card) throw notFound('Escalation event not found.');
       res.json(ok(card));
     }),

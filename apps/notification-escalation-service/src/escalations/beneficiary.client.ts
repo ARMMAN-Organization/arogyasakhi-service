@@ -10,7 +10,8 @@ export interface BeneficiaryRecord {
   id: string;
   sakhiId: string;
   motherCaseDetails: { eddDate: string } | null;
-  pii: { fullName: string };
+  pii: { fullName: string; mobileNumber: string };
+  riskLevel: 'none' | 'mild' | 'moderate' | 'high';
 }
 
 /**
