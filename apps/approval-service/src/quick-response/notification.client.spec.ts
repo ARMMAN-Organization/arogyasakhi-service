@@ -1,3 +1,7 @@
+jest.mock('../config/app-config', () => ({
+  appConfig: { API_GATEWAY_BASE_URL: 'http://localhost:3000' },
+}));
+
 import { NotificationClient } from './notification.client';
 
 const AUTH_HEADER = 'Bearer test-token';
