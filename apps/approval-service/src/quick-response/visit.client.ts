@@ -1,5 +1,6 @@
 import { badGateway, HttpError } from '@armman/service-commons';
 import { appConfig } from '../config/app-config';
+import { DOWNSTREAM_FETCH_TIMEOUT_MS } from './fetch-timeout';
 
 export interface VisitInstanceRecord {
   id: string;
@@ -23,6 +24,7 @@ export class VisitClient {
     try {
       res = await fetch(`${appConfig.API_GATEWAY_BASE_URL}/api/v1/visits/${id}`, {
         headers: { Authorization: authorizationHeader },
+        signal: AbortSignal.timeout(DOWNSTREAM_FETCH_TIMEOUT_MS),
       });
     } catch {
       throw badGateway('Unable to resolve the visit — visit-form-service is unreachable.');

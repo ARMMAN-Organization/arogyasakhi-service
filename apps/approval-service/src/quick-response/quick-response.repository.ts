@@ -8,16 +8,25 @@ export class QuickResponseRepository {
    * Cursor-paginated by `(createdAt, id)` DESC, same scheme as
    * notification-escalation-service's escalation.repository.ts — `id`
    * breaks ties within the same millisecond.
+   *
+   * `sakhiIds` scopes results to only requests raised by one of these
+   * Sakhis — `null` for a privileged (MANAGER/ADMIN) caller, an array (the
+   * caller's own assigned Sakhis, possibly empty) for a SUPERVISOR caller.
+   * approval_requests has no supervisorId/projectId column of its own, so
+   * this is resolved by the caller (see QuickResponseService.list) via
+   * auth-service instead of being scoped here directly.
    */
   findMany(
     decisionStatusLookupId: string,
     limit: number,
     cursor: { createdAt: Date; id: string } | null,
+    sakhiIds: string[] | null,
   ) {
     return this.prisma.approvalRequest.findMany({
       where: {
         decisionStatusLookupId,
         isDeleted: false,
+        ...(sakhiIds ? { requestedByUserId: { in: sakhiIds } } : {}),
         ...(cursor
           ? {
               OR: [

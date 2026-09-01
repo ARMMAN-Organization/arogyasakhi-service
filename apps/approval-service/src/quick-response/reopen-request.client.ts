@@ -1,5 +1,6 @@
 import { badGateway, HttpError } from '@armman/service-commons';
 import { appConfig } from '../config/app-config';
+import { DOWNSTREAM_FETCH_TIMEOUT_MS } from './fetch-timeout';
 
 export interface ReopenRequestRecord {
   id: string;
@@ -32,6 +33,7 @@ export class ReopenRequestClient {
         method: 'PATCH',
         headers: { Authorization: authorizationHeader, 'Content-Type': 'application/json' },
         body: JSON.stringify({ decision, decisionReasonCodeLookupId, decisionNotes }),
+        signal: AbortSignal.timeout(DOWNSTREAM_FETCH_TIMEOUT_MS),
       });
     } catch {
       throw badGateway(
@@ -71,7 +73,10 @@ export class ReopenRequestClient {
     try {
       res = await fetch(
         `${appConfig.API_GATEWAY_BASE_URL}/api/v1/reopen-requests/decision-status?ids=${ids.join(',')}`,
-        { headers: { Authorization: authorizationHeader } },
+        {
+          headers: { Authorization: authorizationHeader },
+          signal: AbortSignal.timeout(DOWNSTREAM_FETCH_TIMEOUT_MS),
+        },
       );
     } catch {
       throw badGateway(
@@ -111,6 +116,7 @@ export class ReopenRequestClient {
     try {
       res = await fetch(`${appConfig.API_GATEWAY_BASE_URL}/api/v1/reopen-requests/${id}`, {
         headers: { Authorization: authorizationHeader },
+        signal: AbortSignal.timeout(DOWNSTREAM_FETCH_TIMEOUT_MS),
       });
     } catch {
       throw badGateway(

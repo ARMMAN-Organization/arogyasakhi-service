@@ -12,4 +12,18 @@ export class ApprovalRequestRepository {
   create(data: CreateApprovalRequestInput) {
     return this.prisma.approvalRequest.create({ data });
   }
+
+  findByClosureId(closureId: string) {
+    return this.prisma.approvalRequest.findFirst({
+      where: { closureId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  findByReopenRequestId(reopenRequestId: string) {
+    return this.prisma.approvalRequest.findFirst({
+      where: { reopenRequestId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
 }
