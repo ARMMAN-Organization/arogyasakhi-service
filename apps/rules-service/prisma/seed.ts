@@ -8,6 +8,8 @@ import { ccvRulesJson } from '../src/rules/scheduling/ccv.rulesJson';
 import { hrRulesJson } from '../src/rules/scheduling/hr.rulesJson';
 import { deliveryRulesJson } from '../src/rules/scheduling/delivery.rulesJson';
 import { escalationRulesJson } from '../src/rules/scheduling/escalation.rulesJson';
+import { ancRiskRulesJson } from '../src/rules/scheduling/anc-risk.rulesJson';
+import { infantRiskRulesJson } from '../src/rules/scheduling/infant-risk.rulesJson';
 
 const prisma = new PrismaClient();
 
@@ -147,6 +149,65 @@ async function seedEscalationRulePacks(): Promise<void> {
   }
 }
 
+// The two RISK-category clinical grading packs (ANC High-Risk grading /
+// Infant High-Risk grading — see anc-risk.rulesJson.ts and
+// infant-risk.rulesJson.ts's own doc comments). Previously created only via
+// out-of-band POST /admin/rules calls in every environment, never by this
+// seed script — meaning a fresh environment's ANC_VISIT/NEONATAL_VISIT/
+// INC_VISIT/CCV_VISIT submissions had no risk-grading RuleSet to point at
+// (visit-form-service's FormDefinition.riskRuleSetId had nothing to
+// reference) until someone manually bootstrapped one. Fixed UUIDs (distinct
+// '55555555...' prefix from SCHEDULE's '33333333...' / ESCALATION's
+// '44444444...') so visit-form-service's seed (below) can wire
+// FormDefinition.riskRuleSetId to a known id rather than a value discovered
+// after the fact. Same upsert-once pattern as the packs above: `update: {}`
+// only ever creates these on a fresh environment — an existing environment's
+// already-published RuleVersion is never silently rewritten by re-seeding;
+// a real content change is a new versionNo via POST /admin/rules/:setId/publish.
+const RISK_RULE_PACKS = [
+  {
+    ruleSetId: '55555555-5555-4555-8555-555555555551',
+    ruleVersionId: '55555555-5555-4555-8555-555555555552',
+    ruleSetName: 'Arogya Sakhi ANC Clinical Risk Grading',
+    rulesJson: ancRiskRulesJson,
+  },
+  {
+    ruleSetId: '55555555-5555-4555-8555-555555555561',
+    ruleVersionId: '55555555-5555-4555-8555-555555555562',
+    ruleSetName: 'Arogya Sakhi Infant Clinical Risk Grading',
+    rulesJson: infantRiskRulesJson,
+  },
+] as const;
+
+async function seedRiskRulePacks(): Promise<void> {
+  for (const pack of RISK_RULE_PACKS) {
+    await prisma.ruleSet.upsert({
+      where: { id: pack.ruleSetId },
+      create: {
+        id: pack.ruleSetId,
+        ruleCategory: 'RISK',
+        ruleSetName: pack.ruleSetName,
+        status: 'ACTIVE',
+      },
+      update: {},
+    });
+
+    await prisma.ruleVersion.upsert({
+      where: { id: pack.ruleVersionId },
+      create: {
+        id: pack.ruleVersionId,
+        ruleSetId: pack.ruleSetId,
+        versionNo: 'v1',
+        rulesJson: pack.rulesJson,
+        effectiveFrom: new Date('2026-08-10'),
+        checksum: createHash('sha256').update(JSON.stringify(pack.rulesJson)).digest(),
+        status: 'PUBLISHED',
+      },
+      update: {},
+    });
+  }
+}
+
 /**
  * Seeds the SCHEDULE rule set + its v1-hardcoded published version, so
  * VisitSchedule.generatedByRuleVersionId (NOT NULL, no default) has a real
@@ -204,6 +265,9 @@ async function main(): Promise<void> {
 
   await seedEscalationRulePacks();
   console.log(`Seeded ${ESCALATION_RULE_PACKS.length} escalation rule pack(s).`);
+
+  await seedRiskRulePacks();
+  console.log(`Seeded ${RISK_RULE_PACKS.length} clinical risk-grading rule pack(s) (ANC/Infant).`);
 }
 
 main()

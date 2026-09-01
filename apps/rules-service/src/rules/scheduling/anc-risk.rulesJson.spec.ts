@@ -25,6 +25,7 @@ const CONDITION_IDS = {
   JAUNDICE: '11111111-1111-1111-1111-111111111117',
   URINE_ANALYSIS: '11111111-1111-1111-1111-111111111118',
   DANGER_SIGNS: '11111111-1111-1111-1111-111111111119',
+  SICKLE_CELL_DISEASE: '11111111-1111-1111-1111-111111111120',
 };
 
 // Real ANC_VISIT question codes (see
@@ -546,5 +547,84 @@ describe('ancRiskRulesJson', () => {
     await expect(
       evaluateRulePack(ancRiskRulesJson, { ...NORMAL_VITALS, conditionIds: incompleteIds }),
     ).rejects.toThrow();
+  });
+
+  describe('Sickle Cell Disease (interim measure pending issue #191 tier confirmation)', () => {
+    it('grades SEVERE with referral and HR-visit triggers when SCD is selected, on first instance', async () => {
+      const result = await evaluateRulePack(ancRiskRulesJson, {
+        ...NORMAL_VITALS,
+        sickleCellStatus: 'sickle_cell_disease_scd',
+        isFirstInstance: { SICKLE_CELL_DISEASE: true },
+      });
+
+      const condition = findCondition(result, CONDITION_IDS.SICKLE_CELL_DISEASE);
+      expect(condition.grade).toBe('SEVERE');
+      expect(condition.isReferralTrigger).toBe(true);
+      expect(condition.isHrVisitTrigger).toBe(true);
+    });
+
+    it('grades NORMAL when sickleCellStatus is absent or a non-SCD answer', async () => {
+      const result = await evaluateRulePack(ancRiskRulesJson, {
+        ...NORMAL_VITALS,
+        sickleCellStatus: 'tested_and_result_is_normal',
+      });
+
+      const condition = findCondition(result, CONDITION_IDS.SICKLE_CELL_DISEASE);
+      expect(condition.grade).toBe('NORMAL');
+      expect(condition.isReferralTrigger).toBe(false);
+      expect(condition.isHrVisitTrigger).toBe(false);
+    });
+
+    it('grades SEVERE and suppresses only the referral trigger on a repeat (non-first) instance — HR-visit trigger fires every instance, matching Age/MUAC/Stunting/BOH', async () => {
+      const result = await evaluateRulePack(ancRiskRulesJson, {
+        ...NORMAL_VITALS,
+        sickleCellStatus: 'sickle_cell_disease_scd',
+        isFirstInstance: { SICKLE_CELL_DISEASE: false },
+      });
+
+      const condition = findCondition(result, CONDITION_IDS.SICKLE_CELL_DISEASE);
+      expect(condition.grade).toBe('SEVERE');
+      expect(condition.isReferralTrigger).toBe(false);
+      expect(condition.isHrVisitTrigger).toBe(true);
+    });
+
+    it('defaults to first-instance (triggers fire) when isFirstInstance omits this condition', async () => {
+      const result = await evaluateRulePack(ancRiskRulesJson, {
+        ...NORMAL_VITALS,
+        sickleCellStatus: 'sickle_cell_disease_scd',
+      });
+
+      const condition = findCondition(result, CONDITION_IDS.SICKLE_CELL_DISEASE);
+      expect(condition.isReferralTrigger).toBe(true);
+      expect(condition.isHrVisitTrigger).toBe(true);
+    });
+
+    it('grades NORMAL for Sickle Cell Trait (SCT) — grading impact unconfirmed, not implemented (issue #191)', async () => {
+      const result = await evaluateRulePack(ancRiskRulesJson, {
+        ...NORMAL_VITALS,
+        sickleCellStatus: 'sickle_cell_trait_sct_carrier',
+      });
+
+      expect(findCondition(result, CONDITION_IDS.SICKLE_CELL_DISEASE).grade).toBe('NORMAL');
+    });
+
+    it('is omitted entirely when sickleCellStatus is not present, matching Bad Obstetric History\'s "no registration data yet" behavior', async () => {
+      const result = await evaluateRulePack(ancRiskRulesJson, NORMAL_VITALS);
+
+      expect(
+        result.conditions.some((c) => c.riskConditionId === CONDITION_IDS.SICKLE_CELL_DISEASE),
+      ).toBe(false);
+    });
+
+    it('is present (graded NORMAL) per §D.7 whenever sickleCellStatus is supplied, even with a non-SCD answer', async () => {
+      const result = await evaluateRulePack(ancRiskRulesJson, {
+        ...NORMAL_VITALS,
+        sickleCellStatus: 'tested_and_result_is_normal',
+      });
+
+      expect(
+        result.conditions.some((c) => c.riskConditionId === CONDITION_IDS.SICKLE_CELL_DISEASE),
+      ).toBe(true);
+    });
   });
 });

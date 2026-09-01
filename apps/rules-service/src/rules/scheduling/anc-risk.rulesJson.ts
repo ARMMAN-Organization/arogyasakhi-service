@@ -74,11 +74,30 @@
  * them; not implemented pending ARMMAN confirming whether new form fields
  * are needed (issue #191).
  *
- * Sickle Cell is not read or graded by this pack at all. Appendix D's
- * Anemia table ties Sickle Cell Disease to the Moderate tier (confirmed,
- * issue #191) — not yet implemented since MOTHER_REGISTRATION has no
- * sickle-cell field wired into this pack's input today. Sickle Cell
- * Trait's effect on grading, if any, is unconfirmed.
+ * Sickle Cell Disease (SCD) is graded as an INTERIM MEASURE, pending GitHub
+ * issue #191 (item 10): Appendix D's Anemia table ties SCD to the Moderate
+ * tier, but the app-form spec (Q60) says SCD selected -> Severe risk +
+ * referral — these two sources conflict and ARMMAN has not yet confirmed
+ * which is correct. This pack currently grades SCD as SEVERE, matching the
+ * app-form spec, since that's the more specific source for this exact
+ * question and matches the field's own stated risk action. If issue #191
+ * is answered as Moderate instead, this grading must be revisited. Sickle
+ * Cell Trait (SCT) is deliberately left ungraded — its effect, if any, is
+ * also unconfirmed by #191.
+ *
+ * SCD is graded at the beneficiary's first ANC_VISIT (via
+ * sickleCellStatus, merged in from MOTHER_REGISTRATION by
+ * resolveAncRiskRegistrationAnswers), not at registration itself —
+ * MOTHER_REGISTRATION has no working risk-grading pipeline: its
+ * FormDefinition.riskRuleSetId is unset, and registration submissions
+ * carry no visitId, which form.service.ts's risk-assessment trigger also
+ * requires. Wiring registration-time grading properly would need a new
+ * VisitCodeType, a new RuleSet/RuleVersion, and changes to that guard —
+ * out of scope for this interim measure. KNOWN GAP: a beneficiary who
+ * registers with SCD but never submits a follow-up ANC_VISIT is never
+ * graded, and so never gets the referral/HR visit this condition should
+ * trigger — accepted as the trade-off for this interim measure, not
+ * silently overlooked.
  *
  * Age and Bad Obstetric History are captured once at MOTHER_REGISTRATION,
  * not on the recurring ANC_VISIT form — the caller (riskAssessment.service.ts
@@ -215,6 +234,27 @@ const handler = (input, { dayjs }) => {
 
     const grade = badObstetricHistoryFlag ? 'MILD' : 'NORMAL';
     record('BAD_OBSTETRIC_HISTORY', grade, { badObstetricHistoryFlag }, {
+      onlyFirstInstance: true,
+      referralTrigger: grade !== 'NORMAL',
+      hrVisitTrigger: grade !== 'NORMAL',
+    });
+  }
+
+  // --- Sickle Cell Disease (only first instance) — INTERIM MEASURE, see
+  // this pack's top doc comment. Graded SEVERE per the app-form spec (Q60:
+  // "High risk if SCD selected... at severe risk + referral"), NOT
+  // Appendix D's Anemia table (which ties SCD to Moderate) — the two
+  // sources conflict and the correct tier is unconfirmed pending GitHub
+  // issue #191 (item 10). Sickle Cell Trait (SCT) is deliberately left
+  // ungraded — its impact, if any, is also unconfirmed by #191.
+  // sickleCellStatus is merged in by form.service.ts from
+  // MOTHER_REGISTRATION's SCD/SCT question, read at the beneficiary's
+  // first ANC_VISIT (not at registration itself — see this pack's doc
+  // comment for why registration-time grading isn't wired up).
+  const sickleCellStatus = input.sickleCellStatus;
+  if (typeof sickleCellStatus === 'string') {
+    const grade = sickleCellStatus === 'sickle_cell_disease_scd' ? 'SEVERE' : 'NORMAL';
+    record('SICKLE_CELL_DISEASE', grade, { sickleCellStatus }, {
       onlyFirstInstance: true,
       referralTrigger: grade !== 'NORMAL',
       hrVisitTrigger: grade !== 'NORMAL',
