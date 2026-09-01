@@ -33,10 +33,19 @@ const escalationCardSchema = z.object({
   cardType: z.enum(['MISSED_VISIT', 'EDD_NEARING']),
   cardSource: z.literal('escalation_events'),
   beneficiaryId: z.string().uuid(),
+  beneficiaryName: z.string().nullable().openapi({ example: 'Nithya Sakhi Mother 4' }),
+  beneficiaryPhone: z.string().nullable().openapi({ example: '9810015405' }),
+  riskLevel: z.enum(['none', 'mild', 'moderate', 'high']).nullable(),
+  assignedSupervisorId: z.string().uuid().nullable(),
+  sakhiId: z.string().nullable(),
+  sakhiName: z.string().nullable().openapi({ example: 'Priya Sakhi' }),
+  sakhiContact: z.string().nullable().openapi({ example: '9812345678' }),
   visitId: z.string().uuid().nullable(),
   referralId: z.string().uuid().nullable(),
   escalationType: z.string().openapi({ example: 'ANC_2_MISSED' }),
   status: z.string().openapi({ example: 'OPEN' }),
+  resolvedAt: z.string().datetime().nullable(),
+  actionTaken: z.string().nullable(),
   raisedAt: z.string().datetime(),
 });
 
@@ -52,7 +61,8 @@ const listEscalationEventsResponseSchema = z.object({
 // state (status/resolvedAt/actionTaken), not the card-list projection.
 const escalationEventSchema = z.object({
   id: z.string().uuid(),
-  beneficiaryId: z.string().uuid(),
+  beneficiaryId: z.string().uuid().nullable(),
+  sakhiUserId: z.string().uuid().nullable(),
   visitId: z.string().uuid().nullable(),
   referralId: z.string().uuid().nullable(),
   escalationType: z.string().openapi({ example: 'EDD_NEARING' }),
@@ -147,7 +157,7 @@ export function registerEscalationRoutes(doc: DocumentedRouter, service: Escalat
       },
     },
     trustGatewayIdentity,
-    requireRoles('ADMIN'),
+    requireRoles('ADMIN', 'SYSTEM'),
     validateBody(createEscalationEventSchema),
     controller.create,
   );
@@ -166,6 +176,10 @@ export function registerEscalationRoutes(doc: DocumentedRouter, service: Escalat
         401: { description: 'Unauthenticated', schema: apiErrorSchema },
         403: { description: 'Caller role not permitted', schema: apiErrorSchema },
         404: { description: 'Escalation event not found', schema: apiErrorSchema },
+        502: {
+          description: 'beneficiary-service or auth-service unreachable while enriching the card',
+          schema: apiErrorSchema,
+        },
       },
     },
     trustGatewayIdentity,

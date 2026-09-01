@@ -3,14 +3,20 @@ import { z } from 'zod';
 import type { NotificationService } from './notification.service';
 import { createNotificationController } from './notification.controller';
 import { createNotificationSchema } from './dto/create-notification.dto';
+import { updateNotificationStatusSchema } from './dto/update-notification-status.dto';
 import {
   requireRoles,
   trustGatewayIdentity,
+  validate,
   validateBody,
   type DocumentedRouter,
 } from '../app.module';
 
 extendZodWithOpenApi(z);
+
+const notificationIdParamsSchema = z
+  .object({ id: z.string().uuid().openapi({ example: 'b3f1c2a0-1234-4a56-9abc-1234567890ab' }) })
+  .strict();
 
 const notificationSchema = z.object({
   id: z.string().uuid(),
@@ -80,13 +86,40 @@ export function registerNotificationRoutes(doc: DocumentedRouter, service: Notif
       },
     },
     trustGatewayIdentity,
-    // ADMIN direct use, plus SUPERVISOR so approval-service can notify a
-    // Sakhi on the caller's behalf after a Quick Response decision (it
-    // forwards the deciding Supervisor's own Authorization header, same
-    // pattern supervisor-operations-service's SakhiClient uses — no
-    // separate service-to-service credential scheme in this codebase yet).
-    requireRoles('ADMIN', 'SUPERVISOR'),
+    // ADMIN direct use; SUPERVISOR so approval-service can notify a Sakhi on
+    // the caller's behalf after a Quick Response decision (forwards the
+    // deciding Supervisor's own Authorization header); SYSTEM so the
+    // missed-visit/referral-followup/sync-delay cron jobs can notify a
+    // Supervisor via a service-account token (POST /auth/service-token).
+    requireRoles('ADMIN', 'SUPERVISOR', 'SYSTEM'),
     validateBody(createNotificationSchema),
     controller.create,
+  );
+
+  doc.patch(
+    '/notifications/:id',
+    {
+      summary: 'Mark a notification READ or DISMISSED',
+      tags: ['Notifications'],
+      params: notificationIdParamsSchema,
+      responses: {
+        200: { description: 'Notification updated', schema: envelope(notificationSchema) },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: {
+          description: "Caller role not permitted, or not this notification's own recipient",
+          schema: apiErrorSchema,
+        },
+        404: { description: 'Notification not found', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    // Same roles as GET /notifications — ownership (caller must be
+    // recipientUserId) is enforced in NotificationService.updateStatus, not
+    // by role alone, since recipientUserId can belong to any of these roles.
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER'),
+    validate(notificationIdParamsSchema, 'params'),
+    validateBody(updateNotificationStatusSchema),
+    controller.updateStatus,
   );
 }

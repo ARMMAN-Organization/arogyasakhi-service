@@ -53,6 +53,11 @@ enum EscalationStatus {
 
 enum NotificationType {
   MISSED_VISIT_ESCALATION
+  // Sent to the assigned supervisor by visit-form-service's HR-missed-visit
+  // escalation trigger (missedVisit.job.ts) for ANC_HR/PP_HR/NN_HR/INC_HR/
+  // CCV_HR families — distinct from MISSED_VISIT_ESCALATION above, which
+  // every non-HR missed-visit family still uses.
+  HR_MISSED_VISIT_ESCALATION
   // Missed Visit Escalation TRANSFER (FR-SV-4.3) — the Sakhi's in-app
   // notification that her beneficiary has been removed from her active
   // list pending a Manager's review.
@@ -63,6 +68,15 @@ enum NotificationType {
   REOPEN_UPDATE
   CLOSURE_UPDATE
   LMP_CHANGE_UPDATE
+  // Quick Response decision-outcome types (approval-service/closure-reopen-service
+  // notify() calls) — added alongside REOPEN_UPDATE/LMP_CHANGE_UPDATE/CLOSURE_UPDATE
+  // above, which this enum already had; these three were missing entirely, so
+  // POST /notifications 400'd on them and the notification was silently never
+  // created (best-effort try/catch at every call site swallowed the failure).
+  REFERRAL_INCOMPLETE_UPDATE
+  ACCOMPANIED_REFERRAL_UPDATE
+  DATA_RESTORE_UPDATE
+  CLOSURE_REVIEW_UPDATE
   FORM_UPDATE
   DATA_SYNC_STATUS
   VISIT_NEAR_MISS
@@ -87,7 +101,15 @@ enum NotificationStatus {
 model EscalationEvent {
   id                   String           @id @default(uuid()) @map("escalation_id")
   // beneficiary_cases.beneficiary_id — owned by another service, no cross-service relation.
-  beneficiaryId        String           @map("beneficiary_id")
+  // Nullable: a SYNC_DELAY escalation is about a Sakhi/device, not a specific
+  // beneficiary — it carries sakhiUserId instead (see that column below).
+  // Every other escalationType still requires beneficiaryId; enforced in
+  // createEscalationEventSchema ("exactly one of beneficiaryId/sakhiUserId"),
+  // not at the DB level.
+  beneficiaryId        String?          @map("beneficiary_id")
+  // users.user_id — owned by another service, no cross-service relation.
+  // SYNC_DELAY only — see beneficiaryId's comment above.
+  sakhiUserId          String?          @map("sakhi_user_id")
   // visit_instances.visit_id — owned by another service, no cross-service relation.
   visitId              String?          @map("visit_id")
   // referrals.referral_id — owned by another service, no cross-service relation.

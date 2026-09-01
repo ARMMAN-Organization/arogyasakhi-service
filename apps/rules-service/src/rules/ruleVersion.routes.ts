@@ -376,7 +376,10 @@ export function registerRuleVersionRoutes(doc: DocumentedRouter, service: RuleVe
       summary:
         "Evaluate the rule set's currently-published gorules ESCALATION decision graph " +
         '(missed-visit escalation, SRS §3A.2.7 FR-S-7.1) against caller-supplied ' +
-        'visitFamily/isHrVisit/consecutiveMissedCount. Never evaluates against a DRAFT version.',
+        'visitFamily/isHrVisit/consecutiveMissedCount. Never evaluates against a DRAFT version. ' +
+        "Gated by requireRoles('SAKHI', 'SYSTEM') — SYSTEM is the missed-visit/referral-followup " +
+        'cron jobs calling in via a service-account token (POST /auth/service-token), not a ' +
+        'human SAKHI request.',
       tags: ['Rules'],
       params: setIdParamsSchema,
       responses: {
@@ -395,7 +398,7 @@ export function registerRuleVersionRoutes(doc: DocumentedRouter, service: RuleVe
       },
     },
     trustGatewayIdentity,
-    requireRoles('SAKHI'),
+    requireRoles('SAKHI', 'SYSTEM'),
     validate(setIdParamsSchema, 'params'),
     validateBody(evaluateEscalationRequestSchema),
     controller.evaluateEscalation,

@@ -1,8 +1,10 @@
 import { conflict } from '@armman/service-commons';
 import type { EscalationRepository } from './escalation.repository';
 import type { NotificationRepository } from '../notifications/notification.repository';
+import { fanOutToSupervisor } from '../notifications/supervisor-fanout';
 import type { BeneficiaryClient } from './beneficiary.client';
 import type { ManagerNoticeClient } from './manager-notice.client';
+import type { SakhiClient } from './sakhi.client';
 import { MISSED_VISIT_TYPE_MAP } from './missed-visit-types';
 
 /** FR-SV-4.3 — how long a Manager has to review a TRANSFER before the
@@ -16,6 +18,7 @@ interface Deps {
   notificationRepository: NotificationRepository;
   beneficiaryClient: BeneficiaryClient;
   managerNoticeClient: ManagerNoticeClient;
+  sakhiClient: SakhiClient;
 }
 
 /**
@@ -40,9 +43,21 @@ export async function decideTransfer(
   deps: Deps,
   authorizationHeader: string,
 ) {
-  const { repository, notificationRepository, beneficiaryClient, managerNoticeClient } = deps;
+  const {
+    repository,
+    notificationRepository,
+    beneficiaryClient,
+    managerNoticeClient,
+    sakhiClient,
+  } = deps;
   const id = existing.id;
   const reviewDeadlineAt = new Date(Date.now() + MANAGER_REVIEW_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  // TRANSFER only ever applies to a MISSED_VISIT-type escalation, which
+  // always carries beneficiaryId (only SYNC_DELAY uses sakhiUserId instead —
+  // see EscalationEvent.beneficiaryId's schema doc comment).
+  if (!existing.beneficiaryId) {
+    throw new Error(`Escalation ${existing.escalationType} row has no beneficiaryId.`);
+  }
 
   await beneficiaryClient.markPendingTransfer(existing.beneficiaryId, authorizationHeader);
 
@@ -82,9 +97,9 @@ export async function decideTransfer(
     }
 
     try {
-      await notificationRepository.create({
+      const notificationDto = {
         recipientUserId: beneficiary.sakhiId,
-        notificationType: 'BENEFICIARY_TRANSFER_NOTICE',
+        notificationType: 'BENEFICIARY_TRANSFER_NOTICE' as const,
         title: 'Beneficiary removed for Manager review',
         body:
           'A beneficiary has been removed from your list pending a Manager review of a ' +
@@ -92,8 +107,15 @@ export async function decideTransfer(
         priority: 5,
         linkedEntityType: 'EscalationEvent',
         linkedEntityId: id,
-        status: 'UNREAD',
-      });
+        status: 'UNREAD' as const,
+      };
+      await notificationRepository.create(notificationDto);
+      await fanOutToSupervisor(
+        notificationRepository,
+        sakhiClient,
+        notificationDto,
+        authorizationHeader,
+      );
     } catch (err) {
       console.error(
         `Missed Visit Escalation ${id} was transferred but notifying the Sakhi failed:`,

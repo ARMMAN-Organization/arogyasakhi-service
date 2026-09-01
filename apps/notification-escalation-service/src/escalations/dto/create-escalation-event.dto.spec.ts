@@ -60,4 +60,27 @@ describe('createEscalationEventSchema', () => {
     });
     expect(result.success).toBe(false);
   });
+
+  it('accepts a SYNC_DELAY payload with sakhiUserId instead of beneficiaryId', () => {
+    const result = createEscalationEventSchema.safeParse({
+      sakhiUserId: '66666666-6666-6666-6666-666666666666',
+      escalationType: 'SYNC_DELAY' as const,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects both beneficiaryId and sakhiUserId set at once', () => {
+    const result = createEscalationEventSchema.safeParse({
+      ...baseInput,
+      sakhiUserId: '66666666-6666-6666-6666-666666666666',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects neither beneficiaryId nor sakhiUserId set', () => {
+    const result = createEscalationEventSchema.safeParse({
+      escalationType: baseInput.escalationType,
+    });
+    expect(result.success).toBe(false);
+  });
 });
