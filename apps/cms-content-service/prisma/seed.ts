@@ -49,7 +49,7 @@ async function seedPlaceholderContent(): Promise<void> {
 
 /**
  * Ingests ARMMAN's delivered health-education content (2026-08-28,
- * "Revised App Form Final 20.3.26 - Health education message.csv", 34
+ * "Revised App Form Final 20.3.26 - Health education message.csv", 32
  * rows after dropping one genuinely blank spacer row). Every row's
  * riskConditionId is null in the seed data — manual matching against
  * risk-referral-service's real risk_conditions found no unambiguous match

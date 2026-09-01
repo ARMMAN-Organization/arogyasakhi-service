@@ -2,7 +2,13 @@ import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
 import { z } from 'zod';
 import type { HealthEducationService } from './healthEducation.service';
 import { createHealthEducationController } from './healthEducation.controller';
-import { requireRoles, trustGatewayIdentity, validate, type DocumentedRouter } from '../app.module';
+import {
+  errorResponse,
+  requireRoles,
+  trustGatewayIdentity,
+  validate,
+  type DocumentedRouter,
+} from '../app.module';
 
 extendZodWithOpenApi(z);
 
@@ -10,6 +16,10 @@ const listMessagesQuerySchema = z
   .object({
     riskConditionId: z.string().uuid().optional(),
     stage: z.string().trim().min(1).optional(),
+    // Matched against conditionLabel verbatim (see model doc comment on
+    // HealthEducationMessage) — used by risk-referral-service's condition
+    // -code-to-label map until riskConditionId is backfilled on these rows.
+    conditionLabel: z.string().trim().min(1).optional(),
   })
   .strict();
 
@@ -25,13 +35,6 @@ const healthEducationMessageSchema = z.object({
   mediaType: z.enum(['TEXT', 'IMAGE', 'AUDIO', 'VIDEO']),
   mediaFile: z.string().nullable(),
   sortOrder: z.number().int(),
-});
-
-const apiErrorSchema = z.object({
-  success: z.literal(false),
-  message: z.string(),
-  errorCode: z.string().openapi({ example: 'VALIDATION_ERROR' }),
-  details: z.record(z.unknown()).optional(),
 });
 
 function envelope<T extends z.ZodTypeAny>(data: T) {
@@ -64,9 +67,9 @@ export function registerHealthEducationRoutes(
       query: listMessagesQuerySchema,
       responses: {
         200: { description: 'Messages', schema: envelope(z.array(healthEducationMessageSchema)) },
-        400: { description: 'Validation error', schema: apiErrorSchema },
-        401: { description: 'Unauthenticated', schema: apiErrorSchema },
-        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+        400: errorResponse(400),
+        401: errorResponse(401),
+        403: errorResponse(403),
       },
     },
     trustGatewayIdentity,

@@ -1,6 +1,12 @@
 // Read directly (not via appConfig) — see beneficiary.client.ts for why.
 const API_GATEWAY_BASE_URL = process.env.API_GATEWAY_BASE_URL ?? 'http://localhost:3000';
 
+// A slow (not down) dependency must degrade the same way an unreachable one
+// does — without this, a hung gateway/cms-content-service call blocks
+// GET /beneficiaries/:beneficiaryId/risk indefinitely, defeating the
+// "stays readable even if unreachable" guarantee this function promises.
+const REQUEST_TIMEOUT_MS = 3000;
+
 export interface EducationContent {
   topicCode: string;
   topicName: string;
@@ -34,11 +40,15 @@ export async function resolveEducationContent(
   try {
     const res = await fetch(`${API_GATEWAY_BASE_URL}/api/v1/learn-more/topics/${topicCode}`, {
       headers: { Authorization: authorizationHeader },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
     if (!res.ok) return null;
 
-    const body = (await res.json()) as { data: EducationContent };
-    return body.data;
+    const body = (await res.json()) as {
+      data: EducationContent & { id: string; sortOrder: number };
+    };
+    const { topicCode: code, topicName, mediaType, contentUrl } = body.data;
+    return { topicCode: code, topicName, mediaType, contentUrl };
   } catch {
     return null;
   }

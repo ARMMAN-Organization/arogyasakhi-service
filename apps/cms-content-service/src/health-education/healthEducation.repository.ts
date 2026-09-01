@@ -10,14 +10,20 @@ export class HealthEducationRepository {
    * GET /media / GET /learn-more/sections precedent of "no filter =
    * everything" rather than an error.
    */
-  findMany(filters: { riskConditionId?: string; stage?: string }) {
+  findMany(filters: { riskConditionId?: string; stage?: string; conditionLabel?: string }) {
     return this.prisma.healthEducationMessage.findMany({
       where: {
         isDeleted: false,
         ...(filters.riskConditionId ? { riskConditionId: filters.riskConditionId } : {}),
         ...(filters.stage ? { stage: filters.stage } : {}),
+        ...(filters.conditionLabel ? { conditionLabel: filters.conditionLabel } : {}),
       },
-      orderBy: [{ conditionLabel: 'asc' }, { messageOrder: 'asc' }],
+      // sortOrder preserves the source CSV's original row order (see
+      // seed.ts) — used only as the outermost tiebreaker so conditions keep
+      // the CSV's authored sequence when no conditionLabel filter narrows
+      // the result; conditionLabel/messageOrder still decide the actual
+      // grouping and intra-condition sequence.
+      orderBy: [{ sortOrder: 'asc' }, { conditionLabel: 'asc' }, { messageOrder: 'asc' }],
     });
   }
 }

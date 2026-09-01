@@ -39,8 +39,64 @@ describe('resolveEducationContent', () => {
     });
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining('/learn-more/topics/COMING_SOON'),
-      { headers: { Authorization: AUTH_HEADER } },
+      expect.objectContaining({ headers: { Authorization: AUTH_HEADER } }),
     );
+  });
+
+  it('strips undeclared fields (id, sortOrder) from the upstream response', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: {
+          id: 'some-uuid',
+          topicCode: 'COMING_SOON',
+          topicName: 'Content coming soon',
+          mediaType: 'QNA_TEXT',
+          contentUrl: null,
+          sortOrder: 3,
+        },
+      }),
+    });
+
+    const result = await resolveEducationContent('COMING_SOON', AUTH_HEADER);
+
+    expect(result).toEqual({
+      topicCode: 'COMING_SOON',
+      topicName: 'Content coming soon',
+      mediaType: 'QNA_TEXT',
+      contentUrl: null,
+    });
+    expect(result).not.toHaveProperty('id');
+    expect(result).not.toHaveProperty('sortOrder');
+  });
+
+  it('passes an AbortSignal so a slow (not down) dependency times out instead of hanging', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: {
+          topicCode: 'COMING_SOON',
+          topicName: 'Content coming soon',
+          mediaType: 'QNA_TEXT',
+          contentUrl: null,
+        },
+      }),
+    });
+
+    await resolveEducationContent('COMING_SOON', AUTH_HEADER);
+
+    const [, options] = fetchMock.mock.calls[0];
+    expect(options.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('returns null when the request times out, without throwing', async () => {
+    fetchMock.mockRejectedValue(new DOMException('The operation was aborted.', 'TimeoutError'));
+
+    const result = await resolveEducationContent('COMING_SOON', AUTH_HEADER);
+
+    expect(result).toBeNull();
   });
 
   it('returns null when the topic does not exist (404)', async () => {
