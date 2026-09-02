@@ -77,6 +77,58 @@ describe('NotificationService', () => {
     });
   });
 
+  it('SAKHI notifying her own assigned Supervisor succeeds', async () => {
+    const sakhiToSupervisorDto: CreateNotificationInput = {
+      ...dto,
+      recipientUserId: 'supervisor-1',
+    };
+    sakhiClient.findById.mockResolvedValue({
+      sakhiId: 'jane.sakhi',
+      supervisorId: 'supervisor-1',
+    });
+    repository.create.mockResolvedValue({ id: '1' } as never);
+
+    await service.create(sakhiToSupervisorDto, sakhi, authHeader);
+
+    expect(sakhiClient.findById).toHaveBeenCalledWith('jane.sakhi', authHeader);
+    expect(repository.create).toHaveBeenCalledWith(sakhiToSupervisorDto);
+  });
+
+  it('SAKHI notifying a Supervisor who is not her own is forbidden', async () => {
+    const sakhiToOtherSupervisorDto: CreateNotificationInput = {
+      ...dto,
+      recipientUserId: 'someone-elses-supervisor',
+    };
+    sakhiClient.findById.mockResolvedValue({
+      sakhiId: 'jane.sakhi',
+      supervisorId: 'supervisor-1',
+    });
+
+    await expect(
+      service.create(sakhiToOtherSupervisorDto, sakhi, authHeader),
+    ).rejects.toMatchObject({ status: 403 });
+    expect(repository.create).not.toHaveBeenCalled();
+  });
+
+  it('SAKHI notifying herself is forbidden', async () => {
+    const sakhiToSelfDto: CreateNotificationInput = { ...dto, recipientUserId: 'jane.sakhi' };
+    sakhiClient.findById.mockResolvedValue({
+      sakhiId: 'jane.sakhi',
+      supervisorId: 'supervisor-1',
+    });
+
+    await expect(service.create(sakhiToSelfDto, sakhi, authHeader)).rejects.toMatchObject({
+      status: 403,
+    });
+    expect(repository.create).not.toHaveBeenCalled();
+  });
+
+  it('SAKHI caller whose own Sakhi record is not found is forbidden, not 404', async () => {
+    sakhiClient.findById.mockResolvedValue(null);
+    await expect(service.create(dto, sakhi, authHeader)).rejects.toMatchObject({ status: 403 });
+    expect(repository.create).not.toHaveBeenCalled();
+  });
+
   it('propagates repository errors on create', async () => {
     repository.create.mockRejectedValue(new Error('db down'));
     await expect(service.create(dto, admin, authHeader)).rejects.toThrow('db down');
