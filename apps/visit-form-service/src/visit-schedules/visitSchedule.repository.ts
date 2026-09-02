@@ -87,16 +87,46 @@ export class VisitScheduleRepository {
   }
 
   /**
-   * Every non-deleted schedule for this beneficiary+visitType, most-recent
-   * first — the missed-visit job walks this list counting the unbroken
-   * trailing run of MISSED to derive `consecutiveMissedCount` (scoped to
-   * the exact visitType, e.g. ANC vs ANC_HR are counted separately — see
+   * Reverts a schedule this same job tick already flipped to MISSED back to
+   * OPEN — used only when a downstream step after markMissed (VisitInstance
+   * write, escalation lookup/evaluation) throws. Without this, that schedule
+   * would never be selected by findOverdueOpenSchedules again and the
+   * required escalation would be silently and permanently lost (see
+   * missedVisit.job.ts's per-schedule try/catch). The `status: 'MISSED'`
+   * guard mirrors markMissed's own idempotency guard: only undoes this
+   * tick's own transition, never a MISSED row some other process already
+   * relied on.
+   */
+  async revertToOpen(id: string): Promise<boolean> {
+    const result = await this.prisma.visitSchedule.updateMany({
+      where: { id, status: 'MISSED' },
+      data: { status: 'OPEN' },
+    });
+    return result.count > 0;
+  }
+
+  /**
+   * Already-due schedules for this beneficiary+visitType, most-recent first
+   * — the missed-visit job walks this list counting the unbroken trailing
+   * run of MISSED to derive `consecutiveMissedCount` (scoped to the exact
+   * visitType, e.g. ANC vs ANC_HR are counted separately — see
    * missedVisit.job.ts for why). Bounded to a small window since only the
    * leading run matters, not the full history.
+   *
+   * `windowEndDate: { lte: asOf }` excludes schedules that aren't due yet —
+   * ANC/PP/INC schedules are generated as a full batch up front
+   * (scheduleMapper.ts), so a beneficiary typically has several future OPEN
+   * rows sitting ahead of the visit that just missed. Without this filter,
+   * those future rows sort first (scheduledDate desc) and
+   * countConsecutiveMissed breaks on the first non-MISSED row it sees,
+   * always returning 0 and silently defeating HR/consecutive-count
+   * escalation. `asOf` is the caller's `now`, not this call's own time, so
+   * a schedule reprocessed on retry sees the same "due" boundary as its
+   * first attempt.
    */
-  findRecentByBeneficiaryAndVisitType(beneficiaryId: string, visitType: VisitCodeType) {
+  findRecentByBeneficiaryAndVisitType(beneficiaryId: string, visitType: VisitCodeType, asOf: Date) {
     return this.prisma.visitSchedule.findMany({
-      where: { beneficiaryId, visitType, isDeleted: false },
+      where: { beneficiaryId, visitType, isDeleted: false, windowEndDate: { lte: asOf } },
       orderBy: { scheduledDate: 'desc' },
       take: 20,
     });

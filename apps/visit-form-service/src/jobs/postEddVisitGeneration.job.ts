@@ -55,14 +55,6 @@ export async function runPostEddVisitGenerationJob(
     return;
   }
 
-  let authorizationHeader: string;
-  try {
-    authorizationHeader = `Bearer ${await deps.getSystemToken()}`;
-  } catch (err) {
-    console.error(`[${JOB_NAME}] Unable to mint a service token — skipping this tick:`, err);
-    return;
-  }
-
   const scheduleRepo = new VisitScheduleRepository(deps.prisma);
   const scheduleService = new VisitScheduleService(scheduleRepo);
 
@@ -72,12 +64,34 @@ export async function runPostEddVisitGenerationJob(
 
   let cursor: string | undefined;
   for (let page = 0; page < MAX_PAGES_PER_TICK; page++) {
-    const result = await findPostEddPendingBeneficiaries(
-      cutoffDate,
-      PAGE_SIZE,
-      cursor,
-      authorizationHeader,
-    );
+    // Minted fresh per page (ServiceTokenClient caches internally and only
+    // re-mints once the cached token is within 30s of expiry — see
+    // ServiceTokenClient.getToken) so a run long enough to outlive one
+    // token's TTL keeps working instead of failing partway through.
+    let authorizationHeader: string;
+    try {
+      authorizationHeader = `Bearer ${await deps.getSystemToken()}`;
+    } catch (err) {
+      console.error(`[${JOB_NAME}] Unable to mint a service token — stopping this tick:`, err);
+      return;
+    }
+
+    let result;
+    try {
+      result = await findPostEddPendingBeneficiaries(
+        cutoffDate,
+        PAGE_SIZE,
+        cursor,
+        authorizationHeader,
+      );
+    } catch (err) {
+      // Stop rather than throw: cursor is local to this call, so a future
+      // tick can only resume from page 1 either way — better to keep
+      // whatever pages already succeeded this tick than to lose them to an
+      // uncaught rejection propagating out of runPostEddVisitGenerationJob.
+      console.error(`[${JOB_NAME}] Failed fetching page ${page} — stopping this tick:`, err);
+      return;
+    }
 
     for (const candidate of result.items) {
       try {

@@ -39,14 +39,17 @@ describe('countConsecutiveMissed', () => {
 describe('runMissedVisitJob', () => {
   const findOverdueOpenSchedules = jest.fn();
   const markMissed = jest.fn();
+  const revertToOpen = jest.fn();
   const findRecentByBeneficiaryAndVisitType = jest.fn();
   const markMissedByScheduleId = jest.fn();
 
   beforeEach(() => {
     jest.clearAllMocks();
+    revertToOpen.mockResolvedValue(true);
     (VisitScheduleRepository as jest.Mock).mockImplementation(() => ({
       findOverdueOpenSchedules,
       markMissed,
+      revertToOpen,
       findRecentByBeneficiaryAndVisitType,
     }));
     (VisitInstanceRepository as jest.Mock).mockImplementation(() => ({
@@ -89,7 +92,11 @@ describe('runMissedVisitJob', () => {
     await runMissedVisitJob(baseDeps());
 
     expect(markMissed).toHaveBeenCalledWith('schedule-1');
-    expect(markMissedByScheduleId).toHaveBeenCalledWith('schedule-1', 'missed-lookup-id');
+    expect(markMissedByScheduleId).toHaveBeenCalledWith(
+      'schedule-1',
+      'missed-lookup-id',
+      'missed-visit-escalation-job',
+    );
     expect(evaluateEscalation).toHaveBeenCalledWith(
       'rule-set-1',
       { visitFamily: 'ANC', isHrVisit: true, consecutiveMissedCount: 1 },
@@ -288,19 +295,59 @@ describe('runMissedVisitJob', () => {
     expect(createEscalationEvent).not.toHaveBeenCalled();
   });
 
-  it('still transitions schedules to MISSED when minting a service token fails', async () => {
+  it('aborts the whole tick without transitioning anything when minting a service token fails', async () => {
     findOverdueOpenSchedules.mockResolvedValue([
       { id: 'schedule-1', beneficiaryId: 'ben-1', visitType: 'ANC' },
     ]);
-    markMissed.mockResolvedValue(true);
     const deps = baseDeps();
     deps.getSystemToken = jest.fn().mockRejectedValue(new Error('auth-service unreachable'));
 
     await runMissedVisitJob(deps);
 
-    expect(markMissed).toHaveBeenCalledWith('schedule-1');
+    // Aborting before markMissed means the next tick's findOverdueOpenSchedules
+    // will see this same schedule again — no permanent desync from a
+    // transient auth-service blip.
+    expect(markMissed).not.toHaveBeenCalled();
     expect(evaluateEscalation).not.toHaveBeenCalled();
     expect(createEscalationEvent).not.toHaveBeenCalled();
+  });
+
+  it('aborts the whole tick without transitioning anything when resolving the MISSED lookup fails', async () => {
+    findOverdueOpenSchedules.mockResolvedValue([
+      { id: 'schedule-1', beneficiaryId: 'ben-1', visitType: 'ANC' },
+    ]);
+    (resolveVisitStatusIdByCode as jest.Mock).mockRejectedValue(new Error('auth-service 503'));
+
+    await runMissedVisitJob(baseDeps());
+
+    expect(markMissed).not.toHaveBeenCalled();
+    expect(evaluateEscalation).not.toHaveBeenCalled();
+  });
+
+  it('reverts a schedule back to OPEN when markMissedByScheduleId fails after markMissed succeeded', async () => {
+    findOverdueOpenSchedules.mockResolvedValue([
+      { id: 'schedule-1', beneficiaryId: 'ben-1', visitType: 'ANC' },
+    ]);
+    markMissed.mockResolvedValue(true);
+    markMissedByScheduleId.mockRejectedValue(new Error('db write failed'));
+
+    await runMissedVisitJob(baseDeps());
+
+    expect(revertToOpen).toHaveBeenCalledWith('schedule-1');
+    expect(evaluateEscalation).not.toHaveBeenCalled();
+  });
+
+  it('reverts a schedule back to OPEN when evaluateAndEscalate throws after markMissed succeeded', async () => {
+    findOverdueOpenSchedules.mockResolvedValue([
+      { id: 'schedule-1', beneficiaryId: 'ben-1', visitType: 'ANC' },
+    ]);
+    markMissed.mockResolvedValue(true);
+    findRecentByBeneficiaryAndVisitType.mockResolvedValue([{ status: 'MISSED' }]);
+    (evaluateEscalation as jest.Mock).mockRejectedValue(new Error('rules-service 503'));
+
+    await runMissedVisitJob(baseDeps());
+
+    expect(revertToOpen).toHaveBeenCalledWith('schedule-1');
   });
 
   it('continues processing remaining schedules when one throws', async () => {

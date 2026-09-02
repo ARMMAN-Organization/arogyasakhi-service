@@ -13,6 +13,10 @@ import type { VisitCodeType } from '../../../../node_modules/.prisma/client-visi
 const JOB_NAME = 'missed-visit-escalation';
 const LOCK_DURATION_MS = 25 * 60 * 1000; // slightly under the default 30-min tick interval
 const MAX_SCHEDULES_PER_TICK = 200;
+// This job has no human identity — mirrors postEddVisitGeneration.job.ts's
+// own SYSTEM_CALLER.id convention, used as VisitStatusHistory.changedByUserId
+// for cron-driven MISSED transitions.
+const SYSTEM_CALLER_ID = 'missed-visit-escalation-job';
 
 /**
  * `VisitCodeType` -> the ESCALATION rule pack's (visitFamily, isHrVisit)
@@ -81,47 +85,71 @@ export async function runMissedVisitJob(deps: MissedVisitJobDeps): Promise<void>
   const scheduleRepo = new VisitScheduleRepository(deps.prisma);
   const instanceRepo = new VisitInstanceRepository(deps.prisma);
 
-  const overdue = await scheduleRepo.findOverdueOpenSchedules(new Date(), MAX_SCHEDULES_PER_TICK);
+  const now = new Date();
+  const overdue = await scheduleRepo.findOverdueOpenSchedules(now, MAX_SCHEDULES_PER_TICK);
   if (overdue.length === 0) return;
 
   // A system-issued bearer token, forwarded as-is to every downstream
   // call this job makes — mirrors every *.client.ts's `authorizationHeader`
   // parameter, just backed by a machine identity instead of a human's.
-  let authorizationHeader: string | null = null;
+  //
+  // Both this and the MISSED lookup below are resolved once, up front, and
+  // abort the whole tick on failure — rather than the previous behavior of
+  // transitioning every schedule to MISSED regardless and silently skipping
+  // the VisitInstance/escalation side effects for all of them. Aborting here
+  // means none of this tick's schedules are touched yet (findOverdueOpenSchedules
+  // hasn't been acted on), so the next tick simply retries the same set from
+  // a clean slate instead of leaving 200 schedules permanently desynced.
+  let authorizationHeader: string;
   try {
     authorizationHeader = `Bearer ${await deps.getSystemToken()}`;
   } catch (err) {
-    console.error(
-      `[${JOB_NAME}] Unable to mint a service token — will still transition schedules, ` +
-        'but skip escalation/notification calls this tick:',
-      err,
-    );
+    console.error(`[${JOB_NAME}] Unable to mint a service token — skipping this tick:`, err);
+    return;
   }
 
-  let missedStatusLookupValueId: string | null = null;
-  if (authorizationHeader) {
-    try {
-      missedStatusLookupValueId = await resolveVisitStatusIdByCode('MISSED', authorizationHeader);
-    } catch (err) {
-      console.error(`[${JOB_NAME}] Unable to resolve the MISSED lookup value id:`, err);
-    }
+  let missedStatusLookupValueId: string;
+  try {
+    missedStatusLookupValueId = await resolveVisitStatusIdByCode('MISSED', authorizationHeader);
+  } catch (err) {
+    console.error(`[${JOB_NAME}] Unable to resolve the MISSED lookup value id:`, err);
+    return;
   }
 
   for (const schedule of overdue) {
+    let transitioned = false;
     try {
-      const transitioned = await scheduleRepo.markMissed(schedule.id);
+      transitioned = await scheduleRepo.markMissed(schedule.id);
       if (!transitioned) continue; // raced with another run/manual PATCH — already handled
 
-      if (missedStatusLookupValueId) {
-        await instanceRepo.markMissedByScheduleId(schedule.id, missedStatusLookupValueId);
-      }
-
-      if (!authorizationHeader) continue;
-      await evaluateAndEscalate(schedule, scheduleRepo, deps, authorizationHeader);
+      await instanceRepo.markMissedByScheduleId(
+        schedule.id,
+        missedStatusLookupValueId,
+        SYSTEM_CALLER_ID,
+      );
+      await evaluateAndEscalate(schedule, scheduleRepo, deps, now, authorizationHeader);
     } catch (err) {
-      // One beneficiary's bad data (e.g. an unmapped visitFamily) must not
-      // abort the rest of this tick's batch.
+      // One beneficiary's bad data (e.g. an unmapped visitFamily, or
+      // markMissed itself throwing) must not abort the rest of this tick's
+      // batch, so the loop continues either way.
       console.error(`[${JOB_NAME}] Failed processing schedule ${schedule.id}:`, err);
+
+      // Undo this tick's own MISSED transition so the schedule is eligible
+      // for findOverdueOpenSchedules again next tick — without this, a
+      // transient failure after markMissed already committed (VisitInstance
+      // write, rules-service/beneficiary-service/auth-service blip) would
+      // permanently drop the FR-S-7.1 escalation, since a MISSED schedule is
+      // never revisited. Only needed once markMissed itself actually
+      // succeeded — a throw from markMissed leaves nothing to revert.
+      if (transitioned) {
+        await scheduleRepo.revertToOpen(schedule.id).catch((revertErr) => {
+          console.error(
+            `[${JOB_NAME}] Failed to revert schedule ${schedule.id} back to OPEN — it will ` +
+              'remain stuck MISSED without escalation until manually corrected:',
+            revertErr,
+          );
+        });
+      }
     }
   }
 }
@@ -130,15 +158,21 @@ async function evaluateAndEscalate(
   schedule: { id: string; beneficiaryId: string; visitType: VisitCodeType },
   scheduleRepo: VisitScheduleRepository,
   deps: MissedVisitJobDeps,
+  now: Date,
   authorizationHeader: string,
 ): Promise<void> {
   const mapping = VISIT_TYPE_ESCALATION[schedule.visitType];
   if (!mapping) return; // e.g. DELIVERY — see VISIT_TYPE_ESCALATION's doc comment
   if (!deps.escalationRuleSetId) return; // not yet provisioned — see app-config.ts's doc comment
 
+  // *.client.ts calls in this job all take the raw (un-prefixed) token —
+  // computed once here instead of re-deriving it at each call site below.
+  const rawToken = authorizationHeader.replace(/^Bearer /, '');
+
   const recent = await scheduleRepo.findRecentByBeneficiaryAndVisitType(
     schedule.beneficiaryId,
     schedule.visitType,
+    now,
   );
   const consecutiveMissedCount = countConsecutiveMissed(recent);
 
@@ -161,52 +195,56 @@ async function evaluateAndEscalate(
       visitsMissedCount: consecutiveMissedCount,
       assignedSupervisorId: supervisorId ?? undefined,
     },
-    authorizationHeader.replace(/^Bearer /, ''),
+    rawToken,
   );
 
   // Best-effort — the escalation event above is the durable record; a failed
   // push here is logged, not retried, and never fails the job run.
   if (supervisorId && event.status === 'OPEN') {
     try {
-      if (mapping.isHrVisit) {
-        // HR escalations get their own notificationType/body naming the
-        // beneficiary and the miss count, per the HR-missed-visit
-        // escalation spec — distinct from every other family's generic
-        // MISSED_VISIT_ESCALATION below.
-        const beneficiaryName = await resolveBeneficiaryName(
-          schedule.beneficiaryId,
-          authorizationHeader,
-        );
-        await createNotification(
-          {
+      // HR escalations get their own notificationType/body naming the
+      // beneficiary and the miss count, per the HR-missed-visit escalation
+      // spec — distinct from every other family's generic
+      // MISSED_VISIT_ESCALATION. Both shapes funnel through the same single
+      // createNotification call below instead of two near-duplicate ones.
+      const notificationInput = mapping.isHrVisit
+        ? {
             recipientUserId: supervisorId,
             notificationType: 'HR_MISSED_VISIT_ESCALATION',
             title: 'HR escalation — visit missed',
-            body: beneficiaryName
-              ? `${beneficiaryName} has missed ${consecutiveMissedCount} consecutive visits — HR review required.`
-              : `A beneficiary has missed ${consecutiveMissedCount} consecutive visits — HR review required.`,
+            body: await resolveHrNotificationBody(
+              schedule.beneficiaryId,
+              consecutiveMissedCount,
+              authorizationHeader,
+            ),
             priority: 8,
             linkedEntityType: 'ESCALATION_EVENT',
             linkedEntityId: event.id,
-          },
-          authorizationHeader.replace(/^Bearer /, ''),
-        );
-      } else {
-        await createNotification(
-          {
+          }
+        : {
             recipientUserId: supervisorId,
             notificationType: 'MISSED_VISIT_ESCALATION',
             title: 'A Sakhi has a missed-visit escalation requiring review',
             linkedEntityType: 'VISIT_SCHEDULE',
             linkedEntityId: schedule.id,
-          },
-          authorizationHeader.replace(/^Bearer /, ''),
-        );
-      }
+          };
+      await createNotification(notificationInput, rawToken);
     } catch (err) {
       console.error(`[${JOB_NAME}] Escalation ${event.id} raised, notification failed:`, err);
     }
   }
+}
+
+/** Best-effort — a name lookup failure falls back to a generic HR notification body. */
+async function resolveHrNotificationBody(
+  beneficiaryId: string,
+  consecutiveMissedCount: number,
+  authorizationHeader: string,
+): Promise<string> {
+  const beneficiaryName = await resolveBeneficiaryName(beneficiaryId, authorizationHeader);
+  return beneficiaryName
+    ? `${beneficiaryName} has missed ${consecutiveMissedCount} consecutive visits — HR review required.`
+    : `A beneficiary has missed ${consecutiveMissedCount} consecutive visits — HR review required.`;
 }
 
 /** Best-effort — a name lookup failure falls back to a generic notification
