@@ -133,23 +133,31 @@ const handler = (input, { dayjs }) => {
 
   const results = [];
 
-  function requireConditionId(code) {
-    const id = conditionIds[code];
-    if (!id) throw new Error('conditionIds is missing an entry for ' + code);
-    return id;
-  }
-
   // Pushes one graded condition result. onlyFirstInstance conditions get
   // referralTrigger/hrVisitTrigger gated by firstInstance[code]; other
   // conditions use their own trigger rule directly.
+  //
+  // A missing conditionIds entry for the given code skips ONLY this
+  // condition — every other condition's record() call still runs. Before
+  // this fix, a missing mapping threw synchronously and aborted the whole
+  // handler, silently losing every condition graded after it in source
+  // order; that is a realistic failure mode (not theoretical) whenever a
+  // new condition is added to this pack before risk_conditions/
+  // RiskCondition.phase has been backfilled in a given environment — see
+  // PR #208 review. No console/logging available in this GoRules sandbox
+  // (confirmed: no other rule pack in this repo calls console.*), so the
+  // skip is silent here; the caller (rules-service's evaluate endpoint) is
+  // where any visibility into a missing mapping would need to be added.
   function record(code, grade, observedValueJson, opts) {
+    const riskConditionId = conditionIds[code];
+    if (!riskConditionId) return;
     opts = opts || {};
     const gateByFirstInstance = opts.onlyFirstInstance === true;
     const isFirst = firstInstance[code] !== false; // default true if unknown
     const referralEligible = opts.referralTrigger === true;
     const hrEligible = opts.hrVisitTrigger === true;
     results.push({
-      riskConditionId: requireConditionId(code),
+      riskConditionId,
       grade,
       gradeRank: GRADE_RANK[grade],
       isReferralTrigger: gateByFirstInstance ? referralEligible && isFirst : referralEligible,

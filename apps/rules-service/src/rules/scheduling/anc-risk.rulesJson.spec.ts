@@ -540,13 +540,40 @@ describe('ancRiskRulesJson', () => {
     await expect(evaluateRulePack(ancRiskRulesJson, rest)).rejects.toThrow();
   });
 
-  it('throws when conditionIds is missing an entry the graded vitals require', async () => {
+  it('skips only the affected condition when conditionIds is missing an entry the graded vitals require, grading everything else normally', async () => {
     const incompleteIds: Record<string, string | undefined> = { ...CONDITION_IDS };
     incompleteIds.ANEMIA = undefined;
 
-    await expect(
-      evaluateRulePack(ancRiskRulesJson, { ...NORMAL_VITALS, conditionIds: incompleteIds }),
-    ).rejects.toThrow();
+    const result = await evaluateRulePack(ancRiskRulesJson, {
+      ...NORMAL_VITALS,
+      conditionIds: incompleteIds,
+    });
+
+    expect(result.conditions.some((c) => c.riskConditionId === CONDITION_IDS.ANEMIA)).toBe(false);
+    expect(result.conditions.some((c) => c.riskConditionId === CONDITION_IDS.AGE)).toBe(true);
+    expect(result.conditions.some((c) => c.riskConditionId === CONDITION_IDS.HYPERTENSION)).toBe(
+      true,
+    );
+    expect(result.conditions.length).toBeGreaterThan(0);
+  });
+
+  it('skips Sickle Cell Disease gracefully (does not abort the rest of grading) when its conditionId mapping is missing — the realistic already-seeded-environment scenario', async () => {
+    const idsWithoutScd: Record<string, string | undefined> = { ...CONDITION_IDS };
+    idsWithoutScd.SICKLE_CELL_DISEASE = undefined;
+
+    const result = await evaluateRulePack(ancRiskRulesJson, {
+      ...NORMAL_VITALS,
+      conditionIds: idsWithoutScd,
+      sickleCellStatus: 'sickle_cell_disease_scd',
+    });
+
+    expect(
+      result.conditions.some((c) => c.riskConditionId === CONDITION_IDS.SICKLE_CELL_DISEASE),
+    ).toBe(false);
+    expect(result.conditions.some((c) => c.riskConditionId === CONDITION_IDS.ANEMIA)).toBe(true);
+    expect(result.conditions.some((c) => c.riskConditionId === CONDITION_IDS.HYPERTENSION)).toBe(
+      true,
+    );
   });
 
   describe('Sickle Cell Disease (interim measure pending issue #191 tier confirmation)', () => {
