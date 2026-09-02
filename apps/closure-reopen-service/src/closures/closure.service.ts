@@ -37,6 +37,22 @@ export class ClosureService {
     private readonly sakhiClient: SakhiClient,
   ) {}
 
+  /**
+   * Wraps one supplementary lookup: logs and returns null on failure rather
+   * than throwing, so a downstream hiccup degrades only its own field
+   * instead of failing the decision it's attached to. Used for the
+   * notification-enrichment beneficiary fetch in decide() — never for the
+   * ownership gate itself, which must still throw as-is.
+   */
+  private async safeResolve<T>(label: string, fn: () => Promise<T>): Promise<T | null> {
+    try {
+      return await fn();
+    } catch (err) {
+      console.error(`Closure decide(): failed to resolve ${label} for a notification:`, err);
+      return null;
+    }
+  }
+
   /** Best-effort — a name lookup failure falls back to no name (generic
    * notification text) rather than blocking the decision it's attached to. */
   private async resolveSakhiName(
@@ -88,6 +104,18 @@ export class ClosureService {
     const closure = await this.repository.findById(id);
     if (!closure) throw notFound('Closure not found.');
     return closure;
+  }
+
+  /**
+   * Full detail for a batch of closure ids in a single query — lets
+   * approval-service's Quick Response card-enrichment endpoint resolve all
+   * of a page's CLOSURE_REVIEW cards in one call instead of one
+   * GET /closures/:id per card, which was overloading the gateway under
+   * concurrent load. An id not found or soft-deleted is simply omitted from
+   * the result, not an error — same contract as getDecisionStatusByIds.
+   */
+  getByIds(ids: string[]) {
+    return this.repository.findManyDetailByIds(ids);
   }
 
   /**
@@ -223,16 +251,16 @@ export class ClosureService {
     if (!existing) throw notFound('Closure not found.');
 
     // Delegates ownership scoping to beneficiary-service's own GET
-    // /beneficiaries/:id (SAKHI-own-case / SUPERVISOR-roster /
+    // /beneficiaries/:id/ownership (SAKHI-own-case / SUPERVISOR-roster /
     // MANAGER-unrestricted) — same pattern create() already uses. Without
     // this, any SUPERVISOR who learns a closure id outside their own
-    // roster could approve or reject it (IDOR). Its response is also reused
-    // below for the Sakhi notification's beneficiary name, avoiding a
-    // second fetch.
-    const beneficiary = await this.beneficiaryClient.getById(
-      existing.beneficiaryId,
-      authorizationHeader,
-    );
+    // roster could approve or reject it (IDOR). Uses the lightweight
+    // ownership endpoint, not the full getById() below, so this gate never
+    // waits on beneficiary-service's own unrelated enrichment (pii/socio/
+    // risk/lastVisitVitals) — a slow downstream vitals lookup on
+    // beneficiary-service's side must not be able to 502 a closure decision
+    // that never needed vitals data in the first place.
+    await this.beneficiaryClient.getOwnership(existing.beneficiaryId, authorizationHeader);
 
     if (existing.supervisorStatus === null) {
       throw unprocessable('This closure does not require supervisor review.');
@@ -241,7 +269,19 @@ export class ClosureService {
       throw conflict('This closure has already been decided.');
     }
 
-    const updated = await this.repository.decide(id, decidedBySupervisorId, dto);
+    // The full beneficiary detail (for the Sakhi notification's
+    // beneficiaryName below) has no dependency on the decision write, and is
+    // best-effort like every other notification-enrichment lookup in this
+    // method — a failure here degrades the notification text, it must not
+    // block or fail an otherwise-successful decision. Run it alongside
+    // repository.decide() instead of stacking its latency in front of the
+    // write, now that it's no longer doing double duty as the ownership gate.
+    const [updated, beneficiary] = await Promise.all([
+      this.repository.decide(id, decidedBySupervisorId, dto),
+      this.safeResolve('beneficiary', () =>
+        this.beneficiaryClient.getById(existing.beneficiaryId, authorizationHeader),
+      ),
+    ]);
     if (!updated) {
       // Raced with another decision between the read above and the
       // conditional update — same outcome as the check above, just caught a

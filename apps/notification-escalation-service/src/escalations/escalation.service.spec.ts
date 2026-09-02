@@ -29,10 +29,17 @@ function sakhiRecord(overrides: Partial<SakhiRecord> = {}): SakhiRecord {
   };
 }
 
-function row(overrides: { id?: string; escalationType?: EscalationType; createdAt?: Date } = {}) {
+function row(
+  overrides: {
+    id?: string;
+    escalationType?: EscalationType;
+    createdAt?: Date;
+    beneficiaryId?: string;
+  } = {},
+) {
   return {
     id: overrides.id ?? '11111111-1111-1111-1111-111111111111',
-    beneficiaryId: '22222222-2222-2222-2222-222222222222',
+    beneficiaryId: overrides.beneficiaryId ?? '22222222-2222-2222-2222-222222222222',
     sakhiUserId: null,
     visitId: null,
     referralId: null,
@@ -60,6 +67,7 @@ describe('EscalationService', () => {
   const repository = {
     findMany: jest.fn(),
     findById: jest.fn(),
+    findManyByIds: jest.fn(),
     create: jest.fn(),
     findOpenDuplicate: jest.fn(),
     updateStatus: jest.fn(),
@@ -77,6 +85,12 @@ describe('EscalationService', () => {
   let service: EscalationService;
   const baseQuery: ListEscalationEventsInput = { status: 'OPEN', limit: 50 };
   const AUTH_HEADER = 'Bearer test-token';
+  const managerCaller = { id: 'manager-1', roles: ['MANAGER'], projectId: null };
+  const supervisorCaller = (id = 'supervisor-1') => ({
+    id,
+    roles: ['SUPERVISOR'],
+    projectId: 'project-1',
+  });
 
   beforeEach(() => {
     jest.resetAllMocks();
@@ -95,7 +109,7 @@ describe('EscalationService', () => {
 
   it('groups every *_MISSED escalation type under MISSED_VISIT', async () => {
     repository.findMany.mockResolvedValue([row({ escalationType: 'PP_HR_MISSED' })]);
-    const result = await service.list(baseQuery, AUTH_HEADER);
+    const result = await service.list(baseQuery, managerCaller, AUTH_HEADER);
     expect(result.cards).toHaveLength(1);
     expect(result.cards[0].cardType).toBe('MISSED_VISIT');
     expect(result.cards[0].cardSource).toBe('escalation_events');
@@ -103,19 +117,19 @@ describe('EscalationService', () => {
 
   it('surfaces EDD_NEARING as its own card type', async () => {
     repository.findMany.mockResolvedValue([row({ escalationType: 'EDD_NEARING' })]);
-    const result = await service.list(baseQuery, AUTH_HEADER);
+    const result = await service.list(baseQuery, managerCaller, AUTH_HEADER);
     expect(result.cards[0].cardType).toBe('EDD_NEARING');
   });
 
   it('omits escalation types outside the 8 supported Quick Response card types', async () => {
     repository.findMany.mockResolvedValue([row({ escalationType: 'SYNC_DELAY' })]);
-    const result = await service.list(baseQuery, AUTH_HEADER);
+    const result = await service.list(baseQuery, managerCaller, AUTH_HEADER);
     expect(result.cards).toHaveLength(0);
   });
 
   it('returns no nextCursor when the repository returns exactly `limit` rows', async () => {
     repository.findMany.mockResolvedValue([row()]);
-    const result = await service.list({ ...baseQuery, limit: 1 }, AUTH_HEADER);
+    const result = await service.list({ ...baseQuery, limit: 1 }, managerCaller, AUTH_HEADER);
     expect(result.nextCursor).toBeNull();
   });
 
@@ -125,7 +139,7 @@ describe('EscalationService', () => {
       row({ id: 'b', createdAt: new Date('2026-08-05T10:00:01.000Z') }),
     ];
     repository.findMany.mockResolvedValue(rows);
-    const result = await service.list({ ...baseQuery, limit: 1 }, AUTH_HEADER);
+    const result = await service.list({ ...baseQuery, limit: 1 }, managerCaller, AUTH_HEADER);
     expect(result.cards).toHaveLength(1);
     expect(result.cards[0].cardId).toBe('a');
     expect(result.nextCursor).not.toBeNull();
@@ -136,19 +150,20 @@ describe('EscalationService', () => {
     const cursor = Buffer.from(
       '2026-08-05T10:00:00.000Z|11111111-1111-1111-1111-111111111111',
     ).toString('base64url');
-    await service.list({ ...baseQuery, cursor }, AUTH_HEADER);
+    await service.list({ ...baseQuery, cursor }, managerCaller, AUTH_HEADER);
     expect(repository.findMany).toHaveBeenCalledWith(
       { ...baseQuery, cursor },
       {
         createdAt: new Date('2026-08-05T10:00:00.000Z'),
         id: '11111111-1111-1111-1111-111111111111',
       },
+      undefined,
     );
   });
 
   it('rejects a malformed cursor with a 400', async () => {
     await expect(
-      service.list({ ...baseQuery, cursor: 'not-valid-base64!!' }, AUTH_HEADER),
+      service.list({ ...baseQuery, cursor: 'not-valid-base64!!' }, managerCaller, AUTH_HEADER),
     ).rejects.toMatchObject({
       status: 400,
     });
@@ -158,7 +173,7 @@ describe('EscalationService', () => {
   describe('list enrichment', () => {
     it('enriches each card with beneficiary + Sakhi details', async () => {
       repository.findMany.mockResolvedValue([row({ escalationType: 'ANC_2_MISSED' })]);
-      const result = await service.list(baseQuery, AUTH_HEADER);
+      const result = await service.list(baseQuery, managerCaller, AUTH_HEADER);
       expect(result.cards[0]).toMatchObject({
         beneficiaryName: 'Nithya Sakhi Mother 4',
         beneficiaryPhone: '9810015405',
@@ -173,7 +188,7 @@ describe('EscalationService', () => {
       repository.findMany.mockResolvedValue([
         row({ id: 'card-1', escalationType: 'ANC_2_MISSED' }),
       ]);
-      const result = await service.list(baseQuery, AUTH_HEADER);
+      const result = await service.list(baseQuery, managerCaller, AUTH_HEADER);
       expect(result.cards[0]).toMatchObject({
         cardId: 'card-1',
         cardType: 'MISSED_VISIT',
@@ -191,7 +206,7 @@ describe('EscalationService', () => {
         row({ id: 'card-1', escalationType: 'ANC_2_MISSED' }),
         row({ id: 'card-2', escalationType: 'EDD_NEARING' }),
       ]);
-      await service.list(baseQuery, AUTH_HEADER);
+      await service.list(baseQuery, managerCaller, AUTH_HEADER);
       expect(beneficiaryClient.getById).toHaveBeenCalledTimes(1);
       expect(sakhiClient.findById).toHaveBeenCalledTimes(1);
     });
@@ -199,7 +214,7 @@ describe('EscalationService', () => {
     it("nulls a row's enrichment fields (without failing the list) when the beneficiary lookup fails", async () => {
       repository.findMany.mockResolvedValue([row({ escalationType: 'ANC_2_MISSED' })]);
       beneficiaryClient.getById.mockRejectedValue(new Error('beneficiary-service down'));
-      const result = await service.list(baseQuery, AUTH_HEADER);
+      const result = await service.list(baseQuery, managerCaller, AUTH_HEADER);
       expect(result.cards[0]).toMatchObject({
         beneficiaryName: null,
         beneficiaryPhone: null,
@@ -214,12 +229,30 @@ describe('EscalationService', () => {
     it('nulls only the Sakhi fields when the Sakhi lookup fails', async () => {
       repository.findMany.mockResolvedValue([row({ escalationType: 'ANC_2_MISSED' })]);
       sakhiClient.findById.mockRejectedValue(new Error('auth-service down'));
-      const result = await service.list(baseQuery, AUTH_HEADER);
+      const result = await service.list(baseQuery, managerCaller, AUTH_HEADER);
       expect(result.cards[0]).toMatchObject({
         beneficiaryName: 'Nithya Sakhi Mother 4',
         sakhiName: null,
         sakhiContact: null,
       });
+    });
+  });
+
+  describe('list scoping', () => {
+    it("passes the SUPERVISOR caller's own id as assignedSupervisorId to the repository", async () => {
+      repository.findMany.mockResolvedValue([]);
+
+      await service.list(baseQuery, supervisorCaller('supervisor-1'), AUTH_HEADER);
+
+      expect(repository.findMany).toHaveBeenCalledWith(baseQuery, null, 'supervisor-1');
+    });
+
+    it('passes no supervisor filter for a MANAGER/ADMIN caller (unrestricted)', async () => {
+      repository.findMany.mockResolvedValue([]);
+
+      await service.list(baseQuery, managerCaller, AUTH_HEADER);
+
+      expect(repository.findMany).toHaveBeenCalledWith(baseQuery, null, undefined);
     });
   });
 
@@ -356,6 +389,71 @@ describe('EscalationService', () => {
       await expect(
         service.findById('11111111-1111-1111-1111-111111111111', AUTH_HEADER),
       ).rejects.toThrow('auth-service down');
+    });
+  });
+
+  describe('findManyByIds', () => {
+    it('returns the enriched card shape for a mix of MISSED_VISIT and EDD_NEARING ids', async () => {
+      repository.findManyByIds.mockResolvedValue([
+        row({ id: 'card-1', escalationType: 'ANC_2_MISSED' }),
+        row({ id: 'card-2', escalationType: 'EDD_NEARING' }),
+      ]);
+      const result = await service.findManyByIds(['card-1', 'card-2'], AUTH_HEADER);
+      expect(repository.findManyByIds).toHaveBeenCalledWith(['card-1', 'card-2']);
+      expect(result).toHaveLength(2);
+      expect(result.find((card) => card.cardId === 'card-1')).toMatchObject({
+        cardType: 'MISSED_VISIT',
+        cardSource: 'escalation_events',
+        beneficiaryName: 'Nithya Sakhi Mother 4',
+        sakhiName: 'Priya Sakhi',
+      });
+      expect(result.find((card) => card.cardId === 'card-2')).toMatchObject({
+        cardType: 'EDD_NEARING',
+        cardSource: 'escalation_events',
+      });
+    });
+
+    it('silently omits an id the repository does not return (unknown/soft-deleted)', async () => {
+      repository.findManyByIds.mockResolvedValue([
+        row({ id: 'card-1', escalationType: 'EDD_NEARING' }),
+      ]);
+      const result = await service.findManyByIds(['card-1', 'unknown-id'], AUTH_HEADER);
+      expect(result).toHaveLength(1);
+      expect(result[0].cardId).toBe('card-1');
+    });
+
+    it('omits an escalation type outside the 8 supported card types', async () => {
+      repository.findManyByIds.mockResolvedValue([row({ escalationType: 'SYNC_DELAY' })]);
+      const result = await service.findManyByIds(
+        ['11111111-1111-1111-1111-111111111111'],
+        AUTH_HEADER,
+      );
+      expect(result).toHaveLength(0);
+    });
+
+    it('returns a single row for a duplicate id passed twice (DB IN(...) dedupes naturally)', async () => {
+      repository.findManyByIds.mockResolvedValue([
+        row({ id: 'card-1', escalationType: 'EDD_NEARING' }),
+      ]);
+      const result = await service.findManyByIds(['card-1', 'card-1'], AUTH_HEADER);
+      expect(result).toHaveLength(1);
+    });
+
+    it('does not fail the whole batch when one row’s enrichment lookup fails (best-effort, like list())', async () => {
+      repository.findManyByIds.mockResolvedValue([
+        row({ id: 'card-1', beneficiaryId: 'beneficiary-1', escalationType: 'EDD_NEARING' }),
+        row({ id: 'card-2', beneficiaryId: 'beneficiary-2', escalationType: 'EDD_NEARING' }),
+      ]);
+      beneficiaryClient.getById.mockImplementation(async (id: string) => {
+        if (id === 'beneficiary-2') throw new Error('beneficiary-service down');
+        return beneficiaryRecord({ id });
+      });
+      const result = await service.findManyByIds(['card-1', 'card-2'], AUTH_HEADER);
+      expect(result).toHaveLength(2);
+      expect(result.find((card) => card.cardId === 'card-1')?.beneficiaryName).toBe(
+        'Nithya Sakhi Mother 4',
+      );
+      expect(result.find((card) => card.cardId === 'card-2')?.beneficiaryName).toBeNull();
     });
   });
 

@@ -8,16 +8,25 @@ export class QuickResponseRepository {
    * Cursor-paginated by `(createdAt, id)` DESC, same scheme as
    * notification-escalation-service's escalation.repository.ts — `id`
    * breaks ties within the same millisecond.
+   *
+   * `sakhiIds` scopes results to only requests raised by one of these
+   * Sakhis — `null` for a privileged (MANAGER/ADMIN) caller, an array (the
+   * caller's own assigned Sakhis, possibly empty) for a SUPERVISOR caller.
+   * approval_requests has no supervisorId/projectId column of its own, so
+   * this is resolved by the caller (see QuickResponseService.list) via
+   * auth-service instead of being scoped here directly.
    */
   findMany(
     decisionStatusLookupId: string,
     limit: number,
     cursor: { createdAt: Date; id: string } | null,
+    sakhiIds: string[] | null,
   ) {
     return this.prisma.approvalRequest.findMany({
       where: {
         decisionStatusLookupId,
         isDeleted: false,
+        ...(sakhiIds ? { requestedByUserId: { in: sakhiIds } } : {}),
         ...(cursor
           ? {
               OR: [
@@ -34,6 +43,19 @@ export class QuickResponseRepository {
 
   findById(id: string) {
     return this.prisma.approvalRequest.findFirst({ where: { id, isDeleted: false } });
+  }
+
+  /**
+   * Batch counterpart of findById, for QuickResponseService.getCardDetails —
+   * one query for a whole batch of candidate card ids instead of one
+   * findById per card. No pagination needed: the caller bounds `ids` to
+   * MAX_BATCH_CARD_IDS entries before calling this. An id not found (or
+   * soft-deleted) is simply absent from the result, not an error — matches
+   * the batch "by-ids" contract used across every other service in this
+   * fix.
+   */
+  findManyByIds(ids: string[]) {
+    return this.prisma.approvalRequest.findMany({ where: { id: { in: ids }, isDeleted: false } });
   }
 
   /**

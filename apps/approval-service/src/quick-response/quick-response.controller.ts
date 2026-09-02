@@ -1,6 +1,10 @@
 import { asyncHandler, ok, unauthorized } from '../app.module';
 import type { QuickResponseService } from './quick-response.service';
 import type { listQuickResponseSchema } from './dto/list-quick-response.dto';
+import {
+  parseCardIdsParam,
+  type getQuickResponseDetailsSchema,
+} from './dto/get-quick-response-details.dto';
 import type { z } from 'zod';
 
 /**
@@ -10,16 +14,27 @@ import type { z } from 'zod';
 export function createQuickResponseController(service: QuickResponseService) {
   return {
     list: asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
       const authorizationHeader = req.header('authorization');
       if (!authorizationHeader) return next(unauthorized());
       const query = req.query as unknown as z.infer<typeof listQuickResponseSchema>;
-      res.json(ok(await service.list(query, authorizationHeader)));
+      res.json(ok(await service.list(query, req.user, authorizationHeader)));
     }),
 
     getCardDetail: asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
       const authorizationHeader = req.header('authorization');
       if (!authorizationHeader) return next(unauthorized());
-      res.json(ok(await service.getCardDetail(req.params.cardId, authorizationHeader)));
+      res.json(ok(await service.getCardDetail(req.params.cardId, req.user, authorizationHeader)));
+    }),
+
+    getCardDetails: asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const query = req.query as unknown as z.infer<typeof getQuickResponseDetailsSchema>;
+      const cardIds = parseCardIdsParam(query.cardIds);
+      res.json(ok(await service.getCardDetails(cardIds, req.user, authorizationHeader)));
     }),
 
     decide: asyncHandler(async (req, res, next) => {

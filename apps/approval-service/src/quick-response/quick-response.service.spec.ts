@@ -63,6 +63,7 @@ describe('QuickResponseService', () => {
   const repository = {
     findMany: jest.fn(),
     findById: jest.fn(),
+    findManyByIds: jest.fn(),
     markDecided: jest.fn(),
   } as unknown as jest.Mocked<QuickResponseRepository>;
   const lookupClient = {
@@ -72,6 +73,7 @@ describe('QuickResponseService', () => {
   const escalationClient = {
     list: jest.fn(),
     findById: jest.fn(),
+    findManyByIds: jest.fn(),
     acknowledgeEddNearing: jest.fn(),
     decideMissedVisit: jest.fn(),
   } as unknown as jest.Mocked<EscalationClient>;
@@ -79,33 +81,52 @@ describe('QuickResponseService', () => {
     decide: jest.fn(),
     getDecisionStatusByIds: jest.fn(),
     getById: jest.fn(),
+    getManyByIds: jest.fn(),
   } as unknown as jest.Mocked<ReopenRequestClient>;
   const beneficiaryClient = {
     applyLmpChange: jest.fn(),
     getById: jest.fn(),
     getManyWithRisk: jest.fn(),
+    getManyDetailByIds: jest.fn(),
   } as unknown as jest.Mocked<BeneficiaryClient>;
   const notificationClient = { notify: jest.fn() } as unknown as jest.Mocked<NotificationClient>;
   const closureClient = {
     decide: jest.fn(),
     getDecisionStatusByIds: jest.fn(),
     getById: jest.fn(),
+    getManyByIds: jest.fn(),
   } as unknown as jest.Mocked<ClosureClient>;
   const referralClient = {
     decide: jest.fn(),
     getDecisionStatusByIds: jest.fn(),
     getById: jest.fn(),
+    getManyByIds: jest.fn(),
   } as unknown as jest.Mocked<ReferralClient>;
   const incentiveClient = {
     triggerAccompaniedReferral: jest.fn(),
   } as unknown as jest.Mocked<IncentiveClient>;
   const userClient = { reactivateUser: jest.fn() } as unknown as jest.Mocked<UserClient>;
-  const sakhiClient = { getById: jest.fn() } as unknown as jest.Mocked<SakhiClient>;
-  const geographyClient = { getById: jest.fn() } as unknown as jest.Mocked<GeographyClient>;
+  const sakhiClient = {
+    getById: jest.fn(),
+    getManyByIds: jest.fn(),
+    getManyRecordsByIds: jest.fn(),
+    getOwnSakhiIds: jest.fn(),
+  } as unknown as jest.Mocked<SakhiClient>;
+  const geographyClient = {
+    getById: jest.fn(),
+    getManyByIds: jest.fn(),
+  } as unknown as jest.Mocked<GeographyClient>;
   const visitClient = { getById: jest.fn() } as unknown as jest.Mocked<VisitClient>;
   let service: QuickResponseService;
   const authHeader = 'Bearer token';
   let consoleErrorSpy: jest.SpyInstance;
+
+  const managerCaller = { id: 'manager-1', roles: ['MANAGER'], projectId: null };
+  const supervisorCaller = (projectId: string | null, id = 'supervisor-1') => ({
+    id,
+    roles: ['SUPERVISOR'],
+    projectId,
+  });
 
   const DECIDED_BY_USER_ID = '55555555-5555-5555-5555-555555555555';
 
@@ -135,6 +156,7 @@ describe('QuickResponseService', () => {
     // affected by it — tests asserting the batch-enrichment behavior itself
     // override these per-call.
     beneficiaryClient.getManyWithRisk.mockResolvedValue(new Map());
+    sakhiClient.getManyByIds.mockResolvedValue(new Map());
     service = new QuickResponseService(
       repository,
       lookupClient,
@@ -169,7 +191,11 @@ describe('QuickResponseService', () => {
         nextCursor: null,
       });
 
-      const result = await service.list({ status: 'PENDING', limit: 50 }, authHeader);
+      const result = await service.list(
+        { status: 'PENDING', limit: 50 },
+        managerCaller,
+        authHeader,
+      );
       expect(result.cards).toHaveLength(2);
       expect(result.cards[0].cardId).toBe('66666666-6666-6666-6666-666666666666');
       expect(result.cards[1].cardId).toBe('11111111-1111-1111-1111-111111111111');
@@ -182,7 +208,7 @@ describe('QuickResponseService', () => {
       repository.findMany.mockResolvedValue([]);
       escalationClient.list.mockResolvedValue({ cards: [], nextCursor: null });
 
-      await service.list({ status: 'PENDING', limit: 50 }, authHeader);
+      await service.list({ status: 'PENDING', limit: 50 }, managerCaller, authHeader);
       expect(escalationClient.list).toHaveBeenCalledWith('OPEN', undefined, 50, authHeader);
     });
 
@@ -192,7 +218,11 @@ describe('QuickResponseService', () => {
       );
       repository.findMany.mockResolvedValue([]);
 
-      const result = await service.list({ status: 'APPROVED', limit: 50 }, authHeader);
+      const result = await service.list(
+        { status: 'APPROVED', limit: 50 },
+        managerCaller,
+        authHeader,
+      );
       expect(escalationClient.list).not.toHaveBeenCalled();
       expect(result.cards).toHaveLength(0);
     });
@@ -201,14 +231,18 @@ describe('QuickResponseService', () => {
       lookupClient.resolveApprovalStatusId.mockResolvedValue(null);
       escalationClient.list.mockResolvedValue({ cards: [], nextCursor: null });
 
-      const result = await service.list({ status: 'BOGUS', limit: 50 }, authHeader);
+      const result = await service.list({ status: 'BOGUS', limit: 50 }, managerCaller, authHeader);
       expect(result.cards).toHaveLength(0);
       expect(repository.findMany).not.toHaveBeenCalled();
     });
 
     it('rejects a malformed cursor with a 400', async () => {
       await expect(
-        service.list({ status: 'PENDING', cursor: 'not-valid!!', limit: 50 }, authHeader),
+        service.list(
+          { status: 'PENDING', cursor: 'not-valid!!', limit: 50 },
+          managerCaller,
+          authHeader,
+        ),
       ).rejects.toMatchObject({ status: 400 });
     });
 
@@ -219,14 +253,15 @@ describe('QuickResponseService', () => {
         beneficiaryClient.getManyWithRisk.mockResolvedValue(
           new Map([['22222222-2222-2222-2222-222222222222', 'Sita Kumari']]),
         );
-        sakhiClient.getById.mockResolvedValue({
-          sakhiId: '44444444-4444-4444-4444-444444444444',
-          displayName: 'Asha Devi',
-          mobileNumber: '9999999999',
-          supervisorId: null,
-        });
+        sakhiClient.getManyByIds.mockResolvedValue(
+          new Map([['44444444-4444-4444-4444-444444444444', 'Asha Devi']]),
+        );
 
-        const result = await service.list({ status: 'PENDING', limit: 50 }, authHeader);
+        const result = await service.list(
+          { status: 'PENDING', limit: 50 },
+          managerCaller,
+          authHeader,
+        );
         expect(result.cards[0]).toMatchObject({
           beneficiaryName: 'Sita Kumari',
           sakhiName: 'Asha Devi',
@@ -237,7 +272,11 @@ describe('QuickResponseService', () => {
         repository.findMany.mockResolvedValue([]);
         escalationClient.list.mockResolvedValue({ cards: [escalationCard()], nextCursor: null });
 
-        const result = await service.list({ status: 'PENDING', limit: 50 }, authHeader);
+        const result = await service.list(
+          { status: 'PENDING', limit: 50 },
+          managerCaller,
+          authHeader,
+        );
         expect(result.cards[0]).not.toHaveProperty('beneficiaryName');
         expect(result.cards[0]).not.toHaveProperty('sakhiName');
       });
@@ -249,7 +288,7 @@ describe('QuickResponseService', () => {
         ]);
         escalationClient.list.mockResolvedValue({ cards: [], nextCursor: null });
 
-        await service.list({ status: 'PENDING', limit: 50 }, authHeader);
+        await service.list({ status: 'PENDING', limit: 50 }, managerCaller, authHeader);
 
         expect(beneficiaryClient.getManyWithRisk).toHaveBeenCalledTimes(1);
         expect(beneficiaryClient.getManyWithRisk).toHaveBeenCalledWith(
@@ -258,18 +297,18 @@ describe('QuickResponseService', () => {
         );
       });
 
-      it('calls sakhiClient.getById once per unique requestedByUserId, not once per row', async () => {
+      it('calls sakhiClient.getManyByIds once with a deduped requestedByUserId list, not once per row', async () => {
         repository.findMany.mockResolvedValue([
           approvalRequest({ id: 'card-1' }),
           approvalRequest({ id: 'card-2' }),
         ]);
         escalationClient.list.mockResolvedValue({ cards: [], nextCursor: null });
 
-        await service.list({ status: 'PENDING', limit: 50 }, authHeader);
+        await service.list({ status: 'PENDING', limit: 50 }, managerCaller, authHeader);
 
-        expect(sakhiClient.getById).toHaveBeenCalledTimes(1);
-        expect(sakhiClient.getById).toHaveBeenCalledWith(
-          '44444444-4444-4444-4444-444444444444',
+        expect(sakhiClient.getManyByIds).toHaveBeenCalledTimes(1);
+        expect(sakhiClient.getManyByIds).toHaveBeenCalledWith(
+          ['44444444-4444-4444-4444-444444444444'],
           authHeader,
         );
       });
@@ -279,14 +318,15 @@ describe('QuickResponseService', () => {
           approvalRequest({ requestType: 'DATA_RESTORE', beneficiaryId: null }),
         ]);
         escalationClient.list.mockResolvedValue({ cards: [], nextCursor: null });
-        sakhiClient.getById.mockResolvedValue({
-          sakhiId: '44444444-4444-4444-4444-444444444444',
-          displayName: 'Meena Kumari',
-          mobileNumber: '9999999999',
-          supervisorId: null,
-        });
+        sakhiClient.getManyByIds.mockResolvedValue(
+          new Map([['44444444-4444-4444-4444-444444444444', 'Meena Kumari']]),
+        );
 
-        const result = await service.list({ status: 'PENDING', limit: 50 }, authHeader);
+        const result = await service.list(
+          { status: 'PENDING', limit: 50 },
+          managerCaller,
+          authHeader,
+        );
         expect(result.cards[0]).toMatchObject({ sakhiName: 'Meena Kumari', beneficiaryName: null });
       });
 
@@ -296,7 +336,11 @@ describe('QuickResponseService', () => {
         ]);
         escalationClient.list.mockResolvedValue({ cards: [], nextCursor: null });
 
-        const result = await service.list({ status: 'PENDING', limit: 50 }, authHeader);
+        const result = await service.list(
+          { status: 'PENDING', limit: 50 },
+          managerCaller,
+          authHeader,
+        );
         expect(result.cards[0]).toMatchObject({ beneficiaryName: null });
         expect(beneficiaryClient.getManyWithRisk).not.toHaveBeenCalled();
       });
@@ -305,10 +349,10 @@ describe('QuickResponseService', () => {
         repository.findMany.mockResolvedValue([]);
         escalationClient.list.mockResolvedValue({ cards: [escalationCard()], nextCursor: null });
 
-        await service.list({ status: 'PENDING', limit: 50 }, authHeader);
+        await service.list({ status: 'PENDING', limit: 50 }, managerCaller, authHeader);
 
         expect(beneficiaryClient.getManyWithRisk).not.toHaveBeenCalled();
-        expect(sakhiClient.getById).not.toHaveBeenCalled();
+        expect(sakhiClient.getManyByIds).not.toHaveBeenCalled();
       });
 
       it('degrades beneficiaryName to null for the whole page, without failing list(), when the batch call throws', async () => {
@@ -316,40 +360,27 @@ describe('QuickResponseService', () => {
         escalationClient.list.mockResolvedValue({ cards: [], nextCursor: null });
         beneficiaryClient.getManyWithRisk.mockRejectedValue(new Error('beneficiary-service down'));
 
-        const result = await service.list({ status: 'PENDING', limit: 50 }, authHeader);
+        const result = await service.list(
+          { status: 'PENDING', limit: 50 },
+          managerCaller,
+          authHeader,
+        );
         expect(result.cards[0]).toMatchObject({ beneficiaryName: null });
         expect(consoleErrorSpy).toHaveBeenCalled();
       });
 
-      it('resolves one Sakhi failing to null without affecting a different Sakhi on the same page', async () => {
-        repository.findMany.mockResolvedValue([
-          approvalRequest({
-            id: 'card-1',
-            requestedByUserId: 'sakhi-a',
-            beneficiaryId: 'beneficiary-a',
-          }),
-          approvalRequest({
-            id: 'card-2',
-            requestedByUserId: 'sakhi-b',
-            beneficiaryId: 'beneficiary-b',
-          }),
-        ]);
+      it('degrades sakhiName to null for the whole page, without failing list(), when the batch call throws', async () => {
+        repository.findMany.mockResolvedValue([approvalRequest()]);
         escalationClient.list.mockResolvedValue({ cards: [], nextCursor: null });
-        sakhiClient.getById.mockImplementation(async (sakhiId: string) => {
-          if (sakhiId === 'sakhi-a') throw new Error('auth-service unreachable');
-          return {
-            sakhiId: 'sakhi-b',
-            displayName: 'Reachable Sakhi',
-            mobileNumber: '9999999999',
-            supervisorId: null,
-          };
-        });
+        sakhiClient.getManyByIds.mockRejectedValue(new Error('auth-service unreachable'));
 
-        const result = await service.list({ status: 'PENDING', limit: 50 }, authHeader);
-        const card1 = result.cards.find((c) => c.cardId === 'card-1');
-        const card2 = result.cards.find((c) => c.cardId === 'card-2');
-        expect(card1).toMatchObject({ sakhiName: null });
-        expect(card2).toMatchObject({ sakhiName: 'Reachable Sakhi' });
+        const result = await service.list(
+          { status: 'PENDING', limit: 50 },
+          managerCaller,
+          authHeader,
+        );
+        expect(result.cards[0]).toMatchObject({ sakhiName: null });
+        expect(consoleErrorSpy).toHaveBeenCalled();
       });
     });
 
@@ -363,7 +394,11 @@ describe('QuickResponseService', () => {
           new Map([['closure-1', 'APPROVED']]),
         );
 
-        const result = await service.list({ status: 'PENDING', limit: 50 }, authHeader);
+        const result = await service.list(
+          { status: 'PENDING', limit: 50 },
+          managerCaller,
+          authHeader,
+        );
         expect(result.cards).toHaveLength(0);
       });
 
@@ -376,7 +411,11 @@ describe('QuickResponseService', () => {
           new Map([['reopen-1', 'REJECTED']]),
         );
 
-        const result = await service.list({ status: 'PENDING', limit: 50 }, authHeader);
+        const result = await service.list(
+          { status: 'PENDING', limit: 50 },
+          managerCaller,
+          authHeader,
+        );
         expect(result.cards).toHaveLength(0);
       });
 
@@ -391,7 +430,11 @@ describe('QuickResponseService', () => {
             new Map([['referral-1', 'COMPLETED']]),
           );
 
-          const result = await service.list({ status: 'PENDING', limit: 50 }, authHeader);
+          const result = await service.list(
+            { status: 'PENDING', limit: 50 },
+            managerCaller,
+            authHeader,
+          );
           expect(result.cards).toHaveLength(0);
         },
       );
@@ -411,7 +454,11 @@ describe('QuickResponseService', () => {
         ]);
         escalationClient.list.mockResolvedValue({ cards: [], nextCursor: null });
 
-        const result = await service.list({ status: 'PENDING', limit: 50 }, authHeader);
+        const result = await service.list(
+          { status: 'PENDING', limit: 50 },
+          managerCaller,
+          authHeader,
+        );
 
         expect(result.cards).toHaveLength(2);
         expect(closureClient.getDecisionStatusByIds).not.toHaveBeenCalled();
@@ -429,7 +476,11 @@ describe('QuickResponseService', () => {
         // is still "not pending".
         closureClient.getDecisionStatusByIds.mockResolvedValue(new Map());
 
-        const result = await service.list({ status: 'PENDING', limit: 50 }, authHeader);
+        const result = await service.list(
+          { status: 'PENDING', limit: 50 },
+          managerCaller,
+          authHeader,
+        );
         expect(result.cards).toHaveLength(0);
       });
 
@@ -438,7 +489,11 @@ describe('QuickResponseService', () => {
           approvalRequest({ requestType: 'CLOSURE_REVIEW', closureId: 'closure-1' }),
         ]);
 
-        const result = await service.list({ status: 'APPROVED', limit: 50 }, authHeader);
+        const result = await service.list(
+          { status: 'APPROVED', limit: 50 },
+          managerCaller,
+          authHeader,
+        );
 
         expect(result.cards).toHaveLength(1);
         expect(closureClient.getDecisionStatusByIds).not.toHaveBeenCalled();
@@ -464,7 +519,11 @@ describe('QuickResponseService', () => {
           new Map([['reopen-1', 'APPROVED']]),
         );
 
-        const result = await service.list({ status: 'PENDING', limit: 50 }, authHeader);
+        const result = await service.list(
+          { status: 'PENDING', limit: 50 },
+          managerCaller,
+          authHeader,
+        );
 
         // closure group failed -> passes through un-reconciled (still shown);
         // reopen group succeeded and found it decided -> excluded.
@@ -489,13 +548,70 @@ describe('QuickResponseService', () => {
         ]);
         escalationClient.list.mockResolvedValue({ cards: [], nextCursor: null });
 
-        await service.list({ status: 'PENDING', limit: 50 }, authHeader);
+        await service.list({ status: 'PENDING', limit: 50 }, managerCaller, authHeader);
 
         expect(closureClient.getDecisionStatusByIds).toHaveBeenCalledTimes(1);
         expect(closureClient.getDecisionStatusByIds).toHaveBeenCalledWith(
           ['closure-a', 'closure-b'],
           authHeader,
         );
+      });
+    });
+
+    describe('supervisor scoping', () => {
+      beforeEach(() => {
+        escalationClient.list.mockResolvedValue({ cards: [], nextCursor: null });
+      });
+
+      it("scopes a SUPERVISOR caller's approval_requests to their own resolved Sakhi ids", async () => {
+        sakhiClient.getOwnSakhiIds.mockResolvedValue(['sakhi-1', 'sakhi-2']);
+        repository.findMany.mockResolvedValue([]);
+
+        await service.list(
+          { status: 'PENDING', limit: 50 },
+          supervisorCaller('project-1'),
+          authHeader,
+        );
+
+        expect(sakhiClient.getOwnSakhiIds).toHaveBeenCalledWith('project-1', authHeader);
+        expect(repository.findMany).toHaveBeenCalledWith(
+          'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+          50,
+          null,
+          ['sakhi-1', 'sakhi-2'],
+        );
+      });
+
+      it('returns an empty approval_requests page (not an error) for a SUPERVISOR with zero assigned Sakhis', async () => {
+        sakhiClient.getOwnSakhiIds.mockResolvedValue([]);
+        repository.findMany.mockResolvedValue([]);
+
+        const result = await service.list(
+          { status: 'PENDING', limit: 50 },
+          supervisorCaller('project-1'),
+          authHeader,
+        );
+
+        expect(repository.findMany).toHaveBeenCalledWith(expect.any(String), 50, null, []);
+        expect(result.cards).toEqual([]);
+      });
+
+      it('does not restrict a MANAGER/ADMIN caller — repository is called with sakhiIds: null, no auth-service lookup made', async () => {
+        repository.findMany.mockResolvedValue([]);
+
+        await service.list({ status: 'PENDING', limit: 50 }, managerCaller, authHeader);
+
+        expect(sakhiClient.getOwnSakhiIds).not.toHaveBeenCalled();
+        expect(repository.findMany).toHaveBeenCalledWith(expect.any(String), 50, null, null);
+      });
+
+      it('fails closed to zero accessible Sakhis for a SUPERVISOR caller with no projectId on their scope', async () => {
+        repository.findMany.mockResolvedValue([]);
+
+        await service.list({ status: 'PENDING', limit: 50 }, supervisorCaller(null), authHeader);
+
+        expect(sakhiClient.getOwnSakhiIds).not.toHaveBeenCalled();
+        expect(repository.findMany).toHaveBeenCalledWith(expect.any(String), 50, null, []);
       });
     });
   });
@@ -546,8 +662,85 @@ describe('QuickResponseService', () => {
       escalationClient.findById.mockResolvedValue(null);
 
       await expect(
-        service.getCardDetail('11111111-1111-1111-1111-111111111111', authHeader),
+        service.getCardDetail('11111111-1111-1111-1111-111111111111', managerCaller, authHeader),
       ).rejects.toMatchObject({ status: 404 });
+    });
+
+    describe('supervisor scoping', () => {
+      it("returns the card when the raising Sakhi is in the SUPERVISOR caller's own roster", async () => {
+        sakhiClient.getOwnSakhiIds.mockResolvedValue(['44444444-4444-4444-4444-444444444444']);
+        repository.findById.mockResolvedValue(
+          approvalRequest({ requestType: 'REOPEN', reopenRequestId: 'reopen-1' }),
+        );
+        reopenRequestClient.getById.mockResolvedValue({
+          id: 'reopen-1',
+          beneficiaryId: '22222222-2222-2222-2222-222222222222',
+          supervisorStatus: 'PENDING',
+          requestReason: 'CLOSED_BY_MISTAKE',
+          decisionNotes: null,
+        });
+
+        const result = await service.getCardDetail(
+          '11111111-1111-1111-1111-111111111111',
+          supervisorCaller('project-1'),
+          authHeader,
+        );
+
+        expect(result).toMatchObject({ reasonForReopen: 'CLOSED_BY_MISTAKE' });
+      });
+
+      it("rejects with 403 when the raising Sakhi is outside the SUPERVISOR caller's own roster, without calling any downstream enrichment client", async () => {
+        sakhiClient.getOwnSakhiIds.mockResolvedValue(['some-other-sakhi']);
+        repository.findById.mockResolvedValue(
+          approvalRequest({ requestType: 'REOPEN', reopenRequestId: 'reopen-1' }),
+        );
+
+        await expect(
+          service.getCardDetail(
+            '11111111-1111-1111-1111-111111111111',
+            supervisorCaller('project-1'),
+            authHeader,
+          ),
+        ).rejects.toMatchObject({ status: 403 });
+        expect(beneficiaryClient.getById).not.toHaveBeenCalled();
+        expect(reopenRequestClient.getById).not.toHaveBeenCalled();
+      });
+
+      it('does not restrict a MANAGER/ADMIN caller — no auth-service roster lookup is made', async () => {
+        repository.findById.mockResolvedValue(
+          approvalRequest({ requestType: 'REOPEN', reopenRequestId: 'reopen-1' }),
+        );
+        reopenRequestClient.getById.mockResolvedValue({
+          id: 'reopen-1',
+          beneficiaryId: '22222222-2222-2222-2222-222222222222',
+          supervisorStatus: 'PENDING',
+          requestReason: 'CLOSED_BY_MISTAKE',
+          decisionNotes: null,
+        });
+
+        await service.getCardDetail(
+          '11111111-1111-1111-1111-111111111111',
+          managerCaller,
+          authHeader,
+        );
+
+        expect(sakhiClient.getOwnSakhiIds).not.toHaveBeenCalled();
+      });
+
+      it('fails closed (403) for a SUPERVISOR caller with no projectId on their scope', async () => {
+        repository.findById.mockResolvedValue(
+          approvalRequest({ requestType: 'REOPEN', reopenRequestId: 'reopen-1' }),
+        );
+
+        await expect(
+          service.getCardDetail(
+            '11111111-1111-1111-1111-111111111111',
+            supervisorCaller(null),
+            authHeader,
+          ),
+        ).rejects.toMatchObject({ status: 403 });
+        expect(sakhiClient.getOwnSakhiIds).not.toHaveBeenCalled();
+      });
     });
 
     it('LMP_CHANGE: returns names, old/new LMP, risk/contact, and null sonography asset id when absent', async () => {
@@ -561,6 +754,7 @@ describe('QuickResponseService', () => {
 
       const result = await service.getCardDetail(
         '11111111-1111-1111-1111-111111111111',
+        managerCaller,
         authHeader,
       );
 
@@ -590,6 +784,7 @@ describe('QuickResponseService', () => {
 
       const result = await service.getCardDetail(
         '11111111-1111-1111-1111-111111111111',
+        managerCaller,
         authHeader,
       );
 
@@ -694,6 +889,7 @@ describe('QuickResponseService', () => {
 
       const result = await service.getCardDetail(
         '11111111-1111-1111-1111-111111111111',
+        managerCaller,
         authHeader,
       );
 
@@ -724,6 +920,7 @@ describe('QuickResponseService', () => {
 
       const result = await service.getCardDetail(
         '11111111-1111-1111-1111-111111111111',
+        managerCaller,
         authHeader,
       );
 
@@ -760,6 +957,7 @@ describe('QuickResponseService', () => {
 
       const result = await service.getCardDetail(
         '11111111-1111-1111-1111-111111111111',
+        managerCaller,
         authHeader,
       );
 
@@ -796,6 +994,7 @@ describe('QuickResponseService', () => {
 
       const result = await service.getCardDetail(
         '11111111-1111-1111-1111-111111111111',
+        managerCaller,
         authHeader,
       );
 
@@ -820,6 +1019,7 @@ describe('QuickResponseService', () => {
 
       const result = await service.getCardDetail(
         '66666666-6666-6666-6666-666666666666',
+        managerCaller,
         authHeader,
       );
 
@@ -865,6 +1065,7 @@ describe('QuickResponseService', () => {
 
       const result = await service.getCardDetail(
         '11111111-1111-1111-1111-111111111111',
+        managerCaller,
         authHeader,
       );
 
@@ -874,6 +1075,234 @@ describe('QuickResponseService', () => {
       });
       expect((result as unknown as { visitReference: unknown }).visitReference).toMatchObject({
         id: 'visit-1',
+      });
+    });
+
+    describe('concurrency: resolveCommonFields runs alongside the card-type resource fetch', () => {
+      /** Blocks beneficiaryClient.getById until releaseBeneficiary() is called,
+       * so tests can prove the other fetch was already dispatched before the
+       * beneficiary lookup resolved. */
+      function deferBeneficiaryLookup() {
+        let releaseBeneficiary!: () => void;
+        const gate = new Promise<void>((resolve) => {
+          releaseBeneficiary = resolve;
+        });
+        beneficiaryClient.getById.mockImplementation(async () => {
+          await gate;
+          return fullBeneficiary();
+        });
+        return releaseBeneficiary;
+      }
+
+      it('CLOSURE_REVIEW: calls closureClient.getById without waiting for the beneficiary lookup to resolve', async () => {
+        repository.findById.mockResolvedValue(
+          approvalRequest({
+            requestType: 'CLOSURE_REVIEW',
+            reopenRequestId: null,
+            closureId: 'closure-1',
+          }),
+        );
+        const releaseBeneficiary = deferBeneficiaryLookup();
+        closureClient.getById.mockResolvedValue({
+          id: 'closure-1',
+          beneficiaryId: '22222222-2222-2222-2222-222222222222',
+          supervisorStatus: 'PENDING',
+          closureType: 'MEDICAL',
+          closureReasonLookupValueId: 'reason-1',
+          closureDate: '2026-08-01T00:00:00.000Z',
+          supervisorNotes: null,
+        });
+
+        const pending = service.getCardDetail(
+          '11111111-1111-1111-1111-111111111111',
+          managerCaller,
+          authHeader,
+        );
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(closureClient.getById).toHaveBeenCalledWith('closure-1', authHeader);
+
+        releaseBeneficiary();
+        await pending;
+      });
+
+      it('REOPEN: calls reopenRequestClient.getById without waiting for the beneficiary lookup to resolve', async () => {
+        repository.findById.mockResolvedValue(
+          approvalRequest({ requestType: 'REOPEN', reopenRequestId: 'reopen-1' }),
+        );
+        const releaseBeneficiary = deferBeneficiaryLookup();
+        reopenRequestClient.getById.mockResolvedValue({
+          id: 'reopen-1',
+          beneficiaryId: '22222222-2222-2222-2222-222222222222',
+          supervisorStatus: 'PENDING',
+          requestReason: 'CLOSED_BY_MISTAKE',
+          decisionNotes: null,
+        });
+
+        const pending = service.getCardDetail(
+          '11111111-1111-1111-1111-111111111111',
+          managerCaller,
+          authHeader,
+        );
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(reopenRequestClient.getById).toHaveBeenCalledWith('reopen-1', authHeader);
+
+        releaseBeneficiary();
+        await pending;
+      });
+
+      it('ACCOMPANIED_REFERRAL: calls referralClient.getById without waiting for the beneficiary lookup to resolve', async () => {
+        repository.findById.mockResolvedValue(
+          approvalRequest({
+            requestType: 'ACCOMPANIED_REFERRAL',
+            reopenRequestId: null,
+            referralId: 'referral-1',
+          }),
+        );
+        const releaseBeneficiary = deferBeneficiaryLookup();
+        referralClient.getById.mockResolvedValue({
+          id: 'referral-1',
+          beneficiaryId: '22222222-2222-2222-2222-222222222222',
+          status: 'PENDING_FOLLOWUP',
+          visitId: null,
+          referralDate: '2026-07-01T00:00:00.000Z',
+          facilityType: 'PHC',
+          facilityName: 'Sample PHC',
+          photoEvidenceMediaAssetId: null,
+          incompleteCount: 0,
+          latestFollowup: null,
+        });
+
+        const pending = service.getCardDetail(
+          '11111111-1111-1111-1111-111111111111',
+          managerCaller,
+          authHeader,
+        );
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(referralClient.getById).toHaveBeenCalledWith('referral-1', authHeader);
+
+        releaseBeneficiary();
+        await pending;
+      });
+
+      it('REFERRAL_INCOMPLETE: calls referralClient.getById without waiting for the beneficiary lookup to resolve', async () => {
+        repository.findById.mockResolvedValue(
+          approvalRequest({
+            requestType: 'REFERRAL_INCOMPLETE',
+            reopenRequestId: null,
+            referralId: 'referral-1',
+          }),
+        );
+        const releaseBeneficiary = deferBeneficiaryLookup();
+        referralClient.getById.mockResolvedValue({
+          id: 'referral-1',
+          beneficiaryId: '22222222-2222-2222-2222-222222222222',
+          status: 'PENDING_FOLLOWUP',
+          visitId: null,
+          referralDate: '2026-07-01T00:00:00.000Z',
+          facilityType: null,
+          facilityName: null,
+          photoEvidenceMediaAssetId: null,
+          incompleteCount: 0,
+          latestFollowup: null,
+        });
+
+        const pending = service.getCardDetail(
+          '11111111-1111-1111-1111-111111111111',
+          managerCaller,
+          authHeader,
+        );
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(referralClient.getById).toHaveBeenCalledWith('referral-1', authHeader);
+
+        releaseBeneficiary();
+        await pending;
+      });
+
+      it('REFERRAL_INCOMPLETE: still calls visitClient.getById only after referral resolves, with referral.visitId', async () => {
+        repository.findById.mockResolvedValue(
+          approvalRequest({
+            requestType: 'REFERRAL_INCOMPLETE',
+            reopenRequestId: null,
+            referralId: 'referral-1',
+          }),
+        );
+        referralClient.getById.mockResolvedValue({
+          id: 'referral-1',
+          beneficiaryId: '22222222-2222-2222-2222-222222222222',
+          status: 'PENDING_FOLLOWUP',
+          visitId: 'visit-1',
+          referralDate: '2026-07-01T00:00:00.000Z',
+          facilityType: null,
+          facilityName: null,
+          photoEvidenceMediaAssetId: null,
+          incompleteCount: 0,
+          latestFollowup: null,
+        });
+        visitClient.getById.mockResolvedValue({
+          id: 'visit-1',
+          scheduleId: 'schedule-1',
+          actualVisitDate: null,
+          statusLookupValueId: 'status-1',
+        });
+
+        await service.getCardDetail(
+          '11111111-1111-1111-1111-111111111111',
+          managerCaller,
+          authHeader,
+        );
+
+        expect(visitClient.getById).toHaveBeenCalledWith('visit-1', authHeader);
+      });
+
+      it('CLOSURE_REVIEW: a closure lookup failure still degrades closureType to null instead of failing the card', async () => {
+        repository.findById.mockResolvedValue(
+          approvalRequest({
+            requestType: 'CLOSURE_REVIEW',
+            reopenRequestId: null,
+            closureId: 'closure-1',
+          }),
+        );
+        closureClient.getById.mockRejectedValue(new Error('closure-reopen-service unreachable'));
+
+        const result = await service.getCardDetail(
+          '11111111-1111-1111-1111-111111111111',
+          managerCaller,
+          authHeader,
+        );
+
+        expect(result).toMatchObject({ closureType: null });
+      });
+
+      it('CLOSURE_REVIEW: a core beneficiary-lookup failure still propagates and fails the whole card', async () => {
+        repository.findById.mockResolvedValue(
+          approvalRequest({
+            requestType: 'CLOSURE_REVIEW',
+            reopenRequestId: null,
+            closureId: 'closure-1',
+          }),
+        );
+        beneficiaryClient.getById.mockResolvedValue(null);
+        closureClient.getById.mockResolvedValue({
+          id: 'closure-1',
+          beneficiaryId: '22222222-2222-2222-2222-222222222222',
+          supervisorStatus: 'PENDING',
+          closureType: 'MEDICAL',
+          closureReasonLookupValueId: 'reason-1',
+          closureDate: '2026-08-01T00:00:00.000Z',
+          supervisorNotes: null,
+        });
+
+        await expect(
+          service.getCardDetail('11111111-1111-1111-1111-111111111111', managerCaller, authHeader),
+        ).rejects.toMatchObject({ status: 404 });
       });
     });
 
@@ -893,6 +1322,7 @@ describe('QuickResponseService', () => {
 
       const result = await service.getCardDetail(
         '66666666-6666-6666-6666-666666666666',
+        managerCaller,
         authHeader,
       );
 
@@ -922,6 +1352,7 @@ describe('QuickResponseService', () => {
 
       const result = await service.getCardDetail(
         '11111111-1111-1111-1111-111111111111',
+        managerCaller,
         authHeader,
       );
 
@@ -945,7 +1376,7 @@ describe('QuickResponseService', () => {
       );
 
       await expect(
-        service.getCardDetail('11111111-1111-1111-1111-111111111111', authHeader),
+        service.getCardDetail('11111111-1111-1111-1111-111111111111', managerCaller, authHeader),
       ).rejects.toMatchObject({ status: 502 });
     });
 
@@ -964,6 +1395,7 @@ describe('QuickResponseService', () => {
 
       const result = await service.getCardDetail(
         '11111111-1111-1111-1111-111111111111',
+        managerCaller,
         authHeader,
       );
 
@@ -978,6 +1410,7 @@ describe('QuickResponseService', () => {
 
       const result = await service.getCardDetail(
         '11111111-1111-1111-1111-111111111111',
+        managerCaller,
         authHeader,
       );
 
@@ -1477,7 +1910,11 @@ describe('QuickResponseService', () => {
       ]);
       escalationClient.list.mockResolvedValue({ cards: [], nextCursor: null });
 
-      const result = await service.list({ status: 'PENDING', limit: 50 }, authHeader);
+      const result = await service.list(
+        { status: 'PENDING', limit: 50 },
+        managerCaller,
+        authHeader,
+      );
       const types = result.cards.map((c) => c.cardType);
 
       expect(types).toEqual(
@@ -1859,6 +2296,96 @@ describe('QuickResponseService', () => {
       expect(result.decision).toBe('APPROVE');
     });
 
+    it('approves: calls beneficiaryClient.getById without waiting for referralClient.decide to resolve', async () => {
+      const card = accompaniedReferralRequest();
+      repository.findById.mockResolvedValue(card);
+      let releaseReferralDecide!: () => void;
+      referralClient.decide.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            releaseReferralDecide = () =>
+              resolve({
+                id: card.referralId as unknown as string,
+                beneficiaryId: card.beneficiaryId as string,
+                status: 'COMPLETED',
+              });
+          }),
+      );
+      beneficiaryClient.getById.mockResolvedValue({
+        id: card.beneficiaryId as string,
+        sakhiId: '88888888-8888-8888-8888-888888888888',
+        pii: { fullName: 'Test Beneficiary', padaId: null },
+        motherCaseDetails: null,
+        riskConditionSummaries: [],
+      });
+      sakhiClient.getById.mockResolvedValue({
+        supervisorId: null,
+        sakhiId: card.requestedByUserId as string,
+        displayName: 'Priya Sakhi',
+        mobileNumber: '+919000000123',
+      });
+
+      const pending = service.decide(
+        card.id as string,
+        { cardSource: 'approval_requests', decision: 'APPROVE' },
+        DECIDED_BY_USER_ID,
+        authHeader,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(beneficiaryClient.getById).toHaveBeenCalledWith(card.beneficiaryId, authHeader);
+
+      releaseReferralDecide();
+      await pending;
+    });
+
+    it('approves: propagates a referralClient.decide failure without triggering the incentive or marking the referral complete', async () => {
+      const card = accompaniedReferralRequest();
+      repository.findById.mockResolvedValue(card);
+      referralClient.decide.mockRejectedValue(new Error('risk-referral-service unreachable'));
+      beneficiaryClient.getById.mockResolvedValue({
+        id: card.beneficiaryId as string,
+        sakhiId: '88888888-8888-8888-8888-888888888888',
+        pii: { fullName: 'Test Beneficiary', padaId: null },
+        motherCaseDetails: null,
+        riskConditionSummaries: [],
+      });
+
+      await expect(
+        service.decide(
+          card.id as string,
+          { cardSource: 'approval_requests', decision: 'APPROVE' },
+          DECIDED_BY_USER_ID,
+          authHeader,
+        ),
+      ).rejects.toThrow('risk-referral-service unreachable');
+      expect(incentiveClient.triggerAccompaniedReferral).not.toHaveBeenCalled();
+      expect(notificationClient.notify).not.toHaveBeenCalled();
+    });
+
+    it('approves: propagates a beneficiary-lookup failure without triggering the incentive', async () => {
+      const card = accompaniedReferralRequest();
+      repository.findById.mockResolvedValue(card);
+      referralClient.decide.mockResolvedValue({
+        id: card.referralId as unknown as string,
+        beneficiaryId: card.beneficiaryId as string,
+        status: 'COMPLETED',
+      });
+      beneficiaryClient.getById.mockRejectedValue(new Error('beneficiary-service unreachable'));
+
+      await expect(
+        service.decide(
+          card.id as string,
+          { cardSource: 'approval_requests', decision: 'APPROVE' },
+          DECIDED_BY_USER_ID,
+          authHeader,
+        ),
+      ).rejects.toThrow('beneficiary-service unreachable');
+      expect(incentiveClient.triggerAccompaniedReferral).not.toHaveBeenCalled();
+      expect(notificationClient.notify).not.toHaveBeenCalled();
+    });
+
     it('rejects: makes no referral-side call, no incentive, still notifies', async () => {
       const card = accompaniedReferralRequest();
       repository.findById.mockResolvedValue(card);
@@ -1911,6 +2438,17 @@ describe('QuickResponseService', () => {
       referralClient.decide.mockRejectedValue(
         Object.assign(new Error('Cannot decide'), { status: 409 }),
       );
+      // The beneficiary lookup runs concurrently with referralClient.decide()
+      // (see the "without waiting for referralClient.decide to resolve" test
+      // above) — it IS still dispatched here, but its result is discarded
+      // once referralClient.decide rejects, so no incentive/notification follows.
+      beneficiaryClient.getById.mockResolvedValue({
+        id: card.beneficiaryId as string,
+        sakhiId: '88888888-8888-8888-8888-888888888888',
+        pii: { fullName: 'Test Beneficiary', padaId: null },
+        motherCaseDetails: null,
+        riskConditionSummaries: [],
+      });
 
       await expect(
         service.decide(
@@ -1920,7 +2458,6 @@ describe('QuickResponseService', () => {
           authHeader,
         ),
       ).rejects.toMatchObject({ status: 409 });
-      expect(beneficiaryClient.getById).not.toHaveBeenCalled();
       expect(incentiveClient.triggerAccompaniedReferral).not.toHaveBeenCalled();
       expect(notificationClient.notify).not.toHaveBeenCalled();
     });
@@ -2313,6 +2850,480 @@ describe('QuickResponseService', () => {
         ),
       ).rejects.toMatchObject({ status: 409 });
       expect(reopenRequestClient.decide).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getCardDetails (batch)', () => {
+    const BEN_1 = 'ben-1';
+    const BEN_2 = 'ben-2';
+    const SAKHI_1 = 'sakhi-1';
+    const SAKHI_2 = 'sakhi-2';
+    const DATA_RESTORE_REQUESTOR = 'sakhi-data-restore';
+    const PADA_1 = 'pada-1';
+    const PADA_2 = 'pada-2';
+
+    const CARD_LMP = 'card-lmp';
+    const CARD_CLOSURE = 'card-closure';
+    const CARD_REOPEN = 'card-reopen';
+    const CARD_REFERRAL_INCOMPLETE = 'card-referral-incomplete';
+    const CARD_ACCOMPANIED = 'card-accompanied-referral';
+    const CARD_DATA_RESTORE = 'card-data-restore';
+    const CARD_EDD = 'card-edd-nearing';
+    const CARD_MISSED_VISIT = 'card-missed-visit';
+
+    function beneficiaryDetail(overrides: Partial<Record<string, unknown>> = {}) {
+      return {
+        id: BEN_1,
+        sakhiId: SAKHI_1,
+        pii: { fullName: 'Asha Devi', padaId: PADA_1 },
+        motherCaseDetails: {
+          lmpDate: '2026-01-01T00:00:00.000Z',
+          eddDate: '2026-10-08T00:00:00.000Z',
+        },
+        riskConditionSummaries: [
+          {
+            riskConditionId: 'risk-1',
+            phase: 'ANC',
+            latestGrade: 'HIGH',
+            latestAssessedAt: '2026-07-01T00:00:00.000Z',
+            everHighestGrade: 'HIGH',
+            everAtRiskFlag: true,
+            currentReferralTriggerFlag: false,
+            currentHrVisitTriggerFlag: true,
+          },
+        ],
+        ...overrides,
+      };
+    }
+
+    function beneficiaryMap() {
+      return new Map([
+        [BEN_1, beneficiaryDetail()],
+        [
+          BEN_2,
+          beneficiaryDetail({
+            id: BEN_2,
+            sakhiId: SAKHI_2,
+            pii: { fullName: 'Meena Kumari', padaId: PADA_2 },
+          }),
+        ],
+      ]);
+    }
+
+    function padaMap() {
+      return new Map([
+        [PADA_1, { geographyUnitId: PADA_1, name: 'Sundarpada', geoType: 'PADA' }],
+        [PADA_2, { geographyUnitId: PADA_2, name: 'Nayapada', geoType: 'PADA' }],
+      ]);
+    }
+
+    function sakhiMap() {
+      return new Map([
+        [
+          SAKHI_1,
+          {
+            sakhiId: SAKHI_1,
+            displayName: 'Priya Sharma',
+            mobileNumber: '+919000000123',
+            supervisorId: null,
+          },
+        ],
+        [
+          SAKHI_2,
+          {
+            sakhiId: SAKHI_2,
+            displayName: 'Rita Devi',
+            mobileNumber: '+919000000456',
+            supervisorId: null,
+          },
+        ],
+        [
+          DATA_RESTORE_REQUESTOR,
+          {
+            sakhiId: DATA_RESTORE_REQUESTOR,
+            displayName: 'Kavita Bai',
+            mobileNumber: '+919000000789',
+            supervisorId: null,
+          },
+        ],
+      ]);
+    }
+
+    const allApprovalRows = () => [
+      approvalRequest({
+        id: CARD_LMP,
+        requestType: 'LMP_CHANGE',
+        beneficiaryId: BEN_1,
+        reopenRequestId: null,
+        requestPayloadJson: { newLmpDate: '2026-02-01' },
+      }),
+      approvalRequest({
+        id: CARD_CLOSURE,
+        requestType: 'CLOSURE_REVIEW',
+        beneficiaryId: BEN_1,
+        reopenRequestId: null,
+        closureId: 'closure-1',
+      }),
+      approvalRequest({
+        id: CARD_REOPEN,
+        requestType: 'REOPEN',
+        beneficiaryId: BEN_1,
+        reopenRequestId: 'reopen-1',
+      }),
+      approvalRequest({
+        id: CARD_REFERRAL_INCOMPLETE,
+        requestType: 'REFERRAL_INCOMPLETE',
+        beneficiaryId: BEN_1,
+        reopenRequestId: null,
+        referralId: 'referral-incomplete-1',
+      }),
+      approvalRequest({
+        id: CARD_ACCOMPANIED,
+        requestType: 'ACCOMPANIED_REFERRAL',
+        beneficiaryId: BEN_1,
+        reopenRequestId: null,
+        referralId: 'referral-accompanied-1',
+      }),
+      approvalRequest({
+        id: CARD_DATA_RESTORE,
+        requestType: 'DATA_RESTORE',
+        beneficiaryId: null,
+        reopenRequestId: null,
+        requestedByUserId: DATA_RESTORE_REQUESTOR,
+      }),
+    ];
+
+    const allEscalationCards = () => [
+      escalationCard({
+        cardId: CARD_EDD,
+        cardType: 'EDD_NEARING',
+        escalationType: 'EDD_NEARING',
+        beneficiaryId: BEN_1,
+      }),
+      escalationCard({
+        cardId: CARD_MISSED_VISIT,
+        cardType: 'MISSED_VISIT',
+        escalationType: 'MISSED_VISIT',
+        beneficiaryId: BEN_2,
+      }),
+    ];
+
+    function mockHappyPathDownstream() {
+      repository.findManyByIds.mockResolvedValue(allApprovalRows());
+      escalationClient.findManyByIds.mockResolvedValue(allEscalationCards());
+      beneficiaryClient.getManyDetailByIds.mockResolvedValue(beneficiaryMap());
+      geographyClient.getManyByIds.mockResolvedValue(padaMap());
+      sakhiClient.getManyRecordsByIds.mockResolvedValue(sakhiMap());
+      closureClient.getManyByIds.mockResolvedValue(
+        new Map([
+          [
+            'closure-1',
+            {
+              id: 'closure-1',
+              beneficiaryId: BEN_1,
+              supervisorStatus: 'PENDING' as const,
+              closureType: 'DEATH',
+              closureReasonLookupValueId: 'reason-1',
+              closureDate: '2026-07-01',
+              supervisorNotes: 'note',
+            },
+          ],
+        ]),
+      );
+      reopenRequestClient.getManyByIds.mockResolvedValue(
+        new Map([
+          [
+            'reopen-1',
+            {
+              id: 'reopen-1',
+              beneficiaryId: BEN_1,
+              supervisorStatus: 'PENDING' as const,
+              requestReason: 'CLOSED_BY_MISTAKE',
+              decisionNotes: null,
+            },
+          ],
+        ]),
+      );
+      referralClient.getManyByIds.mockResolvedValue(
+        new Map([
+          [
+            'referral-incomplete-1',
+            {
+              id: 'referral-incomplete-1',
+              beneficiaryId: BEN_1,
+              status: 'PENDING_FOLLOWUP',
+              visitId: 'visit-1',
+              referralDate: '2026-06-01',
+              facilityType: 'PHC',
+              facilityName: 'Sundarpada PHC',
+              photoEvidenceMediaAssetId: null,
+              incompleteCount: 2,
+              latestFollowup: {
+                followupDate: '2026-06-15',
+                notVisitedReason: 'Facility closed',
+                outcome: null,
+              },
+            },
+          ],
+          [
+            'referral-accompanied-1',
+            {
+              id: 'referral-accompanied-1',
+              beneficiaryId: BEN_1,
+              status: 'COMPLETED',
+              visitId: null,
+              referralDate: '2026-05-01',
+              facilityType: 'CHC',
+              facilityName: 'District CHC',
+              photoEvidenceMediaAssetId: 'asset-1',
+              incompleteCount: 0,
+              latestFollowup: null,
+            },
+          ],
+        ]),
+      );
+      visitClient.getById.mockResolvedValue({
+        id: 'visit-1',
+        scheduleId: 'schedule-1',
+        actualVisitDate: null,
+        statusLookupValueId: null,
+      });
+    }
+
+    it("resolves a mixed batch (all 8 card types) in one call, each matching getCardDetail's field shape", async () => {
+      mockHappyPathDownstream();
+
+      const results = await service.getCardDetails(
+        [
+          CARD_LMP,
+          CARD_CLOSURE,
+          CARD_REOPEN,
+          CARD_REFERRAL_INCOMPLETE,
+          CARD_ACCOMPANIED,
+          CARD_DATA_RESTORE,
+          CARD_EDD,
+          CARD_MISSED_VISIT,
+        ],
+        managerCaller,
+        authHeader,
+      );
+
+      expect(results).toHaveLength(8);
+
+      const byId = new Map(results.map((r) => [(r as { cardId: string }).cardId, r]));
+
+      expect(byId.get(CARD_LMP)).toMatchObject({
+        padaName: 'Sundarpada',
+        sakhiName: 'Priya Sharma',
+        beneficiaryName: 'Asha Devi',
+        oldLmpDate: '2026-01-01T00:00:00.000Z',
+        newLmpDate: '2026-02-01',
+        sonographyImageAssetId: null,
+        sakhiContactNumber: '+919000000123',
+      });
+
+      expect(byId.get(CARD_CLOSURE)).toMatchObject({
+        padaName: 'Sundarpada',
+        beneficiaryName: 'Asha Devi',
+        closureType: 'DEATH',
+        closureReasonLookupValueId: 'reason-1',
+        closureDate: '2026-07-01',
+        supervisorNotes: 'note',
+      });
+
+      expect(byId.get(CARD_REOPEN)).toMatchObject({
+        reasonForReopen: 'CLOSED_BY_MISTAKE',
+        beneficiaryName: 'Asha Devi',
+      });
+
+      expect(byId.get(CARD_REFERRAL_INCOMPLETE)).toMatchObject({
+        referralsMissedCount: 2,
+        reason: 'Facility closed',
+        visitReference: { id: 'visit-1', scheduleId: 'schedule-1' },
+      });
+
+      expect(byId.get(CARD_ACCOMPANIED)).toMatchObject({
+        referralDate: '2026-05-01',
+        facilityType: 'CHC',
+        facilityName: 'District CHC',
+        photoEvidenceAssetId: 'asset-1',
+      });
+
+      expect(byId.get(CARD_DATA_RESTORE)).toMatchObject({
+        cardType: 'DATA_RESTORE',
+        sakhiName: 'Kavita Bai',
+        sakhiId: DATA_RESTORE_REQUESTOR,
+      });
+
+      expect(byId.get(CARD_EDD)).toMatchObject({
+        beneficiaryName: 'Asha Devi',
+        padaName: 'Sundarpada',
+        eddDate: '2026-10-08T00:00:00.000Z',
+        reason: 'EDD approaching on 2026-10-08',
+      });
+
+      expect(byId.get(CARD_MISSED_VISIT)).toMatchObject({
+        beneficiaryName: 'Meena Kumari',
+        visitType: 'MISSED_VISIT',
+      });
+    });
+
+    it('calls each downstream batch client exactly once, regardless of how many cards need that resource', async () => {
+      mockHappyPathDownstream();
+
+      await service.getCardDetails(
+        [
+          CARD_LMP,
+          CARD_CLOSURE,
+          CARD_REOPEN,
+          CARD_REFERRAL_INCOMPLETE,
+          CARD_ACCOMPANIED,
+          CARD_DATA_RESTORE,
+          CARD_EDD,
+          CARD_MISSED_VISIT,
+        ],
+        managerCaller,
+        authHeader,
+      );
+
+      expect(repository.findManyByIds).toHaveBeenCalledTimes(1);
+      expect(escalationClient.findManyByIds).toHaveBeenCalledTimes(1);
+      expect(beneficiaryClient.getManyDetailByIds).toHaveBeenCalledTimes(1);
+      expect(geographyClient.getManyByIds).toHaveBeenCalledTimes(1);
+      expect(sakhiClient.getManyRecordsByIds).toHaveBeenCalledTimes(1);
+      expect(closureClient.getManyByIds).toHaveBeenCalledTimes(1);
+      expect(reopenRequestClient.getManyByIds).toHaveBeenCalledTimes(1);
+      expect(referralClient.getManyByIds).toHaveBeenCalledTimes(1);
+      // getById (single-item) client methods must never be used by the batch path.
+      expect(beneficiaryClient.getById).not.toHaveBeenCalled();
+      expect(geographyClient.getById).not.toHaveBeenCalled();
+      expect(closureClient.getById).not.toHaveBeenCalled();
+      expect(reopenRequestClient.getById).not.toHaveBeenCalled();
+      expect(referralClient.getById).not.toHaveBeenCalled();
+    });
+
+    it('SUPERVISOR scoping: drops out-of-roster approval cards but keeps in-roster ones, without error', async () => {
+      mockHappyPathDownstream();
+      sakhiClient.getOwnSakhiIds.mockResolvedValue([
+        '44444444-4444-4444-4444-444444444444', // the default approvalRequest() requestedByUserId
+      ]);
+      // Make one row raised by a different Sakhi, outside the roster.
+      repository.findManyByIds.mockResolvedValue([
+        ...allApprovalRows().filter((r) => r.id !== CARD_REOPEN),
+        approvalRequest({
+          id: CARD_REOPEN,
+          requestType: 'REOPEN',
+          beneficiaryId: BEN_1,
+          reopenRequestId: 'reopen-1',
+          requestedByUserId: 'someone-else',
+        }),
+      ]);
+
+      const results = await service.getCardDetails(
+        [CARD_LMP, CARD_REOPEN],
+        supervisorCaller('project-1'),
+        authHeader,
+      );
+
+      expect(results.map((r) => (r as { cardId: string }).cardId)).toEqual([CARD_LMP]);
+    });
+
+    it('silently omits a cardId present in neither approval_requests nor escalation_events', async () => {
+      mockHappyPathDownstream();
+
+      const results = await service.getCardDetails(
+        [CARD_LMP, 'no-such-card'],
+        managerCaller,
+        authHeader,
+      );
+
+      expect(results.map((r) => (r as { cardId: string }).cardId)).toEqual([CARD_LMP]);
+    });
+
+    it('degrades REFERRAL_INCOMPLETE/ACCOMPANIED_REFERRAL fields when the referral batch call throws, without failing the rest of the batch', async () => {
+      mockHappyPathDownstream();
+      referralClient.getManyByIds.mockRejectedValue(new Error('risk-referral-service down'));
+
+      const results = await service.getCardDetails(
+        [CARD_REFERRAL_INCOMPLETE, CARD_ACCOMPANIED, CARD_LMP],
+        managerCaller,
+        authHeader,
+      );
+
+      const byId = new Map(results.map((r) => [(r as { cardId: string }).cardId, r]));
+      expect(byId.get(CARD_REFERRAL_INCOMPLETE)).toMatchObject({
+        referralsMissedCount: null,
+        reason: null,
+        visitReference: null,
+      });
+      expect(byId.get(CARD_ACCOMPANIED)).toMatchObject({
+        referralDate: null,
+        facilityType: null,
+        facilityName: null,
+        photoEvidenceAssetId: null,
+      });
+      // Unrelated card in the same batch still resolves fully.
+      expect(byId.get(CARD_LMP)).toMatchObject({ newLmpDate: '2026-02-01' });
+    });
+
+    it('marks affected cards with an error when the beneficiary batch call throws, while DATA_RESTORE (no beneficiary dependency) still resolves', async () => {
+      mockHappyPathDownstream();
+      beneficiaryClient.getManyDetailByIds.mockRejectedValue(new Error('beneficiary-service down'));
+
+      const results = await service.getCardDetails(
+        [CARD_LMP, CARD_DATA_RESTORE],
+        managerCaller,
+        authHeader,
+      );
+
+      const byId = new Map(results.map((r) => [(r as { cardId: string }).cardId, r]));
+      expect(byId.get(CARD_LMP)).toMatchObject({
+        cardId: CARD_LMP,
+        cardType: 'LMP_CHANGE',
+        error: "Unable to resolve this card's detail — beneficiary-service is unreachable.",
+      });
+      expect(byId.get(CARD_DATA_RESTORE)).toMatchObject({
+        cardType: 'DATA_RESTORE',
+        sakhiName: 'Kavita Bai',
+      });
+      expect(byId.get(CARD_DATA_RESTORE)).not.toHaveProperty('error');
+    });
+
+    it('degrades a card to a not-found marker when its beneficiaryId is simply absent from the batch result (not a network failure)', async () => {
+      mockHappyPathDownstream();
+      beneficiaryClient.getManyDetailByIds.mockResolvedValue(new Map()); // BEN_1 not found, no throw
+
+      const results = await service.getCardDetails([CARD_LMP], managerCaller, authHeader);
+
+      expect(results[0]).toMatchObject({
+        cardId: CARD_LMP,
+        error: 'The beneficiary linked to this card was not found.',
+      });
+    });
+
+    it('degrades padaName/sakhiName/sakhiContactNumber to null (not a batch failure) when the geography/Sakhi batch calls throw', async () => {
+      mockHappyPathDownstream();
+      geographyClient.getManyByIds.mockRejectedValue(new Error('auth-service down'));
+      sakhiClient.getManyRecordsByIds.mockRejectedValue(new Error('auth-service down'));
+
+      const results = await service.getCardDetails([CARD_LMP], managerCaller, authHeader);
+
+      expect(results[0]).toMatchObject({
+        padaName: null,
+        sakhiName: null,
+        sakhiContactNumber: null,
+        beneficiaryName: 'Asha Devi',
+      });
+    });
+
+    it('does not throw when the whole batch is empty (all ids omitted)', async () => {
+      repository.findManyByIds.mockResolvedValue([]);
+      escalationClient.findManyByIds.mockResolvedValue([]);
+
+      const results = await service.getCardDetails(['no-such-card'], managerCaller, authHeader);
+
+      expect(results).toEqual([]);
+      expect(beneficiaryClient.getManyDetailByIds).not.toHaveBeenCalled();
     });
   });
 });

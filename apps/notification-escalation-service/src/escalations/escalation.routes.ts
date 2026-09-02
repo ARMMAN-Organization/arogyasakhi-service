@@ -4,6 +4,7 @@ import type { EscalationService } from './escalation.service';
 import { createEscalationController } from './escalation.controller';
 import { listEscalationEventsSchema } from './dto/list-escalation-events.dto';
 import { createEscalationEventSchema } from './dto/create-escalation-event.dto';
+import { escalationEventsByIdsQuerySchema } from './dto/escalation-events-by-ids-query.dto';
 import { acknowledgeEddNearingSchema } from './dto/acknowledge-edd-nearing.dto';
 import { decideMissedVisitEscalationSchema } from './dto/decide-missed-visit-escalation.dto';
 import { submitClosurePendingReasonSchema } from './dto/submit-closure-pending-reason.dto';
@@ -160,6 +161,39 @@ export function registerEscalationRoutes(doc: DocumentedRouter, service: Escalat
     requireRoles('ADMIN', 'SYSTEM'),
     validateBody(createEscalationEventSchema),
     controller.create,
+  );
+
+  // Registered before `/escalation-events/:id` — Express matches routes in
+  // registration order, and `:id` would otherwise capture the literal
+  // "by-ids" segment as an id value. Same ordering reasoning as
+  // auth-service's `/geography-units/roots` vs `/geography-units/:id`.
+  doc.get(
+    '/escalation-events/by-ids',
+    {
+      summary:
+        'Batched fetch of escalation events shaped as Quick Response cards. Resolves a ' +
+        'comma-separated list of ids to the same enriched card shape as ' +
+        "GET /escalation-events/:id, in one query instead of N — approval-service's " +
+        'Quick Response card-detail resolution was firing one single-item request per card ' +
+        'concurrently, which overloads the gateway. An id that does not exist, is soft-' +
+        'deleted, or is not one of the 8 supported card types is simply omitted from the ' +
+        'result, not a 404.',
+      tags: ['Escalations'],
+      query: escalationEventsByIdsQuerySchema,
+      responses: {
+        200: {
+          description: 'Escalation-sourced Quick Response cards for the requested ids',
+          schema: envelope(z.array(escalationCardSchema)),
+        },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER'),
+    validate(escalationEventsByIdsQuerySchema, 'query'),
+    controller.findByIds,
   );
 
   doc.get(

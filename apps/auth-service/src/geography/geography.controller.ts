@@ -1,5 +1,7 @@
 import { asyncHandler, ok, unauthorized } from '../app.module';
 import type { GeographyService } from './geography.service';
+import { parseIdsParam, type byIdsQuerySchema } from './dto/by-ids-query.dto';
+import type { z } from 'zod';
 
 /**
  * Geography unit request handlers. Mounted under the global `api/v1`
@@ -17,6 +19,12 @@ export function createGeographyController(service: GeographyService) {
 
     getById: asyncHandler(async (req, res) => {
       res.json(ok(await service.getById(req.params.id)));
+    }),
+
+    getByIds: asyncHandler(async (req, res) => {
+      const query = req.query as unknown as z.infer<typeof byIdsQuerySchema>;
+      const ids = parseIdsParam(query.ids);
+      res.json(ok(await service.getByIds(ids)));
     }),
 
     getAncestors: asyncHandler(async (req, res) => {

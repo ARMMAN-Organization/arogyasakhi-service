@@ -46,7 +46,10 @@ describe('resolveLatestVisitVitals', () => {
     expect(result).toEqual(data);
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining('/beneficiaries/ben-1/latest-visit-vitals'),
-      { headers: { Authorization: 'Bearer test-token' } },
+      {
+        headers: { Authorization: 'Bearer test-token' },
+        signal: expect.any(AbortSignal),
+      },
     );
   });
 
@@ -66,5 +69,23 @@ describe('resolveLatestVisitVitals', () => {
 
     expect(result).toBeNull();
     expect(consoleWarnSpy).toHaveBeenCalled();
+  });
+
+  it('returns null (not a throw) when the downstream call times out — same rejection shape as a real AbortSignal.timeout() abort', async () => {
+    fetchMock.mockRejectedValue(new DOMException('The operation was aborted.', 'TimeoutError'));
+
+    const result = await resolveLatestVisitVitals('ben-1', 'Bearer test-token');
+
+    expect(result).toBeNull();
+    expect(consoleWarnSpy).toHaveBeenCalled();
+  });
+
+  it('bounds every call with an AbortSignal — regression guard for the missing-timeout bug', async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 500 });
+
+    await resolveLatestVisitVitals('ben-1', 'Bearer test-token');
+
+    const [, init] = fetchMock.mock.calls[0] as [string, { signal?: AbortSignal }];
+    expect(init.signal).toBeInstanceOf(AbortSignal);
   });
 });

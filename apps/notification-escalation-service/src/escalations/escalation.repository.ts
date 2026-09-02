@@ -11,11 +11,24 @@ export class EscalationRepository {
    * same millisecond so the cursor stays gapless. Fetches `limit + 1` rows to
    * know whether a next page exists without a separate count query.
    */
-  async findMany(query: ListEscalationEventsInput, cursor: { createdAt: Date; id: string } | null) {
+  /**
+   * `assignedSupervisorId` scopes results to only escalations raised for
+   * this supervisor — undefined for a privileged (MANAGER/ADMIN) caller,
+   * the caller's own id for a SUPERVISOR caller. Unlike approval-service's
+   * approval_requests, this table already carries the column (snapshotted
+   * at creation time — see missedVisit.job.ts), so no cross-service lookup
+   * is needed to scope it.
+   */
+  async findMany(
+    query: ListEscalationEventsInput,
+    cursor: { createdAt: Date; id: string } | null,
+    assignedSupervisorId?: string,
+  ) {
     const rows = await this.prisma.escalationEvent.findMany({
       where: {
         status: query.status,
         isDeleted: false,
+        ...(assignedSupervisorId ? { assignedSupervisorId } : {}),
         ...(cursor
           ? {
               OR: [
@@ -33,6 +46,20 @@ export class EscalationRepository {
 
   findById(id: string) {
     return this.prisma.escalationEvent.findFirst({ where: { id, isDeleted: false } });
+  }
+
+  /**
+   * Batched lookup for GET /escalation-events/by-ids — a single `findMany`
+   * with an `IN (...)` filter instead of N sequential `findById` calls, so
+   * approval-service's Quick Response card-detail resolution can resolve a
+   * whole page of cards in one query. An id that doesn't exist (or is
+   * soft-deleted) is simply absent from the result, not an error — matching
+   * findById's own not-found-is-null contract, just batched.
+   */
+  findManyByIds(ids: string[]) {
+    return this.prisma.escalationEvent.findMany({
+      where: { id: { in: ids }, isDeleted: false },
+    });
   }
 
   /**

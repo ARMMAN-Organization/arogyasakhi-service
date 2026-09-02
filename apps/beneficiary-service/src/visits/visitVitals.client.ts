@@ -1,3 +1,5 @@
+import { DOWNSTREAM_FETCH_TIMEOUT_MS } from '../lookups/fetch-timeout';
+
 // Read directly (not via appConfig) so importing this client doesn't pull in
 // app-config's full schema — see riskCondition.client.ts's own note on why.
 const VISIT_FORM_SERVICE_BASE_URL =
@@ -27,7 +29,13 @@ export interface VitalsSnapshot {
  *
  * Returns `null` (not thrown) on any failure — degrade, don't fail: the
  * beneficiary's own case/PII/risk data is more load-bearing than the last
- * visit's vitals, same stance as resolveRiskConditions.
+ * visit's vitals, same stance as resolveRiskConditions. Bounded by
+ * DOWNSTREAM_FETCH_TIMEOUT_MS like every other downstream hop in this
+ * codebase — without it, a slow visit-form-service leaves getById() (which
+ * awaits this alongside projectCase via Promise.all) hanging past every
+ * caller's own timeout budget, turning a vitals-fetch slowdown into
+ * unrelated 502s wherever GET /beneficiaries/:id is used as an ownership
+ * check (e.g. closure-reopen-service's decide() flows).
  */
 export async function resolveLatestVisitVitals(
   beneficiaryId: string,
@@ -36,7 +44,10 @@ export async function resolveLatestVisitVitals(
   try {
     const res = await fetch(
       `${VISIT_FORM_SERVICE_BASE_URL}/api/v1/beneficiaries/${beneficiaryId}/latest-visit-vitals`,
-      { headers: { Authorization: authorizationHeader } },
+      {
+        headers: { Authorization: authorizationHeader },
+        signal: AbortSignal.timeout(DOWNSTREAM_FETCH_TIMEOUT_MS),
+      },
     );
     if (!res.ok) {
       console.warn(

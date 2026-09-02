@@ -1,5 +1,6 @@
 import { badGateway, HttpError } from '@armman/service-commons';
 import { appConfig } from '../config/app-config';
+import { DOWNSTREAM_DECIDE_TIMEOUT_MS, DOWNSTREAM_FETCH_TIMEOUT_MS } from './fetch-timeout';
 
 export interface ClosureRecord {
   id: string;
@@ -35,6 +36,7 @@ export class ClosureClient {
         method: 'PATCH',
         headers: { Authorization: authorizationHeader, 'Content-Type': 'application/json' },
         body: JSON.stringify({ decision, supervisorNotes }),
+        signal: AbortSignal.timeout(DOWNSTREAM_DECIDE_TIMEOUT_MS),
       });
     } catch {
       throw badGateway('Unable to decide the closure — closure-reopen-service is unreachable.');
@@ -70,7 +72,10 @@ export class ClosureClient {
     try {
       res = await fetch(
         `${appConfig.API_GATEWAY_BASE_URL}/api/v1/closures/decision-status?ids=${ids.join(',')}`,
-        { headers: { Authorization: authorizationHeader } },
+        {
+          headers: { Authorization: authorizationHeader },
+          signal: AbortSignal.timeout(DOWNSTREAM_FETCH_TIMEOUT_MS),
+        },
       );
     } catch {
       throw badGateway(
@@ -107,6 +112,7 @@ export class ClosureClient {
     try {
       res = await fetch(`${appConfig.API_GATEWAY_BASE_URL}/api/v1/closures/${id}`, {
         headers: { Authorization: authorizationHeader },
+        signal: AbortSignal.timeout(DOWNSTREAM_FETCH_TIMEOUT_MS),
       });
     } catch {
       throw badGateway('Unable to fetch the closure — closure-reopen-service is unreachable.');
@@ -123,5 +129,43 @@ export class ClosureClient {
 
     const body = (await res.json()) as { data: ClosureDetailRecord };
     return body.data;
+  }
+
+  /**
+   * Full detail for a batch of closure ids, via closure-reopen-service's
+   * GET /closures/by-ids — one call per batch instead of one
+   * GET /closures/:id per CLOSURE_REVIEW card, used by
+   * QuickResponseService.getCardDetails. An id not found or soft-deleted is
+   * simply omitted from the result, not an error.
+   */
+  async getManyByIds(
+    ids: string[],
+    authorizationHeader: string,
+  ): Promise<Map<string, ClosureDetailRecord>> {
+    if (ids.length === 0) return new Map();
+
+    let res: Response;
+    try {
+      res = await fetch(
+        `${appConfig.API_GATEWAY_BASE_URL}/api/v1/closures/by-ids?ids=${ids.join(',')}`,
+        {
+          headers: { Authorization: authorizationHeader },
+          signal: AbortSignal.timeout(DOWNSTREAM_FETCH_TIMEOUT_MS),
+        },
+      );
+    } catch {
+      throw badGateway('Unable to fetch closures — closure-reopen-service is unreachable.');
+    }
+
+    if (!res.ok) {
+      if (res.status >= 400 && res.status < 500) {
+        const body = (await res.json().catch(() => null)) as { message?: string } | null;
+        throw new HttpError(res.status, body?.message ?? 'Unable to fetch closures.');
+      }
+      throw badGateway('Unable to fetch closures — closure-reopen-service returned an error.');
+    }
+
+    const body = (await res.json()) as { data: ClosureDetailRecord[] };
+    return new Map(body.data.map((row) => [row.id, row]));
   }
 }

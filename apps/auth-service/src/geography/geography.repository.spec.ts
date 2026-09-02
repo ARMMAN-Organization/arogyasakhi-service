@@ -37,6 +37,32 @@ describe('GeographyRepository', () => {
     });
   });
 
+  describe('findByIds', () => {
+    it('queries by geographyUnitId IN ids, excluding soft-deleted, in one call', async () => {
+      findMany.mockResolvedValue([
+        { geographyUnitId: 'phc-1', parentId: 'block-1', geoType: 'PHC' },
+        { geographyUnitId: 'pada-1', parentId: 'village-1', geoType: 'PADA' },
+      ]);
+
+      const result = await repository.findByIds(['phc-1', 'pada-1']);
+
+      expect(findMany).toHaveBeenCalledTimes(1);
+      expect(findMany).toHaveBeenCalledWith({
+        where: { geographyUnitId: { in: ['phc-1', 'pada-1'] }, isDeleted: false },
+      });
+      expect(result).toEqual([
+        { geographyUnitId: 'phc-1', parentId: 'block-1', geoType: 'PHC' },
+        { geographyUnitId: 'pada-1', parentId: 'village-1', geoType: 'PADA' },
+      ]);
+    });
+
+    it('returns an empty array without querying when ids is empty', async () => {
+      const result = await repository.findByIds([]);
+      expect(result).toEqual([]);
+      expect(findMany).not.toHaveBeenCalled();
+    });
+  });
+
   describe('findRoots', () => {
     it('queries units with parentId null, excluding soft-deleted, ordered by geoCode', async () => {
       findMany.mockResolvedValue([

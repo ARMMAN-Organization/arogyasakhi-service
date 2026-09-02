@@ -1,4 +1,4 @@
-import { badGateway, unprocessable } from '@armman/service-commons';
+import { badGateway, forbidden, unauthorized, unprocessable } from '@armman/service-commons';
 
 // Read directly (not via appConfig) so importing this client doesn't pull in
 // app-config's full schema — that schema requires DATABASE_URL/PII keys with
@@ -11,6 +11,21 @@ interface GeographyUnit {
   geoType: 'STATE' | 'DISTRICT' | 'BLOCK' | 'PHC' | 'SUBCENTRE' | 'VILLAGE' | 'PADA';
   status: 'ACTIVE' | 'INACTIVE';
   name: string;
+}
+
+/**
+ * Maps a non-ok auth-service response to the right error class: 401/403
+ * mean the caller's own token was rejected (stale/expired/invalid) — thrown
+ * as such so it surfaces as an auth failure instead of masquerading as an
+ * infra outage. Anything else (5xx, unexpected 4xx) is a genuine dependency
+ * failure, kept as 502.
+ */
+function mapGeographyFetchError(status: number, label: string): Error {
+  if (status === 401)
+    return unauthorized(`Unable to resolve ${label} — the caller is not authenticated.`);
+  if (status === 403)
+    return forbidden(`Unable to resolve ${label} — the caller is not authorized.`);
+  return badGateway(`Unable to resolve ${label} — the auth service returned an error.`);
 }
 
 /** Fetches one geography unit through the gateway, mapping transport/HTTP
@@ -39,7 +54,7 @@ async function fetchGeographyUnit(
     // 5xx or any other non-ok from auth-service is a dependency failure, not a
     // "not found" — surface it as 502 so a Sakhi sees a retryable error and it
     // doesn't pollute 404-rate monitoring during an auth-service blip.
-    throw badGateway('Unable to resolve geography — the auth service returned an error.');
+    throw mapGeographyFetchError(res.status, 'geography');
   }
 
   const body = (await res.json()) as { data: GeographyUnit };
@@ -121,7 +136,7 @@ export async function resolveVillageNames(
   }
 
   if (!res.ok) {
-    throw badGateway('Unable to resolve villages — the auth service returned an error.');
+    throw mapGeographyFetchError(res.status, 'villages');
   }
 
   const body = (await res.json()) as { data: GeographyUnit[] };
@@ -149,7 +164,7 @@ export async function resolvePadaUnits(
   }
 
   if (!res.ok) {
-    throw badGateway('Unable to resolve padas — the auth service returned an error.');
+    throw mapGeographyFetchError(res.status, 'padas');
   }
 
   const body = (await res.json()) as { data: GeographyUnit[] };

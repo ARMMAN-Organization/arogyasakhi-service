@@ -948,4 +948,30 @@ export class BeneficiaryRepository {
       riskConditionSummaries: summariesByBeneficiary.get(c.id) ?? [],
     }));
   }
+
+  /**
+   * Full per-beneficiary detail rows for `GET /beneficiaries/by-ids-detail`
+   * — the same `{pii, motherCaseDetails, riskConditionSummaries}` shape
+   * `findById` loads for a single case, batched for approval-service's Quick
+   * Response card enrichment (previously N sequential single-item
+   * `GET /beneficiaries/:id` calls, one per card, overloading the gateway).
+   * Same ids/scoping intersection and silent-drop semantics as
+   * `findByIdsWithRisk`/`findRiskConditionSummariesByBeneficiaryIds`: an id
+   * outside `scoping`, or simply not found, is absent from the result, not a
+   * 403/404. One query for every case plus its pii/motherCaseDetails/
+   * riskConditionSummaries relations — no per-id follow-up.
+   */
+  async findByIdsDetail(ids: string[], scoping: { sakhiId?: string; sakhiIds?: string[] }) {
+    if (ids.length === 0) return [];
+
+    return this.prisma.beneficiaryCase.findMany({
+      where: {
+        id: { in: ids },
+        isDeleted: false,
+        ...(scoping.sakhiId ? { sakhiId: scoping.sakhiId } : {}),
+        ...(scoping.sakhiIds ? { sakhiId: { in: scoping.sakhiIds } } : {}),
+      },
+      include: { pii: true, motherCaseDetails: true, riskConditionSummaries: true },
+    });
+  }
 }

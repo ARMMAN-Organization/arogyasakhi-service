@@ -51,6 +51,7 @@ describe('BeneficiaryService', () => {
     findByIdsWithRisk: jest.fn(),
     upsertRiskConditionSummary: jest.fn(),
     findRiskConditionSummariesByBeneficiaryIds: jest.fn(),
+    findByIdsDetail: jest.fn(),
   } as unknown as jest.Mocked<BeneficiaryRepository>;
   let service: BeneficiaryService;
 
@@ -1606,6 +1607,31 @@ describe('BeneficiaryService', () => {
 
       expect(result.socioDemographics).toBeNull();
     });
+
+    it('degrades to unresolved socioDemographics, without failing the request, when auth-service is unreachable', async () => {
+      const found = {
+        id: 'x',
+        pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
+        socioDemographics: {
+          religionLookupId: 'religion-uuid-1',
+          educationLevelLookupId: null,
+        },
+      };
+      repository.findById.mockResolvedValue(found as never);
+      resolveLookupValuesMock.mockRejectedValue(
+        Object.assign(new Error('bad gateway'), { status: 502 }),
+      );
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+
+      const result = await service.getById('x', caller({ roles: ['ADMIN'] }), AUTH_HEADER);
+
+      expect(result.socioDemographics).toEqual({
+        religionLookupId: 'religion-uuid-1',
+        educationLevelLookupId: null,
+      });
+      expect(consoleErrorSpy).toHaveBeenCalled();
+      consoleErrorSpy.mockRestore();
+    });
   });
 
   describe('getById — risk condition name resolution', () => {
@@ -3052,6 +3078,200 @@ describe('BeneficiaryService', () => {
           conditionName: null,
           gradeScale: null,
         }),
+      );
+      expect(consoleErrorSpy).toHaveBeenCalled();
+      consoleErrorSpy.mockRestore();
+    });
+  });
+
+  describe('getByIdsDetail', () => {
+    function detailRow(overrides: Record<string, unknown> = {}) {
+      return {
+        id: 'b1',
+        sakhiId: 'sakhi-1',
+        pii: { fullNameEnc: encryptPii('Jane Doe'), padaId: 'pada-1' },
+        motherCaseDetails: {
+          lmpDate: new Date('2025-10-01T00:00:00.000Z'),
+          eddDate: new Date('2026-07-08T00:00:00.000Z'),
+        },
+        riskConditionSummaries: [],
+        ...overrides,
+      };
+    }
+
+    it('returns id/sakhiId/pii.fullName/pii.padaId/motherCaseDetails/riskConditionSummaries', async () => {
+      repository.findByIdsDetail.mockResolvedValue([detailRow()] as never);
+
+      const result = await service.getByIdsDetail(['b1'], caller(), AUTH_HEADER);
+
+      expect(result).toEqual([
+        {
+          id: 'b1',
+          sakhiId: 'sakhi-1',
+          pii: { fullName: 'Jane Doe', padaId: 'pada-1' },
+          motherCaseDetails: {
+            lmpDate: new Date('2025-10-01T00:00:00.000Z'),
+            eddDate: new Date('2026-07-08T00:00:00.000Z'),
+          },
+          riskConditionSummaries: [],
+        },
+      ]);
+    });
+
+    it('fetches multiple beneficiaries in one repository call (no N+1)', async () => {
+      repository.findByIdsDetail.mockResolvedValue([
+        detailRow({ id: 'b1' }),
+        detailRow({ id: 'b2' }),
+      ] as never);
+
+      const result = await service.getByIdsDetail(['b1', 'b2'], caller(), AUTH_HEADER);
+
+      expect(repository.findByIdsDetail).toHaveBeenCalledTimes(1);
+      expect(result).toHaveLength(2);
+    });
+
+    it('returns null motherCaseDetails for a CHILD case', async () => {
+      repository.findByIdsDetail.mockResolvedValue([
+        detailRow({ motherCaseDetails: null }),
+      ] as never);
+
+      const result = await service.getByIdsDetail(['b1'], caller(), AUTH_HEADER);
+
+      expect(result[0].motherCaseDetails).toBeNull();
+    });
+
+    it('scopes a SAKHI caller to their own id', async () => {
+      repository.findByIdsDetail.mockResolvedValue([]);
+
+      await service.getByIdsDetail(['b1'], caller(), AUTH_HEADER);
+
+      expect(repository.findByIdsDetail).toHaveBeenCalledWith(
+        ['b1'],
+        expect.objectContaining({ sakhiId: CALLER_ID }),
+      );
+    });
+
+    it('scopes a SUPERVISOR caller to their roster', async () => {
+      listSakhiIdsForSupervisorMock.mockResolvedValue(['sakhi-a', 'sakhi-b']);
+      repository.findByIdsDetail.mockResolvedValue([]);
+
+      await service.getByIdsDetail(['b1'], caller({ roles: ['SUPERVISOR'] }), AUTH_HEADER);
+
+      expect(repository.findByIdsDetail).toHaveBeenCalledWith(
+        ['b1'],
+        expect.objectContaining({ sakhiIds: ['sakhi-a', 'sakhi-b'] }),
+      );
+    });
+
+    it('leaves a MANAGER/ADMIN caller unscoped', async () => {
+      repository.findByIdsDetail.mockResolvedValue([]);
+
+      await service.getByIdsDetail(['b1'], caller({ roles: ['MANAGER'] }), AUTH_HEADER);
+
+      expect(repository.findByIdsDetail).toHaveBeenCalledWith(
+        ['b1'],
+        expect.not.objectContaining({ sakhiId: expect.anything() }),
+      );
+    });
+
+    it('returns an empty array when no ids match (out-of-scope or nonexistent id silently dropped)', async () => {
+      repository.findByIdsDetail.mockResolvedValue([]);
+
+      const result = await service.getByIdsDetail(['unknown-id'], caller(), AUTH_HEADER);
+
+      expect(result).toEqual([]);
+    });
+
+    it('resolves condition names in a single call across every distinct riskConditionId in the whole batch', async () => {
+      repository.findByIdsDetail.mockResolvedValue([
+        detailRow({
+          id: 'b1',
+          riskConditionSummaries: [
+            {
+              riskConditionId: 'risk-1',
+              phase: 'ANC',
+              latestGrade: 'HIGH',
+              latestAssessedAt: '2026-01-01T00:00:00.000Z',
+              everHighestGrade: 'HIGH',
+              everAtRiskFlag: true,
+              currentReferralTriggerFlag: true,
+              currentHrVisitTriggerFlag: false,
+              isFirstInstance: true,
+              consecutiveNoImprovementCount: null,
+            },
+          ],
+        }),
+        detailRow({
+          id: 'b2',
+          riskConditionSummaries: [
+            {
+              riskConditionId: 'risk-1',
+              phase: 'ANC',
+              latestGrade: 'MILD',
+              latestAssessedAt: '2026-01-01T00:00:00.000Z',
+              everHighestGrade: 'MILD',
+              everAtRiskFlag: true,
+              currentReferralTriggerFlag: false,
+              currentHrVisitTriggerFlag: false,
+              isFirstInstance: true,
+              consecutiveNoImprovementCount: null,
+            },
+          ],
+        }),
+      ] as never);
+      resolveRiskConditionsMock.mockResolvedValue(
+        new Map([
+          [
+            'risk-1',
+            {
+              conditionCode: 'ANEMIA',
+              conditionName: 'Anemia',
+              gradeScale: 'NORMAL_MILD_MODERATE_SEVERE',
+            },
+          ],
+        ]),
+      );
+
+      const result = await service.getByIdsDetail(['b1', 'b2'], caller(), AUTH_HEADER);
+
+      expect(resolveRiskConditionsMock).toHaveBeenCalledTimes(1);
+      expect(resolveRiskConditionsMock).toHaveBeenCalledWith(['risk-1'], AUTH_HEADER);
+      expect(result[0].riskConditionSummaries[0]).toEqual(
+        expect.objectContaining({ conditionCode: 'ANEMIA', conditionName: 'Anemia' }),
+      );
+      expect(result[1].riskConditionSummaries[0]).toEqual(
+        expect.objectContaining({ conditionCode: 'ANEMIA', conditionName: 'Anemia' }),
+      );
+    });
+
+    it('degrades to null conditionCode/conditionName/gradeScale, without failing the request, when risk-referral-service is unreachable', async () => {
+      repository.findByIdsDetail.mockResolvedValue([
+        detailRow({
+          riskConditionSummaries: [
+            {
+              riskConditionId: 'risk-1',
+              phase: 'ANC',
+              latestGrade: 'HIGH',
+              latestAssessedAt: '2026-01-01T00:00:00.000Z',
+              everHighestGrade: 'HIGH',
+              everAtRiskFlag: true,
+              currentReferralTriggerFlag: true,
+              currentHrVisitTriggerFlag: false,
+              isFirstInstance: true,
+              consecutiveNoImprovementCount: null,
+            },
+          ],
+        }),
+      ] as never);
+      resolveRiskConditionsMock.mockRejectedValue(
+        Object.assign(new Error('bad gateway'), { status: 502 }),
+      );
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+
+      const result = await service.getByIdsDetail(['b1'], caller(), AUTH_HEADER);
+
+      expect(result[0].riskConditionSummaries[0]).toEqual(
+        expect.objectContaining({ conditionCode: null, conditionName: null, gradeScale: null }),
       );
       expect(consoleErrorSpy).toHaveBeenCalled();
       consoleErrorSpy.mockRestore();

@@ -1,5 +1,6 @@
 import { badGateway, HttpError } from '@armman/service-commons';
 import { appConfig } from '../config/app-config';
+import { DOWNSTREAM_FETCH_TIMEOUT_MS } from './fetch-timeout';
 
 export interface ReferralRecord {
   id: string;
@@ -39,6 +40,7 @@ export class ReferralClient {
         method: 'PATCH',
         headers: { Authorization: authorizationHeader, 'Content-Type': 'application/json' },
         body: JSON.stringify({ decision }),
+        signal: AbortSignal.timeout(DOWNSTREAM_FETCH_TIMEOUT_MS),
       });
     } catch {
       throw badGateway('Unable to decide the referral — risk-referral-service is unreachable.');
@@ -74,7 +76,10 @@ export class ReferralClient {
     try {
       res = await fetch(
         `${appConfig.API_GATEWAY_BASE_URL}/api/v1/referrals/decision-status?ids=${ids.join(',')}`,
-        { headers: { Authorization: authorizationHeader } },
+        {
+          headers: { Authorization: authorizationHeader },
+          signal: AbortSignal.timeout(DOWNSTREAM_FETCH_TIMEOUT_MS),
+        },
       );
     } catch {
       throw badGateway(
@@ -111,6 +116,7 @@ export class ReferralClient {
     try {
       res = await fetch(`${appConfig.API_GATEWAY_BASE_URL}/api/v1/referrals/${id}`, {
         headers: { Authorization: authorizationHeader },
+        signal: AbortSignal.timeout(DOWNSTREAM_FETCH_TIMEOUT_MS),
       });
     } catch {
       throw badGateway('Unable to fetch the referral — risk-referral-service is unreachable.');
@@ -127,5 +133,45 @@ export class ReferralClient {
 
     const body = (await res.json()) as { data: ReferralDetailRecord };
     return body.data;
+  }
+
+  /**
+   * Full detail plus follow-up summary for a batch of referral ids, via
+   * risk-referral-service's GET /referrals/by-ids — one call per batch
+   * instead of one GET /referrals/:id per REFERRAL_INCOMPLETE/
+   * ACCOMPANIED_REFERRAL card, used by
+   * QuickResponseService.getCardDetails. An id that's unknown, soft-
+   * deleted, or outside the caller's scope is simply omitted from the
+   * result, not an error.
+   */
+  async getManyByIds(
+    ids: string[],
+    authorizationHeader: string,
+  ): Promise<Map<string, ReferralDetailRecord>> {
+    if (ids.length === 0) return new Map();
+
+    let res: Response;
+    try {
+      res = await fetch(
+        `${appConfig.API_GATEWAY_BASE_URL}/api/v1/referrals/by-ids?ids=${ids.join(',')}`,
+        {
+          headers: { Authorization: authorizationHeader },
+          signal: AbortSignal.timeout(DOWNSTREAM_FETCH_TIMEOUT_MS),
+        },
+      );
+    } catch {
+      throw badGateway('Unable to fetch referrals — risk-referral-service is unreachable.');
+    }
+
+    if (!res.ok) {
+      if (res.status >= 400 && res.status < 500) {
+        const body = (await res.json().catch(() => null)) as { message?: string } | null;
+        throw new HttpError(res.status, body?.message ?? 'Unable to fetch referrals.');
+      }
+      throw badGateway('Unable to fetch referrals — risk-referral-service returned an error.');
+    }
+
+    const body = (await res.json()) as { data: ReferralDetailRecord[] };
+    return new Map(body.data.map((row) => [row.id, row]));
   }
 }

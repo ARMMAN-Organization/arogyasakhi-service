@@ -53,7 +53,9 @@ export async function resolveRiskConditions(
   }
 
   if (!res.ok) {
-    throw badGateway('Unable to resolve risk conditions — the risk service returned an error.');
+    throw badGateway(
+      `Unable to resolve risk conditions — the risk service returned ${res.status}.`,
+    );
   }
 
   const body = (await res.json()) as { data: RiskConditionRow[] };

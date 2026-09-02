@@ -38,6 +38,7 @@ describe('ClosureService', () => {
     findById: jest.fn(),
     findByLocalClosureUuid: jest.fn(),
     findManyByIds: jest.fn(),
+    findManyDetailByIds: jest.fn(),
     create: jest.fn(),
     decide: jest.fn(),
   } as unknown as jest.Mocked<ClosureRepository>;
@@ -53,6 +54,7 @@ describe('ClosureService', () => {
   const beneficiaryClient = {
     closeCase: jest.fn(),
     getById: jest.fn(),
+    getOwnership: jest.fn(),
   } as unknown as jest.Mocked<BeneficiaryClient>;
   const sakhiClient = { getById: jest.fn() } as unknown as jest.Mocked<SakhiClient>;
   let service: ClosureService;
@@ -74,6 +76,11 @@ describe('ClosureService', () => {
       id: '22222222-2222-2222-2222-222222222222',
       currentStatus: 'ACTIVE',
       pii: { fullName: 'Asha Devi' },
+    });
+    beneficiaryClient.getOwnership.mockResolvedValue({
+      id: '22222222-2222-2222-2222-222222222222',
+      sakhiId: '33333333-3333-3333-3333-333333333333',
+      caseType: 'MOTHER',
     });
     lookupClient.resolveClosureReasonCode.mockResolvedValue('WITHDRAWAL');
     service = new ClosureService(
@@ -112,6 +119,32 @@ describe('ClosureService', () => {
       const ids = ['11111111-1111-1111-1111-111111111111'];
       await expect(service.getDecisionStatusByIds(ids)).resolves.toBe(rows);
       expect(repository.findManyByIds).toHaveBeenCalledWith(ids);
+    });
+  });
+
+  describe('getByIds', () => {
+    it('delegates to the repository batch lookup with the given ids', async () => {
+      const rows = [closureRow(), closureRow({ id: '66666666-6666-6666-6666-666666666666' })];
+      repository.findManyDetailByIds.mockResolvedValue(rows);
+
+      const ids = [rows[0].id, rows[1].id];
+      await expect(service.getByIds(ids)).resolves.toBe(rows);
+      expect(repository.findManyDetailByIds).toHaveBeenCalledWith(ids);
+    });
+
+    it('returns an empty array when none of the ids match (unknown or soft-deleted, not an error)', async () => {
+      repository.findManyDetailByIds.mockResolvedValue([]);
+
+      await expect(service.getByIds(['99999999-9999-9999-9999-999999999999'])).resolves.toEqual([]);
+    });
+
+    it('collapses a duplicate id in the input to the single row the repository returns', async () => {
+      const row = closureRow();
+      repository.findManyDetailByIds.mockResolvedValue([row]);
+
+      const result = await service.getByIds([row.id, row.id]);
+      expect(result).toEqual([row]);
+      expect(repository.findManyDetailByIds).toHaveBeenCalledWith([row.id, row.id]);
     });
   });
 
@@ -465,7 +498,7 @@ describe('ClosureService', () => {
       expect(repository.decide).not.toHaveBeenCalled();
     });
 
-    describe('ownership scoping via beneficiaryClient.getById', () => {
+    describe('ownership scoping via beneficiaryClient.getOwnership', () => {
       it('checks ownership before deciding when the supervisor is in the roster', async () => {
         const pending = pendingClosure();
         const decided = { ...pending, supervisorStatus: 'APPROVED' as const, supervisorId };
@@ -474,14 +507,33 @@ describe('ClosureService', () => {
 
         await service.decide(pending.id, supervisorId, { decision: 'APPROVED' }, authHeader);
 
-        expect(beneficiaryClient.getById).toHaveBeenCalledWith(pending.beneficiaryId, authHeader);
+        expect(beneficiaryClient.getOwnership).toHaveBeenCalledWith(
+          pending.beneficiaryId,
+          authHeader,
+        );
+        expect(repository.decide).toHaveBeenCalled();
+      });
+
+      it('uses the lightweight ownership check, not the full getById, as the gate', async () => {
+        const pending = pendingClosure();
+        const decided = { ...pending, supervisorStatus: 'APPROVED' as const, supervisorId };
+        repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(decided);
+        repository.decide.mockResolvedValue(true);
+        // If getOwnership were skipped and getById used as the sole gate, this
+        // rejection would make the whole decide() throw before reaching
+        // repository.decide — proving getOwnership, not getById, is the gate.
+        beneficiaryClient.getById.mockRejectedValue(new Error('should not gate on this'));
+
+        await expect(
+          service.decide(pending.id, supervisorId, { decision: 'APPROVED' }, authHeader),
+        ).resolves.toBe(decided);
         expect(repository.decide).toHaveBeenCalled();
       });
 
       it('propagates a 403 when the supervisor is outside the beneficiary roster, without deciding', async () => {
         const pending = pendingClosure();
         repository.findById.mockResolvedValueOnce(pending);
-        beneficiaryClient.getById.mockRejectedValue(
+        beneficiaryClient.getOwnership.mockRejectedValue(
           Object.assign(new Error('This beneficiary case is outside your own roster.'), {
             status: 403,
           }),
@@ -503,11 +555,6 @@ describe('ClosureService', () => {
         };
         repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(decided);
         repository.decide.mockResolvedValue(true);
-        beneficiaryClient.getById.mockResolvedValue({
-          id: pending.beneficiaryId,
-          currentStatus: 'ACTIVE',
-          pii: { fullName: 'Asha Devi' },
-        });
 
         await expect(
           service.decide(pending.id, managerId, { decision: 'APPROVED' }, authHeader),
@@ -520,7 +567,7 @@ describe('ClosureService', () => {
       it('propagates a 404 when the underlying beneficiary no longer exists', async () => {
         const pending = pendingClosure();
         repository.findById.mockResolvedValueOnce(pending);
-        beneficiaryClient.getById.mockRejectedValue(
+        beneficiaryClient.getOwnership.mockRejectedValue(
           Object.assign(new Error('Beneficiary case not found.'), { status: 404 }),
         );
 
@@ -529,6 +576,32 @@ describe('ClosureService', () => {
         ).rejects.toMatchObject({ status: 404 });
         expect(repository.decide).not.toHaveBeenCalled();
       });
+    });
+
+    it('still decides and closes the beneficiary when the notification-enrichment beneficiary lookup fails after ownership passed', async () => {
+      const pending = pendingClosure();
+      const decided = { ...pending, supervisorStatus: 'APPROVED' as const, supervisorId };
+      repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(decided);
+      repository.decide.mockResolvedValue(true);
+      beneficiaryClient.getById.mockRejectedValue(new Error('beneficiary-service unreachable'));
+
+      await expect(
+        service.decide(pending.id, supervisorId, { decision: 'APPROVED' }, authHeader),
+      ).resolves.toBe(decided);
+      expect(beneficiaryClient.closeCase).toHaveBeenCalledWith(
+        pending.beneficiaryId,
+        pending.closureType,
+        authHeader,
+      );
+      expect(notificationClient.notify).toHaveBeenCalledWith(
+        pending.submittedByUserId,
+        'CLOSURE_REVIEW_UPDATE',
+        expect.any(String),
+        'Your closure request was approved.',
+        authHeader,
+        { linkedEntityType: 'QuickResponseCard', linkedEntityId: approvalRequestId },
+      );
+      expect(consoleErrorSpy).toHaveBeenCalled();
     });
 
     it('422s when the closure does not require supervisor review', async () => {

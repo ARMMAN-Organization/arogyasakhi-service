@@ -1,4 +1,5 @@
-import { badGateway } from '@armman/service-commons';
+import { badGateway, forbidden, unauthorized } from '@armman/service-commons';
+import { DOWNSTREAM_FETCH_TIMEOUT_MS } from './fetch-timeout';
 
 // Read directly (not via appConfig) — see geography.client.ts for why.
 const AUTH_SERVICE_BASE_URL = process.env.AUTH_SERVICE_BASE_URL ?? 'http://localhost:3000';
@@ -12,6 +13,21 @@ interface LookupValue {
 interface LookupCategory {
   categoryCode: string;
   values: LookupValue[];
+}
+
+/**
+ * Maps a non-ok auth-service response to the right error class: 401/403
+ * mean the caller's own token was rejected (stale/expired/invalid) — thrown
+ * as such so it surfaces as an auth failure instead of masquerading as an
+ * infra outage. Anything else (5xx, unexpected 4xx) is a genuine dependency
+ * failure, kept as 502.
+ */
+function mapLookupFetchError(status: number): Error {
+  if (status === 401)
+    return unauthorized('Unable to resolve lookup values — the caller is not authenticated.');
+  if (status === 403)
+    return forbidden('Unable to resolve lookup values — the caller is not authorized.');
+  return badGateway('Unable to resolve lookup values — the auth service returned an error.');
 }
 
 /**
@@ -31,6 +47,7 @@ async function fetchLookupCategory(
   try {
     res = await fetch(`${AUTH_SERVICE_BASE_URL}/api/v1/lookups/${categoryCode}`, {
       headers: { Authorization: authorizationHeader },
+      signal: AbortSignal.timeout(DOWNSTREAM_FETCH_TIMEOUT_MS),
     });
   } catch {
     throw badGateway('Unable to resolve lookup values — the auth service is unreachable.');
@@ -38,7 +55,7 @@ async function fetchLookupCategory(
 
   if (res.status === 404) return null;
   if (!res.ok) {
-    throw badGateway('Unable to resolve lookup values — the auth service returned an error.');
+    throw mapLookupFetchError(res.status);
   }
 
   const body = (await res.json()) as { data: LookupCategory };

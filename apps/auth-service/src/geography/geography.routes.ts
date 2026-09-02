@@ -13,6 +13,7 @@ import {
 } from '../app.module';
 import { createGeographyUnitSchema } from './dto/create-geography-unit.dto';
 import { updateGeographyUnitSchema } from './dto/update-geography-unit.dto';
+import { byIdsQuerySchema } from './dto/by-ids-query.dto';
 
 extendZodWithOpenApi(z);
 
@@ -111,6 +112,39 @@ export function registerGeographyRoutes(
     },
     authenticate(signer),
     controller.getRoots,
+  );
+
+  // Registered before `/geography-units/:id` — Express matches routes in
+  // registration order, and `:id` would otherwise capture the literal
+  // "by-ids" segment as an id value and fail UUID validation, same reasoning
+  // as `/geography-units/roots` above.
+  doc.get(
+    '/geography-units/by-ids',
+    {
+      summary:
+        'Batch-get geography units by id — used by other services (e.g. ' +
+        "approval-service's Quick Response card-detail list, resolving each " +
+        "card's Pada) for page-level name resolution instead of one call per " +
+        'unit. Open to any authenticated role, same as GET /geography-units/:id. ' +
+        'An unknown or soft-deleted id is silently absent from the result ' +
+        'rather than erroring.',
+      tags: ['Geography'],
+      query: byIdsQuerySchema,
+      responses: {
+        200: {
+          description: 'Geography units found (unknown ids silently omitted)',
+          schema: envelope(z.array(geographyUnitSchema)),
+        },
+        400: errorResponse(400, {
+          message: 'ids: must be a comma-separated list of at most 100 uuids',
+        }),
+        401: errorResponse(401),
+        500: errorResponse(500),
+      },
+    },
+    authenticate(signer),
+    validate(byIdsQuerySchema, 'query'),
+    controller.getByIds,
   );
 
   doc.get(

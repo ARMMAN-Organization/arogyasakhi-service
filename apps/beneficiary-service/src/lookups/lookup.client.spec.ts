@@ -47,7 +47,10 @@ describe('resolveLookupValues', () => {
     });
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining('/lookups/RELIGION'),
-      expect.objectContaining({ headers: { Authorization: 'Bearer test-token' } }),
+      expect.objectContaining({
+        headers: { Authorization: 'Bearer test-token' },
+        signal: expect.any(AbortSignal),
+      }),
     );
   });
 
@@ -117,6 +120,17 @@ describe('resolveLookupValues', () => {
     ).rejects.toMatchObject({ status: 502 });
   });
 
+  it('throws a 502 when the request is aborted for exceeding the timeout', async () => {
+    fetchMock.mockRejectedValue(new DOMException('signal timed out', 'TimeoutError'));
+
+    await expect(
+      resolveLookupValues(
+        { religionLookupId: { categoryCode: 'RELIGION', lookupValueId: 'religion-hindu' } },
+        'Bearer test-token',
+      ),
+    ).rejects.toMatchObject({ status: 502 });
+  });
+
   it('throws a 502 when auth-service returns a non-404 error status', async () => {
     fetchMock.mockResolvedValueOnce({ ok: false, status: 500 });
 
@@ -126,5 +140,27 @@ describe('resolveLookupValues', () => {
         'Bearer test-token',
       ),
     ).rejects.toMatchObject({ status: 502 });
+  });
+
+  it('throws 401 (not 502) when auth-service returns a 401', async () => {
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 401 });
+
+    await expect(
+      resolveLookupValues(
+        { religionLookupId: { categoryCode: 'RELIGION', lookupValueId: 'religion-hindu' } },
+        'Bearer stale-token',
+      ),
+    ).rejects.toMatchObject({ status: 401 });
+  });
+
+  it('throws 403 (not 502) when auth-service returns a 403', async () => {
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 403 });
+
+    await expect(
+      resolveLookupValues(
+        { religionLookupId: { categoryCode: 'RELIGION', lookupValueId: 'religion-hindu' } },
+        'Bearer test-token',
+      ),
+    ).rejects.toMatchObject({ status: 403 });
   });
 });

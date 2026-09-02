@@ -1,4 +1,4 @@
-import { badGateway } from '@armman/service-commons';
+import { badGateway, forbidden, unauthorized } from '@armman/service-commons';
 
 // Read directly (not via appConfig) — see geography.client.ts for why.
 const AUTH_SERVICE_BASE_URL = process.env.AUTH_SERVICE_BASE_URL ?? 'http://localhost:3000';
@@ -6,6 +6,21 @@ const AUTH_SERVICE_BASE_URL = process.env.AUTH_SERVICE_BASE_URL ?? 'http://local
 interface ApiProject {
   projectId: string;
   projectName: string;
+}
+
+/**
+ * Maps a non-ok auth-service response to the right error class: 401/403
+ * mean the caller's own token was rejected (stale/expired/invalid) — thrown
+ * as such so it surfaces as an auth failure instead of masquerading as an
+ * infra outage. Anything else (5xx, unexpected 4xx) is a genuine dependency
+ * failure, kept as 502.
+ */
+function mapProjectFetchError(status: number): Error {
+  if (status === 401)
+    return unauthorized('Unable to resolve projects — the caller is not authenticated.');
+  if (status === 403)
+    return forbidden('Unable to resolve projects — the caller is not authorized.');
+  return badGateway('Unable to resolve projects — the auth service returned an error.');
 }
 
 /**
@@ -42,7 +57,7 @@ export async function resolveProjectNames(
   }
 
   if (!res.ok) {
-    throw badGateway('Unable to resolve projects — the auth service returned an error.');
+    throw mapProjectFetchError(res.status);
   }
 
   const body = (await res.json()) as { data: ApiProject[] };

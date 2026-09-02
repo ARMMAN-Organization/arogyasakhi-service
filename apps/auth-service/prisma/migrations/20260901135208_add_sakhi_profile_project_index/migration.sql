@@ -1,0 +1,11 @@
+-- CreateIndex
+-- Matches SakhiRepository.findByProject's WHERE clause (primary_project_id +
+-- is_deleted) exactly. That query had no supporting index, forcing a
+-- sequential scan of sakhi_profiles on every Supervisor-roster/ownership
+-- check across the codebase (assertCallerCanTouchCase in beneficiary-service,
+-- Quick Response's resolveOwnSakhiIds, etc.) — observed taking ~9s against
+-- production-scale data, which exceeded every caller's 8s downstream-fetch
+-- timeout and surfaced as opaque 502s. Additive only: CREATE INDEX does not
+-- alter any existing table structure, data, or query results — only how fast
+-- Postgres can find matching rows.
+CREATE INDEX "sakhi_profiles_primary_project_id_is_deleted_idx" ON "sakhi_profiles"("primary_project_id", "is_deleted");

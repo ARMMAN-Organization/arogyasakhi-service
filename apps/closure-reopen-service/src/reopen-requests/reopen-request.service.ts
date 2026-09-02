@@ -47,6 +47,22 @@ export class ReopenRequestService {
   }
 
   /**
+   * Wraps one supplementary lookup: logs and returns null on failure rather
+   * than throwing, so a downstream hiccup degrades only its own field
+   * instead of failing the decision it's attached to. Used for the
+   * notification-enrichment beneficiary fetch in decide() — never for the
+   * ownership gate itself, which must still throw as-is.
+   */
+  private async safeResolve<T>(label: string, fn: () => Promise<T>): Promise<T | null> {
+    try {
+      return await fn();
+    } catch (err) {
+      console.error(`Reopen request decide(): failed to resolve ${label} for a notification:`, err);
+      return null;
+    }
+  }
+
+  /**
    * Best-effort — this reopen request's Quick Response card id
    * (approval_requests.id), used to link the decision notification so
    * GET /quick-response/:cardId can resolve it. A failure here (no matching
@@ -103,6 +119,19 @@ export class ReopenRequestService {
   }
 
   /**
+   * Full detail for a batch of reopen request ids in a single query — lets
+   * approval-service's Quick Response card-enrichment endpoint resolve all
+   * of a page's REOPEN cards in one call instead of one
+   * GET /reopen-requests/:id per card, which was overloading the gateway
+   * under concurrent load. An id not found or soft-deleted is simply
+   * omitted from the result, not an error — same contract as
+   * getDecisionStatusByIds.
+   */
+  getByIds(ids: string[]) {
+    return this.repository.findManyDetailByIds(ids);
+  }
+
+  /**
    * Raises a Sakhi's reopen request (FR-S-10.3) and, on success, raises the
    * matching REOPEN Quick Response card in approval-service. The reopen
    * request is the source of truth — a failure raising the card is logged
@@ -120,6 +149,15 @@ export class ReopenRequestService {
    * check as null) hits the column's own unique constraint on create() —
    * caught here and turned into the same idempotent-replay result as a
    * sequential retry, rather than a raw 500.
+   *
+   * Per FR-S-10.3, reopen only makes sense for a beneficiary that is
+   * actually Closed — checked here against beneficiary-service's own
+   * currentStatus rather than trusting the caller. Without this, a reopen
+   * request can be raised (and later approved) against a beneficiary whose
+   * closure is still PENDING supervisor review — currentStatus never left
+   * ACTIVE — and the approval's reactivateCase() call 409s downstream in
+   * decide() with no way to tell "this is a fine no-op" from "this reopen
+   * request should never have existed".
    */
   async create(
     dto: CreateReopenRequestInput,
@@ -128,6 +166,14 @@ export class ReopenRequestService {
   ) {
     const existing = await this.repository.findByLocalReopenRequestUuid(dto.localReopenRequestUuid);
     if (existing) return existing;
+
+    const beneficiary = await this.beneficiaryClient.getById(
+      dto.beneficiaryId,
+      authorizationHeader,
+    );
+    if (beneficiary.currentStatus !== 'CLOSED') {
+      throw conflict('A reopen request can only be raised for a Closed beneficiary.');
+    }
 
     let created;
     try {
@@ -215,22 +261,34 @@ export class ReopenRequestService {
     if (!existing) throw notFound('Reopen request not found.');
 
     // Delegates ownership scoping to beneficiary-service's own GET
-    // /beneficiaries/:id (SAKHI-own-case / SUPERVISOR-roster /
+    // /beneficiaries/:id/ownership (SAKHI-own-case / SUPERVISOR-roster /
     // MANAGER-unrestricted) — same pattern create() already uses. Without
     // this, any SUPERVISOR who learns a reopen request id outside their own
-    // roster could approve or reject it (IDOR). Its response is also reused
-    // below for the Sakhi notification's beneficiary name, avoiding a
-    // second fetch.
-    const beneficiary = await this.beneficiaryClient.getById(
-      existing.beneficiaryId,
-      authorizationHeader,
-    );
+    // roster could approve or reject it (IDOR). Uses the lightweight
+    // ownership endpoint, not the full getById() below, so this gate never
+    // waits on beneficiary-service's own unrelated enrichment (pii/socio/
+    // risk/lastVisitVitals) — a slow downstream vitals lookup on
+    // beneficiary-service's side must not be able to 502 a reopen decision
+    // that never needed vitals data in the first place.
+    await this.beneficiaryClient.getOwnership(existing.beneficiaryId, authorizationHeader);
 
     if (existing.supervisorStatus !== 'PENDING') {
       throw conflict('This reopen request has already been decided.');
     }
 
-    const updated = await this.repository.decide(id, decidedByUserId, dto);
+    // The full beneficiary detail (for the Sakhi notification's
+    // beneficiaryName below) has no dependency on the decision write, and is
+    // best-effort like every other notification-enrichment lookup in this
+    // method — a failure here degrades the notification text, it must not
+    // block or fail an otherwise-successful decision. Run it alongside
+    // repository.decide() instead of stacking its latency in front of the
+    // write, now that it's no longer doing double duty as the ownership gate.
+    const [updated, beneficiary] = await Promise.all([
+      this.repository.decide(id, decidedByUserId, dto),
+      this.safeResolve('beneficiary', () =>
+        this.beneficiaryClient.getById(existing.beneficiaryId, authorizationHeader),
+      ),
+    ]);
     if (!updated) {
       // Raced with another decision between the read above and the
       // conditional update — same outcome as the check above, just caught a

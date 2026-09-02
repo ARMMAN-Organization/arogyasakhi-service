@@ -90,8 +90,13 @@ export function registerNotificationRoutes(doc: DocumentedRouter, service: Notif
     // the caller's behalf after a Quick Response decision (forwards the
     // deciding Supervisor's own Authorization header); SYSTEM so the
     // missed-visit/referral-followup/sync-delay cron jobs can notify a
-    // Supervisor via a service-account token (POST /auth/service-token).
-    requireRoles('ADMIN', 'SUPERVISOR', 'SYSTEM'),
+    // Supervisor via a service-account token (POST /auth/service-token);
+    // SAKHI so approval-service can notify a Sakhi's assigned Supervisor on
+    // the caller's behalf after a Quick Response submission (forwards the
+    // submitting Sakhi's own Authorization header) — see
+    // NotificationService.create's ownership check for what a SAKHI caller
+    // is actually restricted to (her own assigned Supervisor only).
+    requireRoles('ADMIN', 'SUPERVISOR', 'SYSTEM', 'SAKHI'),
     validateBody(createNotificationSchema),
     controller.create,
   );

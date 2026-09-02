@@ -248,6 +248,12 @@ model SakhiProfile {
   isDeleted        Boolean   @default(false) @map("is_deleted")
   deletedAt        DateTime? @map("deleted_at")
 
+  // Matches SakhiRepository.findByProject's WHERE clause exactly (primary_project_id
+  // + is_deleted) — that query had no supporting index, forcing a sequential scan on
+  // every Supervisor-roster/ownership check across the codebase (assertCallerCanTouchCase,
+  // Quick Response's resolveOwnSakhiIds, etc.), observed taking ~9s against production-scale
+  // data and blowing every caller's 8s downstream-fetch timeout.
+  @@index([primaryProjectId, isDeleted])
   @@map("sakhi_profiles")
 }
 

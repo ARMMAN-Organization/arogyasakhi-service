@@ -53,6 +53,7 @@ describe('ReferralService', () => {
     findMany: jest.fn(),
     findById: jest.fn(),
     findManyByIds: jest.fn(),
+    findManyWithFollowupSummary: jest.fn(),
     findByVisitId: jest.fn(),
     findFollowupSummary: jest.fn(),
     create: jest.fn(),
@@ -612,6 +613,111 @@ describe('ReferralService', () => {
         { id: 'ref-1', status: 'PENDING_FOLLOWUP' },
         { id: 'ref-2', status: 'LAPSED' },
       ]);
+    });
+  });
+
+  describe('getByIds', () => {
+    it('returns each requested referral merged with its follow-up summary when every id is in scope', async () => {
+      const rowOne = {
+        ...referral(),
+        id: 'ref-1',
+        beneficiaryId: 'ben-1',
+        incompleteCount: 2,
+        latestFollowup: null,
+      };
+      const rowTwo = {
+        ...referral(),
+        id: 'ref-2',
+        beneficiaryId: 'ben-2',
+        incompleteCount: 0,
+        latestFollowup: null,
+      };
+      repository.findManyWithFollowupSummary.mockResolvedValue([rowOne, rowTwo]);
+      beneficiaryClient.getIds.mockResolvedValue(['ben-1', 'ben-2']);
+
+      const result = await service.getByIds(
+        ['ref-1', 'ref-2'],
+        caller({ roles: ['SUPERVISOR'] }),
+        AUTH_HEADER,
+      );
+
+      expect(repository.findManyWithFollowupSummary).toHaveBeenCalledWith(['ref-1', 'ref-2']);
+      expect(result).toEqual([rowOne, rowTwo]);
+    });
+
+    it('scopes a SUPERVISOR caller to their roster — a row outside it is silently omitted', async () => {
+      const rowOne = {
+        ...referral(),
+        id: 'ref-1',
+        beneficiaryId: 'ben-1',
+        incompleteCount: 0,
+        latestFollowup: null,
+      };
+      const rowTwo = {
+        ...referral(),
+        id: 'ref-2',
+        beneficiaryId: 'ben-2',
+        incompleteCount: 0,
+        latestFollowup: null,
+      };
+      repository.findManyWithFollowupSummary.mockResolvedValue([rowOne, rowTwo]);
+      beneficiaryClient.getIds.mockResolvedValue(['ben-1']);
+
+      const result = await service.getByIds(
+        ['ref-1', 'ref-2'],
+        caller({ roles: ['SUPERVISOR'] }),
+        AUTH_HEADER,
+      );
+
+      expect(result).toEqual([rowOne]);
+    });
+
+    it('leaves a MANAGER/ADMIN caller unscoped — all rows returned without a beneficiary-service lookup', async () => {
+      const rowOne = {
+        ...referral(),
+        id: 'ref-1',
+        beneficiaryId: 'ben-1',
+        incompleteCount: 0,
+        latestFollowup: null,
+      };
+      repository.findManyWithFollowupSummary.mockResolvedValue([rowOne]);
+
+      const result = await service.getByIds(['ref-1'], caller({ roles: ['MANAGER'] }), AUTH_HEADER);
+
+      expect(beneficiaryClient.getIds).not.toHaveBeenCalled();
+      expect(result).toEqual([rowOne]);
+    });
+
+    it('an id the repository does not return (unknown or soft-deleted) is simply absent from the result', async () => {
+      repository.findManyWithFollowupSummary.mockResolvedValue([]);
+
+      const result = await service.getByIds(
+        ['unknown-id'],
+        caller({ roles: ['MANAGER'] }),
+        AUTH_HEADER,
+      );
+
+      expect(result).toEqual([]);
+    });
+
+    it('a duplicate id in the request yields one row, since findManyWithFollowupSummary is set-based', async () => {
+      const rowOne = {
+        ...referral(),
+        id: 'ref-1',
+        beneficiaryId: 'ben-1',
+        incompleteCount: 0,
+        latestFollowup: null,
+      };
+      repository.findManyWithFollowupSummary.mockResolvedValue([rowOne]);
+
+      const result = await service.getByIds(
+        ['ref-1', 'ref-1'],
+        caller({ roles: ['MANAGER'] }),
+        AUTH_HEADER,
+      );
+
+      expect(repository.findManyWithFollowupSummary).toHaveBeenCalledWith(['ref-1', 'ref-1']);
+      expect(result).toEqual([rowOne]);
     });
   });
 

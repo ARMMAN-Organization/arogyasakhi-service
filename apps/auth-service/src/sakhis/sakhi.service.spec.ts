@@ -5,6 +5,7 @@ describe('SakhiService', () => {
   const repository = {
     findByProject: jest.fn(),
     findById: jest.fn(),
+    findByIds: jest.fn(),
   } as unknown as jest.Mocked<SakhiRepository>;
 
   let service: SakhiService;
@@ -212,5 +213,76 @@ describe('SakhiService', () => {
         });
       },
     );
+
+    it('rejects a SUPERVISOR caller fetching a Sakhi in their own project but assigned to a different supervisor', async () => {
+      repository.findById.mockResolvedValue(rawProfile() as never); // supervisorId: 'supervisor-1'
+      await expect(
+        service.getById('user-1', scopedCaller('project-1', 'other-supervisor')),
+      ).rejects.toMatchObject({ status: 403 });
+    });
+
+    it('allows a SUPERVISOR caller to fetch their own assigned Sakhi in their own project', async () => {
+      repository.findById.mockResolvedValue(rawProfile() as never); // supervisorId: 'supervisor-1'
+      await expect(
+        service.getById('user-1', scopedCaller('project-1', 'supervisor-1')),
+      ).resolves.toMatchObject({ sakhiId: 'user-1' });
+    });
+
+    it('allows MANAGER/ADMIN to fetch a Sakhi regardless of supervisorId', async () => {
+      repository.findById.mockResolvedValue(rawProfile() as never); // supervisorId: 'supervisor-1'
+      await expect(service.getById('user-1', unscopedCaller)).resolves.toMatchObject({
+        sakhiId: 'user-1',
+      });
+    });
+
+    it('does not scope down a caller holding both MANAGER and SUPERVISOR', async () => {
+      repository.findById.mockResolvedValue(rawProfile() as never); // supervisorId: 'supervisor-1'
+      const dualRoleCaller = {
+        id: 'other-supervisor',
+        roles: ['MANAGER', 'SUPERVISOR'],
+        projectId: null,
+      };
+      await expect(service.getById('user-1', dualRoleCaller)).resolves.toMatchObject({
+        sakhiId: 'user-1',
+      });
+    });
+  });
+
+  describe('getByIds', () => {
+    it('returns projected Sakhis for a privileged caller (MANAGER/ADMIN), unrestricted by project', async () => {
+      repository.findByIds.mockResolvedValue([rawProfile()] as never);
+
+      const result = await service.getByIds(['user-1'], unscopedCaller);
+
+      expect(result).toEqual([expect.objectContaining({ sakhiId: 'user-1' })]);
+      expect(repository.findByIds).toHaveBeenCalledWith(['user-1'], {});
+    });
+
+    it('scopes a SUPERVISOR caller to their own project (not further restricted by supervisorId — matches getById)', async () => {
+      repository.findByIds.mockResolvedValue([]);
+
+      await service.getByIds(['user-1', 'user-2'], scopedCaller('project-1'));
+
+      expect(repository.findByIds).toHaveBeenCalledWith(['user-1', 'user-2'], {
+        projectId: 'project-1',
+      });
+    });
+
+    it('returns an empty array (not an error) when no ids are in scope or found', async () => {
+      repository.findByIds.mockResolvedValue([]);
+      await expect(service.getByIds(['missing'], unscopedCaller)).resolves.toEqual([]);
+    });
+
+    it('silently drops out-of-scope/nonexistent ids rather than erroring — the repository already intersects scope', async () => {
+      // Simulates the repository's WHERE-clause scoping: only the in-scope profile comes back.
+      repository.findByIds.mockResolvedValue([rawProfile()] as never);
+
+      const result = await service.getByIds(
+        ['user-1', 'out-of-scope-user'],
+        scopedCaller('project-1'),
+      );
+
+      expect(result).toEqual([expect.objectContaining({ sakhiId: 'user-1' })]);
+    });
   });
 });

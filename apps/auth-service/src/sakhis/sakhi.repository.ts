@@ -21,4 +21,25 @@ export class SakhiRepository {
       include: { user: true },
     });
   }
+
+  /**
+   * Batch lookup for `GET /sakhis/by-ids` — one query for a whole page of
+   * `userId`s instead of one call per id (see sakhi.service.ts's getByIds).
+   * `userIds` is intersected with `scoping` in the WHERE clause, so an
+   * out-of-scope or nonexistent id is silently absent from the result,
+   * never a 403/404 — same reasoning as beneficiary-service's
+   * findByIdsWithRisk (never let a caller-supplied id list reveal via an
+   * error whether an out-of-scope id exists).
+   */
+  findByIds(userIds: string[], scoping: { projectId?: string }) {
+    if (userIds.length === 0) return Promise.resolve([]);
+    return this.prisma.sakhiProfile.findMany({
+      where: {
+        userId: { in: userIds },
+        isDeleted: false,
+        ...(scoping.projectId ? { primaryProjectId: scoping.projectId } : {}),
+      },
+      include: { user: true },
+    });
+  }
 }

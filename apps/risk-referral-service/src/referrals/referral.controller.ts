@@ -7,6 +7,7 @@ import { decideReferralAliasSchema } from './dto/decide-referral-alias.dto';
 import { countByBeneficiarySchema } from './dto/count-by-beneficiary.dto';
 import { followupsByBeneficiarySchema } from './dto/followups-by-beneficiary.dto';
 import { decisionStatusQuerySchema } from './dto/decision-status-query.dto';
+import { byIdsQuerySchema } from './dto/by-ids-query.dto';
 import {
   asyncHandler,
   createDocumentedRouter,
@@ -93,6 +94,22 @@ const apiErrorSchema = z.object({
   message: z.string(),
   errorCode: z.string().openapi({ example: 'VALIDATION_ERROR' }),
   details: z.record(z.unknown()).optional(),
+});
+
+/**
+ * A referral's own fields plus its follow-up summary — shared by the
+ * single-item GET /referrals/:id and the batch GET /referrals/by-ids, which
+ * return the identical per-row shape.
+ */
+const referralDetailSchema = referralSchema.extend({
+  incompleteCount: z.number().int(),
+  latestFollowup: z
+    .object({
+      followupDate: z.string().datetime(),
+      notVisitedReason: z.string().nullable(),
+      outcome: z.string().nullable(),
+    })
+    .nullable(),
 });
 
 const decisionStatusRowSchema = z.object({
@@ -199,6 +216,45 @@ export function createReferralRouter(service: ReferralService) {
   );
 
   doc.get(
+    '/referrals/by-ids',
+    {
+      summary:
+        "A batch of referrals' full detail plus each one's follow-up summary " +
+        '(incompleteCount, latestFollowup) — the batch counterpart of GET /referrals/:id, ' +
+        "added for Quick Response's card-detail resolution so approval-service can resolve " +
+        'all of a page of cards in one call instead of one GET /referrals/:id per card ' +
+        '(concurrent per-card calls were overloading the gateway). Must be registered before ' +
+        "'/referrals/:id' or Express would match 'by-ids' as an :id param instead. Same " +
+        "SUPERVISOR/MANAGER/ADMIN gating as the single-item route. An id that's unknown, " +
+        "soft-deleted, or outside the caller's scope is simply omitted from the result, not " +
+        'a 404/403 — same contract as GET /referrals/decision-status.',
+      tags: ['Referrals'],
+      query: byIdsQuerySchema,
+      responses: {
+        200: {
+          description: 'Referral details for the requested ids',
+          schema: envelope(z.array(referralDetailSchema)),
+        },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(byIdsQuerySchema, 'query'),
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const ids = String(req.query.ids)
+        .split(',')
+        .map((id) => id.trim());
+      res.json(ok(await service.getByIds(ids, req.user, authorizationHeader)));
+    }),
+  );
+
+  doc.get(
     '/referrals/:id',
     {
       summary:
@@ -213,18 +269,7 @@ export function createReferralRouter(service: ReferralService) {
       responses: {
         200: {
           description: 'Referral detail with follow-up summary',
-          schema: envelope(
-            referralSchema.extend({
-              incompleteCount: z.number().int(),
-              latestFollowup: z
-                .object({
-                  followupDate: z.string().datetime(),
-                  notVisitedReason: z.string().nullable(),
-                  outcome: z.string().nullable(),
-                })
-                .nullable(),
-            }),
-          ),
+          schema: envelope(referralDetailSchema),
         },
         400: { description: 'Validation error', schema: apiErrorSchema },
         401: { description: 'Unauthenticated', schema: apiErrorSchema },

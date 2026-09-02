@@ -1,4 +1,4 @@
-import { badGateway } from '@armman/service-commons';
+import { badGateway, forbidden, unauthorized } from '@armman/service-commons';
 
 // Read directly (not via appConfig) so importing this client doesn't pull in
 // app-config's full schema — see geography.client.ts for the same rationale.
@@ -8,6 +8,21 @@ interface ApiSakhi {
   sakhiId: string;
   displayName: string;
   supervisorId: string | null;
+}
+
+/**
+ * Maps a non-ok auth-service response to the right error class: 401/403
+ * mean the caller's own token was rejected (stale/expired/invalid) — thrown
+ * as such so it surfaces as an auth failure instead of masquerading as an
+ * infra outage. Anything else (5xx, unexpected 4xx) is a genuine dependency
+ * failure, kept as 502.
+ */
+function mapSakhiFetchError(status: number, label: string): Error {
+  if (status === 401)
+    return unauthorized(`Unable to resolve ${label} — the caller is not authenticated.`);
+  if (status === 403)
+    return forbidden(`Unable to resolve ${label} — the caller is not authorized.`);
+  return badGateway(`Unable to resolve ${label} — the auth service returned an error.`);
 }
 
 /**
@@ -41,7 +56,7 @@ export async function listSakhiIdsForSupervisor(
   }
 
   if (!res.ok) {
-    throw badGateway('Unable to resolve Sakhis — the auth service returned an error.');
+    throw mapSakhiFetchError(res.status, 'Sakhis');
   }
 
   const body = (await res.json()) as { data: ApiSakhi[] };
@@ -71,7 +86,7 @@ export async function listSakhiNamesForSupervisor(
   }
 
   if (!res.ok) {
-    throw badGateway('Unable to resolve Sakhis — the auth service returned an error.');
+    throw mapSakhiFetchError(res.status, 'Sakhis');
   }
 
   const body = (await res.json()) as { data: ApiSakhi[] };
@@ -108,7 +123,7 @@ export async function getSakhiName(
 
   if (res.status === 404) return null;
   if (!res.ok) {
-    throw badGateway('Unable to resolve a Sakhi — the auth service returned an error.');
+    throw mapSakhiFetchError(res.status, 'a Sakhi');
   }
 
   const body = (await res.json()) as { data: ApiSakhi };

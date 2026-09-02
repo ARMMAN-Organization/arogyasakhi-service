@@ -40,6 +40,19 @@ export class GeographyRepository {
     return chain;
   }
 
+  /**
+   * Batch fetch by id — one query instead of N single-item lookups. An id
+   * that doesn't exist (or is soft-deleted) is simply absent from the
+   * result; duplicate ids in `ids` naturally collapse to one row each since
+   * `geographyUnitId` is the primary key.
+   */
+  findByIds(ids: string[]) {
+    if (ids.length === 0) return Promise.resolve([]);
+    return this.prisma.geographyUnit.findMany({
+      where: { geographyUnitId: { in: ids }, isDeleted: false },
+    });
+  }
+
   /** Direct children of `parentId` (one level down), excluding soft-deleted, ordered by geoCode. */
   findChildren(parentId: string) {
     return this.prisma.geographyUnit.findMany({

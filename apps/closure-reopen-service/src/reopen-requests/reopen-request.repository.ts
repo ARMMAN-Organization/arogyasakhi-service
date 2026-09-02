@@ -26,6 +26,19 @@ export class ReopenRequestRepository {
   }
 
   /**
+   * Full detail for a batch of reopen request ids — same row shape as
+   * findById(), batched via a single `IN (...)` query instead of N
+   * single-item lookups. Added for approval-service's Quick Response card-
+   * enrichment endpoint, whose concurrent per-card GET /reopen-requests/:id
+   * calls were overloading the gateway. An id not found (or soft-deleted) is
+   * simply absent from the result, not an error; a duplicate id in the input
+   * naturally collapses to one row since `id` is the primary key.
+   */
+  findManyDetailByIds(ids: string[]) {
+    return this.prisma.reopenRequest.findMany({ where: { id: { in: ids }, isDeleted: false } });
+  }
+
+  /**
    * Finds a reopen request previously created from this exact
    * client-generated localReopenRequestUuid — lets create() treat a
    * dropped-connection retry as an idempotent replay instead of a new

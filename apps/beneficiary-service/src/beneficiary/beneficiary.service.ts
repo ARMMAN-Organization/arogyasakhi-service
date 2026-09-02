@@ -34,7 +34,11 @@ import {
   resolvePadaUnits,
   resolveVillageNames,
 } from '../geography/geography.client';
-import { resolveLookupIdsByValueCode, resolveLookupValues } from '../lookups/lookup.client';
+import {
+  resolveLookupIdsByValueCode,
+  resolveLookupValues,
+  type ResolvedLookupValue,
+} from '../lookups/lookup.client';
 import {
   getSakhiName,
   listSakhiIdsForSupervisor,
@@ -74,6 +78,12 @@ const SOCIO_DEMOGRAPHICS_LOOKUP_CATEGORIES: Record<string, string> = {
  * (yearsInVillage, familyMembersCount, childrenUnder5Count) are left as-is.
  * A missing/unresolvable value (or no socioDemographics row at all) never
  * fails the whole response — the case/PII/other detail is still valid data.
+ *
+ * If auth-service (the lookup owner) is unreachable or errors, this degrades
+ * to returning socioDemographics unresolved (raw *LookupId fields, no
+ * sibling human-readable keys) rather than failing the whole request — same
+ * stance as withResolvedRiskConditionNames. The failure is logged so it's
+ * visible without paging anyone.
  */
 async function withResolvedSocioDemographics<T extends Record<string, unknown>>(
   caseDetail: T,
@@ -87,7 +97,16 @@ async function withResolvedSocioDemographics<T extends Record<string, unknown>>(
     requests[field] = { categoryCode, lookupValueId: (socio[field] as string | null) ?? null };
   }
 
-  const resolved = await resolveLookupValues(requests, authorizationHeader);
+  let resolved: Record<string, ResolvedLookupValue | null>;
+  try {
+    resolved = await resolveLookupValues(requests, authorizationHeader);
+  } catch (err) {
+    console.error(
+      'Failed to resolve socioDemographics lookup values — returning socioDemographics unresolved.',
+      err,
+    );
+    return caseDetail;
+  }
 
   const withResolved = { ...socio };
   for (const field of Object.keys(SOCIO_DEMOGRAPHICS_LOOKUP_CATEGORIES)) {
@@ -652,6 +671,77 @@ export class BeneficiaryService {
     }));
   }
 
+  /**
+   * Full per-beneficiary detail (id, sakhiId, pii.fullName/padaId,
+   * motherCaseDetails, riskConditionSummaries) for approval-service's Quick
+   * Response card enrichment — batches what was previously N sequential
+   * single-item `GET /beneficiaries/:id` calls (the confirmed 502/timeout
+   * overload under concurrent per-card calls) into one call per resource
+   * type. Same ownership-scoping/silent-drop pattern as getByIdsWithRisk/
+   * getRiskConditionSummaryBatch: an id outside the caller's scope, or
+   * simply not found, is absent from the result, not a 404/403 (never trust
+   * a caller-supplied id list as pre-scoped). riskConditionSummaries'
+   * condition names are resolved once across every distinct riskConditionId
+   * in the whole result set (same as getRiskConditionSummaryBatch) — no
+   * per-beneficiary cross-service call.
+   */
+  async getByIdsDetail(ids: string[], caller: AuthenticatedUser, authorizationHeader: string) {
+    const scoping = await resolveSakhiScoping(undefined, caller, authorizationHeader);
+    const rows = await this.repository.findByIdsDetail(ids, scoping);
+    if (rows.length === 0) return [];
+
+    const allConditionIds = [
+      ...new Set(rows.flatMap((r) => r.riskConditionSummaries.map((s) => s.riskConditionId))),
+    ];
+    let resolvedConditions: Map<
+      string,
+      { conditionCode: string; conditionName: string; gradeScale: string }
+    >;
+    try {
+      resolvedConditions =
+        allConditionIds.length > 0
+          ? await resolveRiskConditions(allConditionIds, authorizationHeader)
+          : new Map();
+    } catch (err) {
+      console.error(
+        `Failed to resolve risk condition names for ids [${allConditionIds.join(', ')}] — ` +
+          'returning riskConditionSummaries with null conditionCode/conditionName/gradeScale.',
+        err,
+      );
+      resolvedConditions = new Map();
+    }
+
+    return rows.map((row) => ({
+      id: row.id,
+      sakhiId: row.sakhiId,
+      pii: {
+        fullName: decryptPii(row.pii.fullNameEnc),
+        padaId: row.pii.padaId,
+      },
+      motherCaseDetails: row.motherCaseDetails
+        ? { lmpDate: row.motherCaseDetails.lmpDate, eddDate: row.motherCaseDetails.eddDate }
+        : null,
+      riskConditionSummaries: row.riskConditionSummaries.map((s) => {
+        const match = resolvedConditions.get(s.riskConditionId);
+        return {
+          riskConditionId: s.riskConditionId,
+          phase: s.phase,
+          latestGrade: s.latestGrade,
+          latestAssessedAt: s.latestAssessedAt,
+          everHighestGrade: s.everHighestGrade,
+          everAtRiskFlag: s.everAtRiskFlag,
+          currentReferralTriggerFlag: s.currentReferralTriggerFlag,
+          currentHrVisitTriggerFlag: s.currentHrVisitTriggerFlag,
+          isFirstInstance: s.isFirstInstance,
+          consecutiveNoImprovementCount: s.consecutiveNoImprovementCount,
+          conditionCode: match?.conditionCode ?? null,
+          conditionName: match?.conditionName ?? null,
+          gradeScale: match?.gradeScale ?? null,
+        };
+      }),
+    }));
+  }
+
   async getRegistrationSummary(
     query: SummaryQueryInput,
     caller: AuthenticatedUser,
@@ -765,14 +855,18 @@ export class BeneficiaryService {
       await assertCallerCanTouchCase(found.sakhiId, caller, authorizationHeader);
     }
 
-    const projected = await this.projectCase(id, authorizationHeader, found);
     // Only fetched for the single-case detail view — projectCase is also
     // reused by write-path re-fetches (applyLmpChange/reactivateCase/etc.),
     // which don't need an extra cross-service round trip to visit-form-
     // service just to return a response the caller already knows the
     // outcome of. Degrades to null on any failure (see
     // resolveLatestVisitVitals) rather than failing the whole request.
-    const lastVisitVitals = await resolveLatestVisitVitals(id, authorizationHeader);
+    // Neither call depends on the other's result, so they run concurrently
+    // instead of adding a third sequential cross-service round trip here.
+    const [projected, lastVisitVitals] = await Promise.all([
+      this.projectCase(id, authorizationHeader, found),
+      resolveLatestVisitVitals(id, authorizationHeader),
+    ]);
     return Object.assign(projected, { lastVisitVitals });
   }
 
@@ -823,9 +917,21 @@ export class BeneficiaryService {
     const found = prefetched ?? (await this.repository.findById(id));
     if (!found) throw notFound('Beneficiary case not found.');
     const projected = withDecryptedName(found);
-    const withSocio = await withResolvedSocioDemographics(projected, authorizationHeader);
-    const withRiskLevel = withOverallRiskLevel(withSocio);
-    return withResolvedRiskConditionNames(withRiskLevel, authorizationHeader);
+    const withRiskLevel = withOverallRiskLevel(projected);
+    // socio-demographics and risk-condition-name resolution each touch their
+    // own independent key (socioDemographics / riskConditionSummaries) and
+    // hit different downstream services (auth-service / risk-referral-
+    // service) — running them in parallel instead of sequentially halves
+    // the cross-service round trips on this method's critical path.
+    const [withSocio, withResolvedRisk] = await Promise.all([
+      withResolvedSocioDemographics(withRiskLevel, authorizationHeader),
+      withResolvedRiskConditionNames(withRiskLevel, authorizationHeader),
+    ]);
+    return {
+      ...withRiskLevel,
+      socioDemographics: withSocio.socioDemographics,
+      riskConditionSummaries: withResolvedRisk.riskConditionSummaries,
+    } as typeof withRiskLevel;
   }
 
   /**

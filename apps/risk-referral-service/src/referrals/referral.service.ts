@@ -108,6 +108,32 @@ export class ReferralService {
   }
 
   /**
+   * Batched counterpart of getById, for Quick Response's card-detail
+   * resolution — resolves all requested cards' referral data in one call
+   * instead of one GET /referrals/:id per card (the concurrent per-card
+   * calls were overloading the gateway). Unlike getById, authorization is
+   * NOT a per-row beneficiaryClient.getById call (that would just move the
+   * N+1 from this service to beneficiary-service) — it reuses
+   * getDecisionStatusByIds's scopeToCaller pattern instead: one bulk
+   * beneficiary-service call, then an in-scope filter. An id that's
+   * unknown, soft-deleted, or whose beneficiary is out of the caller's
+   * scope is simply omitted from the result, not a 404/403 — same contract
+   * as getDecisionStatusByIds, since a caller batching many ids can't
+   * usefully react to a single one being unauthorized.
+   */
+  async getByIds(ids: string[], caller: AuthenticatedUser, authorizationHeader: string) {
+    const rows = await this.repository.findManyWithFollowupSummary(ids);
+    const scopedBeneficiaryIds = new Set(
+      await this.scopeToCaller(
+        rows.map((row) => row.beneficiaryId),
+        caller,
+        authorizationHeader,
+      ),
+    );
+    return rows.filter((row) => scopedBeneficiaryIds.has(row.beneficiaryId));
+  }
+
+  /**
    * A referral's own fields plus its follow-up summary (incompleteCount,
    * latestFollowup) — added for Quick Response's REFERRAL_INCOMPLETE card
    * enrichment. The summary is always computed (cheap: one count + one

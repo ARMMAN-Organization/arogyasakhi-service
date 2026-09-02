@@ -4,6 +4,7 @@ import type { QuickResponseService } from './quick-response.service';
 import { createQuickResponseController } from './quick-response.controller';
 import { listQuickResponseSchema } from './dto/list-quick-response.dto';
 import { decideQuickResponseSchema } from './dto/decide-quick-response.dto';
+import { getQuickResponseDetailsSchema } from './dto/get-quick-response-details.dto';
 import {
   requireRoles,
   trustGatewayIdentity,
@@ -88,6 +89,40 @@ export function registerQuickResponseRoutes(doc: DocumentedRouter, service: Quic
     requireRoles('SUPERVISOR', 'MANAGER'),
     validate(listQuickResponseSchema, 'query'),
     controller.list,
+  );
+
+  // Registered before `/quick-response/:cardId` — Express matches routes in
+  // registration order, and `:cardId` would otherwise capture the literal
+  // "details" segment as a cardId value and fail UUID validation there. Same
+  // ordering reasoning as auth-service's `/geography-units/roots` vs
+  // `/geography-units/:id`.
+  doc.get(
+    '/quick-response/details',
+    {
+      summary:
+        'Batch card detail for up to 50 Quick Response cards in one call — fixes a load-' +
+        "tested bug where the Supervisor app's card screen called GET /quick-response/:cardId " +
+        'once per card, in parallel, and each call fanned out to ~4 downstream services; N ' +
+        'cards open at once meant N×4 concurrent downstream calls, overloading the gateway ' +
+        '(502/timeout, cards silently vanishing from the screen). An id present in neither ' +
+        "approval_requests nor escalation_events, or outside a SUPERVISOR caller's roster, " +
+        'is simply omitted from the result, not an error for the whole batch.',
+      tags: ['Quick Response'],
+      query: getQuickResponseDetailsSchema,
+      responses: {
+        200: {
+          description: 'Card detail for the requested ids (shape varies by cardType)',
+          schema: envelope(z.array(quickResponseCardSchema)),
+        },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER'),
+    validate(getQuickResponseDetailsSchema, 'query'),
+    controller.getCardDetails,
   );
 
   doc.get(

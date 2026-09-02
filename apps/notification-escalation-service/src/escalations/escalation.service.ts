@@ -79,6 +79,23 @@ function encodeCursor(row: { createdAt: Date; id: string }): string {
 
 type EscalationEventRow = NonNullable<Awaited<ReturnType<EscalationRepository['findById']>>>;
 
+/** The calling principal's own scope, as carried on their JWT/trusted-identity headers. */
+export interface CallerScope {
+  readonly id: string;
+  readonly roles: string[];
+  readonly projectId: string | null;
+}
+
+/**
+ * MANAGER/ADMIN are unrestricted across this service's supervisor-scoping
+ * checks — checked as the absence of an elevated role, not the presence of
+ * a restrictive one (SUPERVISOR), since a caller can hold multiple role
+ * assignments at once. Matches auth-service's own isPrivileged() pattern.
+ */
+function isPrivileged(caller: CallerScope): boolean {
+  return caller.roles.includes('MANAGER') || caller.roles.includes('ADMIN');
+}
+
 interface RowEnrichment {
   beneficiary: BeneficiaryRecord | null;
   sakhi: SakhiRecord | null;
@@ -182,9 +199,10 @@ export class EscalationService {
     };
   }
 
-  async list(query: ListEscalationEventsInput, authorizationHeader: string) {
+  async list(query: ListEscalationEventsInput, caller: CallerScope, authorizationHeader: string) {
     const cursor = query.cursor ? decodeCursor(query.cursor) : null;
-    const rows = await this.repository.findMany(query, cursor);
+    const assignedSupervisorId = isPrivileged(caller) ? undefined : caller.id;
+    const rows = await this.repository.findMany(query, cursor, assignedSupervisorId);
 
     const hasMore = rows.length > query.limit;
     const page = hasMore ? rows.slice(0, query.limit) : rows;
@@ -250,6 +268,43 @@ export class EscalationService {
       : null;
 
     return this.toEnrichedCard(row, cardType, { beneficiary, sakhi });
+  }
+
+  /**
+   * Batched equivalent of findById — resolves a comma-separated list of ids
+   * into the same enriched Quick Response card shape, in one DB round trip
+   * (EscalationRepository.findManyByIds) plus one batched enrichment pass
+   * (enrichRows, already deduped per unique beneficiary/Sakhi — the same
+   * helper list() uses). Exists to fix approval-service's card-detail
+   * resolution firing one GET /escalation-events/:id per card concurrently,
+   * which overloads the gateway.
+   *
+   * An id that doesn't exist, is soft-deleted, or isn't one of the 8
+   * supported card types is simply omitted from the result, not a 404 —
+   * matching the by-ids convention used elsewhere (beneficiary-service's
+   * by-ids-with-risk, closure-reopen-service's decision-status). Enrichment
+   * is best-effort per row, like list() — not the single-item findById's
+   * throw-on-failure — since a page of many cards shouldn't come back empty
+   * because one referenced beneficiary/Sakhi record is unreachable.
+   */
+  async findManyByIds(ids: string[], authorizationHeader: string) {
+    const rows = await this.repository.findManyByIds(ids);
+
+    const supported = rows
+      .map((row) => ({ row, cardType: toCardType(row.escalationType) }))
+      .filter(
+        (r): r is { row: (typeof rows)[number]; cardType: 'MISSED_VISIT' | 'EDD_NEARING' } =>
+          r.cardType !== null,
+      );
+
+    const enrichment = await this.enrichRows(
+      supported.map(({ row }) => row),
+      authorizationHeader,
+    );
+
+    return supported.map(({ row, cardType }) =>
+      this.toEnrichedCard(row, cardType, enrichment.get(requireBeneficiaryId(row)) ?? null),
+    );
   }
 
   /**

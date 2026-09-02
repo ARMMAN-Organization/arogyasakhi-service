@@ -116,6 +116,16 @@ export function registerApprovalRequestRoutes(
         'link a Closure Review/Reopen decision notification to its Quick Response card. Provide ' +
         'exactly one of closureId or reopenRequestId.',
       tags: ['Approvals'],
+      // Documented separately from the real validation schema: getApprovalBySourceSchema
+      // is a ZodEffects (wrapped in .refine() to enforce "exactly one of the two ids"),
+      // which zod-to-openapi cannot introspect as individual named query parameters —
+      // it throws MissingParameterDataError at doc-generation time (app boot) otherwise.
+      // `validate(getApprovalBySourceSchema, 'query')` below still enforces the real
+      // (refined) schema at runtime; this override only affects what's documented.
+      query: z.object({
+        closureId: z.string().uuid().optional(),
+        reopenRequestId: z.string().uuid().optional(),
+      }),
       responses: {
         200: { description: 'Matching approval request', schema: envelope(approvalRequestSchema) },
         400: { description: 'Validation error', schema: apiErrorSchema },

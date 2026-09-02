@@ -1,5 +1,6 @@
 import { badGateway, HttpError } from '@armman/service-commons';
 import { appConfig } from '../config/app-config';
+import { DOWNSTREAM_DECIDE_TIMEOUT_MS, DOWNSTREAM_FETCH_TIMEOUT_MS } from './fetch-timeout';
 
 export interface ReopenRequestRecord {
   id: string;
@@ -32,6 +33,7 @@ export class ReopenRequestClient {
         method: 'PATCH',
         headers: { Authorization: authorizationHeader, 'Content-Type': 'application/json' },
         body: JSON.stringify({ decision, decisionReasonCodeLookupId, decisionNotes }),
+        signal: AbortSignal.timeout(DOWNSTREAM_DECIDE_TIMEOUT_MS),
       });
     } catch {
       throw badGateway(
@@ -71,7 +73,10 @@ export class ReopenRequestClient {
     try {
       res = await fetch(
         `${appConfig.API_GATEWAY_BASE_URL}/api/v1/reopen-requests/decision-status?ids=${ids.join(',')}`,
-        { headers: { Authorization: authorizationHeader } },
+        {
+          headers: { Authorization: authorizationHeader },
+          signal: AbortSignal.timeout(DOWNSTREAM_FETCH_TIMEOUT_MS),
+        },
       );
     } catch {
       throw badGateway(
@@ -111,6 +116,7 @@ export class ReopenRequestClient {
     try {
       res = await fetch(`${appConfig.API_GATEWAY_BASE_URL}/api/v1/reopen-requests/${id}`, {
         headers: { Authorization: authorizationHeader },
+        signal: AbortSignal.timeout(DOWNSTREAM_FETCH_TIMEOUT_MS),
       });
     } catch {
       throw badGateway(
@@ -131,5 +137,45 @@ export class ReopenRequestClient {
 
     const body = (await res.json()) as { data: ReopenRequestDetailRecord };
     return body.data;
+  }
+
+  /**
+   * Full detail for a batch of reopen request ids, via closure-reopen-
+   * service's GET /reopen-requests/by-ids — one call per batch instead of
+   * one GET /reopen-requests/:id per REOPEN card, used by
+   * QuickResponseService.getCardDetails. An id not found or soft-deleted is
+   * simply omitted from the result, not an error.
+   */
+  async getManyByIds(
+    ids: string[],
+    authorizationHeader: string,
+  ): Promise<Map<string, ReopenRequestDetailRecord>> {
+    if (ids.length === 0) return new Map();
+
+    let res: Response;
+    try {
+      res = await fetch(
+        `${appConfig.API_GATEWAY_BASE_URL}/api/v1/reopen-requests/by-ids?ids=${ids.join(',')}`,
+        {
+          headers: { Authorization: authorizationHeader },
+          signal: AbortSignal.timeout(DOWNSTREAM_FETCH_TIMEOUT_MS),
+        },
+      );
+    } catch {
+      throw badGateway('Unable to fetch reopen requests — closure-reopen-service is unreachable.');
+    }
+
+    if (!res.ok) {
+      if (res.status >= 400 && res.status < 500) {
+        const body = (await res.json().catch(() => null)) as { message?: string } | null;
+        throw new HttpError(res.status, body?.message ?? 'Unable to fetch reopen requests.');
+      }
+      throw badGateway(
+        'Unable to fetch reopen requests — closure-reopen-service returned an error.',
+      );
+    }
+
+    const body = (await res.json()) as { data: ReopenRequestDetailRecord[] };
+    return new Map(body.data.map((row) => [row.id, row]));
   }
 }

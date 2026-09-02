@@ -93,6 +93,22 @@ describe('resolveHealthBlockIdFromPhc', () => {
     });
   });
 
+  it('throws 401 (not 502, not 404) when the auth-service call fails with a 401', async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 401 });
+
+    await expect(resolveHealthBlockIdFromPhc('phc-1', 'Bearer stale-token')).rejects.toMatchObject({
+      status: 401,
+    });
+  });
+
+  it('throws 403 (not 502, not 404) when the auth-service call fails with a 403', async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 403 });
+
+    await expect(resolveHealthBlockIdFromPhc('phc-1', 'Bearer test-token')).rejects.toMatchObject({
+      status: 403,
+    });
+  });
+
   it('throws 422 when the resolved unit is not PHC-level', async () => {
     fetchMock.mockResolvedValue(
       unitResponse({
@@ -201,6 +217,18 @@ describe('resolveVillageNames', () => {
     await expect(resolveVillageNames('Bearer test-token')).rejects.toMatchObject({ status: 502 });
   });
 
+  it('throws 401 (not 502) when the auth-service call fails with a 401', async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 401 });
+
+    await expect(resolveVillageNames('Bearer stale-token')).rejects.toMatchObject({ status: 401 });
+  });
+
+  it('throws 403 (not 502) when the auth-service call fails with a 403', async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 403 });
+
+    await expect(resolveVillageNames('Bearer test-token')).rejects.toMatchObject({ status: 403 });
+  });
+
   it('filters by geoType=VILLAGE', async () => {
     fetchMock.mockResolvedValue(listResponse([]));
 
@@ -262,6 +290,18 @@ describe('resolvePadaUnits', () => {
     fetchMock.mockResolvedValue({ ok: false, status: 500 });
 
     await expect(resolvePadaUnits('Bearer test-token')).rejects.toMatchObject({ status: 502 });
+  });
+
+  it('throws 401 (not 502) when the auth-service call fails with a 401', async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 401 });
+
+    await expect(resolvePadaUnits('Bearer stale-token')).rejects.toMatchObject({ status: 401 });
+  });
+
+  it('throws 403 (not 502) when the auth-service call fails with a 403', async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 403 });
+
+    await expect(resolvePadaUnits('Bearer test-token')).rejects.toMatchObject({ status: 403 });
   });
 
   it('filters by geoType=PADA', async () => {

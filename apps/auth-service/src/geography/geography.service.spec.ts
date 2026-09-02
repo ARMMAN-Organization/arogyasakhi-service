@@ -8,6 +8,7 @@ describe('GeographyService', () => {
     findChildren: jest.fn(),
     findRoots: jest.fn(),
     findMany: jest.fn(),
+    findByIds: jest.fn(),
     createUnit: jest.fn(),
     updateUnit: jest.fn(),
     hasActiveChildren: jest.fn(),
@@ -163,6 +164,110 @@ describe('GeographyService', () => {
     it('throws 404 when the parent itself does not exist', async () => {
       repository.findById.mockResolvedValue(null);
       await expect(service.getChildren('missing')).rejects.toMatchObject({ status: 404 });
+    });
+  });
+
+  describe('getByIds', () => {
+    it('returns the projected units for the requested ids', async () => {
+      repository.findByIds.mockResolvedValue([
+        {
+          geographyUnitId: 'phc-1',
+          parentId: 'block-1',
+          geoType: 'PHC',
+          geoCode: 'PHC-001',
+          name: 'Sample PHC',
+          status: 'ACTIVE',
+          createdByUserId: 'u',
+        },
+        {
+          geographyUnitId: 'pada-1',
+          parentId: 'village-1',
+          geoType: 'PADA',
+          geoCode: null,
+          name: 'Sample Pada',
+          status: 'ACTIVE',
+          createdByUserId: 'u',
+        },
+      ] as never);
+
+      const result = await service.getByIds(['phc-1', 'pada-1']);
+
+      expect(repository.findByIds).toHaveBeenCalledWith(['phc-1', 'pada-1']);
+      expect(result).toEqual([
+        {
+          geographyUnitId: 'phc-1',
+          parentId: 'block-1',
+          geoType: 'PHC',
+          geoCode: 'PHC-001',
+          name: 'Sample PHC',
+          status: 'ACTIVE',
+        },
+        {
+          geographyUnitId: 'pada-1',
+          parentId: 'village-1',
+          geoType: 'PADA',
+          geoCode: null,
+          name: 'Sample Pada',
+          status: 'ACTIVE',
+        },
+      ]);
+      expect(result[0]).not.toHaveProperty('createdByUserId');
+    });
+
+    it('silently omits an id that does not exist (no 404)', async () => {
+      // Repository only returns the row that actually matched — the "missing"
+      // id is simply absent, mirroring what Prisma's `in` filter would do.
+      repository.findByIds.mockResolvedValue([
+        {
+          geographyUnitId: 'phc-1',
+          parentId: 'block-1',
+          geoType: 'PHC',
+          geoCode: 'PHC-001',
+          name: 'Sample PHC',
+          status: 'ACTIVE',
+        },
+      ] as never);
+
+      const result = await service.getByIds(['phc-1', 'missing-id']);
+
+      expect(result).toEqual([
+        {
+          geographyUnitId: 'phc-1',
+          parentId: 'block-1',
+          geoType: 'PHC',
+          geoCode: 'PHC-001',
+          name: 'Sample PHC',
+          status: 'ACTIVE',
+        },
+      ]);
+    });
+
+    it('returns one row when the same id is requested twice (duplicate collapses)', async () => {
+      // The repository is queried with whatever ids the controller parsed
+      // (duplicates included); Prisma's `in` filter against a unique PK
+      // naturally returns each matching row once, so the service doesn't
+      // need to dedupe itself.
+      repository.findByIds.mockResolvedValue([
+        {
+          geographyUnitId: 'phc-1',
+          parentId: 'block-1',
+          geoType: 'PHC',
+          geoCode: 'PHC-001',
+          name: 'Sample PHC',
+          status: 'ACTIVE',
+        },
+      ] as never);
+
+      const result = await service.getByIds(['phc-1', 'phc-1']);
+
+      expect(repository.findByIds).toHaveBeenCalledWith(['phc-1', 'phc-1']);
+      expect(result).toHaveLength(1);
+    });
+
+    it('returns an empty array when no ids match (not an error)', async () => {
+      repository.findByIds.mockResolvedValue([]);
+      const result = await service.getByIds(['missing-1', 'missing-2']);
+      expect(result).toEqual([]);
     });
   });
 

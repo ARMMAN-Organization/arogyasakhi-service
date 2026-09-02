@@ -55,4 +55,39 @@ describe('SakhiRepository', () => {
       expect(result).toBeNull();
     });
   });
+
+  describe('findByIds', () => {
+    it('queries Sakhis by user ids, excluding soft-deleted, unscoped when no projectId given', async () => {
+      findMany.mockResolvedValue([{ id: 'sakhi-1', user: { id: 'user-1' } }]);
+
+      const result = await repository.findByIds(['user-1', 'user-2'], {});
+
+      expect(findMany).toHaveBeenCalledWith({
+        where: { userId: { in: ['user-1', 'user-2'] }, isDeleted: false },
+        include: { user: true },
+      });
+      expect(result).toEqual([{ id: 'sakhi-1', user: { id: 'user-1' } }]);
+    });
+
+    it('intersects with projectId when scoped', async () => {
+      findMany.mockResolvedValue([]);
+
+      await repository.findByIds(['user-1'], { projectId: 'project-1' });
+
+      expect(findMany).toHaveBeenCalledWith({
+        where: {
+          userId: { in: ['user-1'] },
+          isDeleted: false,
+          primaryProjectId: 'project-1',
+        },
+        include: { user: true },
+      });
+    });
+
+    it('returns an empty array without querying when ids is empty', async () => {
+      const result = await repository.findByIds([], {});
+      expect(result).toEqual([]);
+      expect(findMany).not.toHaveBeenCalled();
+    });
+  });
 });

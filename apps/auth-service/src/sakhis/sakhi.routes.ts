@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { TokenSigner } from '@armman/service-commons';
 import type { SakhiService } from './sakhi.service';
 import { createSakhiController } from './sakhi.controller';
+import { byIdsQuerySchema } from './dto/by-ids-query.dto';
 import {
   authenticate,
   errorResponse,
@@ -77,6 +78,31 @@ export function registerSakhiRoutes(
     requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
     validate(projectIdParamsSchema, 'params'),
     controller.listByProject,
+  );
+
+  // Registered before /sakhis/:sakhiId — Express matches routes in
+  // registration order, so this must come first or "by-ids" would be
+  // captured as a :sakhiId path param and fail UUID validation.
+  doc.get(
+    '/sakhis/by-ids',
+    {
+      summary:
+        'Batch-get Sakhis by id — used by other services for page-level name ' +
+        'resolution instead of one call per Sakhi. Scoping matches GET /sakhis/:sakhiId ' +
+        '(project-only); an out-of-scope or nonexistent id is silently absent from the ' +
+        'result rather than erroring.',
+      tags: ['Sakhis'],
+      query: byIdsQuerySchema,
+      responses: {
+        200: { description: 'Sakhis found and in scope', schema: envelope(z.array(sakhiSchema)) },
+        401: errorResponse(401),
+        500: errorResponse(500),
+      },
+    },
+    authenticate(signer),
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(byIdsQuerySchema, 'query'),
+    controller.getByIds,
   );
 
   doc.get(

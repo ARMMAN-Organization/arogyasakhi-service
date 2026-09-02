@@ -147,6 +147,34 @@ export function registerClosureRoutes(doc: DocumentedRouter, service: ClosureSer
   );
 
   doc.get(
+    '/closures/by-ids',
+    {
+      summary:
+        "Full detail for a batch of closure ids — added for Quick Response's card-" +
+        'enrichment endpoint (approval-service resolves CLOSURE_REVIEW cards through this) ' +
+        'to replace N concurrent single-item GET /closures/:id calls per page of cards, which ' +
+        'was overloading the gateway (502/timeout under concurrent load). Not a general ' +
+        'SAKHI-facing read, same as GET /closures/:id. An id not found or soft-deleted is ' +
+        'simply omitted from the result, not an error.',
+      tags: ['Closures'],
+      query: decisionStatusQuerySchema,
+      responses: {
+        200: {
+          description: 'Closure detail for the requested ids',
+          schema: envelope(z.array(closureSchema)),
+        },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(decisionStatusQuerySchema, 'query'),
+    controller.getByIds,
+  );
+
+  doc.get(
     '/closures/:id',
     {
       summary:

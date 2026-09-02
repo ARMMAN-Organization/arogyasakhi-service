@@ -3,6 +3,7 @@ import { asyncHandler, ok, unauthorized } from '../app.module';
 import type { EscalationService } from './escalation.service';
 import type { ListEscalationEventsInput } from './dto/list-escalation-events.dto';
 import type { CreateEscalationEventInput } from './dto/create-escalation-event.dto';
+import type { EscalationEventsByIdsQuery } from './dto/escalation-events-by-ids-query.dto';
 import type { DecideMissedVisitEscalationInput } from './dto/decide-missed-visit-escalation.dto';
 import type { SubmitClosurePendingReasonInput } from './dto/submit-closure-pending-reason.dto';
 
@@ -13,10 +14,11 @@ import type { SubmitClosurePendingReasonInput } from './dto/submit-closure-pendi
 export function createEscalationController(service: EscalationService) {
   return {
     list: asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
       const authorizationHeader = req.header('authorization');
       if (!authorizationHeader) return next(unauthorized());
       const query = req.query as unknown as ListEscalationEventsInput;
-      res.json(ok(await service.list(query, authorizationHeader)));
+      res.json(ok(await service.list(query, req.user, authorizationHeader)));
     }),
 
     create: asyncHandler(async (req, res, next) => {
@@ -32,6 +34,14 @@ export function createEscalationController(service: EscalationService) {
       const card = await service.findById(req.params.id, authorizationHeader);
       if (!card) throw notFound('Escalation event not found.');
       res.json(ok(card));
+    }),
+
+    findByIds: asyncHandler(async (req, res, next) => {
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const { ids } = req.query as unknown as EscalationEventsByIdsQuery;
+      const idList = ids.split(',').map((id) => id.trim());
+      res.json(ok(await service.findManyByIds(idList, authorizationHeader)));
     }),
 
     getMissedVisitDetail: asyncHandler(async (req, res) => {

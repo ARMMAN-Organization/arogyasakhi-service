@@ -357,6 +357,86 @@ describe('BeneficiaryRepository', () => {
     });
   });
 
+  describe('findByIdsDetail', () => {
+    it('returns an empty array immediately for an empty ids input, without querying', async () => {
+      const localFindMany = jest.fn();
+      const repo = new BeneficiaryRepository({
+        beneficiaryCase: { findMany: localFindMany },
+      } as never);
+
+      const result = await repo.findByIdsDetail([], {});
+
+      expect(result).toEqual([]);
+      expect(localFindMany).not.toHaveBeenCalled();
+    });
+
+    it('intersects ids with sakhiId scoping in the WHERE clause (SAKHI own-only)', async () => {
+      const localFindMany = jest.fn().mockResolvedValue([]);
+      const repo = new BeneficiaryRepository({
+        beneficiaryCase: { findMany: localFindMany },
+      } as never);
+
+      await repo.findByIdsDetail(['b1', 'b2'], { sakhiId: 'sakhi-1' });
+
+      expect(localFindMany).toHaveBeenCalledWith({
+        where: { id: { in: ['b1', 'b2'] }, isDeleted: false, sakhiId: 'sakhi-1' },
+        include: { pii: true, motherCaseDetails: true, riskConditionSummaries: true },
+      });
+    });
+
+    it('intersects ids with sakhiIds roster scoping (SUPERVISOR)', async () => {
+      const localFindMany = jest.fn().mockResolvedValue([]);
+      const repo = new BeneficiaryRepository({
+        beneficiaryCase: { findMany: localFindMany },
+      } as never);
+
+      await repo.findByIdsDetail(['b1'], { sakhiIds: ['sakhi-a', 'sakhi-b'] });
+
+      expect(localFindMany).toHaveBeenCalledWith({
+        where: {
+          id: { in: ['b1'] },
+          isDeleted: false,
+          sakhiId: { in: ['sakhi-a', 'sakhi-b'] },
+        },
+        include: { pii: true, motherCaseDetails: true, riskConditionSummaries: true },
+      });
+    });
+
+    it('leaves an unscoped (MANAGER/ADMIN) caller with no sakhiId filter', async () => {
+      const localFindMany = jest.fn().mockResolvedValue([]);
+      const repo = new BeneficiaryRepository({
+        beneficiaryCase: { findMany: localFindMany },
+      } as never);
+
+      await repo.findByIdsDetail(['b1'], {});
+
+      expect(localFindMany).toHaveBeenCalledWith({
+        where: { id: { in: ['b1'] }, isDeleted: false },
+        include: { pii: true, motherCaseDetails: true, riskConditionSummaries: true },
+      });
+    });
+
+    it('a duplicate id in the input array still resolves to one row (Prisma id-in-list matches each row once)', async () => {
+      // Prisma's `id: { in: [...] }` matches each distinct row at most once
+      // regardless of how many times its id appears in the input array —
+      // this asserts findByIdsDetail passes the ids straight through rather
+      // than deduping itself and relies on that Prisma semantic, and that a
+      // single matched row is returned once.
+      const localFindMany = jest.fn().mockResolvedValue([{ id: 'b1' }]);
+      const repo = new BeneficiaryRepository({
+        beneficiaryCase: { findMany: localFindMany },
+      } as never);
+
+      const result = await repo.findByIdsDetail(['b1', 'b1'], {});
+
+      expect(localFindMany).toHaveBeenCalledWith({
+        where: { id: { in: ['b1', 'b1'] }, isDeleted: false },
+        include: { pii: true, motherCaseDetails: true, riskConditionSummaries: true },
+      });
+      expect(result).toEqual([{ id: 'b1' }]);
+    });
+  });
+
   describe('findOwnershipById', () => {
     it('selects only id/sakhiId/caseType, not the full enriched projection', async () => {
       const findFirst = jest

@@ -1,5 +1,6 @@
 import { badGateway } from '@armman/service-commons';
 import { appConfig } from '../config/app-config';
+import { DOWNSTREAM_FETCH_TIMEOUT_MS } from './fetch-timeout';
 
 /**
  * Notifies a Sakhi after a Quick Response card decision, calling
@@ -29,6 +30,7 @@ export class NotificationClient {
           status: 'UNREAD',
           ...linkedEntity,
         }),
+        signal: AbortSignal.timeout(DOWNSTREAM_FETCH_TIMEOUT_MS),
       });
     } catch {
       throw badGateway(

@@ -88,6 +88,11 @@ export class SakhiService {
    * carries a projectId too, so without this early return a Sakhi whose own
    * `sakhi_profiles.primaryProjectId` doesn't happen to equal their JWT's
    * projectId claim would be wrongly 403'd fetching their own record.
+   *
+   * A non-SAKHI, non-privileged (SUPERVISOR) caller is further scoped to
+   * only their own assigned Sakhis (supervisorId === caller.id), matching
+   * listByProject's own ownership check above — otherwise any Supervisor
+   * sharing a project could fetch another Supervisor's Sakhi by id alone.
    */
   async getById(id: string, caller: CallerScope) {
     if (!isPrivileged(caller) && caller.roles.includes('SAKHI')) {
@@ -103,6 +108,31 @@ export class SakhiService {
     if (caller.projectId && caller.projectId !== profile.primaryProjectId) {
       throw forbidden('You do not have access to this Sakhi.');
     }
+    if (isPrivileged(caller)) {
+      return toApiSakhi(profile as unknown as Record<string, unknown>);
+    }
+    if ((profile as unknown as Record<string, unknown>).supervisorId !== caller.id) {
+      throw forbidden('You do not have access to this Sakhi.');
+    }
     return toApiSakhi(profile as unknown as Record<string, unknown>);
+  }
+
+  /**
+   * Batch counterpart to getById — lets other services (via the gateway)
+   * resolve display names for a page of records with one query instead of
+   * an N-calls fan-out. Scoping matches getById's own non-SAKHI branch
+   * exactly (project-only — a privileged caller is unrestricted, a
+   * SUPERVISOR sees any Sakhi in their own project, not just Sakhis they
+   * personally supervise; SAKHI-role self-only lookups have no batch use
+   * case and aren't supported here). `ids` is caller-supplied and not
+   * pre-scoped, so an out-of-scope or nonexistent id is silently dropped
+   * from the result rather than surfaced as a 403/404 (same IDOR-safe
+   * pattern as beneficiary-service's getByIdsWithRisk) — a batch call
+   * legitimately spans Sakhis the caller may only partially have access to.
+   */
+  async getByIds(ids: string[], caller: CallerScope) {
+    const scoping = isPrivileged(caller) ? {} : { projectId: caller.projectId ?? undefined };
+    const profiles = await this.repository.findByIds(ids, scoping);
+    return profiles.map((p) => toApiSakhi(p as unknown as Record<string, unknown>));
   }
 }

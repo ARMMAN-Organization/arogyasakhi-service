@@ -156,6 +156,34 @@ export function registerReopenRequestRoutes(doc: DocumentedRouter, service: Reop
   );
 
   doc.get(
+    '/reopen-requests/by-ids',
+    {
+      summary:
+        "Full detail for a batch of reopen request ids — added for Quick Response's card-" +
+        'enrichment endpoint (approval-service resolves REOPEN cards through this) to ' +
+        'replace N concurrent single-item GET /reopen-requests/:id calls per page of cards, ' +
+        'which was overloading the gateway (502/timeout under concurrent load). Not a general ' +
+        'SAKHI-facing read, same as GET /reopen-requests/:id. An id not found or soft-deleted ' +
+        'is simply omitted from the result, not an error.',
+      tags: ['Reopen Requests'],
+      query: decisionStatusQuerySchema,
+      responses: {
+        200: {
+          description: 'Reopen request detail for the requested ids',
+          schema: envelope(z.array(reopenRequestSchema)),
+        },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(decisionStatusQuerySchema, 'query'),
+    controller.getByIds,
+  );
+
+  doc.get(
     '/reopen-requests/:id',
     {
       summary:
@@ -189,6 +217,8 @@ export function registerReopenRequestRoutes(doc: DocumentedRouter, service: Reop
         400: { description: 'Validation error', schema: apiErrorSchema },
         401: { description: 'Unauthenticated', schema: apiErrorSchema },
         403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+        404: { description: 'Beneficiary not found', schema: apiErrorSchema },
+        409: { description: 'The beneficiary is not currently Closed', schema: apiErrorSchema },
       },
     },
     trustGatewayIdentity,

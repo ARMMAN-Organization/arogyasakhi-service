@@ -45,6 +45,64 @@ export class ReferralRepository {
   }
 
   /**
+   * A batch of referrals' own fields plus each one's follow-up summary
+   * (incompleteCount, latestFollowup) — the batched counterpart of
+   * findById + findFollowupSummary, for GET /referrals/by-ids (Quick
+   * Response's card-detail resolution, avoiding one HTTP call per card).
+   * Both the referral lookup and the follow-up summary are each a single
+   * query across all requested ids — no N+1. An id not found (or
+   * soft-deleted) is simply absent from the result; a duplicate id in the
+   * input naturally yields one row, since `id: { in: ids }` is set-based.
+   *
+   * `incompleteCount` uses `groupBy` (one query for all ids); the "latest
+   * followup per referral" is resolved with `distinct: ['referralId']`
+   * ordered by `referralId` then `followupDate` desc — Postgres's
+   * DISTINCT ON equivalent, so this is also one query rather than one
+   * findFirst per referral.
+   */
+  async findManyWithFollowupSummary(ids: string[]) {
+    const referrals = await this.prisma.referral.findMany({
+      where: { id: { in: ids }, isDeleted: false },
+    });
+    if (referrals.length === 0) return [];
+    const referralIds = referrals.map((r) => r.id);
+
+    const [incompleteCounts, latestFollowups] = await Promise.all([
+      this.prisma.referralFollowup.groupBy({
+        by: ['referralId'],
+        where: { referralId: { in: referralIds }, isDeleted: false, followupStatus: 'INCOMPLETE' },
+        _count: { _all: true },
+      }),
+      this.prisma.referralFollowup.findMany({
+        where: { referralId: { in: referralIds }, isDeleted: false },
+        orderBy: [{ referralId: 'asc' }, { followupDate: 'desc' }],
+        distinct: ['referralId'],
+        select: { referralId: true, followupDate: true, notVisitedReason: true, outcome: true },
+      }),
+    ]);
+
+    const incompleteCountByReferralId = new Map(
+      incompleteCounts.map((row) => [row.referralId, row._count._all]),
+    );
+    const latestFollowupByReferralId = new Map(
+      latestFollowups.map((row) => [
+        row.referralId,
+        {
+          followupDate: row.followupDate,
+          notVisitedReason: row.notVisitedReason,
+          outcome: row.outcome,
+        },
+      ]),
+    );
+
+    return referrals.map((referral) => ({
+      ...referral,
+      incompleteCount: incompleteCountByReferralId.get(referral.id) ?? 0,
+      latestFollowup: latestFollowupByReferralId.get(referral.id) ?? null,
+    }));
+  }
+
+  /**
    * Real-time status for a batch of referral ids — lets Quick Response's
    * list() reconcile against the current decision state instead of
    * trusting approval_requests' own (possibly stale) copy, since a

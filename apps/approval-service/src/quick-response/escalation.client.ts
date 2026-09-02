@@ -1,5 +1,6 @@
 import { badGateway, HttpError } from '@armman/service-commons';
 import { appConfig } from '../config/app-config';
+import { DOWNSTREAM_FETCH_TIMEOUT_MS } from './fetch-timeout';
 
 export interface EscalationCard {
   cardId: string;
@@ -44,7 +45,10 @@ export class EscalationClient {
     try {
       res = await fetch(
         `${appConfig.API_GATEWAY_BASE_URL}/api/v1/escalation-events?${params.toString()}`,
-        { headers: { Authorization: authorizationHeader } },
+        {
+          headers: { Authorization: authorizationHeader },
+          signal: AbortSignal.timeout(DOWNSTREAM_FETCH_TIMEOUT_MS),
+        },
       );
     } catch {
       throw badGateway('Unable to fetch escalation events — the service is unreachable.');
@@ -68,6 +72,7 @@ export class EscalationClient {
     try {
       res = await fetch(`${appConfig.API_GATEWAY_BASE_URL}/api/v1/escalation-events/${id}`, {
         headers: { Authorization: authorizationHeader },
+        signal: AbortSignal.timeout(DOWNSTREAM_FETCH_TIMEOUT_MS),
       });
     } catch {
       throw badGateway('Unable to fetch the escalation event — the service is unreachable.');
@@ -87,6 +92,42 @@ export class EscalationClient {
   }
 
   /**
+   * Batch-fetches escalation-sourced cards, via notification-escalation-
+   * service's GET /escalation-events/by-ids — one call per batch instead of
+   * one GET /escalation-events/:id per card, used by
+   * QuickResponseService.getCardDetails. An id that does not exist, is
+   * soft-deleted, or is not one of the 8 supported card types is simply
+   * omitted from the result, not an error.
+   */
+  async findManyByIds(ids: string[], authorizationHeader: string): Promise<EscalationCard[]> {
+    if (ids.length === 0) return [];
+
+    let res: Response;
+    try {
+      res = await fetch(
+        `${appConfig.API_GATEWAY_BASE_URL}/api/v1/escalation-events/by-ids?ids=${ids.join(',')}`,
+        {
+          headers: { Authorization: authorizationHeader },
+          signal: AbortSignal.timeout(DOWNSTREAM_FETCH_TIMEOUT_MS),
+        },
+      );
+    } catch {
+      throw badGateway('Unable to fetch escalation events — the service is unreachable.');
+    }
+
+    if (!res.ok) {
+      if (res.status >= 400 && res.status < 500) {
+        const body = (await res.json().catch(() => null)) as { message?: string } | null;
+        throw new HttpError(res.status, body?.message ?? 'Unable to fetch escalation events.');
+      }
+      throw badGateway('Unable to fetch escalation events — the service returned an error.');
+    }
+
+    const body = (await res.json()) as { data: EscalationCard[] };
+    return body.data;
+  }
+
+  /**
    * Acknowledges an EDD Nearing card via notification-escalation-service's
    * dedicated POST /edd-nearing-requests/:id/acknowledge, through the
    * gateway. Called by QuickResponseService.decide() so an EDD_NEARING
@@ -101,7 +142,11 @@ export class EscalationClient {
     try {
       res = await fetch(
         `${appConfig.API_GATEWAY_BASE_URL}/api/v1/edd-nearing-requests/${id}/acknowledge`,
-        { method: 'POST', headers: { Authorization: authorizationHeader } },
+        {
+          method: 'POST',
+          headers: { Authorization: authorizationHeader },
+          signal: AbortSignal.timeout(DOWNSTREAM_FETCH_TIMEOUT_MS),
+        },
       );
     } catch {
       throw badGateway('Unable to acknowledge the EDD Nearing card — the service is unreachable.');
@@ -144,6 +189,7 @@ export class EscalationClient {
           method: 'POST',
           headers: { Authorization: authorizationHeader, 'Content-Type': 'application/json' },
           body: JSON.stringify({ action }),
+          signal: AbortSignal.timeout(DOWNSTREAM_FETCH_TIMEOUT_MS),
         },
       );
     } catch {

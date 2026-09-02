@@ -1,4 +1,5 @@
 import { badGateway, HttpError } from '@armman/service-commons';
+import { DOWNSTREAM_FETCH_TIMEOUT_MS } from './fetch-timeout';
 
 // Read directly (not via appConfig) so importing this client doesn't pull in
 // app-config's full schema (requires DATABASE_URL etc. with no defaults),
@@ -14,6 +15,12 @@ export interface BeneficiaryCaseRecord {
 
 export interface BeneficiaryCaseDetail extends BeneficiaryCaseRecord {
   pii: { fullName: string };
+}
+
+export interface BeneficiaryOwnershipRecord {
+  id: string;
+  sakhiId: string;
+  caseType: string;
 }
 
 /**
@@ -36,6 +43,7 @@ export class BeneficiaryClient {
         {
           method: 'PATCH',
           headers: { Authorization: authorizationHeader, 'Content-Type': 'application/json' },
+          signal: AbortSignal.timeout(DOWNSTREAM_FETCH_TIMEOUT_MS),
         },
       );
     } catch {
@@ -77,6 +85,7 @@ export class BeneficiaryClient {
         method: 'PATCH',
         headers: { Authorization: authorizationHeader, 'Content-Type': 'application/json' },
         body: JSON.stringify({ reasonCode }),
+        signal: AbortSignal.timeout(DOWNSTREAM_FETCH_TIMEOUT_MS),
       });
     } catch {
       throw badGateway('Unable to close the beneficiary — beneficiary-service is unreachable.');
@@ -111,6 +120,7 @@ export class BeneficiaryClient {
     try {
       res = await fetch(`${API_GATEWAY_BASE_URL}/api/v1/beneficiaries/${beneficiaryId}`, {
         headers: { Authorization: authorizationHeader },
+        signal: AbortSignal.timeout(DOWNSTREAM_FETCH_TIMEOUT_MS),
       });
     } catch {
       throw badGateway('Unable to resolve the beneficiary — beneficiary-service is unreachable.');
@@ -127,6 +137,49 @@ export class BeneficiaryClient {
     }
 
     const body = (await res.json()) as { data: BeneficiaryCaseDetail };
+    return body.data;
+  }
+
+  /**
+   * Bare {id, sakhiId, caseType} ownership check via beneficiary-service's
+   * GET /beneficiaries/:id/ownership — used as the SAKHI-own-case/
+   * SUPERVISOR-roster/MANAGER-unrestricted gate in ClosureService.decide()/
+   * ReopenRequestService.decide(), in place of the full getById() above.
+   * getById() enriches with pii/socioDemographics/riskConditionSummaries
+   * and, critically, beneficiary-service's own lastVisitVitals resolution
+   * (a further cross-service round trip to visit-form-service) — none of
+   * which the ownership gate needs. Calling getById() there only to check
+   * sakhiId meant a slow/timed-out vitals lookup on beneficiary-service's
+   * side could stall or 502 a decide() call that never needed vitals data
+   * in the first place. decide() still calls getById() separately, run
+   * concurrently with the decision write, for the Sakhi notification's
+   * beneficiary name.
+   */
+  async getOwnership(
+    beneficiaryId: string,
+    authorizationHeader: string,
+  ): Promise<BeneficiaryOwnershipRecord> {
+    let res: Response;
+    try {
+      res = await fetch(`${API_GATEWAY_BASE_URL}/api/v1/beneficiaries/${beneficiaryId}/ownership`, {
+        headers: { Authorization: authorizationHeader },
+        signal: AbortSignal.timeout(DOWNSTREAM_FETCH_TIMEOUT_MS),
+      });
+    } catch {
+      throw badGateway('Unable to resolve the beneficiary — beneficiary-service is unreachable.');
+    }
+
+    if (!res.ok) {
+      if (res.status >= 400 && res.status < 500) {
+        const body = (await res.json().catch(() => null)) as { message?: string } | null;
+        throw new HttpError(res.status, body?.message ?? 'Unable to resolve the beneficiary.');
+      }
+      throw badGateway(
+        'Unable to resolve the beneficiary — beneficiary-service returned an error.',
+      );
+    }
+
+    const body = (await res.json()) as { data: BeneficiaryOwnershipRecord };
     return body.data;
   }
 }

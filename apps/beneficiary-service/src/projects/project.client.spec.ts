@@ -59,6 +59,18 @@ describe('resolveProjectNames', () => {
     await expect(resolveProjectNames('Bearer test-token')).rejects.toMatchObject({ status: 502 });
   });
 
+  it('throws 401 (not 502) when the auth-service call fails with a 401', async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 401 });
+
+    await expect(resolveProjectNames('Bearer stale-token')).rejects.toMatchObject({ status: 401 });
+  });
+
+  it('throws 403 (not 502) when the auth-service call fails with a 403', async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 403 });
+
+    await expect(resolveProjectNames('Bearer test-token')).rejects.toMatchObject({ status: 403 });
+  });
+
   it("forwards the caller's own bearer token unchanged", async () => {
     fetchMock.mockResolvedValue(projectsResponse([]));
 

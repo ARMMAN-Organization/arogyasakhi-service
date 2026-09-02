@@ -1,17 +1,24 @@
-import { badRequest, conflict, notFound, unprocessable, HttpError } from '@armman/service-commons';
+import {
+  badRequest,
+  conflict,
+  forbidden,
+  notFound,
+  unprocessable,
+  HttpError,
+} from '@armman/service-commons';
 import type { QuickResponseRepository } from './quick-response.repository';
 import type { LookupClient } from './lookup.client';
 import type { EscalationClient, EscalationCard } from './escalation.client';
 import type { ReopenRequestClient } from './reopen-request.client';
-import type { BeneficiaryClient } from './beneficiary.client';
+import type { BeneficiaryClient, BeneficiaryCaseDetail } from './beneficiary.client';
 import type { NotificationClient } from './notification.client';
 import type { ClosureClient } from './closure.client';
 import type { ReferralClient } from './referral.client';
 import type { IncentiveClient } from './incentive.client';
 import type { UserClient } from './user.client';
 import type { SakhiClient, SakhiRecord } from './sakhi.client';
-import type { GeographyClient } from './geography.client';
-import type { VisitClient } from './visit.client';
+import type { GeographyClient, GeographyUnitRecord } from './geography.client';
+import type { VisitClient, VisitInstanceRecord } from './visit.client';
 import type { ListQuickResponseInput } from './dto/list-quick-response.dto';
 import type { DecideQuickResponseInput } from './dto/decide-quick-response.dto';
 import type { DecideLmpChangeRequestInput } from '../lmp-change-requests/dto/decide-lmp-change-request.dto';
@@ -47,6 +54,23 @@ interface ApprovalRequestCard {
 }
 
 type QuickResponseCard = ApprovalRequestCard | EscalationCard;
+
+/** The calling principal's own scope, as carried on their JWT/trusted-identity headers. */
+export interface CallerScope {
+  readonly id: string;
+  readonly roles: string[];
+  readonly projectId: string | null;
+}
+
+/**
+ * MANAGER/ADMIN are unrestricted across Quick Response's supervisor-scoping
+ * checks — checked as the absence of an elevated role, not the presence of
+ * a restrictive one (SUPERVISOR), since a caller can hold multiple role
+ * assignments at once. Matches auth-service's own isPrivileged() pattern.
+ */
+function isPrivileged(caller: CallerScope): boolean {
+  return caller.roles.includes('MANAGER') || caller.roles.includes('ADMIN');
+}
 
 function decodeCursor(cursor: string): { createdAt: Date; id: string } {
   let decoded: string;
@@ -136,25 +160,23 @@ export class QuickResponseService {
   }
 
   /**
-   * Page-level Sakhi name lookup for list() — one call per unique Sakhi on
-   * the page rather than per row, since auth-service exposes no batch-by-ids
-   * route for Sakhis. Each id resolves independently via safeResolve, so one
-   * Sakhi lookup failing doesn't affect another Sakhi's cards on the same
-   * page.
+   * Page-level Sakhi name lookup for list() — one batch call for every
+   * unique Sakhi on the page via auth-service's GET /sakhis/by-ids, instead
+   * of one call per Sakhi (see sakhi.client.ts's getManyByIds). Best-effort:
+   * a failure here degrades the whole page's sakhiName to null rather than
+   * failing the list, matching resolveBeneficiaryNamesById's contract.
    */
   private async resolveSakhiNamesById(
     sakhiIds: string[],
     authorizationHeader: string,
   ): Promise<Map<string, string>> {
-    const entries = await Promise.all(
-      sakhiIds.map(async (sakhiId) => {
-        const sakhi = await this.safeResolve<SakhiRecord>('Sakhi', () =>
-          this.sakhiClient.getById(sakhiId, authorizationHeader),
-        );
-        return [sakhiId, sakhi?.displayName ?? null] as const;
-      }),
-    );
-    return new Map(entries.filter((entry): entry is [string, string] => entry[1] !== null));
+    if (sakhiIds.length === 0) return new Map();
+    try {
+      return await this.sakhiClient.getManyByIds(sakhiIds, authorizationHeader);
+    } catch (err) {
+      console.error('Failed to batch-resolve Sakhi names for the Quick Response list:', err);
+      return new Map();
+    }
   }
 
   constructor(
@@ -180,15 +202,31 @@ export class QuickResponseService {
    * concurrent writes between page fetches — an accepted trade-off at this
    * scale, not solved further here.
    */
-  async list(query: ListQuickResponseInput, authorizationHeader: string) {
+  /**
+   * Resolves the caller's own scope for the approval_requests half of the
+   * Quick Response feed — `null` (unrestricted) for MANAGER/ADMIN, or the
+   * caller's own assigned Sakhi ids (via auth-service, possibly empty) for
+   * a SUPERVISOR. A SUPERVISOR with no projectId on their scope fails
+   * closed to zero accessible Sakhis rather than making an unscoped call.
+   */
+  private async resolveOwnSakhiIds(
+    caller: CallerScope,
+    authorizationHeader: string,
+  ): Promise<string[] | null> {
+    if (isPrivileged(caller)) return null;
+    if (!caller.projectId) return [];
+    return this.sakhiClient.getOwnSakhiIds(caller.projectId, authorizationHeader);
+  }
+
+  async list(query: ListQuickResponseInput, caller: CallerScope, authorizationHeader: string) {
     const cursor = query.cursor ? decodeCursor(query.cursor) : null;
 
-    const approvalStatusId = await this.lookupClient.resolveApprovalStatusId(
-      query.status,
-      authorizationHeader,
-    );
+    const [approvalStatusId, sakhiIds] = await Promise.all([
+      this.lookupClient.resolveApprovalStatusId(query.status, authorizationHeader),
+      this.resolveOwnSakhiIds(caller, authorizationHeader),
+    ]);
     const approvalRows = approvalStatusId
-      ? await this.repository.findMany(approvalStatusId, query.limit, cursor)
+      ? await this.repository.findMany(approvalStatusId, query.limit, cursor, sakhiIds)
       : [];
     const typedRows = approvalRows.filter((row) =>
       APPROVAL_REQUEST_CARD_TYPES.has(row.requestType),
@@ -196,11 +234,23 @@ export class QuickResponseService {
 
     // Only a PENDING page can be stale in the way reconciliation fixes (see
     // filterStillPending's doc comment) — APPROVED/REJECTED queries return
-    // typedRows as-is.
-    const reconciledRows =
+    // typedRows as-is. Run alongside the escalation-events fetch below since
+    // neither depends on the other's result — sequential awaits here were
+    // pushing PENDING responses past the mobile client's timeout.
+    const escalationStatus = mapStatusForEscalations(query.status);
+    const [reconciledRows, escalationResult] = await Promise.all([
       query.status === 'PENDING'
-        ? await this.filterStillPending(typedRows, authorizationHeader)
-        : typedRows;
+        ? this.filterStillPending(typedRows, authorizationHeader)
+        : Promise.resolve(typedRows),
+      escalationStatus
+        ? this.escalationClient.list(
+            escalationStatus,
+            query.cursor,
+            query.limit,
+            authorizationHeader,
+          )
+        : Promise.resolve({ cards: [], nextCursor: null }),
+    ]);
 
     let beneficiaryNames = new Map<string, string>();
     let sakhiNames = new Map<string, string>();
@@ -226,16 +276,6 @@ export class QuickResponseService {
       beneficiaryName: row.beneficiaryId ? (beneficiaryNames.get(row.beneficiaryId) ?? null) : null,
       sakhiName: sakhiNames.get(row.requestedByUserId) ?? null,
     }));
-
-    const escalationStatus = mapStatusForEscalations(query.status);
-    const escalationResult = escalationStatus
-      ? await this.escalationClient.list(
-          escalationStatus,
-          query.cursor,
-          query.limit,
-          authorizationHeader,
-        )
-      : { cards: [], nextCursor: null };
 
     const merged: QuickResponseCard[] = [...approvalCards, ...escalationResult.cards].sort(
       (a, b) => new Date(b.raisedAt).getTime() - new Date(a.raisedAt).getTime(),
@@ -268,9 +308,13 @@ export class QuickResponseService {
    * built"). Closure Review's "completion tracker" is likewise omitted —
    * no backing data source was identified for it.
    */
-  async getCardDetail(cardId: string, authorizationHeader: string) {
+  async getCardDetail(cardId: string, caller: CallerScope, authorizationHeader: string) {
     const approvalRow = await this.repository.findById(cardId);
     if (approvalRow) {
+      const sakhiIds = await this.resolveOwnSakhiIds(caller, authorizationHeader);
+      if (sakhiIds && !sakhiIds.includes(approvalRow.requestedByUserId)) {
+        throw forbidden('You do not have access to this Quick Response card.');
+      }
       return this.enrichApprovalRequestCard(approvalRow, authorizationHeader);
     }
 
@@ -280,6 +324,339 @@ export class QuickResponseService {
     }
 
     throw notFound('Quick Response card not found.');
+  }
+
+  /**
+   * Batch counterpart of getCardDetail — resolves up to
+   * MAX_BATCH_CARD_IDS cards in one call. Built to fix a load-tested bug:
+   * the Supervisor app's card screen calls getCardDetail once per card, in
+   * parallel, and each call fans out to ~4 downstream services — N cards
+   * open at once means N×4 concurrent downstream calls, which floods the
+   * gateway (502/timeout; cards silently vanish from the screen). This
+   * method collapses that to a small, fixed number of batch calls
+   * regardless of how many cards are requested (the one remaining
+   * per-card fan-out — REFERRAL_INCOMPLETE's visit lookup — is documented
+   * at that step below; visit-form-service has no batch endpoint yet).
+   *
+   * Differs from getCardDetail in two deliberate ways, both matching every
+   * other "by-ids" endpoint's contract in this codebase: an id present in
+   * neither approval_requests nor escalation_events is silently omitted
+   * (not a 404 for the whole batch), and a SUPERVISOR requesting an
+   * out-of-roster id has that one card silently dropped (not a 403 for the
+   * whole batch).
+   */
+  async getCardDetails(
+    cardIds: string[],
+    caller: CallerScope,
+    authorizationHeader: string,
+  ): Promise<Record<string, unknown>[]> {
+    const [approvalRows, escalationCards] = await Promise.all([
+      this.repository.findManyByIds(cardIds),
+      this.escalationClient.findManyByIds(cardIds, authorizationHeader),
+    ]);
+
+    let scopedApprovalRows = approvalRows;
+    if (!isPrivileged(caller)) {
+      const ownSakhiIds = new Set(await this.resolveOwnSakhiIds(caller, authorizationHeader));
+      scopedApprovalRows = approvalRows.filter((row) => ownSakhiIds.has(row.requestedByUserId));
+    }
+
+    // Partition, mirroring enrichApprovalRequestCard's own branches.
+    const dataRestoreRows = scopedApprovalRows.filter((row) => row.requestType === 'DATA_RESTORE');
+    const thinRows = scopedApprovalRows.filter(
+      (row) => !APPROVAL_REQUEST_CARD_TYPES.has(row.requestType),
+    );
+    const commonRows = scopedApprovalRows.filter(
+      (row) =>
+        row.requestType !== 'DATA_RESTORE' &&
+        APPROVAL_REQUEST_CARD_TYPES.has(row.requestType) &&
+        row.beneficiaryId,
+    );
+    const noBeneficiaryRows = scopedApprovalRows.filter(
+      (row) =>
+        row.requestType !== 'DATA_RESTORE' &&
+        APPROVAL_REQUEST_CARD_TYPES.has(row.requestType) &&
+        !row.beneficiaryId,
+    );
+
+    const beneficiaryIdsNeeded = Array.from(
+      new Set<string>([
+        ...commonRows.map((row) => row.beneficiaryId as string),
+        ...escalationCards.map((card) => card.beneficiaryId),
+      ]),
+    );
+
+    // The beneficiary batch lookup is the one CORE, non-degradable
+    // dependency — mirrors resolveCommonFields's existing behavior, where a
+    // beneficiary fetch failure is never tolerated. Unlike the single-card
+    // path, a batch request can't simply throw the whole thing on this
+    // failure (that would drop every card in the batch, including ones that
+    // don't even need a beneficiary) — so it's caught once here and turned
+    // into a per-card error marker below, only for the cards that actually
+    // needed it.
+    let beneficiaryMap = new Map<string, BeneficiaryCaseDetail>();
+    let beneficiaryFetchFailed = false;
+    if (beneficiaryIdsNeeded.length > 0) {
+      try {
+        beneficiaryMap = await this.beneficiaryClient.getManyDetailByIds(
+          beneficiaryIdsNeeded,
+          authorizationHeader,
+        );
+      } catch (err) {
+        console.error(
+          'Quick Response getCardDetails: batch beneficiary lookup failed — affected cards ' +
+            'will carry an error marker instead of their detail:',
+          err,
+        );
+        beneficiaryFetchFailed = true;
+      }
+    }
+
+    const padaIds = Array.from(
+      new Set(
+        Array.from(beneficiaryMap.values())
+          .map((beneficiary) => beneficiary.pii.padaId)
+          .filter((id): id is string => id != null),
+      ),
+    );
+    const sakhiIdsForContact = Array.from(
+      new Set([
+        ...Array.from(beneficiaryMap.values()).map((beneficiary) => beneficiary.sakhiId),
+        ...dataRestoreRows.map((row) => row.requestedByUserId),
+      ]),
+    );
+
+    const closureIds = commonRows
+      .filter((row) => row.requestType === 'CLOSURE_REVIEW' && row.closureId)
+      .map((row) => row.closureId as string);
+    const reopenRequestIds = commonRows
+      .filter((row) => row.requestType === 'REOPEN' && row.reopenRequestId)
+      .map((row) => row.reopenRequestId as string);
+    const referralIds = commonRows
+      .filter(
+        (row) =>
+          (row.requestType === 'REFERRAL_INCOMPLETE' ||
+            row.requestType === 'ACCOMPANIED_REFERRAL') &&
+          row.referralId,
+      )
+      .map((row) => row.referralId as string);
+
+    // Pada/Sakhi/closure/reopen-request/referral are all supplementary/
+    // best-effort — a failure degrades only the affected field(s) to null
+    // for the cards that needed it, same as safeResolve's per-field
+    // fail-open contract, just applied at batch-map granularity. Run
+    // concurrently: none of the five depends on another's result.
+    const [padaMap, sakhiMap, closureMap, reopenMap, referralMap] = await Promise.all([
+      this.safeBatch<string, GeographyUnitRecord>('Pada', () =>
+        this.geographyClient.getManyByIds(padaIds, authorizationHeader),
+      ),
+      this.safeBatch<string, SakhiRecord>('Sakhi', () =>
+        this.sakhiClient.getManyRecordsByIds(sakhiIdsForContact, authorizationHeader),
+      ),
+      this.safeBatch('closure', () =>
+        this.closureClient.getManyByIds(closureIds, authorizationHeader),
+      ),
+      this.safeBatch('reopen request', () =>
+        this.reopenRequestClient.getManyByIds(reopenRequestIds, authorizationHeader),
+      ),
+      this.safeBatch('referral', () =>
+        this.referralClient.getManyByIds(referralIds, authorizationHeader),
+      ),
+    ]);
+
+    // REFERRAL_INCOMPLETE's visit fetch is the one remaining fan-out point:
+    // there is no batch endpoint for visits (out of scope for this fix, no
+    // visit-service batch endpoint exists yet) — but it's now bounded to at
+    // most one downstream call per REFERRAL_INCOMPLETE card that actually
+    // has a resolved referral with a visitId, not one per card of every
+    // type as before.
+    const referralIncompleteRows = commonRows.filter(
+      (row) => row.requestType === 'REFERRAL_INCOMPLETE',
+    );
+    const visitEntries = await Promise.all(
+      referralIncompleteRows.map(async (row) => {
+        const referral = row.referralId ? referralMap.get(row.referralId) : undefined;
+        if (!referral?.visitId) return null;
+        const visit = await this.safeResolve<VisitInstanceRecord>('visit', () =>
+          this.visitClient.getById(referral.visitId as string, authorizationHeader),
+        );
+        return [row.id, visit] as const;
+      }),
+    );
+    const visitMap = new Map(
+      visitEntries.filter(
+        (entry): entry is readonly [string, VisitInstanceRecord | null] => entry !== null,
+      ),
+    );
+
+    const results = new Map<string, Record<string, unknown>>();
+
+    const beneficiaryErrorEntry = (base: Record<string, unknown>): Record<string, unknown> => ({
+      ...base,
+      error: beneficiaryFetchFailed
+        ? "Unable to resolve this card's detail — beneficiary-service is unreachable."
+        : 'The beneficiary linked to this card was not found.',
+    });
+
+    // Escalation-sourced cards first, so an (in practice impossible, given
+    // the two sources' disjoint id spaces) collision still prefers the
+    // approval_requests entry below — same source priority getCardDetail
+    // itself uses.
+    for (const card of escalationCards) {
+      const beneficiary = beneficiaryMap.get(card.beneficiaryId);
+      if (!beneficiary) {
+        results.set(card.cardId, beneficiaryErrorEntry({ ...card }));
+        continue;
+      }
+      const pada = beneficiary.pii.padaId ? (padaMap.get(beneficiary.pii.padaId) ?? null) : null;
+      const sakhi = sakhiMap.get(beneficiary.sakhiId) ?? null;
+      const common = this.buildCommonFields(beneficiary, pada, sakhi);
+
+      if (card.cardType === 'EDD_NEARING') {
+        const eddDate = common.beneficiary.motherCaseDetails?.eddDate ?? null;
+        results.set(card.cardId, {
+          ...card,
+          padaName: common.padaName,
+          sakhiName: common.sakhiName,
+          beneficiaryName: common.beneficiaryName,
+          eddDate,
+          reason: eddDate ? `EDD approaching on ${eddDate.slice(0, 10)}` : null,
+          riskDetails: common.riskDetails,
+          sakhiContactNumber: common.sakhiContactNumber,
+        });
+        continue;
+      }
+
+      // MISSED_VISIT
+      results.set(card.cardId, {
+        ...card,
+        padaName: common.padaName,
+        sakhiName: common.sakhiName,
+        beneficiaryName: common.beneficiaryName,
+        visitType: card.escalationType,
+        riskDetails: common.riskDetails,
+        sakhiContactNumber: common.sakhiContactNumber,
+      });
+    }
+
+    for (const row of thinRows) {
+      results.set(row.id, this.thinCard(row));
+    }
+
+    for (const row of dataRestoreRows) {
+      const sakhi = sakhiMap.get(row.requestedByUserId) ?? null;
+      results.set(row.id, {
+        ...this.thinCard(row),
+        sakhiName: sakhi?.displayName ?? null,
+        sakhiId: row.requestedByUserId,
+      });
+    }
+
+    for (const row of noBeneficiaryRows) {
+      results.set(row.id, this.thinCard(row));
+    }
+
+    for (const row of commonRows) {
+      const beneficiaryId = row.beneficiaryId as string;
+      const beneficiary = beneficiaryMap.get(beneficiaryId);
+      if (!beneficiary) {
+        results.set(row.id, beneficiaryErrorEntry(this.thinCard(row)));
+        continue;
+      }
+      const pada = beneficiary.pii.padaId ? (padaMap.get(beneficiary.pii.padaId) ?? null) : null;
+      const sakhi = sakhiMap.get(beneficiary.sakhiId) ?? null;
+      const common = this.buildCommonFields(beneficiary, pada, sakhi);
+
+      if (row.requestType === 'LMP_CHANGE') {
+        const payload = row.requestPayloadJson as {
+          newLmpDate?: string;
+          sonographyImageAssetId?: string;
+        } | null;
+        results.set(row.id, {
+          ...this.thinCard(row),
+          padaName: common.padaName,
+          sakhiName: common.sakhiName,
+          beneficiaryName: common.beneficiaryName,
+          oldLmpDate: common.beneficiary.motherCaseDetails?.lmpDate ?? null,
+          newLmpDate: payload?.newLmpDate ?? null,
+          sonographyImageAssetId: payload?.sonographyImageAssetId ?? null,
+          riskDetails: common.riskDetails,
+          sakhiContactNumber: common.sakhiContactNumber,
+        });
+        continue;
+      }
+
+      if (row.requestType === 'CLOSURE_REVIEW') {
+        const closure = row.closureId ? (closureMap.get(row.closureId) ?? null) : null;
+        results.set(row.id, {
+          ...this.thinCard(row),
+          padaName: common.padaName,
+          sakhiName: common.sakhiName,
+          beneficiaryName: common.beneficiaryName,
+          closureType: closure?.closureType ?? null,
+          closureReasonLookupValueId: closure?.closureReasonLookupValueId ?? null,
+          closureDate: closure?.closureDate ?? null,
+          supervisorNotes: closure?.supervisorNotes ?? null,
+          riskDetails: common.riskDetails,
+          sakhiContactNumber: common.sakhiContactNumber,
+        });
+        continue;
+      }
+
+      if (row.requestType === 'REOPEN') {
+        const reopenRequest = row.reopenRequestId
+          ? (reopenMap.get(row.reopenRequestId) ?? null)
+          : null;
+        results.set(row.id, {
+          ...this.thinCard(row),
+          padaName: common.padaName,
+          sakhiName: common.sakhiName,
+          beneficiaryName: common.beneficiaryName,
+          reasonForReopen: reopenRequest?.requestReason ?? null,
+          riskDetails: common.riskDetails,
+          sakhiContactNumber: common.sakhiContactNumber,
+        });
+        continue;
+      }
+
+      // ACCOMPANIED_REFERRAL / REFERRAL_INCOMPLETE
+      const referral = row.referralId ? (referralMap.get(row.referralId) ?? null) : null;
+
+      if (row.requestType === 'ACCOMPANIED_REFERRAL') {
+        results.set(row.id, {
+          ...this.thinCard(row),
+          padaName: common.padaName,
+          sakhiName: common.sakhiName,
+          beneficiaryName: common.beneficiaryName,
+          referralDate: referral?.referralDate ?? null,
+          facilityType: referral?.facilityType ?? null,
+          facilityName: referral?.facilityName ?? null,
+          photoEvidenceAssetId: referral?.photoEvidenceMediaAssetId ?? null,
+          riskDetails: common.riskDetails,
+          sakhiContactNumber: common.sakhiContactNumber,
+        });
+        continue;
+      }
+
+      // REFERRAL_INCOMPLETE
+      results.set(row.id, {
+        ...this.thinCard(row),
+        padaName: common.padaName,
+        sakhiName: common.sakhiName,
+        beneficiaryName: common.beneficiaryName,
+        visitReference: visitMap.get(row.id) ?? null,
+        referralsMissedCount: referral?.incompleteCount ?? null,
+        reason: referral?.latestFollowup?.notVisitedReason ?? null,
+        riskDetails: common.riskDetails,
+        sakhiContactNumber: common.sakhiContactNumber,
+      });
+    }
+
+    // Preserve the caller's requested order; an id that matched neither
+    // source (or was scoped out above) is simply absent, not an error.
+    return cardIds
+      .map((id) => results.get(id))
+      .filter((entry): entry is Record<string, unknown> => entry !== undefined);
   }
 
   /**
@@ -302,10 +679,38 @@ export class QuickResponseService {
   }
 
   /**
+   * Pure projection of an already-resolved beneficiary/Pada/Sakhi triple
+   * into the shape every card type's enrichment shares — factored out of
+   * resolveCommonFields so both the single-card path (which fetches this
+   * triple one card at a time) and the batch path (getCardDetails, which
+   * fetches it from pre-resolved batch maps) can build the same fields
+   * without duplicating this shape twice. Never throws — pada/sakhi being
+   * null just means those fields degrade to null, same contract
+   * resolveCommonFields already had via safeResolve.
+   */
+  private buildCommonFields(
+    beneficiary: BeneficiaryCaseDetail,
+    pada: GeographyUnitRecord | null,
+    sakhi: SakhiRecord | null,
+  ) {
+    return {
+      beneficiary,
+      beneficiaryName: beneficiary.pii.fullName,
+      padaName: pada?.name ?? null,
+      sakhiName: sakhi?.displayName ?? null,
+      sakhiContactNumber: sakhi?.mobileNumber ?? null,
+      riskDetails: beneficiary.riskConditionSummaries,
+    };
+  }
+
+  /**
    * Beneficiary name/Pada name/Sakhi name+contact/risk details — shared
    * across every card type keyed on a beneficiaryId. The beneficiary
    * lookup itself is core (thrown as-is on failure); Pada/Sakhi resolution
-   * is supplementary (fails open to null via safeResolve).
+   * is supplementary (fails open to null via safeResolve). Single-card path
+   * only — see getCardDetails for the batch equivalent, which resolves the
+   * same triple from pre-fetched batch maps and calls buildCommonFields
+   * directly.
    */
   private async resolveCommonFields(beneficiaryId: string, authorizationHeader: string) {
     const beneficiary = await this.beneficiaryClient.getById(beneficiaryId, authorizationHeader);
@@ -322,14 +727,30 @@ export class QuickResponseService {
       ),
     ]);
 
-    return {
-      beneficiary,
-      beneficiaryName: beneficiary.pii.fullName,
-      padaName: pada?.name ?? null,
-      sakhiName: sakhi?.displayName ?? null,
-      sakhiContactNumber: sakhi?.mobileNumber ?? null,
-      riskDetails: beneficiary.riskConditionSummaries,
-    };
+    return this.buildCommonFields(beneficiary, pada, sakhi);
+  }
+
+  /**
+   * Wraps one supplementary batch lookup for getCardDetails: on failure,
+   * logs and degrades to an empty Map (every card needing that resource
+   * shows the corresponding field(s) as null) rather than failing the whole
+   * batch — the batch-map-granularity equivalent of safeResolve's per-field
+   * fail-open contract.
+   */
+  private async safeBatch<K, V>(
+    label: string,
+    fetcher: () => Promise<Map<K, V>>,
+  ): Promise<Map<K, V>> {
+    try {
+      return await fetcher();
+    } catch (err) {
+      console.error(
+        `Quick Response card details: failed to batch-resolve ${label} — affected cards will ` +
+          'show it as unavailable:',
+        err,
+      );
+      return new Map();
+    }
   }
 
   private thinCard(row: {
@@ -372,9 +793,10 @@ export class QuickResponseService {
       // resolve, so fall back to the thin shape rather than throwing.
       return this.thinCard(row);
     }
-    const common = await this.resolveCommonFields(row.beneficiaryId, authorizationHeader);
+    const beneficiaryId = row.beneficiaryId;
 
     if (row.requestType === 'LMP_CHANGE') {
+      const common = await this.resolveCommonFields(beneficiaryId, authorizationHeader);
       const payload = row.requestPayloadJson as {
         newLmpDate?: string;
         sonographyImageAssetId?: string;
@@ -393,11 +815,16 @@ export class QuickResponseService {
     }
 
     if (row.requestType === 'CLOSURE_REVIEW') {
-      const closure = row.closureId
-        ? await this.safeResolve('closure', () =>
-            this.closureClient.getById(row.closureId as string, authorizationHeader),
-          )
-        : null;
+      // resolveCommonFields and the closure fetch have no dependency on each
+      // other — run them concurrently instead of stacking their latency.
+      const [common, closure] = await Promise.all([
+        this.resolveCommonFields(beneficiaryId, authorizationHeader),
+        row.closureId
+          ? this.safeResolve('closure', () =>
+              this.closureClient.getById(row.closureId as string, authorizationHeader),
+            )
+          : Promise.resolve(null),
+      ]);
       return {
         ...this.thinCard(row),
         padaName: common.padaName,
@@ -413,11 +840,15 @@ export class QuickResponseService {
     }
 
     if (row.requestType === 'REOPEN') {
-      const reopenRequest = row.reopenRequestId
-        ? await this.safeResolve('reopen request', () =>
-            this.reopenRequestClient.getById(row.reopenRequestId as string, authorizationHeader),
-          )
-        : null;
+      // Same independence as CLOSURE_REVIEW above — run concurrently.
+      const [common, reopenRequest] = await Promise.all([
+        this.resolveCommonFields(beneficiaryId, authorizationHeader),
+        row.reopenRequestId
+          ? this.safeResolve('reopen request', () =>
+              this.reopenRequestClient.getById(row.reopenRequestId as string, authorizationHeader),
+            )
+          : Promise.resolve(null),
+      ]);
       return {
         ...this.thinCard(row),
         padaName: common.padaName,
@@ -431,12 +862,18 @@ export class QuickResponseService {
 
     // ACCOMPANIED_REFERRAL / REFERRAL_INCOMPLETE — both key off referralId
     // on the same underlying referrals table (see referral-type guard in
-    // risk-referral-service's ReferralService.decide).
-    const referral = row.referralId
-      ? await this.safeResolve('referral', () =>
-          this.referralClient.getById(row.referralId as string, authorizationHeader),
-        )
-      : null;
+    // risk-referral-service's ReferralService.decide). The referral fetch has
+    // no dependency on resolveCommonFields, so the two run concurrently; only
+    // REFERRAL_INCOMPLETE's visit fetch below has a real dependency (it needs
+    // referral.visitId) and stays sequential after referral resolves.
+    const [common, referral] = await Promise.all([
+      this.resolveCommonFields(beneficiaryId, authorizationHeader),
+      row.referralId
+        ? this.safeResolve('referral', () =>
+            this.referralClient.getById(row.referralId as string, authorizationHeader),
+          )
+        : Promise.resolve(null),
+    ]);
 
     if (row.requestType === 'ACCOMPANIED_REFERRAL') {
       return {
@@ -1147,15 +1584,16 @@ export class QuickResponseService {
 
     let approvedBeneficiaryName: string | null = null;
     if (dto.decision === 'APPROVE') {
-      await this.referralClient.decide(existing.referralId, 'COMPLETE', authorizationHeader);
-
       if (!existing.beneficiaryId) {
         throw new HttpError(500, 'This ACCOMPANIED_REFERRAL card has no linked beneficiary.');
       }
-      const beneficiary = await this.beneficiaryClient.getById(
-        existing.beneficiaryId,
-        authorizationHeader,
-      );
+      // The beneficiary lookup only needs the already-known beneficiaryId —
+      // it has no dependency on the referral decision's result — so run it
+      // concurrently with referralClient.decide() instead of after it.
+      const [, beneficiary] = await Promise.all([
+        this.referralClient.decide(existing.referralId, 'COMPLETE', authorizationHeader),
+        this.beneficiaryClient.getById(existing.beneficiaryId, authorizationHeader),
+      ]);
       if (!beneficiary) {
         throw notFound('The beneficiary linked to this referral was not found.');
       }

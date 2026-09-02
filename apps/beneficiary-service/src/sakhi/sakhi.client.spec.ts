@@ -73,6 +73,22 @@ describe('listSakhiIdsForSupervisor', () => {
     ).rejects.toMatchObject({ status: 502 });
   });
 
+  it('throws 401 (not 502) when the auth-service call fails with a 401', async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 401 });
+
+    await expect(
+      listSakhiIdsForSupervisor('project-1', 'sup-1', 'Bearer stale-token'),
+    ).rejects.toMatchObject({ status: 401 });
+  });
+
+  it('throws 403 (not 502) when the auth-service call fails with a 403', async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 403 });
+
+    await expect(
+      listSakhiIdsForSupervisor('project-1', 'sup-1', 'Bearer test-token'),
+    ).rejects.toMatchObject({ status: 403 });
+  });
+
   it("forwards the caller's own bearer token unchanged", async () => {
     fetchMock.mockResolvedValue(sakhisResponse([]));
 
@@ -126,6 +142,22 @@ describe('listSakhiNamesForSupervisor', () => {
       listSakhiNamesForSupervisor('project-1', 'sup-1', 'Bearer test-token'),
     ).rejects.toMatchObject({ status: 502 });
   });
+
+  it('throws 401 (not 502) when the auth-service call fails with a 401', async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 401 });
+
+    await expect(
+      listSakhiNamesForSupervisor('project-1', 'sup-1', 'Bearer stale-token'),
+    ).rejects.toMatchObject({ status: 401 });
+  });
+
+  it('throws 403 (not 502) when the auth-service call fails with a 403', async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 403 });
+
+    await expect(
+      listSakhiNamesForSupervisor('project-1', 'sup-1', 'Bearer test-token'),
+    ).rejects.toMatchObject({ status: 403 });
+  });
 });
 
 describe('getSakhiName', () => {
@@ -170,6 +202,22 @@ describe('getSakhiName', () => {
 
     await expect(getSakhiName('sakhi-a', 'Bearer test-token')).rejects.toMatchObject({
       status: 502,
+    });
+  });
+
+  it('throws 401 (not null, not 502) when the auth-service call fails with a 401', async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 401 });
+
+    await expect(getSakhiName('sakhi-a', 'Bearer stale-token')).rejects.toMatchObject({
+      status: 401,
+    });
+  });
+
+  it('throws 403 (not null, not 502) when the auth-service call fails with a 403', async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 403 });
+
+    await expect(getSakhiName('sakhi-a', 'Bearer test-token')).rejects.toMatchObject({
+      status: 403,
     });
   });
 

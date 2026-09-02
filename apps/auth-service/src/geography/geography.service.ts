@@ -68,6 +68,18 @@ export class GeographyService {
     return children.map((u) => toApiGeographyUnit(u as unknown as Record<string, unknown>));
   }
 
+  /**
+   * Batch-get geography units by id, for callers resolving many ids in one
+   * request instead of one call per id (e.g. approval-service's Quick
+   * Response card-detail list resolving each card's Pada). An unknown or
+   * soft-deleted id is silently omitted rather than causing a 404 — this is
+   * a batch lookup, not a fetch-by-id.
+   */
+  async getByIds(ids: string[]) {
+    const units = await this.repository.findByIds(ids);
+    return units.map((u) => toApiGeographyUnit(u as unknown as Record<string, unknown>));
+  }
+
   /** Returns all top-level units (no parent, i.e. all STATEs). An empty result is valid. */
   async getRoots() {
     const roots = await this.repository.findRoots();

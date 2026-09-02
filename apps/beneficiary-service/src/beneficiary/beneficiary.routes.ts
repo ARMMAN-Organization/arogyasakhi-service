@@ -18,6 +18,7 @@ import { summaryQuerySchema } from './dto/summary-query.dto';
 import { idsQuerySchema } from './dto/ids-query.dto';
 import { byIdsWithRiskQuerySchema } from './dto/by-ids-with-risk-query.dto';
 import { batchRiskConditionSummaryQuerySchema } from './dto/batch-risk-condition-summary-query.dto';
+import { byIdsDetailQuerySchema } from './dto/by-ids-detail-query.dto';
 import { postEddPendingQuerySchema } from './dto/post-edd-pending-query.dto';
 import { upsertSocioDemographicsSchema } from './dto/upsert-socio-demographics.dto';
 import { upsertRiskConditionSummarySchema } from './dto/upsert-risk-condition-summary.dto';
@@ -225,6 +226,21 @@ const beneficiaryCaseDetailSchema = beneficiaryCaseSchema.extend({
   statusHistory: z.array(statusHistoryEntrySchema),
   socioDemographics: socioDemographicsSchema.nullable(),
   lastVisitVitals: lastVisitVitalsSchema,
+});
+
+// Full per-beneficiary detail for GET /beneficiaries/by-ids-detail — the
+// same {pii.fullName/padaId, motherCaseDetails, riskConditionSummaries}
+// shape GET /beneficiaries/:id returns for one case, minus the other
+// single-item fields (consentRecords, statusHistory, socioDemographics,
+// riskLevel/riskColor, lastVisitVitals) that approval-service's Quick
+// Response card enrichment doesn't need — trimmed to keep the batch
+// response small across many cards.
+const byIdsDetailItemSchema = z.object({
+  id: z.string().uuid(),
+  sakhiId: z.string().uuid(),
+  pii: piiResponseSchema.pick({ fullName: true, padaId: true }),
+  motherCaseDetails: motherCaseDetailsSchema.pick({ lmpDate: true, eddDate: true }).nullable(),
+  riskConditionSummaries: z.array(riskConditionSummarySchema),
 });
 
 // List rows carry PII (decrypted name) and mother-or-child details (EDD/LMP/
@@ -465,6 +481,39 @@ export function registerBeneficiaryRoutes(doc: DocumentedRouter, service: Benefi
     requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
     validate(batchRiskConditionSummaryQuerySchema, 'query'),
     controller.getRiskConditionSummaryBatch,
+  );
+
+  doc.get(
+    '/beneficiaries/by-ids-detail',
+    {
+      summary:
+        "Batch full-case-detail lookup for a set of beneficiaries — for approval-service's " +
+        'Quick Response card enrichment, batching what was previously N sequential single-item ' +
+        'GET /beneficiaries/:id calls (one per card) into one call, avoiding the concurrent-call ' +
+        "gateway overload that pattern caused. Mirrors by-ids-with-risk's scoping/silent-drop " +
+        'semantics: `ids` is a comma-separated list, further intersected server-side with the ' +
+        "caller's own scope (SAKHI: own; SUPERVISOR: roster; MANAGER/ADMIN: unscoped) — an id " +
+        'outside that scope, or simply not found, is absent from the result, not a 404 or 403 ' +
+        '(never trust a caller-supplied id list as pre-scoped). Each row carries the same ' +
+        'pii.fullName/padaId, motherCaseDetails (lmpDate/eddDate, null for a CHILD case), and ' +
+        'the full riskConditionSummaries array GET /beneficiaries/:id returns for one case — ' +
+        'condition names are resolved once across every distinct riskConditionId in the whole ' +
+        'result set, same as GET /beneficiaries/risk-condition-summary.',
+      tags: ['Beneficiaries'],
+      responses: {
+        200: {
+          description: 'Beneficiaries with full case/PII/risk detail',
+          schema: envelope(z.array(byIdsDetailItemSchema)),
+        },
+        400: errorResponse(400, { message: "ids: '<value>' is not a valid uuid." }),
+        401: errorResponse(401),
+        500: errorResponse(500),
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(byIdsDetailQuerySchema, 'query'),
+    controller.getByIdsDetail,
   );
 
   doc.get(
