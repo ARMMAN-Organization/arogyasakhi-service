@@ -172,6 +172,57 @@ export class ReferralRepository {
   }
 
   /**
+   * Job-only read (overdueFollowup.job.ts) — every PENDING follow-up whose
+   * `followupDate` has passed, system-wide (not scoped to a caller's roster
+   * — this job runs as a machine identity, not on behalf of any one
+   * Supervisor). Bounded by `take` so one tick can't try to process an
+   * unbounded backlog in a single run.
+   *
+   * Ordered by `lastEscalatedAt` ascending (nulls — never escalated — first)
+   * rather than `followupDate`: once the backlog exceeds `take`, ordering by
+   * `followupDate` alone would return the same oldest slice on every tick
+   * forever, since nothing else in this flow changes `followupDate` or
+   * `followupStatus`. Ordering by `lastEscalatedAt` instead means each tick
+   * naturally rotates to the rows least-recently (or never) escalated,
+   * covering the whole backlog over time rather than starving anything past
+   * position `take`.
+   */
+  findOverduePendingFollowups(today: Date, take: number) {
+    return this.prisma.referralFollowup.findMany({
+      where: {
+        isDeleted: false,
+        followupStatus: 'PENDING',
+        followupDate: { lt: today },
+        referral: { isDeleted: false },
+      },
+      orderBy: [{ lastEscalatedAt: { sort: 'asc', nulls: 'first' } }, { followupDate: 'asc' }],
+      take,
+      select: {
+        id: true,
+        referralId: true,
+        followupDate: true,
+        referral: { select: { beneficiaryId: true } },
+      },
+    });
+  }
+
+  /**
+   * Stamps `lastEscalatedAt` after overdueFollowup.job.ts successfully
+   * processes a follow-up (escalation raised or reused) — the signal
+   * findOverduePendingFollowups' ordering rotates on. Fire-and-forget from
+   * the job's perspective: a failure to stamp this only risks re-selecting
+   * the row sooner on a future tick, not losing it or double-escalating (the
+   * server-side escalation dedup in notification-escalation-service already
+   * guards against the latter).
+   */
+  markFollowupEscalated(id: string) {
+    return this.prisma.referralFollowup.update({
+      where: { id },
+      data: { lastEscalatedAt: new Date() },
+    });
+  }
+
+  /**
    * Only updates a row that is still in `fromStatus` — `updateMany`'s
    * affected count (rather than a separate read-then-write) is the
    * concurrency guard: if the referral's status already changed between the

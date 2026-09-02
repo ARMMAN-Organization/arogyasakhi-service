@@ -1,4 +1,5 @@
 import type { Server } from 'node:http';
+import { bootstrapService } from '@armman/service-commons';
 import { appConfig } from './config/app-config';
 import { createApp } from './app.module';
 import { PrismaService } from './prisma/prisma.service';
@@ -22,4 +23,4 @@ async function bootstrap(): Promise<void> {
   process.on('SIGINT', () => shutdown('SIGINT'));
 }
 
-void bootstrap();
+bootstrapService(bootstrap);

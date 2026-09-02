@@ -1,5 +1,5 @@
 import type { Server } from 'node:http';
-import { PublicKeyVerifier } from '@armman/service-commons';
+import { PublicKeyVerifier, bootstrapService } from '@armman/service-commons';
 import { appConfig } from './config/app-config';
 import { createApp } from './app.module';
 
@@ -18,4 +18,4 @@ async function bootstrap(): Promise<void> {
   process.on('SIGINT', () => shutdown('SIGINT'));
 }
 
-void bootstrap();
+bootstrapService(bootstrap);

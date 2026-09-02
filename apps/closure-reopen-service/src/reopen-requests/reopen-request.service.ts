@@ -5,6 +5,8 @@ import type { NotificationClient } from './notification.client';
 import type { ApprovalClient } from './approval.client';
 import type { LookupClient } from './lookup.client';
 import type { BeneficiaryClient } from './beneficiary.client';
+import type { SakhiClient } from './sakhi.client';
+import { resolveSakhiName, resolveQuickResponseCardId } from './decision-notification.helper';
 import type { CreateReopenRequestInput } from './dto/create-reopen-request.dto';
 import type { DecideReopenRequestInput } from './dto/decide-reopen-request.dto';
 
@@ -27,6 +29,7 @@ export class ReopenRequestService {
     private readonly approvalClient: ApprovalClient,
     private readonly lookupClient: LookupClient,
     private readonly beneficiaryClient: BeneficiaryClient,
+    private readonly sakhiClient: SakhiClient,
   ) {}
 
   /**
@@ -173,8 +176,13 @@ export class ReopenRequestService {
     // /beneficiaries/:id (SAKHI-own-case / SUPERVISOR-roster /
     // MANAGER-unrestricted) — same pattern create() already uses. Without
     // this, any SUPERVISOR who learns a reopen request id outside their own
-    // roster could approve or reject it (IDOR).
-    await this.beneficiaryClient.getById(existing.beneficiaryId, authorizationHeader);
+    // roster could approve or reject it (IDOR). Its response is also reused
+    // below for the Sakhi notification's beneficiary name, avoiding a
+    // second fetch.
+    const beneficiary = await this.beneficiaryClient.getById(
+      existing.beneficiaryId,
+      authorizationHeader,
+    );
 
     if (existing.supervisorStatus !== 'PENDING') {
       throw conflict('This reopen request has already been decided.');
@@ -215,14 +223,24 @@ export class ReopenRequestService {
         { decision: dto.decision, decisionNotes: dto.decisionNotes ?? null },
         authorizationHeader,
       );
+      const [sakhiName, cardId] = await Promise.all([
+        resolveSakhiName(this.sakhiClient, existing.requestedByUserId, authorizationHeader),
+        resolveQuickResponseCardId(this.approvalClient, 'reopen request', id, authorizationHeader),
+      ]);
+      const beneficiaryName = beneficiary?.pii?.fullName ?? null;
       await this.notificationClient.notify(
         existing.requestedByUserId,
         'REOPEN_UPDATE',
-        'Reopen request decided',
-        dto.decision === 'APPROVED'
-          ? 'Your reopen request was approved.'
-          : 'Your reopen request was rejected.',
+        sakhiName ? `Reopen request — ${sakhiName}` : 'Reopen request decided',
+        beneficiaryName
+          ? dto.decision === 'APPROVED'
+            ? `${beneficiaryName}'s reopen request was approved`
+            : `${beneficiaryName}'s reopen request was rejected`
+          : dto.decision === 'APPROVED'
+            ? 'Your reopen request was approved.'
+            : 'Your reopen request was rejected.',
         authorizationHeader,
+        cardId ? { linkedEntityType: 'QuickResponseCard', linkedEntityId: cardId } : undefined,
       );
     } catch (err) {
       console.error(

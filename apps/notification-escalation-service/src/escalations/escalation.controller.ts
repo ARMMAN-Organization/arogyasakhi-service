@@ -23,8 +23,8 @@ export function createEscalationController(service: EscalationService) {
     create: asyncHandler(async (req, res, next) => {
       if (!req.user) return next(unauthorized());
       const body = req.body as CreateEscalationEventInput;
-      const row = await service.create(body, req.user.id);
-      res.status(201).json(ok(row));
+      const { event, wasCreated } = await service.create(body, req.user.id);
+      res.status(201).json(ok({ ...event, wasCreated }));
     }),
 
     findById: asyncHandler(async (req, res, next) => {

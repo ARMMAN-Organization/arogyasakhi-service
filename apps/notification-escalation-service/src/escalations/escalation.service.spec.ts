@@ -258,7 +258,8 @@ describe('EscalationService', () => {
 
     it('delegates to the repository, returning whatever it resolves', async () => {
       const created = row({ escalationType: 'ANC_2_MISSED' });
-      repository.createOrReuseOpen.mockResolvedValue(created);
+      const resolved = { event: created, wasCreated: true };
+      repository.createOrReuseOpen.mockResolvedValue(resolved);
       const input = {
         beneficiaryId: created.beneficiaryId,
         escalationType: 'ANC_2_MISSED' as const,
@@ -267,13 +268,13 @@ describe('EscalationService', () => {
 
       const result = await service.create(input, 'admin-user-id');
 
-      expect(result).toBe(created);
+      expect(result).toBe(resolved);
       expect(repository.createOrReuseOpen).toHaveBeenCalledWith(input, 'admin-user-id');
     });
 
     it('passes optional fields through to the repository unchanged', async () => {
       const created = row({ escalationType: 'ANC_2_MISSED' });
-      repository.createOrReuseOpen.mockResolvedValue(created);
+      repository.createOrReuseOpen.mockResolvedValue({ event: created, wasCreated: true });
       const input = {
         beneficiaryId: created.beneficiaryId,
         escalationType: 'ANC_2_MISSED' as const,

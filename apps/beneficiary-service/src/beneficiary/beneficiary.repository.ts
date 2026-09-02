@@ -26,23 +26,29 @@ export type {
   PiiCreateData,
 } from './beneficiary.repository.types';
 
-interface ListCursor {
-  createdAt: string;
-  id: string;
-}
-
-/** Encodes a row's sort key as an opaque pagination cursor. */
-function encodeCursor(row: { createdAt: Date; id: string }): string {
-  const cursor: ListCursor = { createdAt: row.createdAt.toISOString(), id: row.id };
+/**
+ * Encodes a row's (sortKey, id) pair as an opaque pagination cursor, keyed
+ * by `field` — generic so every cursor-paginated method in this file (and
+ * any future one) shares the same codec instead of each cloning its own
+ * copy differing only in the sort-key field name.
+ */
+function encodeCursor<F extends string>(
+  field: F,
+  row: { [K in F]: Date } & { id: string },
+): string {
+  const cursor = { [field]: row[field].toISOString(), id: row.id };
   return Buffer.from(JSON.stringify(cursor)).toString('base64url');
 }
 
-/** Decodes a cursor produced by encodeCursor; returns null on any malformed input. */
-function decodeCursor(cursor: string): ListCursor | null {
+/** Decodes a cursor produced by encodeCursor for the same `field`; returns null on any malformed input. */
+function decodeCursor<F extends string>(
+  field: F,
+  cursor: string,
+): ({ [K in F]: string } & { id: string }) | null {
   try {
     const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
-    if (typeof parsed?.createdAt === 'string' && typeof parsed?.id === 'string') {
-      return parsed as ListCursor;
+    if (typeof parsed?.[field] === 'string' && typeof parsed?.id === 'string') {
+      return parsed as { [K in F]: string } & { id: string };
     }
     return null;
   } catch {
@@ -98,7 +104,7 @@ export class BeneficiaryRepository {
       };
     }
 
-    const decodedCursor = filters.cursor ? decodeCursor(filters.cursor) : null;
+    const decodedCursor = filters.cursor ? decodeCursor('createdAt', filters.cursor) : null;
 
     const rows = await this.prisma.beneficiaryCase.findMany({
       where: decodedCursor
@@ -118,7 +124,7 @@ export class BeneficiaryRepository {
     const hasMore = rows.length > filters.limit;
     const items = hasMore ? rows.slice(0, filters.limit) : rows;
     const lastItem = items[items.length - 1];
-    return { items, nextCursor: hasMore && lastItem ? encodeCursor(lastItem) : null };
+    return { items, nextCursor: hasMore && lastItem ? encodeCursor('createdAt', lastItem) : null };
   }
 
   /**
@@ -801,6 +807,81 @@ export class BeneficiaryRepository {
       padaId: c.pii.padaId,
       latestGrade: worstByBeneficiary.get(c.id)?.grade ?? null,
     }));
+  }
+
+  /**
+   * MOTHER beneficiaries still in the ANC phase (i.e. `applyPhaseChange`'s
+   * ANC->PP transition hasn't happened yet, meaning no delivery outcome has
+   * been submitted) whose EDD is on or before `cutoffDate` — the candidate
+   * set for visit-form-service's post-EDD visit-generation job (EDD+7
+   * delivery-form-pending detection). Deliberately keyed off
+   * `BeneficiaryCase.currentPhase` — the one field `updatePhase` actually
+   * keeps authoritative — rather than `MotherCaseDetails.currentPhase` or
+   * `BeneficiaryCurrentSummary.dateOfDelivery`, neither of which any write
+   * path in this service ever populates. Unscoped (no sakhiId/roster filter)
+   * since the only caller is a system-wide background job, not a
+   * Sakhi/Supervisor/Manager viewing their own scope.
+   */
+  async findMotherIdsWithEddOnOrBefore(
+    cutoffDate: Date,
+    limit: number,
+    cursor: string | undefined,
+  ): Promise<{
+    items: { beneficiaryId: string; registrationDate: Date; eddDate: Date }[];
+    nextCursor: string | null;
+  }> {
+    const decodedCursor = cursor ? decodeCursor('eddDate', cursor) : null;
+
+    const rows = await this.prisma.beneficiaryCase.findMany({
+      where: {
+        isDeleted: false,
+        caseType: 'MOTHER',
+        currentStatus: 'ACTIVE',
+        currentPhase: 'ANC',
+        motherCaseDetails: { eddDate: { lte: cutoffDate } },
+        ...(decodedCursor
+          ? {
+              OR: [
+                { motherCaseDetails: { eddDate: { lt: new Date(decodedCursor.eddDate) } } },
+                {
+                  motherCaseDetails: { eddDate: new Date(decodedCursor.eddDate) },
+                  id: { gt: decodedCursor.id },
+                },
+              ],
+            }
+          : {}),
+      },
+      orderBy: [{ motherCaseDetails: { eddDate: 'asc' } }, { id: 'asc' }],
+      take: limit + 1,
+      select: {
+        id: true,
+        registrationDate: true,
+        motherCaseDetails: { select: { eddDate: true } },
+      },
+    });
+
+    const hasMore = rows.length > limit;
+    const page = hasMore ? rows.slice(0, limit) : rows;
+    // The `motherCaseDetails: { eddDate: ... }` filter above only matches
+    // rows with a related MotherCaseDetails record, so `eddDate` here is
+    // never null in practice — filtered (not asserted) so a future query
+    // change that loosens that guarantee fails closed (row dropped) rather
+    // than throwing on a non-null assertion.
+    const rowsWithEdd = page.flatMap((row) =>
+      row.motherCaseDetails ? [{ ...row, motherCaseDetails: row.motherCaseDetails }] : [],
+    );
+    const items = rowsWithEdd.map((row) => ({
+      beneficiaryId: row.id,
+      registrationDate: row.registrationDate,
+      eddDate: row.motherCaseDetails.eddDate,
+    }));
+    const lastRow = rowsWithEdd[rowsWithEdd.length - 1];
+    const nextCursor =
+      hasMore && lastRow
+        ? encodeCursor('eddDate', { eddDate: lastRow.motherCaseDetails.eddDate, id: lastRow.id })
+        : null;
+
+    return { items, nextCursor };
   }
 
   /**

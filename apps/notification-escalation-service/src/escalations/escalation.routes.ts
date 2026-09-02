@@ -82,6 +82,14 @@ const escalationEventSchema = z.object({
   updatedAt: z.string().datetime(),
 });
 
+// POST-only: distinguishes "a new row was just inserted" from "an existing
+// OPEN row for the same natural key was reused" — callers that only want to
+// act (e.g. send a notification) the first time an escalation is actually
+// raised need this, since status alone is 'OPEN' in both cases.
+const createEscalationEventResponseSchema = escalationEventSchema.extend({
+  wasCreated: z.boolean(),
+});
+
 const missedVisitDetailSchema = z.object({
   id: z.string().uuid(),
   beneficiaryId: z.string().uuid(),
@@ -150,7 +158,10 @@ export function registerEscalationRoutes(doc: DocumentedRouter, service: Escalat
       summary: 'Raise a new escalation event',
       tags: ['Escalations'],
       responses: {
-        201: { description: 'Escalation event created', schema: envelope(escalationEventSchema) },
+        201: {
+          description: 'Escalation event created',
+          schema: envelope(createEscalationEventResponseSchema),
+        },
         400: { description: 'Validation error', schema: apiErrorSchema },
         401: { description: 'Unauthenticated', schema: apiErrorSchema },
         403: { description: 'Caller role not permitted', schema: apiErrorSchema },

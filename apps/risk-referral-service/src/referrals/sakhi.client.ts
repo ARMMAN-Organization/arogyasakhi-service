@@ -9,6 +9,34 @@ interface ApiSakhi {
 }
 
 /**
+ * Resolves a single Sakhi's own record (for their `supervisorId`), via
+ * auth-service's `GET /sakhis/:id`, through the gateway. Used by
+ * overdueFollowup.job.ts to resolve which Supervisor to notify for a
+ * beneficiary's overdue referral follow-up.
+ */
+export async function findSakhiById(
+  sakhiId: string,
+  authorizationHeader: string,
+): Promise<ApiSakhi | null> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_GATEWAY_BASE_URL}/api/v1/sakhis/${sakhiId}`, {
+      headers: { Authorization: authorizationHeader },
+    });
+  } catch {
+    throw badGateway('Unable to resolve the Sakhi — the auth service is unreachable.');
+  }
+
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    throw badGateway('Unable to resolve the Sakhi — the auth service returned an error.');
+  }
+
+  const body = (await res.json()) as { data: ApiSakhi };
+  return body.data;
+}
+
+/**
  * Resolves the Sakhi ids reporting to a given Supervisor, via auth-service's
  * existing `GET /projects/:projectId/sakhis` (no new auth-service endpoint —
  * that route already returns each Sakhi's `supervisorId`), called through
