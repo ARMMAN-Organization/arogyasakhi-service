@@ -1,4 +1,4 @@
-import { HttpError } from '@armman/service-commons';
+import { HttpError, notFound } from '@armman/service-commons';
 import type { LmpChangeRequestRepository } from './lmp-change-request.repository';
 import type { LookupClient } from '../quick-response/lookup.client';
 import type { QuickResponseService } from '../quick-response/quick-response.service';
@@ -60,6 +60,13 @@ export class LmpChangeRequestService {
    * row. Without this, any authenticated SAKHI could raise an LMP change
    * request against any beneficiary system-wide, not just their own
    * roster/cases — same pattern as reopen-request.service.ts's create().
+   *
+   * beneficiaryClient.getById resolves to `null` (rather than throwing) when
+   * beneficiary-service returns a genuine 404 for a beneficiaryId that does
+   * not exist at all — distinct from the out-of-roster case, which throws.
+   * That null must be turned into a 404 here, or a nonexistent beneficiaryId
+   * would silently pass this guard and create an orphaned approval_requests
+   * row.
    */
   async create(
     dto: CreateLmpChangeRequestInput,
@@ -69,7 +76,11 @@ export class LmpChangeRequestService {
     detail: Awaited<ReturnType<QuickResponseService['getLmpChangeRequestDetail']>>;
     wasCreated: boolean;
   }> {
-    await this.beneficiaryClient.getById(dto.beneficiaryId, authorizationHeader);
+    const beneficiary = await this.beneficiaryClient.getById(
+      dto.beneficiaryId,
+      authorizationHeader,
+    );
+    if (!beneficiary) throw notFound('The beneficiary linked to this request was not found.');
 
     const existing = await this.repository.findByLocalRequestUuid(dto.localRequestUuid);
     if (existing) {
@@ -149,9 +160,16 @@ export class LmpChangeRequestService {
    * via getLmpChangeRequestDetail) for any beneficiaryId. A 403/404 from
    * that call propagates as-is; only on success does this query the
    * repository.
+   *
+   * beneficiaryClient.getById resolves to `null` (rather than throwing) when
+   * beneficiary-service returns a genuine 404 for a beneficiaryId that does
+   * not exist at all — distinct from the out-of-roster case, which throws.
+   * That null must be turned into a 404 here, or a nonexistent beneficiaryId
+   * would silently pass this guard.
    */
   async listByBeneficiaryId(beneficiaryId: string, authorizationHeader: string) {
-    await this.beneficiaryClient.getById(beneficiaryId, authorizationHeader);
+    const beneficiary = await this.beneficiaryClient.getById(beneficiaryId, authorizationHeader);
+    if (!beneficiary) throw notFound('The beneficiary linked to this request was not found.');
 
     const rows = await this.repository.findByBeneficiaryId(beneficiaryId);
     return Promise.all(

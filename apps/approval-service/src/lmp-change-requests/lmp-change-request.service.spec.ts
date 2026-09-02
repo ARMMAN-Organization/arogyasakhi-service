@@ -115,21 +115,16 @@ describe('LmpChangeRequestService', () => {
     });
 
     it('throws not-found (IDOR guard) when the beneficiary does not exist', async () => {
+      // A genuinely nonexistent beneficiaryId maps to a real 404 from
+      // beneficiary-service, which BeneficiaryClient.getById resolves as
+      // `null` rather than throwing (see beneficiary.client.ts) — distinct
+      // from the out-of-roster case above, which throws. create() must turn
+      // that null into its own 404 rather than silently continuing.
       beneficiaryClient.getById.mockResolvedValue(null);
 
-      // getById returning null means "not found" per BeneficiaryClient's own
-      // contract; create() does not itself translate that to an error since
-      // beneficiaryClient.getById(...) is only awaited for its ownership
-      // side-effect (a throw), matching the reopen-request.service.ts
-      // reference exactly — a null return (as opposed to a throw) is not
-      // expected from a real beneficiary-service 404, which throws instead.
-      // This test locks in getById's actual documented behavior: a 404 from
-      // beneficiary-service surfaces as a thrown HttpError, not a null.
-      beneficiaryClient.getById.mockRejectedValue(
-        Object.assign(new Error('Beneficiary not found.'), { status: 404 }),
-      );
-
-      await expect(service.create(dto, sakhiId, authHeader)).rejects.toThrow(/not found/i);
+      await expect(service.create(dto, sakhiId, authHeader)).rejects.toMatchObject({
+        status: 404,
+      });
 
       expect(repository.create).not.toHaveBeenCalled();
     });
@@ -298,13 +293,17 @@ describe('LmpChangeRequestService', () => {
     });
 
     it('throws not-found (IDOR guard) when the beneficiary does not exist', async () => {
-      beneficiaryClient.getById.mockRejectedValue(
-        Object.assign(new Error('Beneficiary not found.'), { status: 404 }),
-      );
+      // A genuinely nonexistent beneficiaryId maps to a real 404 from
+      // beneficiary-service, which BeneficiaryClient.getById resolves as
+      // `null` rather than throwing (see beneficiary.client.ts) — distinct
+      // from the out-of-roster case above, which throws. listByBeneficiaryId
+      // must turn that null into its own 404 rather than silently
+      // continuing.
+      beneficiaryClient.getById.mockResolvedValue(null);
 
-      await expect(service.listByBeneficiaryId(beneficiaryId, authHeader)).rejects.toThrow(
-        /not found/i,
-      );
+      await expect(service.listByBeneficiaryId(beneficiaryId, authHeader)).rejects.toMatchObject({
+        status: 404,
+      });
 
       expect(repository.findByBeneficiaryId).not.toHaveBeenCalled();
     });
