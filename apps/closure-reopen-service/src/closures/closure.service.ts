@@ -4,6 +4,11 @@ import type { ApprovalClient } from '../reopen-requests/approval.client';
 import type { LookupClient } from '../reopen-requests/lookup.client';
 import type { NotificationClient } from '../reopen-requests/notification.client';
 import type { BeneficiaryClient } from '../reopen-requests/beneficiary.client';
+import type { SakhiClient } from '../reopen-requests/sakhi.client';
+import {
+  resolveSakhiName,
+  resolveQuickResponseCardId,
+} from '../reopen-requests/decision-notification.helper';
 import type { CreateClosureInput } from './dto/create-closure.dto';
 import type { DecideClosureInput } from './dto/decide-closure.dto';
 
@@ -33,6 +38,7 @@ export class ClosureService {
     private readonly lookupClient: LookupClient,
     private readonly notificationClient: NotificationClient,
     private readonly beneficiaryClient: BeneficiaryClient,
+    private readonly sakhiClient: SakhiClient,
   ) {}
 
   list() {
@@ -185,8 +191,13 @@ export class ClosureService {
     // /beneficiaries/:id (SAKHI-own-case / SUPERVISOR-roster /
     // MANAGER-unrestricted) — same pattern create() already uses. Without
     // this, any SUPERVISOR who learns a closure id outside their own
-    // roster could approve or reject it (IDOR).
-    await this.beneficiaryClient.getById(existing.beneficiaryId, authorizationHeader);
+    // roster could approve or reject it (IDOR). Its response is also reused
+    // below for the Sakhi notification's beneficiary name, avoiding a
+    // second fetch.
+    const beneficiary = await this.beneficiaryClient.getById(
+      existing.beneficiaryId,
+      authorizationHeader,
+    );
 
     if (existing.supervisorStatus === null) {
       throw unprocessable('This closure does not require supervisor review.');
@@ -222,14 +233,24 @@ export class ClosureService {
     }
 
     try {
+      const [sakhiName, cardId] = await Promise.all([
+        resolveSakhiName(this.sakhiClient, existing.submittedByUserId, authorizationHeader),
+        resolveQuickResponseCardId(this.approvalClient, 'closure', id, authorizationHeader),
+      ]);
+      const beneficiaryName = beneficiary?.pii?.fullName ?? null;
       await this.notificationClient.notify(
         existing.submittedByUserId,
         'CLOSURE_REVIEW_UPDATE',
-        'Closure review decided',
-        dto.decision === 'APPROVED'
-          ? 'Your closure request was approved.'
-          : 'Your closure request was rejected.',
+        sakhiName ? `Closure review — ${sakhiName}` : 'Closure review decided',
+        beneficiaryName
+          ? dto.decision === 'APPROVED'
+            ? `${beneficiaryName}'s closure request was approved`
+            : `${beneficiaryName}'s closure request was rejected`
+          : dto.decision === 'APPROVED'
+            ? 'Your closure request was approved.'
+            : 'Your closure request was rejected.',
         authorizationHeader,
+        cardId ? { linkedEntityType: 'QuickResponseCard', linkedEntityId: cardId } : undefined,
       );
     } catch (err) {
       console.error(

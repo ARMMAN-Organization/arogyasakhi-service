@@ -8,6 +8,7 @@ import { NotificationClient } from './notification.client';
 import { ApprovalClient } from './approval.client';
 import { LookupClient } from './lookup.client';
 import { BeneficiaryClient } from './beneficiary.client';
+import { SakhiClient } from './sakhi.client';
 
 /**
  * Composition root for the reopen-requests feature: wires repository → service → routes.
@@ -19,6 +20,7 @@ export function createReopenRequestModule(prisma: PrismaService): DocumentedRout
   const approvalClient = new ApprovalClient();
   const lookupClient = new LookupClient();
   const beneficiaryClient = new BeneficiaryClient();
+  const sakhiClient = new SakhiClient();
   const service = new ReopenRequestService(
     repository,
     auditClient,
@@ -26,6 +28,7 @@ export function createReopenRequestModule(prisma: PrismaService): DocumentedRout
     approvalClient,
     lookupClient,
     beneficiaryClient,
+    sakhiClient,
   );
   const doc = createDocumentedRouter();
   registerReopenRequestRoutes(doc, service);

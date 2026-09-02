@@ -103,7 +103,7 @@ describe('EscalationRepository', () => {
 
       const result = await repository.createOrReuseOpen(baseInput, 'admin-user-id');
 
-      expect(result).toBe(created);
+      expect(result).toEqual({ event: created, wasCreated: true });
       expect(create).toHaveBeenCalledWith({
         data: {
           beneficiaryId: 'beneficiary-1',
@@ -125,7 +125,7 @@ describe('EscalationRepository', () => {
 
       const result = await repository.createOrReuseOpen(baseInput, 'admin-user-id');
 
-      expect(result).toBe(existing);
+      expect(result).toEqual({ event: existing, wasCreated: false });
       expect(create).not.toHaveBeenCalled();
       expect(update).not.toHaveBeenCalled();
     });
@@ -138,7 +138,7 @@ describe('EscalationRepository', () => {
 
       const result = await repository.createOrReuseOpen(baseInput, 'admin-user-id');
 
-      expect(result).toBe(updated);
+      expect(result).toEqual({ event: updated, wasCreated: false });
       expect(update).toHaveBeenCalledWith({
         where: { id: 'existing-row' },
         data: { assignedSupervisorId: 'supervisor-1' },

@@ -335,6 +335,12 @@ model ReferralFollowup {
   // media_assets.media_asset_id — owned by another service, no cross-service relation.
   casePaperMediaId    String?                @map("case_paper_media_id")
   followupStatus      ReferralFollowupStatus @map("followup_status")
+  // Not in the ERD — stamped by the overdue-follow-up escalation cron job
+  // after each successful tick, so the backlog query below can rotate
+  // through it (oldest-escalated-first) instead of always returning the
+  // same oldest-by-followupDate slice forever once the backlog exceeds one
+  // tick's MAX_FOLLOWUPS_PER_TICK.
+  lastEscalatedAt     DateTime?              @map("last_escalated_at")
   createdAt           DateTime               @default(now()) @map("created_at")
   createdByUserId     String?                @map("created_by_user_id")
   updatedAt           DateTime               @updatedAt @map("updated_at")
@@ -345,4 +351,17 @@ model ReferralFollowup {
   referral Referral @relation(fields: [referralId], references: [id])
 
   @@map("referral_followups")
+}
+
+// Not in the ERD — a DB-backed advisory lock for the in-process node-cron
+// overdue-follow-up job in this service. Without it, running more than one
+// replica of this service would process the same overdue follow-ups once
+// per replica per tick. See libs/service-commons/src/jobs/job-lock.ts.
+model JobRun {
+  id          String   @id @default(uuid()) @map("job_run_id")
+  jobName     String   @unique @map("job_name") @db.VarChar(80)
+  lockedUntil DateTime @map("locked_until")
+  lastRunAt   DateTime @map("last_run_at")
+
+  @@map("job_runs")
 }

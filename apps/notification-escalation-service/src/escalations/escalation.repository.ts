@@ -69,6 +69,11 @@ export class EscalationRepository {
    * and inserting duplicates — there's no DB-level unique constraint
    * backing this natural key (it's conditional on which fields are
    * present), so the lock is what actually closes the race.
+   *
+   * Callers that only want to act (e.g. send a notification) the first time
+   * an escalation is actually raised — not on every re-processing of an
+   * already-open one — need `wasCreated` in the return: `status === 'OPEN'`
+   * alone doesn't distinguish "brand new" from "reused, still open".
    */
   createOrReuseOpen(input: CreateEscalationEventInput, createdByUserId: string) {
     return this.prisma.$transaction(async (tx) => {
@@ -94,15 +99,16 @@ export class EscalationRepository {
       });
       if (existing) {
         if (existing.assignedSupervisorId !== input.assignedSupervisorId) {
-          return tx.escalationEvent.update({
+          const event = await tx.escalationEvent.update({
             where: { id: existing.id },
             data: { assignedSupervisorId: input.assignedSupervisorId },
           });
+          return { event, wasCreated: false };
         }
-        return existing;
+        return { event: existing, wasCreated: false };
       }
 
-      return tx.escalationEvent.create({
+      const event = await tx.escalationEvent.create({
         data: {
           beneficiaryId: input.beneficiaryId ?? null,
           sakhiUserId: input.sakhiUserId ?? null,
@@ -115,6 +121,7 @@ export class EscalationRepository {
           createdByUserId,
         },
       });
+      return { event, wasCreated: true };
     });
   }
 
