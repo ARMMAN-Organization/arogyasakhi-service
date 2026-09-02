@@ -8,6 +8,12 @@ interface EscalationEvent {
   beneficiaryId: string | null;
   escalationType: string;
   status: string;
+  // Distinguishes "a new row was just inserted" from "an existing OPEN row
+  // for the same natural key was reused" — status alone is 'OPEN' either
+  // way, so a caller that only wants to notify the first time an escalation
+  // is actually raised (not on every re-processing of an already-open one)
+  // needs this flag.
+  wasCreated: boolean;
 }
 
 /**
@@ -22,7 +28,7 @@ export async function createEscalationEvent(
     beneficiaryId: string;
     escalationType: string;
     referralId?: string;
-    assignedSupervisorId?: string | null;
+    assignedSupervisorId: string;
   },
   systemAccessToken: string,
 ): Promise<EscalationEvent> {

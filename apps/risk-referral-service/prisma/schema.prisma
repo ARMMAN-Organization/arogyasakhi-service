@@ -335,6 +335,12 @@ model ReferralFollowup {
   // media_assets.media_asset_id — owned by another service, no cross-service relation.
   casePaperMediaId    String?                @map("case_paper_media_id")
   followupStatus      ReferralFollowupStatus @map("followup_status")
+  // Not in the ERD — stamped by the overdue-follow-up escalation cron job
+  // after each successful tick, so the backlog query below can rotate
+  // through it (oldest-escalated-first) instead of always returning the
+  // same oldest-by-followupDate slice forever once the backlog exceeds one
+  // tick's MAX_FOLLOWUPS_PER_TICK.
+  lastEscalatedAt     DateTime?              @map("last_escalated_at")
   createdAt           DateTime               @default(now()) @map("created_at")
   createdByUserId     String?                @map("created_by_user_id")
   updatedAt           DateTime               @updatedAt @map("updated_at")

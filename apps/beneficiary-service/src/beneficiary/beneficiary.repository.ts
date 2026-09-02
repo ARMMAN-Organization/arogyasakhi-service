@@ -26,47 +26,29 @@ export type {
   PiiCreateData,
 } from './beneficiary.repository.types';
 
-interface ListCursor {
-  createdAt: string;
-  id: string;
-}
-
-/** Encodes a row's sort key as an opaque pagination cursor. */
-function encodeCursor(row: { createdAt: Date; id: string }): string {
-  const cursor: ListCursor = { createdAt: row.createdAt.toISOString(), id: row.id };
+/**
+ * Encodes a row's (sortKey, id) pair as an opaque pagination cursor, keyed
+ * by `field` — generic so every cursor-paginated method in this file (and
+ * any future one) shares the same codec instead of each cloning its own
+ * copy differing only in the sort-key field name.
+ */
+function encodeCursor<F extends string>(
+  field: F,
+  row: { [K in F]: Date } & { id: string },
+): string {
+  const cursor = { [field]: row[field].toISOString(), id: row.id };
   return Buffer.from(JSON.stringify(cursor)).toString('base64url');
 }
 
-/** Decodes a cursor produced by encodeCursor; returns null on any malformed input. */
-function decodeCursor(cursor: string): ListCursor | null {
+/** Decodes a cursor produced by encodeCursor for the same `field`; returns null on any malformed input. */
+function decodeCursor<F extends string>(
+  field: F,
+  cursor: string,
+): ({ [K in F]: string } & { id: string }) | null {
   try {
     const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
-    if (typeof parsed?.createdAt === 'string' && typeof parsed?.id === 'string') {
-      return parsed as ListCursor;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-interface PostEddCursor {
-  eddDate: string;
-  id: string;
-}
-
-/** Encodes findMotherIdsWithEddOnOrBefore's sort key (eddDate, id) as an opaque cursor. */
-function encodePostEddCursor(row: { eddDate: Date; id: string }): string {
-  const cursor: PostEddCursor = { eddDate: row.eddDate.toISOString(), id: row.id };
-  return Buffer.from(JSON.stringify(cursor)).toString('base64url');
-}
-
-/** Decodes a cursor produced by encodePostEddCursor; returns null on any malformed input. */
-function decodePostEddCursor(cursor: string): PostEddCursor | null {
-  try {
-    const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
-    if (typeof parsed?.eddDate === 'string' && typeof parsed?.id === 'string') {
-      return parsed as PostEddCursor;
+    if (typeof parsed?.[field] === 'string' && typeof parsed?.id === 'string') {
+      return parsed as { [K in F]: string } & { id: string };
     }
     return null;
   } catch {
@@ -122,7 +104,7 @@ export class BeneficiaryRepository {
       };
     }
 
-    const decodedCursor = filters.cursor ? decodeCursor(filters.cursor) : null;
+    const decodedCursor = filters.cursor ? decodeCursor('createdAt', filters.cursor) : null;
 
     const rows = await this.prisma.beneficiaryCase.findMany({
       where: decodedCursor
@@ -142,7 +124,7 @@ export class BeneficiaryRepository {
     const hasMore = rows.length > filters.limit;
     const items = hasMore ? rows.slice(0, filters.limit) : rows;
     const lastItem = items[items.length - 1];
-    return { items, nextCursor: hasMore && lastItem ? encodeCursor(lastItem) : null };
+    return { items, nextCursor: hasMore && lastItem ? encodeCursor('createdAt', lastItem) : null };
   }
 
   /**
@@ -848,7 +830,7 @@ export class BeneficiaryRepository {
     items: { beneficiaryId: string; registrationDate: Date; eddDate: Date }[];
     nextCursor: string | null;
   }> {
-    const decodedCursor = cursor ? decodePostEddCursor(cursor) : null;
+    const decodedCursor = cursor ? decodeCursor('eddDate', cursor) : null;
 
     const rows = await this.prisma.beneficiaryCase.findMany({
       where: {
@@ -896,7 +878,7 @@ export class BeneficiaryRepository {
     const lastRow = rowsWithEdd[rowsWithEdd.length - 1];
     const nextCursor =
       hasMore && lastRow
-        ? encodePostEddCursor({ eddDate: lastRow.motherCaseDetails.eddDate, id: lastRow.id })
+        ? encodeCursor('eddDate', { eddDate: lastRow.motherCaseDetails.eddDate, id: lastRow.id })
         : null;
 
     return { items, nextCursor };

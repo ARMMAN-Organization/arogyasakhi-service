@@ -85,7 +85,9 @@ export function registerSakhiRoutes(
       summary:
         'Get a Sakhi by id. A SAKHI caller may only fetch their own id (403 otherwise) — ' +
         "used by the Sakhi dashboard for the caller's own name/profile, in addition to this " +
-        "route's original Supervisor picker/detail-header use.",
+        "route's original Supervisor picker/detail-header use. SYSTEM is included for " +
+        "automated cron jobs (e.g. risk-referral-service's overdue-followup escalation) " +
+        'resolving a Sakhi via their own service-token identity, not a human session.',
       tags: ['Sakhis'],
       params: sakhiIdParamsSchema,
       responses: {
@@ -97,7 +99,7 @@ export function registerSakhiRoutes(
       },
     },
     authenticate(signer),
-    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN', 'SYSTEM'),
     validate(sakhiIdParamsSchema, 'params'),
     controller.getById,
   );

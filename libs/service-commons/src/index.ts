@@ -5,6 +5,7 @@ export * from './http/request-id.middleware';
 export * from './http/http-error';
 export * from './http/async-handler';
 export * from './http/validate';
+export * from './http/bootstrap-service';
 export * from './logging/logger';
 export * from './auth/roles.decorator';
 export * from './auth/rbac.guard';

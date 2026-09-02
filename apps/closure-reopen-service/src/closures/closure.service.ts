@@ -5,6 +5,10 @@ import type { LookupClient } from '../reopen-requests/lookup.client';
 import type { NotificationClient } from '../reopen-requests/notification.client';
 import type { BeneficiaryClient } from '../reopen-requests/beneficiary.client';
 import type { SakhiClient } from '../reopen-requests/sakhi.client';
+import {
+  resolveSakhiName,
+  resolveQuickResponseCardId,
+} from '../reopen-requests/decision-notification.helper';
 import type { CreateClosureInput } from './dto/create-closure.dto';
 import type { DecideClosureInput } from './dto/decide-closure.dto';
 
@@ -36,45 +40,6 @@ export class ClosureService {
     private readonly beneficiaryClient: BeneficiaryClient,
     private readonly sakhiClient: SakhiClient,
   ) {}
-
-  /** Best-effort — a name lookup failure falls back to no name (generic
-   * notification text) rather than blocking the decision it's attached to. */
-  private async resolveSakhiName(
-    sakhiId: string,
-    authorizationHeader: string,
-  ): Promise<string | null> {
-    try {
-      const sakhi = await this.sakhiClient.getById(sakhiId, authorizationHeader);
-      return sakhi?.displayName ?? null;
-    } catch (err) {
-      console.error(`Failed to resolve Sakhi ${sakhiId}'s name for a notification:`, err);
-      return null;
-    }
-  }
-
-  /**
-   * Best-effort — this closure's Quick Response card id (approval_requests.id),
-   * used to link the decision notification so GET /quick-response/:cardId can
-   * resolve it. A failure here (no matching approval request, or
-   * approval-service unreachable) must not block the decision — the
-   * notification is simply sent without a linkedEntity rather than with a
-   * closures-table id GET /quick-response/:cardId doesn't recognise.
-   */
-  private async resolveQuickResponseCardId(
-    closureId: string,
-    authorizationHeader: string,
-  ): Promise<string | null> {
-    try {
-      const approvalRequest = await this.approvalClient.findByClosureId(
-        closureId,
-        authorizationHeader,
-      );
-      return approvalRequest?.id ?? null;
-    } catch (err) {
-      console.error(`Failed to resolve the Quick Response card id for closure ${closureId}:`, err);
-      return null;
-    }
-  }
 
   list() {
     return this.repository.findMany();
@@ -269,10 +234,10 @@ export class ClosureService {
 
     try {
       const [sakhiName, cardId] = await Promise.all([
-        this.resolveSakhiName(existing.submittedByUserId, authorizationHeader),
-        this.resolveQuickResponseCardId(id, authorizationHeader),
+        resolveSakhiName(this.sakhiClient, existing.submittedByUserId, authorizationHeader),
+        resolveQuickResponseCardId(this.approvalClient, 'closure', id, authorizationHeader),
       ]);
-      const beneficiaryName = beneficiary?.pii.fullName ?? null;
+      const beneficiaryName = beneficiary?.pii?.fullName ?? null;
       await this.notificationClient.notify(
         existing.submittedByUserId,
         'CLOSURE_REVIEW_UPDATE',

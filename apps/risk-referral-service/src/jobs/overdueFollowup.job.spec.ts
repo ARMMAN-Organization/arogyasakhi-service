@@ -16,19 +16,26 @@ jest.mock('../referrals/systemEscalation.client');
 
 describe('runOverdueFollowupJob', () => {
   const findOverduePendingFollowups = jest.fn();
+  const markFollowupEscalated = jest.fn();
   const getById = jest.fn();
 
   beforeEach(() => {
     jest.clearAllMocks();
     (ReferralRepository as jest.Mock).mockImplementation(() => ({
       findOverduePendingFollowups,
+      markFollowupEscalated,
     }));
     (BeneficiaryClient as jest.Mock).mockImplementation(() => ({ getById }));
     (acquireJobLock as jest.Mock).mockResolvedValue(true);
     (findSakhiById as jest.Mock).mockResolvedValue({ supervisorId: 'supervisor-1' });
     getById.mockResolvedValue({ id: 'ben-1', sakhiId: 'sakhi-1' });
-    (createEscalationEvent as jest.Mock).mockResolvedValue({ id: 'event-1', status: 'OPEN' });
+    (createEscalationEvent as jest.Mock).mockResolvedValue({
+      id: 'event-1',
+      status: 'OPEN',
+      wasCreated: true,
+    });
     (createNotification as jest.Mock).mockResolvedValue(undefined);
+    markFollowupEscalated.mockResolvedValue(undefined);
   });
 
   const baseDeps = () => ({
@@ -44,7 +51,7 @@ describe('runOverdueFollowupJob', () => {
     expect(findOverduePendingFollowups).not.toHaveBeenCalled();
   });
 
-  it('raises an escalation and notifies the resolved Supervisor for each overdue follow-up', async () => {
+  it('raises an escalation, stamps lastEscalatedAt, and notifies the resolved Supervisor for a newly-created escalation', async () => {
     findOverduePendingFollowups.mockResolvedValue([
       { id: 'followup-1', referralId: 'referral-1', referral: { beneficiaryId: 'ben-1' } },
     ]);
@@ -60,6 +67,7 @@ describe('runOverdueFollowupJob', () => {
       }),
       'system-token',
     );
+    expect(markFollowupEscalated).toHaveBeenCalledWith('followup-1');
     expect(createNotification).toHaveBeenCalledWith(
       expect.objectContaining({
         recipientUserId: 'supervisor-1',
@@ -68,6 +76,23 @@ describe('runOverdueFollowupJob', () => {
       }),
       'system-token',
     );
+  });
+
+  it('does not notify when the escalation was reused (not newly created) — avoids a duplicate daily notification', async () => {
+    findOverduePendingFollowups.mockResolvedValue([
+      { id: 'followup-1', referralId: 'referral-1', referral: { beneficiaryId: 'ben-1' } },
+    ]);
+    (createEscalationEvent as jest.Mock).mockResolvedValue({
+      id: 'event-1',
+      status: 'OPEN',
+      wasCreated: false,
+    });
+
+    await runOverdueFollowupJob(baseDeps());
+
+    expect(createEscalationEvent).toHaveBeenCalled();
+    expect(markFollowupEscalated).toHaveBeenCalledWith('followup-1');
+    expect(createNotification).not.toHaveBeenCalled();
   });
 
   it('skips escalation entirely when minting a service token fails', async () => {
@@ -82,7 +107,7 @@ describe('runOverdueFollowupJob', () => {
     expect(createEscalationEvent).not.toHaveBeenCalled();
   });
 
-  it('does not notify when no Supervisor can be resolved', async () => {
+  it('skips escalation (does not call createEscalationEvent) when no Supervisor can be resolved', async () => {
     findOverduePendingFollowups.mockResolvedValue([
       { id: 'followup-1', referralId: 'referral-1', referral: { beneficiaryId: 'ben-1' } },
     ]);
@@ -90,7 +115,7 @@ describe('runOverdueFollowupJob', () => {
 
     await runOverdueFollowupJob(baseDeps());
 
-    expect(createEscalationEvent).toHaveBeenCalled();
+    expect(createEscalationEvent).not.toHaveBeenCalled();
     expect(createNotification).not.toHaveBeenCalled();
   });
 
@@ -101,10 +126,24 @@ describe('runOverdueFollowupJob', () => {
     ]);
     (createEscalationEvent as jest.Mock)
       .mockRejectedValueOnce(new Error('boom'))
-      .mockResolvedValueOnce({ id: 'event-2', status: 'OPEN' });
+      .mockResolvedValueOnce({ id: 'event-2', status: 'OPEN', wasCreated: true });
 
     await runOverdueFollowupJob(baseDeps());
 
     expect(createEscalationEvent).toHaveBeenCalledTimes(2);
+  });
+
+  it('processes a large backlog in bounded-concurrency batches, not all at once or fully sequential', async () => {
+    const followups = Array.from({ length: 37 }, (_, i) => ({
+      id: `followup-${i}`,
+      referralId: `referral-${i}`,
+      referral: { beneficiaryId: `ben-${i}` },
+    }));
+    findOverduePendingFollowups.mockResolvedValue(followups);
+
+    await runOverdueFollowupJob(baseDeps());
+
+    expect(createEscalationEvent).toHaveBeenCalledTimes(37);
+    expect(markFollowupEscalated).toHaveBeenCalledTimes(37);
   });
 });
