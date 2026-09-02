@@ -29,13 +29,25 @@ export class AuditClient {
     beforeJson: Record<string, unknown>,
     afterJson: Record<string, unknown>,
     authorizationHeader: string,
+    // Forwarded as audit-service's own localAuditUuid so a dropped-connection
+    // retry of the caller's PATCH doesn't double-write this audit row
+    // (security review finding, 2026-09-02).
+    localAuditUuid?: string,
   ): Promise<void> {
     let res: Response;
     try {
       res = await fetch(`${API_GATEWAY_BASE_URL}/api/v1/audit`, {
         method: 'POST',
         headers: { Authorization: authorizationHeader, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ actorUserId, action, entityType, entityId, beforeJson, afterJson }),
+        body: JSON.stringify({
+          actorUserId,
+          action,
+          entityType,
+          entityId,
+          beforeJson,
+          afterJson,
+          ...(localAuditUuid ? { localAuditUuid } : {}),
+        }),
         signal: AbortSignal.timeout(DOWNSTREAM_FETCH_TIMEOUT_MS),
       });
     } catch {

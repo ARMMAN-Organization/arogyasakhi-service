@@ -912,6 +912,7 @@ export class FormService {
     edits: PatchFormSubmissionAnswersInput['edits'],
     caller: { id: string; roles: readonly string[]; projectId?: string | null },
     authorizationHeader: string,
+    localAuditUuid?: string,
   ) {
     const submission = await this.repository.findSubmissionById(submissionId);
     if (!submission) throw notFound('Form submission not found.');
@@ -976,6 +977,7 @@ export class FormService {
         beforeJson,
         afterJson,
         authorizationHeader,
+        localAuditUuid,
       );
     } catch (err) {
       console.error(

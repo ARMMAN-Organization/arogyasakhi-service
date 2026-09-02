@@ -99,12 +99,13 @@ export function createFormController(service: FormService) {
       const authorizationHeader = req.header('authorization');
       if (!authorizationHeader) return next(unauthorized());
       const { id } = req.params as unknown as { id: string };
-      const { edits } = req.body as PatchFormSubmissionAnswersInput;
+      const { edits, localAuditUuid } = req.body as PatchFormSubmissionAnswersInput;
       const updated = await service.updateSubmissionAnswers(
         id,
         edits,
         req.user,
         authorizationHeader,
+        localAuditUuid,
       );
       res.json(ok(updated));
     }),

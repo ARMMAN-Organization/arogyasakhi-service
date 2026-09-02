@@ -48,12 +48,33 @@ export const patchFormSubmissionAnswersSchema = z
         z
           .object({
             fieldCode: z.string().trim().min(1),
-            value: jsonValueSchema,
+            // zod-to-openapi cannot introspect a raw z.lazy() (the recursive
+            // nestedJsonValueSchema inside jsonValueSchema) — it throws
+            // UnknownZodTypeError at service boot the moment this schema is
+            // registered on a DocumentedRouter, taking down the whole
+            // service. Annotated directly here (audit-service's identical
+            // jsonValueSchema instead overrides this at the route
+            // registration — either works; this keeps the fix next to the
+            // schema it belongs to rather than relying on every caller to
+            // remember it).
+            value: jsonValueSchema.openapi({ type: 'object', example: {} }),
           })
           .strict(),
       )
       .min(1)
       .max(20),
+    // Idempotency key for this Sakhi-facing sync write's own downstream
+    // FORM_ANSWER_EDIT audit-log call — a dropped-connection retry of this
+    // PATCH resubmits the same client-generated value, so audit-service's
+    // own localAuditUuid replay logic returns the original entry instead of
+    // writing a second audit row for the same logical edit (security
+    // review finding, 2026-09-02 — this was the third mobile-sync write in
+    // this codebase without an idempotency key, unlike
+    // localRequestUuid/localReopenRequestUuid/localAuditUuid elsewhere).
+    // Optional since the underlying formDataJson/FormAnswer write is itself
+    // idempotent for identical values — only the audit-log side effect
+    // needed one.
+    localAuditUuid: z.string().trim().min(1).max(80).optional(),
   })
   .strict();
 

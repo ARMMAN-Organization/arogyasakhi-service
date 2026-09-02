@@ -3399,6 +3399,7 @@ describe('FormService', () => {
         { enter_the_beneficiary_address: 'Old address' },
         { enter_the_beneficiary_address: 'New address' },
         'Bearer token',
+        undefined,
       );
     });
 
@@ -3422,6 +3423,7 @@ describe('FormService', () => {
         { enter_the_beneficiary_address: 'Old address' },
         { enter_the_beneficiary_address: 'Old address' },
         'Bearer token',
+        undefined,
       );
     });
 

@@ -112,6 +112,7 @@ describe('form routes — PATCH /form-submissions/:id/answers', () => {
       validBody.edits,
       expect.objectContaining({ id: 'sakhi-user-1', roles: ['SAKHI'] }),
       expect.any(String),
+      undefined,
     );
   });
 
