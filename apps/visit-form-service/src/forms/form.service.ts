@@ -592,6 +592,16 @@ export class FormService {
     // top doc comment for the interim-measure rationale (issue #191).
     const sickleCellStatus =
       answers.have_you_been_detected_with_sickle_cell_disease_or_sickle_cell_trait_sct;
+    // History of Hypertension (issue #191 item 4, answered) — MOTHER_REGISTRATION's
+    // medical-history multiselect already captures this; no new form question
+    // needed. Only merged when the multiselect itself was actually answered,
+    // so anc-risk.rulesJson.ts can tell "no registration data yet" (undefined,
+    // condition skipped) apart from "answered, no hypertension" (false).
+    const medicalConditions =
+      answers.have_you_ever_been_diagnosed_with_or_treated_for_any_of_the_following_medical_conditions;
+    const historyOfHypertension = Array.isArray(medicalConditions)
+      ? medicalConditions.includes('hypertension_high_bp')
+      : undefined;
 
     return {
       ...(typeof age === 'number' ? { age } : {}),
@@ -601,6 +611,7 @@ export class FormService {
       ...(Array.isArray(complications) ? { priorComplications: complications } : {}),
       ...(typeof lmpDate === 'string' ? { lmpDate } : {}),
       ...(typeof sickleCellStatus === 'string' ? { sickleCellStatus } : {}),
+      ...(historyOfHypertension !== undefined ? { historyOfHypertension } : {}),
     };
   }
 

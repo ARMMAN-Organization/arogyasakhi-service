@@ -82,5 +82,12 @@
     "gradeScale": "BINARY",
     "referralRequiredDefault": true,
     "educationRequiredDefault": true
+  },
+  {
+    "conditionCode": "ACTIVITY_LEVEL",
+    "conditionName": "Activity level",
+    "gradeScale": "NORMAL_MILD_MODERATE_SEVERE",
+    "referralRequiredDefault": true,
+    "educationRequiredDefault": true
   }
 ]

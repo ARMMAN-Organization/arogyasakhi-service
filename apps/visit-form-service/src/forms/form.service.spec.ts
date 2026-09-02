@@ -2144,6 +2144,92 @@ describe('FormService', () => {
         );
       });
 
+      it('merges historyOfHypertension: true when the registration medical-conditions list includes hypertension_high_bp', async () => {
+        repository.findLatestSubmissionByBeneficiaryAndFormCode.mockResolvedValue({
+          formDataJson: {
+            gravida_total_number_of_pregnancies: 2,
+            have_you_ever_been_diagnosed_with_or_treated_for_any_of_the_following_medical_conditions:
+              ['hypertension_high_bp'],
+          },
+        } as never);
+
+        await service.createSubmission(
+          'ANC_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            visitId: 'visit-1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {},
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(triggerRiskAssessment)).toHaveBeenCalledWith(
+          expect.objectContaining({
+            answers: expect.objectContaining({ historyOfHypertension: true }),
+          }),
+          'Bearer test-token',
+        );
+      });
+
+      it('merges historyOfHypertension: false when the medical-conditions list is answered but excludes hypertension', async () => {
+        repository.findLatestSubmissionByBeneficiaryAndFormCode.mockResolvedValue({
+          formDataJson: {
+            gravida_total_number_of_pregnancies: 2,
+            have_you_ever_been_diagnosed_with_or_treated_for_any_of_the_following_medical_conditions:
+              ['no_known_medical_condition'],
+          },
+        } as never);
+
+        await service.createSubmission(
+          'ANC_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            visitId: 'visit-1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {},
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(triggerRiskAssessment)).toHaveBeenCalledWith(
+          expect.objectContaining({
+            answers: expect.objectContaining({ historyOfHypertension: false }),
+          }),
+          'Bearer test-token',
+        );
+      });
+
+      it('omits historyOfHypertension when the registration submission never answered the medical-conditions question', async () => {
+        repository.findLatestSubmissionByBeneficiaryAndFormCode.mockResolvedValue({
+          formDataJson: { gravida_total_number_of_pregnancies: 2 },
+        } as never);
+
+        await service.createSubmission(
+          'ANC_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            visitId: 'visit-1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {},
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(triggerRiskAssessment)).toHaveBeenCalledWith(
+          expect.objectContaining({
+            answers: expect.not.objectContaining({ historyOfHypertension: expect.anything() }),
+          }),
+          'Bearer test-token',
+        );
+      });
+
       it('proceeds without registration-derived answers when no MOTHER_REGISTRATION submission exists', async () => {
         repository.findLatestSubmissionByBeneficiaryAndFormCode.mockResolvedValue(null);
 
