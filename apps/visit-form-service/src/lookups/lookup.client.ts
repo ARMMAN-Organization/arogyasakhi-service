@@ -65,3 +65,22 @@ export async function resolveVisitStatusCodes(
 ): Promise<Map<string, string>> {
   return fetchVisitStatusCategory(authorizationHeader);
 }
+
+/**
+ * The reverse of {@link resolveVisitStatusCode} — resolves a VISIT_STATUS
+ * valueCode (e.g. "MISSED") to its lookup_value_id. Needed by the
+ * missed-visit job (missedVisit.job.ts), which must WRITE a
+ * statusLookupValueId, not just read one. Throws if the code isn't a known
+ * VISIT_STATUS value — a misconfigured/renamed lookup category must fail the
+ * job run loudly, not silently skip every visit.
+ */
+export async function resolveVisitStatusIdByCode(
+  valueCode: string,
+  authorizationHeader: string,
+): Promise<string> {
+  const byId = await fetchVisitStatusCategory(authorizationHeader);
+  for (const [id, code] of byId) {
+    if (code === valueCode) return id;
+  }
+  throw badGateway(`Unable to resolve VISIT_STATUS code "${valueCode}" to a lookup_value_id.`);
+}

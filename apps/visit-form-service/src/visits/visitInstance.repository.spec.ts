@@ -349,4 +349,75 @@ describe('VisitInstanceRepository', () => {
       );
     });
   });
+
+  describe('markMissedByScheduleId', () => {
+    function buildTxMock(targets: { id: string; statusLookupValueId: string | null }[]) {
+      const txFindMany = jest.fn().mockResolvedValue(targets);
+      const txUpdateMany = jest.fn().mockResolvedValue({ count: targets.length });
+      const txCreateMany = jest.fn().mockResolvedValue({ count: targets.length });
+      const tx = {
+        visitInstance: { findMany: txFindMany, updateMany: txUpdateMany },
+        visitStatusHistory: { createMany: txCreateMany },
+      };
+      const $transaction = jest.fn((fn: (tx: unknown) => unknown) => fn(tx));
+      return { $transaction, txFindMany, txUpdateMany, txCreateMany };
+    }
+
+    it('flips every not-yet-completed instance on the schedule and writes one VisitStatusHistory row per instance', async () => {
+      const { $transaction, txFindMany, txUpdateMany, txCreateMany } = buildTxMock([
+        { id: 'vi-1', statusLookupValueId: 'pending-id' },
+        { id: 'vi-2', statusLookupValueId: 'pending-id' },
+      ]);
+      const txRepository = new VisitInstanceRepository({ $transaction } as never);
+
+      const count = await txRepository.markMissedByScheduleId(
+        'schedule-1',
+        'missed-id',
+        'missed-visit-escalation-job',
+      );
+
+      expect(count).toBe(2);
+      expect(txFindMany).toHaveBeenCalledWith({
+        where: { scheduleId: 'schedule-1', isDeleted: false, completedAt: null },
+        select: { id: true, statusLookupValueId: true },
+      });
+      expect(txUpdateMany).toHaveBeenCalledWith({
+        where: { id: { in: ['vi-1', 'vi-2'] } },
+        data: { statusLookupValueId: 'missed-id', statusCode: null },
+      });
+      expect(txCreateMany).toHaveBeenCalledWith({
+        data: [
+          {
+            visitId: 'vi-1',
+            fromStatusLookupValueId: 'pending-id',
+            toStatusLookupValueId: 'missed-id',
+            changedByUserId: 'missed-visit-escalation-job',
+            changedAt: expect.any(Date),
+          },
+          {
+            visitId: 'vi-2',
+            fromStatusLookupValueId: 'pending-id',
+            toStatusLookupValueId: 'missed-id',
+            changedByUserId: 'missed-visit-escalation-job',
+            changedAt: expect.any(Date),
+          },
+        ],
+      });
+    });
+
+    it('does nothing and returns 0 when the schedule has no not-yet-completed instances', async () => {
+      const { $transaction, txUpdateMany, txCreateMany } = buildTxMock([]);
+      const txRepository = new VisitInstanceRepository({ $transaction } as never);
+
+      const count = await txRepository.markMissedByScheduleId(
+        'schedule-1',
+        'missed-id',
+        'missed-visit-escalation-job',
+      );
+
+      expect(count).toBe(0);
+      expect(txUpdateMany).not.toHaveBeenCalled();
+      expect(txCreateMany).not.toHaveBeenCalled();
+    });
+  });
 });

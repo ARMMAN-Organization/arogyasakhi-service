@@ -43,11 +43,11 @@ export interface JobRunDelegate {
  * MUST be sized well above the job's real worst-case runtime. If the job is
  * still running when `lockedUntil` passes, a second replica's next tick will
  * re-acquire the same lock and run concurrently with the first — the exact
- * double-processing this helper exists to prevent. There is currently no
- * consumer of this function in the repo; a future one processing an
- * unbounded or highly variable-sized batch should build its own
- * renewal/heartbeat on top of this rather than assuming a fixed
- * `lockDurationMs` is safe.
+ * double-processing this helper exists to prevent. Current consumers are
+ * missedVisit.job.ts and postEddVisitGeneration.job.ts (visit-form-service);
+ * a consumer processing an unbounded or highly variable-sized batch should
+ * build its own renewal/heartbeat on top of this rather than assuming a
+ * fixed `lockDurationMs` is safe.
  */
 export async function acquireJobLock(
   prisma: JobRunDelegate,

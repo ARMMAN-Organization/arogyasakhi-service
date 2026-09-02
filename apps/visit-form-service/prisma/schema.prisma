@@ -30,7 +30,9 @@ enum VisitCodeType {
   ANC_POST_EDD
   DELIVERY
   PP
+  PP_HR
   NN
+  NN_HR
   INC
   INC_HR
   CCV
@@ -343,4 +345,18 @@ model FormAnswer {
   // since no current caller queries that way.
   @@index([submissionId, fieldCode])
   @@map("form_answers")
+}
+
+// Not in the ERD — a DB-backed advisory lock for the in-process node-cron
+// jobs in this service (missed-visit auto-transition/escalation). Without
+// it, running more than one replica of this service would process the same
+// overdue visits once per replica per tick. See
+// libs/service-commons/src/jobs/job-lock.ts for the acquire logic.
+model JobRun {
+  id          String   @id @default(uuid()) @map("job_run_id")
+  jobName     String   @unique @map("job_name") @db.VarChar(80)
+  lockedUntil DateTime @map("locked_until")
+  lastRunAt   DateTime @map("last_run_at")
+
+  @@map("job_runs")
 }

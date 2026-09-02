@@ -41,6 +41,29 @@ const schema = z.object({
   INC_SCHEDULE_RULE_SET_ID: z.string().uuid().optional(),
   HR_SCHEDULE_RULE_SET_ID: z.string().uuid().optional(),
   DELIVERY_SCHEDULE_RULE_SET_ID: z.string().uuid().optional(),
+  // rules-service's seeded ESCALATION RuleSet id (SRS §3A.2.7 FR-S-7.1) —
+  // one rule set handles every visitFamily (see escalationEvaluator.ts), so
+  // this is a single id, unlike the per-family *_SCHEDULE_RULE_SET_ID vars
+  // above. Optional: the missed-visit job logs and skips escalation
+  // evaluation (still transitions OPEN->MISSED) when unset, rather than
+  // failing the whole job over a not-yet-provisioned rule set.
+  ESCALATION_RULE_SET_ID: z.string().uuid().optional(),
+  // Client-credentials identity (POST /auth/service-token) this service's
+  // missed-visit job authenticates as, to call the ADMIN/SYSTEM-only
+  // POST /escalation-events and POST /notifications. Optional: the job logs
+  // and skips escalation/notification calls (still transitions OPEN->MISSED)
+  // when unset, matching this repo's "config not yet provisioned" stance
+  // elsewhere (e.g. SES_FROM_ADDRESS in auth-service) rather than failing to
+  // start over a not-yet-provisioned credential.
+  SERVICE_ACCOUNT_CLIENT_ID: z.string().min(1).optional(),
+  SERVICE_ACCOUNT_CLIENT_SECRET: z.string().min(1).optional(),
+  // node-cron expression for the missed-visit auto-transition/escalation job.
+  MISSED_VISIT_JOB_CRON: z.string().default('*/30 * * * *'),
+  // node-cron expression for the post-EDD visit-generation job (SR-ANC-01/
+  // BR-08's EDD+7 delivery-form check) — a date-boundary check, not a
+  // fine-grained event, so this defaults to once daily rather than
+  // MISSED_VISIT_JOB_CRON's 30-minute cadence.
+  POST_EDD_VISIT_JOB_CRON: z.string().default('0 2 * * *'),
 });
 
 export type AppConfig = z.infer<typeof schema>;
