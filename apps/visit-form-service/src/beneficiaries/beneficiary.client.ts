@@ -31,6 +31,10 @@ export interface BeneficiaryCase {
    * ccv.rulesJson.ts's decision graph keys its transition/program-exit
    * dates off). */
   childDateOfBirth: string | null;
+  /** pii.fullName, decrypted server-side by beneficiary-service. Used by
+   * missedVisit.job.ts's HR-missed-visit escalation to name the beneficiary
+   * in the supervisor notification body. */
+  fullName: string;
   /** BeneficiaryCase.currentPhase — used by form.service.ts to detect the
    * actual INC->CCV transition moment (read BEFORE calling
    * updateBeneficiaryPhase) so BR-13's ccvOpeningRiskState computation runs
@@ -47,6 +51,7 @@ interface BeneficiaryCaseDetailResponse {
   caseTypeLookupId: string;
   currentPhase: string;
   pii: {
+    fullName: string;
     villageId: string;
     padaId: string;
     healthSubCentreId: string;
@@ -90,6 +95,7 @@ export async function findBeneficiaryById(
   const { pii, childCaseDetails, ...rest } = body.data;
   return {
     ...rest,
+    fullName: pii.fullName,
     villageId: pii.villageId,
     padaId: pii.padaId,
     healthSubCentreId: pii.healthSubCentreId,
@@ -151,5 +157,53 @@ export async function findBeneficiaryOwnership(
   }
 
   const body = (await res.json()) as { data: BeneficiaryOwnership };
+  return body.data;
+}
+
+export interface PostEddPendingBeneficiary {
+  beneficiaryId: string;
+  registrationDate: string;
+  eddDate: string;
+}
+
+export interface PostEddPendingPage {
+  items: PostEddPendingBeneficiary[];
+  nextCursor: string | null;
+}
+
+/**
+ * Fetches one page of MOTHER beneficiaries whose EDD+7 has passed with no
+ * delivery outcome submitted yet, via beneficiary-service's SYSTEM-only
+ * `GET /beneficiaries/internal/post-edd-pending` — the candidate set for
+ * postEddVisitGeneration.job.ts. `authorizationHeader` here is always the
+ * job's own service-token bearer (never a human caller's), matching every
+ * other call this job's family makes (see missedVisit.job.ts).
+ */
+export async function findPostEddPendingBeneficiaries(
+  cutoffDate: string,
+  limit: number,
+  cursor: string | undefined,
+  authorizationHeader: string,
+): Promise<PostEddPendingPage> {
+  const url = new URL(`${GATEWAY_BASE_URL}/api/v1/beneficiaries/internal/post-edd-pending`);
+  url.searchParams.set('cutoffDate', cutoffDate);
+  url.searchParams.set('limit', String(limit));
+  if (cursor) url.searchParams.set('cursor', cursor);
+
+  let res: Response;
+  try {
+    res = await fetch(url, { headers: { Authorization: authorizationHeader } });
+  } catch {
+    throw badGateway(
+      'Unable to fetch post-EDD-pending beneficiaries — beneficiary-service is unreachable.',
+    );
+  }
+  if (!res.ok) {
+    throw badGateway(
+      'Unable to fetch post-EDD-pending beneficiaries — beneficiary-service returned an error.',
+    );
+  }
+
+  const body = (await res.json()) as { data: PostEddPendingPage };
   return body.data;
 }

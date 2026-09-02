@@ -37,6 +37,22 @@ export class VisitInstanceRepository {
   }
 
   /**
+   * Job-only write (missedVisit.job.ts) — flips every not-yet-completed
+   * instance on a schedule to the MISSED lookup value, bypassing
+   * updateStatus()'s human-caller ownership checks (this is a system
+   * transition, not a user PATCH). `completedAt: null` is the existing
+   * "not completed" proxy this repo already relies on elsewhere (see
+   * findManyByBeneficiaryId's doc comment) — a COMPLETED instance's
+   * completedAt is always set, so this WHERE clause can never overwrite one.
+   */
+  markMissedByScheduleId(scheduleId: string, missedStatusLookupValueId: string) {
+    return this.prisma.visitInstance.updateMany({
+      where: { scheduleId, isDeleted: false, completedAt: null },
+      data: { statusLookupValueId: missedStatusLookupValueId, statusCode: null },
+    });
+  }
+
+  /**
    * The beneficiary's `limit` most-recently-completed INC-type visits
    * (visitType NEONATAL_VISIT/INC_VISIT's schedule-level VisitCodeType,
    * INC/INC_HR), most recent first — used by BR-13's CCV opening-risk-state

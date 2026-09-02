@@ -1315,6 +1315,7 @@ describe('FormService', () => {
         stateId: 'state-1',
         districtId: 'district-1',
         childDateOfBirth: null,
+        fullName: 'Jane Doe',
       };
 
       const deliveryVersion = {
@@ -1568,6 +1569,7 @@ describe('FormService', () => {
         stateId: 'state-1',
         districtId: 'district-1',
         childDateOfBirth: null,
+        fullName: 'Jane Doe',
       };
 
       const deliveryVersion = {
@@ -2294,6 +2296,7 @@ describe('FormService', () => {
         stateId: 'state-1',
         districtId: 'district-1',
         childDateOfBirth: null,
+        fullName: 'Jane Doe',
       };
 
       const deliveryVersion = {

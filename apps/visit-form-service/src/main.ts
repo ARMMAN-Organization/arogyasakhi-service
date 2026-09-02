@@ -2,10 +2,27 @@ import type { Server } from 'node:http';
 import { appConfig } from './config/app-config';
 import { createApp } from './app.module';
 import { PrismaService } from './prisma/prisma.service';
+import { scheduleMissedVisitJob } from './jobs/missedVisit.job';
+import { schedulePostEddVisitGenerationJob } from './jobs/postEddVisitGeneration.job';
 
 async function bootstrap(): Promise<void> {
   const prisma = new PrismaService();
   await prisma.connect();
+
+  scheduleMissedVisitJob(
+    prisma,
+    appConfig.MISSED_VISIT_JOB_CRON,
+    appConfig.ESCALATION_RULE_SET_ID,
+    appConfig.SERVICE_ACCOUNT_CLIENT_ID,
+    appConfig.SERVICE_ACCOUNT_CLIENT_SECRET,
+  );
+
+  schedulePostEddVisitGenerationJob(
+    prisma,
+    appConfig.POST_EDD_VISIT_JOB_CRON,
+    appConfig.SERVICE_ACCOUNT_CLIENT_ID,
+    appConfig.SERVICE_ACCOUNT_CLIENT_SECRET,
+  );
 
   const app = createApp(prisma);
   const server: Server = app.listen(appConfig.PORT, () => {
@@ -22,4 +39,7 @@ async function bootstrap(): Promise<void> {
   process.on('SIGINT', () => shutdown('SIGINT'));
 }
 
-void bootstrap();
+bootstrap().catch((err) => {
+  console.error('Fatal error during startup:', err);
+  process.exit(1);
+});

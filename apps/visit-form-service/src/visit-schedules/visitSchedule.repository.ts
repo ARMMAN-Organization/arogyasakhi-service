@@ -59,6 +59,50 @@ export class VisitScheduleRepository {
   }
 
   /**
+   * OPEN schedules whose window has closed — the missed-visit job's
+   * candidate set (missedVisit.job.ts). Bounded by `take` so one tick can't
+   * try to process an unbounded backlog in a single run; a backlog larger
+   * than that just gets picked up on the next tick.
+   */
+  findOverdueOpenSchedules(now: Date, take: number) {
+    return this.prisma.visitSchedule.findMany({
+      where: { status: 'OPEN', windowEndDate: { lt: now }, isDeleted: false },
+      orderBy: { windowEndDate: 'asc' },
+      take,
+    });
+  }
+
+  /**
+   * Flips one schedule OPEN->MISSED. The `where: { status: 'OPEN' }` guard
+   * makes this idempotent under a concurrent run (or a retried job tick):
+   * `updateMany`'s matched count is 0 if another run already transitioned
+   * it, so the caller knows not to re-raise an escalation for it.
+   */
+  async markMissed(id: string): Promise<boolean> {
+    const result = await this.prisma.visitSchedule.updateMany({
+      where: { id, status: 'OPEN' },
+      data: { status: 'MISSED' },
+    });
+    return result.count > 0;
+  }
+
+  /**
+   * Every non-deleted schedule for this beneficiary+visitType, most-recent
+   * first — the missed-visit job walks this list counting the unbroken
+   * trailing run of MISSED to derive `consecutiveMissedCount` (scoped to
+   * the exact visitType, e.g. ANC vs ANC_HR are counted separately — see
+   * missedVisit.job.ts for why). Bounded to a small window since only the
+   * leading run matters, not the full history.
+   */
+  findRecentByBeneficiaryAndVisitType(beneficiaryId: string, visitType: VisitCodeType) {
+    return this.prisma.visitSchedule.findMany({
+      where: { beneficiaryId, visitType, isDeleted: false },
+      orderBy: { scheduledDate: 'desc' },
+      take: 20,
+    });
+  }
+
+  /**
    * Re-stamps a stored row's provenance after a rule-pack republish evaluates
    * an already-scheduled slot identically — the schedule content is unchanged
    * so no supersede is needed, but generatedByRuleVersionId must reflect the
