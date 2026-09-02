@@ -198,17 +198,27 @@ export class ReferralRepository {
 
   /**
    * Records a REFILL decision's audit trail without changing `status` — the
-   * REFILL business rule is "referral stays PENDING_FOLLOWUP", so unlike
-   * updateStatus there's no status transition to protect with a conditional
-   * updateMany. The 409 guard (existing.status === 'PENDING_FOLLOWUP') is
-   * re-checked by the caller (referral.service.ts) immediately before this
-   * call, so a plain `update` is safe here.
+   * REFILL business rule is "referral stays PENDING_FOLLOWUP". Uses the same
+   * conditional-updateMany-as-concurrency-guard pattern as updateStatus
+   * (fixed per security review, 2026-09-02): the caller's own
+   * `existing.status === 'PENDING_FOLLOWUP'` check reads a snapshot taken
+   * before any SUPERVISOR-roster-scoping HTTP call, not immediately before
+   * this write, so two concurrent decisions on the same referral could
+   * previously race — an unconditional `update` here would silently
+   * overwrite decidedByUserId/decidedAt/decisionNotes with the loser's
+   * values after a status-changing decide() had already committed, with no
+   * 409 to signal it. Gated on status: 'PENDING_FOLLOWUP' now, same as
+   * updateStatus, so that race correctly 409s instead.
    */
-  updateDecisionOnly(
+  async updateDecisionOnly(
     id: string,
     decision: { decidedByUserId: string; decidedAt: Date; decisionNotes: string | null },
-  ) {
-    return this.prisma.referral.update({ where: { id }, data: decision });
+  ): Promise<boolean> {
+    const result = await this.prisma.referral.updateMany({
+      where: { id, isDeleted: false, status: 'PENDING_FOLLOWUP' },
+      data: decision,
+    });
+    return result.count > 0;
   }
 
   /**
