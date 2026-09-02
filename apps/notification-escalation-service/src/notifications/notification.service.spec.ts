@@ -129,6 +129,30 @@ describe('NotificationService', () => {
     expect(repository.create).not.toHaveBeenCalled();
   });
 
+  it('a caller who holds both ADMIN and SAKHI roles gets the ADMIN bypass, not the SAKHI ownership check', async () => {
+    const adminAndSakhi = { id: 'admin-1', roles: ['ADMIN', 'SAKHI'] };
+    repository.create.mockResolvedValue({ id: '1' } as never);
+
+    await service.create(dto, adminAndSakhi, authHeader);
+
+    expect(sakhiClient.findById).not.toHaveBeenCalled();
+    expect(repository.create).toHaveBeenCalledWith(dto);
+  });
+
+  it('a caller who holds both SUPERVISOR and SAKHI roles gets the SUPERVISOR ownership check, not the SAKHI one', async () => {
+    const supervisorAndSakhi = { id: 'supervisor-1', roles: ['SUPERVISOR', 'SAKHI'] };
+    sakhiClient.findById.mockResolvedValue({ sakhiId: 'sakhi-1', supervisorId: 'supervisor-1' });
+    repository.create.mockResolvedValue({ id: '1' } as never);
+
+    await service.create(dto, supervisorAndSakhi, authHeader);
+
+    // Looked up by dto.recipientUserId ('sakhi-1'), not by the caller's own
+    // id — proves the SUPERVISOR branch ran, not the SAKHI one (which would
+    // have looked up the caller's own id instead).
+    expect(sakhiClient.findById).toHaveBeenCalledWith('sakhi-1', authHeader);
+    expect(repository.create).toHaveBeenCalledWith(dto);
+  });
+
   it('propagates repository errors on create', async () => {
     repository.create.mockRejectedValue(new Error('db down'));
     await expect(service.create(dto, admin, authHeader)).rejects.toThrow('db down');

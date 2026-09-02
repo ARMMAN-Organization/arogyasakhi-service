@@ -39,19 +39,30 @@ export class NotificationService {
    * Without either check, the widened roles would let any Supervisor/Sakhi
    * notify any recipientUserId.
    *
+   * ADMIN/SYSTEM (and then SUPERVISOR) are checked before SAKHI, not just
+   * "else if" — a caller can hold multiple concurrent role assignments
+   * (`AuthService.issueTokens` puts every active role code into the JWT's
+   * `roles` array with no precedence), so an ADMIN or SUPERVISOR who also
+   * carries a SAKHI role assignment must still get the ADMIN/SUPERVISOR
+   * behavior, not be misrouted into the restrictive SAKHI-only-notify-her-
+   * own-Supervisor branch. Same precedence AuthService.reactivateUser
+   * already applies for the same reason.
+   *
    * For escalation/operational notification types, also best-effort fans
    * out a copy to the Sakhi's assigned Supervisor (see supervisor-fanout.ts).
    */
   async create(dto: CreateNotificationInput, caller: CallerIdentity, authorizationHeader: string) {
-    if (caller.roles.includes('SAKHI')) {
-      const sakhi = await this.sakhiClient.findById(caller.id, authorizationHeader);
-      if (!sakhi || !sakhi.supervisorId || sakhi.supervisorId !== dto.recipientUserId) {
-        throw forbidden('You do not have access to notify this recipient.');
-      }
-    } else if (!caller.roles.includes('ADMIN') && !caller.roles.includes('SYSTEM')) {
+    if (caller.roles.includes('ADMIN') || caller.roles.includes('SYSTEM')) {
+      // No ownership check — may notify anyone.
+    } else if (caller.roles.includes('SUPERVISOR')) {
       const sakhi = await this.sakhiClient.findById(dto.recipientUserId, authorizationHeader);
       if (!sakhi || sakhi.supervisorId !== caller.id) {
         throw forbidden('You do not have access to notify this Sakhi.');
+      }
+    } else if (caller.roles.includes('SAKHI')) {
+      const sakhi = await this.sakhiClient.findById(caller.id, authorizationHeader);
+      if (!sakhi || !sakhi.supervisorId || sakhi.supervisorId !== dto.recipientUserId) {
+        throw forbidden('You do not have access to notify this recipient.');
       }
     }
     const created = await this.repository.create(dto);
