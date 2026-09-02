@@ -31,24 +31,25 @@ export class SyncBatchRepository {
   /**
    * The most recent COMPLETED batch's completedAt per userId, for the
    * Supervisor roster dashboard — the batch counterpart of
-   * findLastSyncedAt. A single query (not one per userId): every COMPLETED
-   * batch for the roster, grouped in application code to the max
-   * completedAt per user, since Prisma's `groupBy` can't express "max of a
-   * field, but return that whole row" directly. A userId with zero
+   * findLastSyncedAt. One aggregate query (not one per userId, and not a
+   * full-table fetch reduced in application code): Prisma's `groupBy` with
+   * `_max: { completedAt: true }` asks Postgres directly for exactly the one
+   * value needed per user, instead of transferring every COMPLETED row for
+   * the roster just to keep the first one seen. A userId with zero
    * COMPLETED batches simply has no entry in the returned Map — the caller
    * treats a missing entry the same as `findLastSyncedAt` returning null.
    */
   async findLastSyncedAtByUserIds(userIds: string[]): Promise<Map<string, Date>> {
     if (userIds.length === 0) return new Map();
-    const rows = await this.prisma.syncBatch.findMany({
+    const rows = await this.prisma.syncBatch.groupBy({
+      by: ['userId'],
       where: { userId: { in: userIds }, status: 'COMPLETED' },
-      select: { userId: true, completedAt: true },
-      orderBy: { completedAt: 'desc' },
+      _max: { completedAt: true },
     });
     const byUserId = new Map<string, Date>();
     for (const row of rows) {
-      if (!row.completedAt) continue;
-      if (!byUserId.has(row.userId)) byUserId.set(row.userId, row.completedAt);
+      if (!row._max.completedAt) continue;
+      byUserId.set(row.userId, row._max.completedAt);
     }
     return byUserId;
   }

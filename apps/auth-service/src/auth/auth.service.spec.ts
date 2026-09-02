@@ -77,6 +77,8 @@ describe('AuthService', () => {
     reactivateUser: jest.fn(),
     findDisplayNameById: jest.fn(),
     findServiceAccountByClientId: jest.fn(),
+    incrementServiceAccountFailedAuthCount: jest.fn(),
+    recordSuccessfulServiceAuth: jest.fn(),
   } as unknown as jest.Mocked<AuthRepository>;
 
   const signer = {
@@ -1250,6 +1252,8 @@ describe('AuthService', () => {
         { sub: 'service-account-1', roles: ['SYSTEM'], typ: 'service' },
         '15m',
       );
+      expect(repository.recordSuccessfulServiceAuth).toHaveBeenCalledWith('service-account-1');
+      expect(repository.incrementServiceAccountFailedAuthCount).not.toHaveBeenCalled();
     });
 
     it('401s on an unknown clientId — same generic message as a bad secret', async () => {
@@ -1259,9 +1263,11 @@ describe('AuthService', () => {
         service.issueServiceToken({ clientId: 'unknown', clientSecret: 'anything' }),
       ).rejects.toMatchObject({ status: 401, message: 'Invalid credentials.' });
       expect(signer.sign).not.toHaveBeenCalled();
+      // No account id to attach a failed-attempt count to.
+      expect(repository.incrementServiceAccountFailedAuthCount).not.toHaveBeenCalled();
     });
 
-    it('401s on a correct clientId with the wrong secret', async () => {
+    it('401s on a correct clientId with the wrong secret, and records the failed attempt', async () => {
       repository.findServiceAccountByClientId.mockResolvedValue(ACTIVE_SERVICE_ACCOUNT as never);
       (verifyPassword as jest.Mock).mockResolvedValue(false);
 
@@ -1269,9 +1275,12 @@ describe('AuthService', () => {
         service.issueServiceToken({ clientId: 'visit-form-service', clientSecret: 'wrong' }),
       ).rejects.toMatchObject({ status: 401, message: 'Invalid credentials.' });
       expect(signer.sign).not.toHaveBeenCalled();
+      expect(repository.incrementServiceAccountFailedAuthCount).toHaveBeenCalledWith(
+        'service-account-1',
+      );
     });
 
-    it('401s on a deactivated service account, even with the correct secret', async () => {
+    it('401s on a deactivated service account, even with the correct secret, and records the failed attempt', async () => {
       repository.findServiceAccountByClientId.mockResolvedValue({
         ...ACTIVE_SERVICE_ACCOUNT,
         isActive: false,
@@ -1282,6 +1291,9 @@ describe('AuthService', () => {
         service.issueServiceToken({ clientId: 'visit-form-service', clientSecret: 'correct' }),
       ).rejects.toMatchObject({ status: 401, message: 'Invalid credentials.' });
       expect(signer.sign).not.toHaveBeenCalled();
+      expect(repository.incrementServiceAccountFailedAuthCount).toHaveBeenCalledWith(
+        'service-account-1',
+      );
     });
   });
 });

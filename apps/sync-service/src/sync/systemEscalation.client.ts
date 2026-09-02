@@ -19,9 +19,15 @@ interface EscalationEvent {
  * sees, not a pushed notification, so no POST /notifications call exists
  * alongside this one. Server idempotently no-ops (returns the existing row)
  * on a duplicate OPEN escalation for the same sakhiUserId.
+ *
+ * `assignedSupervisorId` is required by createEscalationEventSchema (this
+ * service has no roster lookup of its own to derive it server-side) — the
+ * caller (getLastSyncedAtByRoster) already knows it: it's the Supervisor
+ * whose own roster this Sakhi belongs to.
  */
 export async function createSyncDelayEscalationEvent(
   sakhiUserId: string,
+  assignedSupervisorId: string,
   systemAccessToken: string,
 ): Promise<EscalationEvent> {
   let res: Response;
@@ -32,7 +38,7 @@ export async function createSyncDelayEscalationEvent(
         'Content-Type': 'application/json',
         Authorization: `Bearer ${systemAccessToken}`,
       },
-      body: JSON.stringify({ sakhiUserId, escalationType: 'SYNC_DELAY' }),
+      body: JSON.stringify({ sakhiUserId, escalationType: 'SYNC_DELAY', assignedSupervisorId }),
     });
   } catch {
     throw badGateway(

@@ -267,7 +267,11 @@ describe('SyncBatchService', () => {
       await service.getLastSyncedAtByRoster(SUPERVISOR, AUTH_HEADER);
 
       expect(createSyncDelayEscalationEventMock).toHaveBeenCalledTimes(1);
-      expect(createSyncDelayEscalationEventMock).toHaveBeenCalledWith('sakhi-a', 'system-token');
+      expect(createSyncDelayEscalationEventMock).toHaveBeenCalledWith(
+        'sakhi-a',
+        SUPERVISOR.id,
+        'system-token',
+      );
     });
 
     it('does not fail the read when raising an escalation throws', async () => {

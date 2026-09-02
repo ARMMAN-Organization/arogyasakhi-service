@@ -143,6 +143,22 @@ export class AuthRepository {
     return this.prisma.serviceAccount.findUnique({ where: { clientId } });
   }
 
+  /** Service-token counterpart of incrementFailedLoginCount. */
+  incrementServiceAccountFailedAuthCount(serviceAccountId: string) {
+    return this.prisma.serviceAccount.update({
+      where: { id: serviceAccountId },
+      data: { failedAuthCount: { increment: 1 } },
+    });
+  }
+
+  /** Service-token counterpart of recordSuccessfulLogin. */
+  recordSuccessfulServiceAuth(serviceAccountId: string) {
+    return this.prisma.serviceAccount.update({
+      where: { id: serviceAccountId },
+      data: { failedAuthCount: 0, lastAuthAt: new Date() },
+    });
+  }
+
   /**
    * Creates the user and their initial role assignment atomically. When
    * `sakhiProfile` is supplied (roleCode SAKHI — see AuthService.createUser),

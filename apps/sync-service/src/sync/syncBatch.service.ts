@@ -119,7 +119,7 @@ export class SyncBatchService {
           results
             .filter((r) => r.isDelayed)
             .map((r) =>
-              createSyncDelayEscalationEvent(r.userId, systemToken).catch((err) => {
+              createSyncDelayEscalationEvent(r.userId, caller.id, systemToken).catch((err) => {
                 console.error(`Unable to raise SYNC_DELAY escalation for ${r.userId}:`, err);
               }),
             ),

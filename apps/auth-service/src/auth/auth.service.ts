@@ -112,15 +112,23 @@ export class AuthService {
     const account = await this.repository.findServiceAccountByClientId(input.clientId);
 
     // Same generic failure for "no such client" and "wrong secret" as login
-    // — never reveal which one it was.
+    // — never reveal which one it was. Also same failed-attempt tracking as
+    // login: clientIds aren't secret (shipped in .env.example as
+    // descriptive strings like "sync-service"), so without this an
+    // attacker who learns one could guess clientSecret unlimited times with
+    // no record kept anywhere and no lockout.
     if (!account || !account.isActive) {
+      if (account) await this.repository.incrementServiceAccountFailedAuthCount(account.id);
       throw unauthorized('Invalid credentials.');
     }
 
     const secretMatches = await verifyPassword(account.clientSecretHash, input.clientSecret);
     if (!secretMatches) {
+      await this.repository.incrementServiceAccountFailedAuthCount(account.id);
       throw unauthorized('Invalid credentials.');
     }
+
+    await this.repository.recordSuccessfulServiceAuth(account.id);
 
     const accessToken = await this.signer.sign(
       { sub: account.id, roles: [account.role], typ: 'service' },
