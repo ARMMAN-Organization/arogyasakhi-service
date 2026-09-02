@@ -66,7 +66,10 @@ const referralSchema = z.object({
   status: z.enum(['INITIATED', 'PENDING_FOLLOWUP', 'COMPLETED', 'LAPSED', 'SKIPPED', 'CANCELLED']),
   validTill: z.string().datetime().nullable(),
   supervisorApprovalStatus: z.enum(['NOT_REQUIRED', 'PENDING', 'APPROVED', 'REJECTED']),
-  decidedByUserId: z.string().uuid().nullable(),
+  // Not `.uuid()` — the platform's real identity values aren't guaranteed to
+  // be UUIDs (audit-service's own auditLogRecordSchema documents
+  // actorUserId: z.string() with an example like 'jane.sakhi').
+  decidedByUserId: z.string().nullable(),
   decidedAt: z.string().datetime().nullable(),
   decisionNotes: z.string().nullable(),
   createdAt: z.string().datetime(),
