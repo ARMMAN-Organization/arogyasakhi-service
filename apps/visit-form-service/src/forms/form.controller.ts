@@ -1,5 +1,6 @@
 import { asyncHandler, ok, unauthorized } from '../app.module';
 import type { FormService } from './form.service';
+import type { PatchFormSubmissionAnswersInput } from './dto/patch-formSubmissionAnswers.dto';
 import { VISIT_CODE_TO_FORM_CODE } from './visit-code-form-map';
 
 /**
@@ -91,6 +92,21 @@ export function createFormController(service: FormService) {
       const { beneficiaryId } = req.params as unknown as { beneficiaryId: string };
       const outcomes = await service.getDeliveryOutcomes(beneficiaryId);
       res.json(ok(outcomes));
+    }),
+
+    updateSubmissionAnswers: asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const { id } = req.params as unknown as { id: string };
+      const { edits } = req.body as PatchFormSubmissionAnswersInput;
+      const updated = await service.updateSubmissionAnswers(
+        id,
+        edits,
+        req.user.id,
+        authorizationHeader,
+      );
+      res.json(ok(updated));
     }),
   };
 }

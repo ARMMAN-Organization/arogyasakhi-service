@@ -125,6 +125,78 @@ export class FormRepository {
   }
 
   /**
+   * A submission by id, with its form version's schema/formCode attached —
+   * used by updateSubmissionAnswers to resolve which allowlist applies and
+   * to validate the submitted formData shape against the active schema.
+   */
+  findSubmissionById(id: string) {
+    return this.prisma.formSubmission.findFirst({
+      where: { id, isDeleted: false },
+      include: { formVersion: { include: { formDefinition: true } } },
+    });
+  }
+
+  /**
+   * Patches `formDataJson` (merging just the edited keys into the existing
+   * blob) and upserts each edited field's normalized form_answers row,
+   * atomically — the raw payload and its per-question projection can never
+   * diverge, same guarantee createSubmission's own transaction gives.
+   *
+   * Each answer row is upserted by (submissionId, fieldCode) rather than a
+   * Prisma-level `upsert()` — form_answers has no unique constraint on that
+   * pair (only a non-unique index; see schema.prisma's own comment on why),
+   * so `updateMany` + a conditional `create` is used instead: update every
+   * row matching (submissionId, fieldCode), and create one if none existed
+   * (e.g. this field's answer was previously null/absent, so buildFormAnswers
+   * never wrote it the first time — or the field is a BENEFICIARY_DUPLICATED_
+   * FIELD_CODES entry that never gets a form_answers row at all, in which
+   * case `answerRows` simply won't include it and this loop is a no-op for
+   * that field's typed-column projection, while formDataJson is still
+   * patched).
+   */
+  async updateSubmissionAnswers(
+    submissionId: string,
+    mergedFormDataJson: Record<string, unknown>,
+    answerRows: FormAnswerRow[],
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      const submission = await tx.formSubmission.update({
+        where: { id: submissionId },
+        data: { formDataJson: mergedFormDataJson as never },
+      });
+
+      for (const row of answerRows) {
+        const updateResult = await tx.formAnswer.updateMany({
+          where: { submissionId, fieldCode: row.fieldCode, isDeleted: false },
+          data: {
+            answerValueText: row.answerValueText,
+            answerValueNumber: row.answerValueNumber,
+            answerValueDate: row.answerValueDate,
+            answerValueBool: row.answerValueBool,
+            answerValueJson: row.answerValueJson as never,
+          },
+        });
+        if (updateResult.count === 0) {
+          await tx.formAnswer.create({
+            data: {
+              submissionId,
+              fieldCode: row.fieldCode,
+              answerValueText: row.answerValueText,
+              answerValueNumber: row.answerValueNumber,
+              answerValueDate: row.answerValueDate,
+              answerValueBool: row.answerValueBool,
+              answerValueJson: row.answerValueJson as never,
+              isIndexed: row.isIndexed,
+            },
+          });
+        }
+      }
+
+      return submission;
+    });
+  }
+
+  /**
    * The most recent submission for `beneficiaryId` against `formCode`'s
    * form_definition, regardless of which version it was answered under —
    * used to fetch a one-time form's answers (e.g. MOTHER_REGISTRATION) for

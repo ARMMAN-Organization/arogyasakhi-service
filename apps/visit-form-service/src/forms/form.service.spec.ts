@@ -12,6 +12,7 @@ process.env.DATABASE_URL ??= 'postgresql://user:pass@localhost:5432/test';
 import { FormService } from './form.service';
 import type { FormRepository } from './form.repository';
 import type { VisitInstanceRepository } from '../visits/visitInstance.repository';
+import type { AuditClient } from './audit.client';
 import * as geographyClient from '../geography/geography.client';
 import { syncSocioDemographics } from '../beneficiaries/socio-demographics.client';
 import { syncHealthHistory } from '../beneficiaries/health-history.client';
@@ -50,6 +51,8 @@ describe('FormService', () => {
     findLatestSubmissionByBeneficiaryAndFormCode: jest.fn(),
     findLatestVisitSubmission: jest.fn(),
     findLatestDeliverySubmission: jest.fn(),
+    findSubmissionById: jest.fn(),
+    updateSubmissionAnswers: jest.fn(),
   } as unknown as jest.Mocked<FormRepository>;
   const visitInstanceRepository = {
     findRecentCompletedIncVisits: jest.fn(),
@@ -57,11 +60,12 @@ describe('FormService', () => {
     findById: jest.fn(),
     updateStatus: jest.fn(),
   } as unknown as jest.Mocked<VisitInstanceRepository>;
+  const auditClient = { log: jest.fn() } as unknown as jest.Mocked<AuditClient>;
   let service: FormService;
 
   beforeEach(() => {
     jest.resetAllMocks();
-    service = new FormService(repository, visitInstanceRepository);
+    service = new FormService(repository, visitInstanceRepository, auditClient);
   });
 
   describe('getActiveVersion', () => {
@@ -3017,6 +3021,314 @@ describe('FormService', () => {
       expect(result).toEqual({
         outcomes: [{ birthOrder: 2, outcome: 'antepartum_still_birth_fresh' }],
       });
+    });
+  });
+
+  describe('updateSubmissionAnswers', () => {
+    // who_owns_the_phone/sickle_cell fields are allowlisted for
+    // MOTHER_REGISTRATION AND have a real form_answers row (not one of
+    // BENEFICIARY_DUPLICATED_FIELD_CODES, unlike enter_the_beneficiary_address/
+    // gravida_total_number_of_pregnancies/etc — see beneficiary-duplicated-
+    // fields.ts, whose skip in buildFormAnswers applies here too, covered by
+    // its own dedicated test below).
+    const motherRegistrationFields = [
+      {
+        question_code: 'who_owns_the_phone',
+        label: 'Who owns the phone?',
+        input_type: 'select',
+        required: true,
+      },
+      {
+        question_code: 'have_you_been_detected_with_sickle_cell_disease_or_sickle_cell_trait_sct',
+        label: 'Sickle Cell',
+        input_type: 'select',
+        required: true,
+      },
+      {
+        question_code: 'enter_the_beneficiary_address',
+        label: 'Enter the beneficiary address',
+        input_type: 'text_geo',
+        required: true,
+      },
+      {
+        question_code: 'lmp_date',
+        label: 'LMP Date',
+        input_type: 'date',
+        required: true,
+      },
+      {
+        question_code: 'trimester_of_preganancy',
+        label: 'Trimester of preganancy',
+        input_type: 'text',
+        required: true,
+      },
+    ];
+
+    function mockSubmission(overrides: Partial<Record<string, unknown>> = {}) {
+      return {
+        id: 'sub-1',
+        formDataJson: {
+          who_owns_the_phone: 'self',
+          have_you_been_detected_with_sickle_cell_disease_or_sickle_cell_trait_sct:
+            'not_tested_yet',
+          enter_the_beneficiary_address: 'Old address',
+          trimester_of_preganancy: 'second',
+        },
+        formVersion: {
+          schemaJson: motherRegistrationFields,
+          formDefinition: { formCode: 'MOTHER_REGISTRATION' },
+        },
+        ...overrides,
+      };
+    }
+
+    it('patches one allowlisted field, updating both formDataJson and the matching FormAnswer row', async () => {
+      repository.findSubmissionById.mockResolvedValue(mockSubmission() as never);
+      repository.updateSubmissionAnswers.mockResolvedValue({
+        id: 'sub-1',
+        formDataJson: { who_owns_the_phone: 'husband' },
+      } as never);
+
+      await service.updateSubmissionAnswers(
+        'sub-1',
+        [{ fieldCode: 'who_owns_the_phone', value: 'husband' }],
+        'sakhi-1',
+        'Bearer token',
+      );
+
+      expect(repository.updateSubmissionAnswers).toHaveBeenCalledWith(
+        'sub-1',
+        expect.objectContaining({ who_owns_the_phone: 'husband' }),
+        [
+          expect.objectContaining({
+            fieldCode: 'who_owns_the_phone',
+            answerValueText: 'husband',
+          }),
+        ],
+      );
+    });
+
+    it('applies multiple field edits in one call atomically (single repository call)', async () => {
+      repository.findSubmissionById.mockResolvedValue(mockSubmission() as never);
+      repository.updateSubmissionAnswers.mockResolvedValue(mockSubmission() as never);
+
+      await service.updateSubmissionAnswers(
+        'sub-1',
+        [
+          { fieldCode: 'who_owns_the_phone', value: 'husband' },
+          {
+            fieldCode: 'have_you_been_detected_with_sickle_cell_disease_or_sickle_cell_trait_sct',
+            value: 'sickle_cell_trait_sct_carrier',
+          },
+        ],
+        'sakhi-1',
+        'Bearer token',
+      );
+
+      expect(repository.updateSubmissionAnswers).toHaveBeenCalledTimes(1);
+      const [, mergedFormData, answerRows] = repository.updateSubmissionAnswers.mock.calls[0];
+      expect(mergedFormData).toEqual(
+        expect.objectContaining({
+          who_owns_the_phone: 'husband',
+          have_you_been_detected_with_sickle_cell_disease_or_sickle_cell_trait_sct:
+            'sickle_cell_trait_sct_carrier',
+          enter_the_beneficiary_address: 'Old address',
+        }),
+      );
+      expect(answerRows).toHaveLength(2);
+    });
+
+    // The allowlist deliberately includes fields (e.g. Address, per SRS J.4)
+    // whose question_code is also one of BENEFICIARY_DUPLICATED_FIELD_CODES
+    // — buildFormAnswers skips those from the form_answers projection
+    // regardless of caller (see form.mapper.ts's own doc comment), so this
+    // endpoint must still patch formDataJson for them even though no
+    // FormAnswer row is written or updated.
+    it('patches formDataJson but writes no FormAnswer row for a beneficiary-duplicated allowlisted field', async () => {
+      repository.findSubmissionById.mockResolvedValue(mockSubmission() as never);
+      repository.updateSubmissionAnswers.mockResolvedValue(mockSubmission() as never);
+
+      await service.updateSubmissionAnswers(
+        'sub-1',
+        [{ fieldCode: 'enter_the_beneficiary_address', value: 'New address' }],
+        'sakhi-1',
+        'Bearer token',
+      );
+
+      expect(repository.updateSubmissionAnswers).toHaveBeenCalledWith(
+        'sub-1',
+        expect.objectContaining({ enter_the_beneficiary_address: 'New address' }),
+        [],
+      );
+    });
+
+    it('rejects the whole request (422, no partial apply) when a field is not allowlisted for the form code', async () => {
+      repository.findSubmissionById.mockResolvedValue(mockSubmission() as never);
+
+      await expect(
+        service.updateSubmissionAnswers(
+          'sub-1',
+          [
+            { fieldCode: 'enter_the_beneficiary_address', value: 'New address' },
+            { fieldCode: 'trimester_of_preganancy', value: 'third' },
+          ],
+          'sakhi-1',
+          'Bearer token',
+        ),
+      ).rejects.toThrow(/not editable after submission/);
+
+      expect(repository.updateSubmissionAnswers).not.toHaveBeenCalled();
+    });
+
+    it('rejects LMP date specifically — excluded from the PW Registration allowlist even though SRS J.4 lists it, since LMP correction has its own approval-gated flow', async () => {
+      repository.findSubmissionById.mockResolvedValue(mockSubmission() as never);
+
+      await expect(
+        service.updateSubmissionAnswers(
+          'sub-1',
+          [{ fieldCode: 'lmp_date', value: '2026-01-01' }],
+          'sakhi-1',
+          'Bearer token',
+        ),
+      ).rejects.toThrow(/not editable after submission/);
+
+      expect(repository.updateSubmissionAnswers).not.toHaveBeenCalled();
+    });
+
+    it('rejects with 400 when a fieldCode does not exist on the submission form at all', async () => {
+      repository.findSubmissionById.mockResolvedValue(mockSubmission() as never);
+
+      await expect(
+        service.updateSubmissionAnswers(
+          'sub-1',
+          [{ fieldCode: 'not_a_real_field', value: 'x' }],
+          'sakhi-1',
+          'Bearer token',
+        ),
+      ).rejects.toThrow(/Unknown fieldCode/);
+
+      expect(repository.updateSubmissionAnswers).not.toHaveBeenCalled();
+    });
+
+    it('throws 404 when the submission does not exist', async () => {
+      repository.findSubmissionById.mockResolvedValue(null);
+
+      await expect(
+        service.updateSubmissionAnswers(
+          'missing-sub',
+          [{ fieldCode: 'enter_the_beneficiary_address', value: 'x' }],
+          'sakhi-1',
+          'Bearer token',
+        ),
+      ).rejects.toThrow(/not found/);
+    });
+
+    it('calls the audit client with beforeJson/afterJson per edited field after a successful edit', async () => {
+      repository.findSubmissionById.mockResolvedValue(mockSubmission() as never);
+      repository.updateSubmissionAnswers.mockResolvedValue(mockSubmission() as never);
+
+      await service.updateSubmissionAnswers(
+        'sub-1',
+        [{ fieldCode: 'enter_the_beneficiary_address', value: 'New address' }],
+        'sakhi-1',
+        'Bearer token',
+      );
+
+      expect(auditClient.log).toHaveBeenCalledWith(
+        'sakhi-1',
+        'FORM_ANSWER_EDIT',
+        'FormSubmission',
+        'sub-1',
+        { enter_the_beneficiary_address: 'Old address' },
+        { enter_the_beneficiary_address: 'New address' },
+        'Bearer token',
+      );
+    });
+
+    it('still succeeds and still audit-logs when a field is patched to its current value (no no-op exemption)', async () => {
+      repository.findSubmissionById.mockResolvedValue(mockSubmission() as never);
+      repository.updateSubmissionAnswers.mockResolvedValue(mockSubmission() as never);
+
+      await service.updateSubmissionAnswers(
+        'sub-1',
+        [{ fieldCode: 'enter_the_beneficiary_address', value: 'Old address' }],
+        'sakhi-1',
+        'Bearer token',
+      );
+
+      expect(repository.updateSubmissionAnswers).toHaveBeenCalledTimes(1);
+      expect(auditClient.log).toHaveBeenCalledWith(
+        'sakhi-1',
+        'FORM_ANSWER_EDIT',
+        'FormSubmission',
+        'sub-1',
+        { enter_the_beneficiary_address: 'Old address' },
+        { enter_the_beneficiary_address: 'Old address' },
+        'Bearer token',
+      );
+    });
+
+    it('does not fail the request when the best-effort audit write throws', async () => {
+      repository.findSubmissionById.mockResolvedValue(mockSubmission() as never);
+      repository.updateSubmissionAnswers.mockResolvedValue(mockSubmission() as never);
+      auditClient.log.mockRejectedValue(new Error('audit-service unreachable'));
+      const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+
+      await expect(
+        service.updateSubmissionAnswers(
+          'sub-1',
+          [{ fieldCode: 'enter_the_beneficiary_address', value: 'New address' }],
+          'sakhi-1',
+          'Bearer token',
+        ),
+      ).resolves.toBeDefined();
+
+      errorSpy.mockRestore();
+    });
+
+    it('rejects the whole request when an unknown fieldCode and an unallowlisted fieldCode are both present, unknown reported first', async () => {
+      repository.findSubmissionById.mockResolvedValue(mockSubmission() as never);
+
+      await expect(
+        service.updateSubmissionAnswers(
+          'sub-1',
+          [
+            { fieldCode: 'not_a_real_field', value: 'x' },
+            { fieldCode: 'trimester_of_preganancy', value: 'third' },
+          ],
+          'sakhi-1',
+          'Bearer token',
+        ),
+      ).rejects.toThrow(/Unknown fieldCode/);
+
+      expect(repository.updateSubmissionAnswers).not.toHaveBeenCalled();
+    });
+
+    it('rejects all forms with no SRS J.4 entry (e.g. ANC_VISIT) with every field unallowlisted', async () => {
+      repository.findSubmissionById.mockResolvedValue(
+        mockSubmission({
+          formVersion: {
+            schemaJson: [
+              {
+                question_code: 'weight_kg',
+                label: 'Weight',
+                input_type: 'number',
+                required: true,
+              },
+            ],
+            formDefinition: { formCode: 'ANC_VISIT' },
+          },
+        }) as never,
+      );
+
+      await expect(
+        service.updateSubmissionAnswers(
+          'sub-1',
+          [{ fieldCode: 'weight_kg', value: 60 }],
+          'sakhi-1',
+          'Bearer token',
+        ),
+      ).rejects.toThrow(/not editable after submission/);
     });
   });
 });
