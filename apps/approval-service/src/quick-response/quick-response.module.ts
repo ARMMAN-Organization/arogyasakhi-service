@@ -4,6 +4,8 @@ import { QuickResponseRepository } from './quick-response.repository';
 import { QuickResponseService } from './quick-response.service';
 import { registerQuickResponseRoutes } from './quick-response.routes';
 import { registerLmpChangeRequestRoutes } from '../lmp-change-requests/lmp-change-request.routes';
+import { LmpChangeRequestRepository } from '../lmp-change-requests/lmp-change-request.repository';
+import { LmpChangeRequestService } from '../lmp-change-requests/lmp-change-request.service';
 import { LookupClient } from './lookup.client';
 import { EscalationClient } from './escalation.client';
 import { ReopenRequestClient } from './reopen-request.client';
@@ -23,9 +25,10 @@ import { VisitClient } from './visit.client';
  */
 export function createQuickResponseModule(prisma: PrismaService): DocumentedRouter {
   const repository = new QuickResponseRepository(prisma);
+  const lookupClient = new LookupClient();
   const service = new QuickResponseService(
     repository,
-    new LookupClient(),
+    lookupClient,
     new EscalationClient(),
     new ReopenRequestClient(),
     new BeneficiaryClient(),
@@ -38,8 +41,13 @@ export function createQuickResponseModule(prisma: PrismaService): DocumentedRout
     new GeographyClient(),
     new VisitClient(),
   );
+  const lmpChangeRequestService = new LmpChangeRequestService(
+    new LmpChangeRequestRepository(prisma),
+    lookupClient,
+    service,
+  );
   const doc = createDocumentedRouter();
   registerQuickResponseRoutes(doc, service);
-  registerLmpChangeRequestRoutes(doc, service);
+  registerLmpChangeRequestRoutes(doc, service, lmpChangeRequestService);
   return doc;
 }

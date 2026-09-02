@@ -40,6 +40,7 @@ function approvalRequest(overrides: Partial<Record<string, unknown>> = {}) {
     updatedByUserId: null,
     isDeleted: false,
     deletedAt: null,
+    localRequestUuid: null,
     ...overrides,
   };
 }

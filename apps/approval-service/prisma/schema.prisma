@@ -78,6 +78,18 @@ model ApprovalRequest {
   decisionStatusLookupId     String              @map("decision_status_lookup_id")
   decisionPayloadJson        Json?               @map("decision_payload_json")
   decidedAt                  DateTime?           @map("decided_at")
+  // Client-generated idempotency key for POST /lmp-change-requests — the
+  // Sakhi mobile app is offline-first and may retry this submission after a
+  // dropped connection; a retry with the same value returns the original
+  // approval request instead of creating a duplicate row. Nullable because
+  // every other request type (created via the generic POST /approvals, or
+  // REOPEN/CLOSURE_REVIEW's own dedicated create endpoints) has no client-
+  // generated key of its own — plain `@unique` on a nullable column already
+  // gives standard Postgres unique-index semantics (multiple NULLs allowed,
+  // uniqueness enforced only among non-null values), so no named/partial
+  // constraint is needed, same mechanism as reopen_requests before it was
+  // made NOT NULL.
+  localRequestUuid           String?             @unique @map("local_request_uuid") @db.VarChar(80)
 
   createdAt       DateTime  @default(now()) @map("created_at")
   createdByUserId String?   @map("created_by_user_id")
