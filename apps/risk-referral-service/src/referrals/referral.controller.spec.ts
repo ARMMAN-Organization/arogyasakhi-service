@@ -12,6 +12,7 @@ import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 import {
   errorHandler,
+  badRequest,
   conflict,
   notFound,
   TRUSTED_USER_ID_HEADER,
@@ -58,6 +59,7 @@ describe('referral routes', () => {
     return {
       [TRUSTED_USER_ID_HEADER]: 'sakhi-user-1',
       [TRUSTED_ROLES_HEADER]: 'SAKHI',
+      authorization: 'Bearer test-token',
     };
   }
 
@@ -77,18 +79,18 @@ describe('referral routes', () => {
   }
 
   describe('GET /referrals', () => {
-    it('as SAKHI with no beneficiaryId: 200, unfiltered (unchanged)', async () => {
-      service.list.mockResolvedValue([]);
+    it('as SAKHI with no beneficiaryId: service.list enforces the 400 (unscoped listing is MANAGER-only — security review fix, 2026-09-02)', async () => {
+      service.list.mockRejectedValue(
+        badRequest('beneficiaryId is required for SAKHI/SUPERVISOR callers.'),
+      );
 
       const res = await fetch(`${baseUrl}/referrals`, { headers: sakhiHeaders() });
-      const body = await jsonBody(res);
 
-      expect(res.status).toBe(200);
-      expect(body).toEqual({ success: true, message: expect.any(String), data: [] });
-      expect(service.list).toHaveBeenCalledWith(undefined);
+      expect(res.status).toBe(400);
+      expect(service.list).toHaveBeenCalledWith(undefined, expect.anything(), 'Bearer test-token');
     });
 
-    it('as SAKHI with ?beneficiaryId=X: 200, filtered', async () => {
+    it('as SAKHI with ?beneficiaryId=X: 200, filtered, with caller/authorizationHeader forwarded for ownership scoping', async () => {
       const beneficiaryId = '22222222-2222-2222-2222-222222222222';
       service.list.mockResolvedValue([]);
 
@@ -99,7 +101,11 @@ describe('referral routes', () => {
 
       expect(res.status).toBe(200);
       expect(body.success).toBe(true);
-      expect(service.list).toHaveBeenCalledWith(beneficiaryId);
+      expect(service.list).toHaveBeenCalledWith(
+        beneficiaryId,
+        expect.anything(),
+        'Bearer test-token',
+      );
     });
 
     it('rejects a non-uuid beneficiaryId as 400', async () => {

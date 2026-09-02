@@ -1,6 +1,7 @@
 import { addDays } from '@armman/core';
 import {
   badGateway,
+  badRequest,
   conflict,
   forbidden,
   notFound,
@@ -16,6 +17,7 @@ import { listSakhiIdsForSupervisor } from './sakhi.client';
 import { resolveReferralTypeLookupId } from './lookup.client';
 import { IncentiveClient } from './incentive.client';
 import { isUniqueConstraintViolation } from './referral.prisma-errors';
+import { assertSakhiOwnsReferral } from './assertSakhiOwnsReferral';
 
 /** Referral domain logic. Data access is delegated to the repository. */
 export class ReferralService {
@@ -25,7 +27,53 @@ export class ReferralService {
     private readonly incentiveClient: IncentiveClient = new IncentiveClient(),
   ) {}
 
-  list(beneficiaryId?: string) {
+  /**
+   * `beneficiaryId` given: SAKHI must own that beneficiary
+   * (assertSakhiOwnsReferral), SUPERVISOR must have it on their roster,
+   * MANAGER unrestricted — same scoping decide() already applies (ADMIN
+   * cannot reach this route at all — see requireRoles('SAKHI',
+   * 'SUPERVISOR', 'MANAGER') on GET /referrals). `beneficiaryId` omitted
+   * (the "most recent 50, system-wide" listing): SAKHI/SUPERVISOR must
+   * supply one (400) rather than getting an unscoped cross-beneficiary
+   * listing; only MANAGER may call this unfiltered (security review
+   * finding, 2026-09-02 — GET /referrals had no ownership/roster scoping
+   * at all).
+   */
+  async list(
+    beneficiaryId: string | undefined,
+    caller: AuthenticatedUser,
+    authorizationHeader: string,
+  ) {
+    if (!beneficiaryId) {
+      if (!caller.roles.includes('MANAGER')) {
+        throw badRequest('beneficiaryId is required for SAKHI/SUPERVISOR callers.');
+      }
+      return this.repository.findMany(undefined);
+    }
+
+    if (caller.roles.includes('SAKHI')) {
+      await assertSakhiOwnsReferral(
+        { beneficiaryId },
+        caller,
+        this.beneficiaryClient,
+        authorizationHeader,
+      );
+    } else if (caller.roles.includes('SUPERVISOR')) {
+      if (!caller.projectId) {
+        throw forbidden('Supervisor caller has no project scope.');
+      }
+      const beneficiary = await this.beneficiaryClient.getById(beneficiaryId, authorizationHeader);
+      if (!beneficiary) throw notFound('Beneficiary not found.');
+      const roster = await listSakhiIdsForSupervisor(
+        caller.projectId,
+        caller.id,
+        authorizationHeader,
+      );
+      if (!roster.includes(beneficiary.sakhiId)) {
+        throw forbidden("This beneficiary is outside this Supervisor's roster.");
+      }
+    }
+
     return this.repository.findMany(beneficiaryId);
   }
 
@@ -291,7 +339,15 @@ export class ReferralService {
     };
 
     if (dto.decision === 'REFILL') {
-      return this.repository.updateDecisionOnly(id, decisionAudit);
+      const updatedRefill = await this.repository.updateDecisionOnly(id, decisionAudit);
+      if (!updatedRefill) {
+        // Raced with another decision between the read above and the
+        // conditional update — same as the LAPSE/COMPLETE branch below.
+        throw conflict(`Cannot decide a referral with status ${existing.status}.`);
+      }
+      const refilled = await this.repository.findById(id);
+      if (!refilled) throw notFound('Referral not found.');
+      return refilled;
     }
 
     await this.assertDecisionMatchesReferralType(existing, dto.decision, authorizationHeader);

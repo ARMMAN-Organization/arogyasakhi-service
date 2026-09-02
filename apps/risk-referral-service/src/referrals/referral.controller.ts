@@ -138,17 +138,27 @@ export function createReferralRouter(service: ReferralService) {
       query: listReferralsQuerySchema,
       responses: {
         200: { description: 'Referrals list', schema: envelope(z.array(referralSchema)) },
-        400: { description: 'Validation error', schema: apiErrorSchema },
+        400: {
+          description: 'Validation error, or beneficiaryId omitted by a SAKHI/SUPERVISOR caller',
+          schema: apiErrorSchema,
+        },
         401: { description: 'Unauthenticated', schema: apiErrorSchema },
-        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+        403: {
+          description:
+            "Caller role not permitted, or beneficiaryId outside the caller's own roster",
+          schema: apiErrorSchema,
+        },
       },
     },
     trustGatewayIdentity,
     requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER'),
     validate(listReferralsQuerySchema, 'query'),
-    asyncHandler(async (req, res) => {
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
       const { beneficiaryId } = req.query as unknown as z.infer<typeof listReferralsQuerySchema>;
-      res.json(ok(await service.list(beneficiaryId)));
+      res.json(ok(await service.list(beneficiaryId, req.user, authorizationHeader)));
     }),
   );
 
