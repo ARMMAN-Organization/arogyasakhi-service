@@ -25,8 +25,8 @@ export class ReferralService {
     private readonly incentiveClient: IncentiveClient = new IncentiveClient(),
   ) {}
 
-  list() {
-    return this.repository.findMany();
+  list(beneficiaryId?: string) {
+    return this.repository.findMany(beneficiaryId);
   }
 
   /**
@@ -229,9 +229,18 @@ export class ReferralService {
    *   caller can't "refill" a referral that was never in that state.
    * - COMPLETE (FR-SV-4.9 approve): PENDING_FOLLOWUP -> COMPLETED.
    *
+   * All three decisions persist decidedByUserId/decidedAt/decisionNotes —
+   * mirroring ReopenRequest's own decision-audit fields — so a REFILL is no
+   * longer indistinguishable from no decision ever happening. LAPSE/COMPLETE
+   * write these atomically with the status change (repository.updateStatus);
+   * REFILL writes only these three fields via a plain update
+   * (repository.updateDecisionOnly), since it never changes status.
+   *
    * Both real status transitions use the same PENDING_FOLLOWUP-only
    * conditional update — a referral not in that state 409s rather than
-   * silently no-op'ing.
+   * silently no-op'ing. REFILL re-checks the same PENDING_FOLLOWUP guard
+   * just above, but (having no status to protect) uses a plain update rather
+   * than a conditional one.
    *
    * A SUPERVISOR caller may only decide a referral belonging to a
    * beneficiary assigned to their own Sakhi roster — referrals carries no
@@ -275,14 +284,25 @@ export class ReferralService {
       throw conflict(`Cannot decide a referral with status ${existing.status}.`);
     }
 
+    const decisionAudit = {
+      decidedByUserId: caller.id,
+      decidedAt: new Date(),
+      decisionNotes: dto.decisionNotes ?? null,
+    };
+
     if (dto.decision === 'REFILL') {
-      return existing;
+      return this.repository.updateDecisionOnly(id, decisionAudit);
     }
 
     await this.assertDecisionMatchesReferralType(existing, dto.decision, authorizationHeader);
 
     const toStatus = dto.decision === 'LAPSE' ? 'LAPSED' : 'COMPLETED';
-    const updated = await this.repository.updateStatus(id, 'PENDING_FOLLOWUP', toStatus);
+    const updated = await this.repository.updateStatus(
+      id,
+      'PENDING_FOLLOWUP',
+      toStatus,
+      decisionAudit,
+    );
     if (!updated) {
       // Raced with another decision between the read above and the
       // conditional update — same outcome as the check above, just caught a

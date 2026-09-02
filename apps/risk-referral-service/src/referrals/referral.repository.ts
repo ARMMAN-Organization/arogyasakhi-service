@@ -5,8 +5,17 @@ import type { CreateReferralInput } from './dto/create-referral.dto';
 export class ReferralRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  findMany() {
-    return this.prisma.referral.findMany({ orderBy: { createdAt: 'desc' }, take: 50 });
+  /**
+   * Most-recent-50 referrals, optionally scoped to one `beneficiaryId` — the
+   * beneficiary-scoped case backs a beneficiary detail screen's referral
+   * history; omitting it keeps the existing unfiltered behavior.
+   */
+  findMany(beneficiaryId?: string) {
+    return this.prisma.referral.findMany({
+      where: beneficiaryId ? { beneficiaryId } : undefined,
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
   }
 
   findById(id: string) {
@@ -169,17 +178,37 @@ export class ReferralRepository {
    * caller's `findById` and this call, the count comes back 0 and the
    * service turns that into a 409 instead of silently overwriting a
    * since-changed referral. Same pattern as closures/reopen-requests.
+   *
+   * Sets the decision audit trail (decidedByUserId/decidedAt/decisionNotes)
+   * atomically with the status change, for the LAPSE/COMPLETE decisions —
+   * mirrors ReopenRequest's own decision-audit fields.
    */
   async updateStatus(
     id: string,
     fromStatus: 'PENDING_FOLLOWUP',
     toStatus: 'LAPSED' | 'COMPLETED',
+    decision: { decidedByUserId: string; decidedAt: Date; decisionNotes: string | null },
   ): Promise<boolean> {
     const result = await this.prisma.referral.updateMany({
       where: { id, isDeleted: false, status: fromStatus },
-      data: { status: toStatus },
+      data: { status: toStatus, ...decision },
     });
     return result.count > 0;
+  }
+
+  /**
+   * Records a REFILL decision's audit trail without changing `status` — the
+   * REFILL business rule is "referral stays PENDING_FOLLOWUP", so unlike
+   * updateStatus there's no status transition to protect with a conditional
+   * updateMany. The 409 guard (existing.status === 'PENDING_FOLLOWUP') is
+   * re-checked by the caller (referral.service.ts) immediately before this
+   * call, so a plain `update` is safe here.
+   */
+  updateDecisionOnly(
+    id: string,
+    decision: { decidedByUserId: string; decidedAt: Date; decisionNotes: string | null },
+  ) {
+    return this.prisma.referral.update({ where: { id }, data: decision });
   }
 
   /**

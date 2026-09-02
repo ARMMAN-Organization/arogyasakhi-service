@@ -23,6 +23,13 @@ extendZodWithOpenApi(z);
 /** Query params for GET /referrals/referral-summary — see referral.service.ts's getSummary. */
 const referralSummaryQuerySchema = z.object({ sakhiId: z.string().uuid().optional() }).strict();
 
+/**
+ * Query params for GET /referrals — `beneficiaryId` narrows the
+ * most-recent-50 list to one beneficiary's referrals; omitting it keeps the
+ * existing unfiltered behavior.
+ */
+const listReferralsQuerySchema = z.object({ beneficiaryId: z.string().uuid().optional() }).strict();
+
 // Request DTO annotated with examples for Swagger UI; validation behavior is
 // unchanged (`.openapi()` only attaches documentation metadata).
 const createReferralRequestSchema = createReferralSchema.extend({
@@ -59,6 +66,9 @@ const referralSchema = z.object({
   status: z.enum(['INITIATED', 'PENDING_FOLLOWUP', 'COMPLETED', 'LAPSED', 'SKIPPED', 'CANCELLED']),
   validTill: z.string().datetime().nullable(),
   supervisorApprovalStatus: z.enum(['NOT_REQUIRED', 'PENDING', 'APPROVED', 'REJECTED']),
+  decidedByUserId: z.string().uuid().nullable(),
+  decidedAt: z.string().datetime().nullable(),
+  decisionNotes: z.string().nullable(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });
@@ -118,18 +128,24 @@ export function createReferralRouter(service: ReferralService) {
   doc.get(
     '/referrals',
     {
-      summary: 'List the most recent referrals',
+      summary:
+        'List the most recent referrals (most-recent-50). Optional `beneficiaryId` narrows ' +
+        "this to one beneficiary's referrals.",
       tags: ['Referrals'],
+      query: listReferralsQuerySchema,
       responses: {
         200: { description: 'Referrals list', schema: envelope(z.array(referralSchema)) },
+        400: { description: 'Validation error', schema: apiErrorSchema },
         401: { description: 'Unauthenticated', schema: apiErrorSchema },
         403: { description: 'Caller role not permitted', schema: apiErrorSchema },
       },
     },
     trustGatewayIdentity,
     requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER'),
-    asyncHandler(async (_req, res) => {
-      res.json(ok(await service.list()));
+    validate(listReferralsQuerySchema, 'query'),
+    asyncHandler(async (req, res) => {
+      const { beneficiaryId } = req.query as unknown as z.infer<typeof listReferralsQuerySchema>;
+      res.json(ok(await service.list(beneficiaryId)));
     }),
   );
 
