@@ -87,7 +87,22 @@ describe('AuditLogService', () => {
     expect(repository.create).toHaveBeenCalledWith({ ...dto, actorUserId: 'supervisor-1' });
   });
 
-  it('SUPERVISOR logging a non-QUICK_RESPONSE_ action is forbidden', async () => {
+  it.each(['LMP_CHANGE_APPROVED', 'LMP_CHANGE_REJECTED'])(
+    'SUPERVISOR logging %s (an LMP-change decision) has actorUserId forced to their own id',
+    async (action) => {
+      const dto: CreateAuditLogInput = {
+        actorUserId: 'someone-else',
+        action,
+        entityType: 'ApprovalRequest',
+        entityId: 'req-1',
+      };
+      repository.create.mockResolvedValue({ id: '1' } as never);
+      await service.create(dto, supervisor);
+      expect(repository.create).toHaveBeenCalledWith({ ...dto, actorUserId: 'supervisor-1' });
+    },
+  );
+
+  it('SUPERVISOR logging a non-QUICK_RESPONSE_/non-LMP_CHANGE_ action is forbidden', async () => {
     const dto: CreateAuditLogInput = {
       action: 'DELETE_EVERYTHING',
       entityType: 'Beneficiary',
@@ -106,7 +121,7 @@ describe('AuditLogService', () => {
   });
 
   describe('SAKHI allowlist', () => {
-    it.each(['LMP_CHANGE_APPROVED', 'LMP_CHANGE_REJECTED', 'FORM_ANSWER_EDIT'])(
+    it.each(['FORM_ANSWER_EDIT'])(
       'SAKHI logging %s with their own actorUserId succeeds',
       async (action) => {
         const dto: CreateAuditLogInput = {
@@ -118,6 +133,22 @@ describe('AuditLogService', () => {
         repository.create.mockResolvedValue({ id: '1' } as never);
         await service.create(dto, sakhi);
         expect(repository.create).toHaveBeenCalledWith({ ...dto, actorUserId: 'sakhi-1' });
+      },
+    );
+
+    it.each(['LMP_CHANGE_APPROVED', 'LMP_CHANGE_REJECTED'])(
+      'SAKHI logging %s is forbidden — only a SUPERVISOR may log an LMP-change decision',
+      async (action) => {
+        const dto: CreateAuditLogInput = {
+          actorUserId: 'sakhi-1',
+          action,
+          entityType: 'ApprovalRequest',
+          entityId: 'req-1',
+        };
+        await expect(service.create(dto, sakhi)).rejects.toThrow(
+          expect.objectContaining({ status: 403 }),
+        );
+        expect(repository.create).not.toHaveBeenCalled();
       },
     );
 
@@ -135,9 +166,9 @@ describe('AuditLogService', () => {
     it('SAKHI setting actorUserId to a different user is forbidden (not silently overridden)', async () => {
       const dto: CreateAuditLogInput = {
         actorUserId: 'someone-else',
-        action: 'LMP_CHANGE_APPROVED',
-        entityType: 'ApprovalRequest',
-        entityId: 'req-1',
+        action: 'FORM_ANSWER_EDIT',
+        entityType: 'FormSubmission',
+        entityId: 'form-1',
       };
       await expect(service.create(dto, sakhi)).rejects.toThrow(
         expect.objectContaining({ status: 403 }),
@@ -207,32 +238,33 @@ describe('AuditLogService', () => {
     });
 
     it('rejects with 409 when localAuditUuid already exists on a DIFFERENT actor/action row (cross-actor IDOR)', async () => {
-      // A SAKHI submits a validly-allowlisted action/actorUserId (their own),
-      // but the localAuditUuid they supply already exists on an unrelated
-      // row written earlier by a SUPERVISOR for a completely different
-      // action/entity. The idempotency lookup must not silently return that
-      // other row's contents — it must reject as a genuine UUID collision.
+      // A SUPERVISOR submits a validly-allowlisted action/actorUserId (their
+      // own, deciding an LMP-change card), but the localAuditUuid they
+      // supply already exists on an unrelated row written earlier by another
+      // SUPERVISOR for a completely different action/entity. The idempotency
+      // lookup must not silently return that other row's contents — it must
+      // reject as a genuine UUID collision.
       const unrelatedRow = {
         id: 'other-row-1',
-        actorUserId: 'supervisor-1',
+        actorUserId: 'other-supervisor',
         action: 'QUICK_RESPONSE_REJECT_LOAN',
         entityType: 'ReopenRequest',
         entityId: 'reopen-99',
         beforeJson: null,
         afterJson: { secret: 'unrelated case data' },
-        localAuditUuid: 'reused-uuid-from-sakhi',
+        localAuditUuid: 'reused-uuid-from-supervisor',
       } as never;
       repository.findByLocalAuditUuid.mockResolvedValue(unrelatedRow);
 
       const dto: CreateAuditLogInput = {
-        actorUserId: 'sakhi-1',
+        actorUserId: 'supervisor-1',
         action: 'LMP_CHANGE_APPROVED',
         entityType: 'ApprovalRequest',
         entityId: 'req-1',
-        localAuditUuid: 'reused-uuid-from-sakhi',
+        localAuditUuid: 'reused-uuid-from-supervisor',
       };
 
-      await expect(service.create(dto, sakhi)).rejects.toThrow(
+      await expect(service.create(dto, supervisor)).rejects.toThrow(
         expect.objectContaining({ status: 409 }),
       );
       expect(repository.create).not.toHaveBeenCalled();

@@ -26,17 +26,22 @@ function isUniqueConstraintViolation(err: unknown): boolean {
 // widened role can never forge an entry attributed to someone else or write
 // an arbitrary action/entityType.
 const ALLOWED_ACTION_PREFIXES: Record<string, readonly string[]> = {
-  // approval-service forwards a Quick Response decision's audit entry using
-  // the deciding Supervisor's own Authorization header.
-  SUPERVISOR: ['QUICK_RESPONSE_'],
-  // approval-service/visit-form-service will forward a Sakhi's own LMP
-  // change decision / form answer edit audit entry the same way. The
-  // FORM_ANSWER_EDIT_ prefix is written without a trailing underscore
+  // approval-service forwards both a Quick Response decision's and an
+  // LMP-change decision's audit entry using the deciding Supervisor's own
+  // Authorization header. POST /quick-response/:cardId/decision (the only
+  // endpoint that decides an LMP_CHANGE card) is gated requireRoles('SUPERVISOR')
+  // exclusively — there is no SAKHI-authenticated path to it, and the Sakhi
+  // who originally requested the LMP change isn't in the request chain when a
+  // Supervisor later decides the card — so LMP_CHANGE_* audit entries are
+  // always, and can only be, attributed to the deciding Supervisor.
+  SUPERVISOR: ['QUICK_RESPONSE_', 'LMP_CHANGE_'],
+  // visit-form-service will forward a Sakhi's own form answer edit audit
+  // entry the same way. The prefix is written without a trailing underscore
   // (deliberately just 'FORM_ANSWER_EDIT') because the sibling task that adds
   // the actual caller logs the literal action 'FORM_ANSWER_EDIT' with no
   // suffix (see the plan's Task 5) — a trailing-underscore prefix would not
   // match that literal and would 403 the caller this allowance exists for.
-  SAKHI: ['LMP_CHANGE_', 'FORM_ANSWER_EDIT'],
+  SAKHI: ['FORM_ANSWER_EDIT'],
 };
 
 /**
@@ -79,6 +84,11 @@ export class AuditLogService {
    * to the caller's own id (never the client-supplied value) — so the
    * widened role can never forge an entry attributed to someone else or
    * write an arbitrary action/entityType.
+   *
+   * LMP_CHANGE_* is allowlisted under SUPERVISOR, not SAKHI: the deciding
+   * Supervisor is the only caller in the request chain when an LMP-change
+   * card is decided, so that entry is always attributed to them (see
+   * ALLOWED_ACTION_PREFIXES above).
    *
    * SAKHI additionally 403s outright if the client-supplied actorUserId
    * names someone other than the caller, rather than silently overriding it

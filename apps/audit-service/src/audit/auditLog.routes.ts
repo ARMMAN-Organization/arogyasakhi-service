@@ -97,7 +97,7 @@ export function registerAuditLogRoutes(doc: DocumentedRouter, service: AuditLogS
     // — no separate service-to-service credential scheme in this codebase
     // yet). service.create() constrains a non-ADMIN caller to their own
     // actorUserId and to that role's allowlisted action namespace
-    // (SUPERVISOR: QUICK_RESPONSE_*; SAKHI: LMP_CHANGE_*, FORM_ANSWER_EDIT_*),
+    // (SUPERVISOR: QUICK_RESPONSE_*, LMP_CHANGE_*; SAKHI: FORM_ANSWER_EDIT),
     // so a widened role can only ever log the caller's own decisions — never
     // forge an entry attributed to someone else or write an arbitrary
     // action/entityType.
