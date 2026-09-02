@@ -12,6 +12,7 @@ import type { EscalationClient, EscalationCard } from './escalation.client';
 import type { ReopenRequestClient } from './reopen-request.client';
 import type { BeneficiaryClient } from './beneficiary.client';
 import type { NotificationClient } from './notification.client';
+import type { AuditClient } from './audit.client';
 import type { ClosureClient } from './closure.client';
 import type { ReferralClient } from './referral.client';
 import type { IncentiveClient } from './incentive.client';
@@ -193,6 +194,7 @@ export class QuickResponseService {
     private readonly sakhiClient: SakhiClient,
     private readonly geographyClient: GeographyClient,
     private readonly visitClient: VisitClient,
+    private readonly auditClient: AuditClient,
   ) {}
 
   /**
@@ -906,7 +908,13 @@ export class QuickResponseService {
     }
 
     if (existing.requestType === 'LMP_CHANGE') {
-      result = await this.decideLmpChangeCard(cardId, existing, dto, authorizationHeader);
+      result = await this.decideLmpChangeCard(
+        cardId,
+        existing,
+        dto,
+        decidedByUserId,
+        authorizationHeader,
+      );
     } else if (existing.requestType === 'DATA_RESTORE') {
       result = await this.decideDataRestoreCard(cardId, existing, dto, authorizationHeader);
     } else if (existing.requestType === 'CLOSURE_REVIEW') {
@@ -1021,12 +1029,14 @@ export class QuickResponseService {
       requestedByUserId: string;
     },
     dto: DecideQuickResponseInput,
+    decidedByUserId: string,
     authorizationHeader: string,
   ) {
     if (dto.decision !== 'APPROVE' && dto.decision !== 'REJECT') {
       throw badRequest('decision: Must be APPROVE or REJECT for an LMP_CHANGE card.');
     }
 
+    let newLmpDate: string | undefined;
     if (dto.decision === 'APPROVE') {
       if (!existing.beneficiaryId) {
         throw new HttpError(500, 'This LMP_CHANGE card has no linked beneficiary.');
@@ -1035,10 +1045,37 @@ export class QuickResponseService {
       if (!payload || typeof payload.newLmpDate !== 'string') {
         throw unprocessable('This LMP_CHANGE card has no valid newLmpDate to apply.');
       }
+      newLmpDate = payload.newLmpDate;
       await this.beneficiaryClient.applyLmpChange(
         existing.beneficiaryId,
         payload.newLmpDate,
         authorizationHeader,
+      );
+    }
+
+    // The decision above is already committed (APPROVE's beneficiary write
+    // succeeded, or REJECT has no side effect of its own). A failure writing
+    // the audit entry or notifying the Sakhi must not turn an already-
+    // successful decision into an error response to the caller — log it and
+    // move on instead, mirroring closure-reopen-service's ReopenRequestService
+    // resilience style for this exact combination.
+    try {
+      if (existing.beneficiaryId) {
+        await this.auditClient.log(
+          decidedByUserId,
+          dto.decision === 'APPROVE' ? 'LMP_CHANGE_APPROVED' : 'LMP_CHANGE_REJECTED',
+          'MotherCaseDetails',
+          existing.beneficiaryId,
+          dto.decision === 'APPROVE'
+            ? { lmpDate: newLmpDate }
+            : { decision: 'REJECTED', reason: dto.decisionNotes ?? null },
+          authorizationHeader,
+        );
+      }
+    } catch (err) {
+      console.error(
+        `LMP_CHANGE card ${cardId} was decided (${dto.decision}) but writing the audit entry failed:`,
+        err,
       );
     }
 

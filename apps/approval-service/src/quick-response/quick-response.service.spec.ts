@@ -5,6 +5,7 @@ import type { EscalationClient } from './escalation.client';
 import type { ReopenRequestClient } from './reopen-request.client';
 import type { BeneficiaryClient } from './beneficiary.client';
 import type { NotificationClient } from './notification.client';
+import type { AuditClient } from './audit.client';
 import type { ClosureClient } from './closure.client';
 import type { ReferralClient } from './referral.client';
 import type { IncentiveClient } from './incentive.client';
@@ -108,6 +109,7 @@ describe('QuickResponseService', () => {
   } as unknown as jest.Mocked<SakhiClient>;
   const geographyClient = { getById: jest.fn() } as unknown as jest.Mocked<GeographyClient>;
   const visitClient = { getById: jest.fn() } as unknown as jest.Mocked<VisitClient>;
+  const auditClient = { log: jest.fn() } as unknown as jest.Mocked<AuditClient>;
   let service: QuickResponseService;
   const authHeader = 'Bearer token';
   let consoleErrorSpy: jest.SpyInstance;
@@ -166,6 +168,7 @@ describe('QuickResponseService', () => {
       sakhiClient,
       geographyClient,
       visitClient,
+      auditClient,
     );
   });
 
@@ -2766,6 +2769,109 @@ describe('QuickResponseService', () => {
       expect(beneficiaryClient.applyLmpChange).not.toHaveBeenCalled();
       expect(notificationClient.notify).toHaveBeenCalled();
       expect(result.decision).toBe('REJECT');
+    });
+
+    it('approves: writes an audit entry after the LMP change is applied', async () => {
+      const card = lmpChangeRequest();
+      repository.findById.mockResolvedValue(card);
+      beneficiaryClient.applyLmpChange.mockResolvedValue({ id: card.beneficiaryId as string });
+
+      await service.decide(
+        card.id as string,
+        { cardSource: 'approval_requests', decision: 'APPROVE' },
+        decidedByCaller,
+        authHeader,
+      );
+
+      expect(auditClient.log).toHaveBeenCalledTimes(1);
+      expect(auditClient.log).toHaveBeenCalledWith(
+        DECIDED_BY_USER_ID,
+        'LMP_CHANGE_APPROVED',
+        'MotherCaseDetails',
+        card.beneficiaryId,
+        { lmpDate: '2026-06-15' },
+        authHeader,
+      );
+    });
+
+    it('rejects: writes an audit entry that does not claim an LMP value changed', async () => {
+      const card = lmpChangeRequest();
+      repository.findById.mockResolvedValue(card);
+
+      await service.decide(
+        card.id as string,
+        { cardSource: 'approval_requests', decision: 'REJECT', decisionNotes: 'Not plausible' },
+        decidedByCaller,
+        authHeader,
+      );
+
+      expect(auditClient.log).toHaveBeenCalledTimes(1);
+      expect(auditClient.log).toHaveBeenCalledWith(
+        DECIDED_BY_USER_ID,
+        'LMP_CHANGE_REJECTED',
+        'MotherCaseDetails',
+        card.beneficiaryId,
+        { decision: 'REJECTED', reason: 'Not plausible' },
+        authHeader,
+      );
+      expect(beneficiaryClient.applyLmpChange).not.toHaveBeenCalled();
+    });
+
+    it('rejects: audit entry reason is null when no decisionNotes were given', async () => {
+      const card = lmpChangeRequest();
+      repository.findById.mockResolvedValue(card);
+
+      await service.decide(
+        card.id as string,
+        { cardSource: 'approval_requests', decision: 'REJECT' },
+        decidedByCaller,
+        authHeader,
+      );
+
+      expect(auditClient.log).toHaveBeenCalledWith(
+        DECIDED_BY_USER_ID,
+        'LMP_CHANGE_REJECTED',
+        'MotherCaseDetails',
+        card.beneficiaryId,
+        { decision: 'REJECTED', reason: null },
+        authHeader,
+      );
+    });
+
+    it('does not fail the approval when writing the audit entry throws, and the Sakhi is still notified', async () => {
+      const card = lmpChangeRequest();
+      repository.findById.mockResolvedValue(card);
+      beneficiaryClient.applyLmpChange.mockResolvedValue({ id: card.beneficiaryId as string });
+      auditClient.log.mockRejectedValue(Object.assign(new Error('Bad gateway'), { status: 502 }));
+
+      const result = await service.decide(
+        card.id as string,
+        { cardSource: 'approval_requests', decision: 'APPROVE' },
+        decidedByCaller,
+        authHeader,
+      );
+
+      expect(result.decision).toBe('APPROVE');
+      expect(beneficiaryClient.applyLmpChange).toHaveBeenCalled();
+      expect(notificationClient.notify).toHaveBeenCalled();
+      expect(consoleErrorSpy).toHaveBeenCalled();
+    });
+
+    it('does not fail the rejection when writing the audit entry throws, and the Sakhi is still notified', async () => {
+      const card = lmpChangeRequest();
+      repository.findById.mockResolvedValue(card);
+      auditClient.log.mockRejectedValue(Object.assign(new Error('Bad gateway'), { status: 502 }));
+
+      const result = await service.decide(
+        card.id as string,
+        { cardSource: 'approval_requests', decision: 'REJECT' },
+        decidedByCaller,
+        authHeader,
+      );
+
+      expect(result.decision).toBe('REJECT');
+      expect(notificationClient.notify).toHaveBeenCalled();
+      expect(consoleErrorSpy).toHaveBeenCalled();
     });
 
     it('422s on approve when requestPayloadJson has no valid newLmpDate', async () => {

@@ -11,6 +11,7 @@ import { EscalationClient } from './escalation.client';
 import { ReopenRequestClient } from './reopen-request.client';
 import { BeneficiaryClient } from './beneficiary.client';
 import { NotificationClient } from './notification.client';
+import { AuditClient } from './audit.client';
 import { ClosureClient } from './closure.client';
 import { ReferralClient } from './referral.client';
 import { IncentiveClient } from './incentive.client';
@@ -40,6 +41,7 @@ export function createQuickResponseModule(prisma: PrismaService): DocumentedRout
     new SakhiClient(),
     new GeographyClient(),
     new VisitClient(),
+    new AuditClient(),
   );
   const lmpChangeRequestService = new LmpChangeRequestService(
     new LmpChangeRequestRepository(prisma),
