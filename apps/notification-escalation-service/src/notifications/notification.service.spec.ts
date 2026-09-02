@@ -77,6 +77,82 @@ describe('NotificationService', () => {
     });
   });
 
+  it('SAKHI notifying her own assigned Supervisor succeeds', async () => {
+    const sakhiToSupervisorDto: CreateNotificationInput = {
+      ...dto,
+      recipientUserId: 'supervisor-1',
+    };
+    sakhiClient.findById.mockResolvedValue({
+      sakhiId: 'jane.sakhi',
+      supervisorId: 'supervisor-1',
+    });
+    repository.create.mockResolvedValue({ id: '1' } as never);
+
+    await service.create(sakhiToSupervisorDto, sakhi, authHeader);
+
+    expect(sakhiClient.findById).toHaveBeenCalledWith('jane.sakhi', authHeader);
+    expect(repository.create).toHaveBeenCalledWith(sakhiToSupervisorDto);
+  });
+
+  it('SAKHI notifying a Supervisor who is not her own is forbidden', async () => {
+    const sakhiToOtherSupervisorDto: CreateNotificationInput = {
+      ...dto,
+      recipientUserId: 'someone-elses-supervisor',
+    };
+    sakhiClient.findById.mockResolvedValue({
+      sakhiId: 'jane.sakhi',
+      supervisorId: 'supervisor-1',
+    });
+
+    await expect(
+      service.create(sakhiToOtherSupervisorDto, sakhi, authHeader),
+    ).rejects.toMatchObject({ status: 403 });
+    expect(repository.create).not.toHaveBeenCalled();
+  });
+
+  it('SAKHI notifying herself is forbidden', async () => {
+    const sakhiToSelfDto: CreateNotificationInput = { ...dto, recipientUserId: 'jane.sakhi' };
+    sakhiClient.findById.mockResolvedValue({
+      sakhiId: 'jane.sakhi',
+      supervisorId: 'supervisor-1',
+    });
+
+    await expect(service.create(sakhiToSelfDto, sakhi, authHeader)).rejects.toMatchObject({
+      status: 403,
+    });
+    expect(repository.create).not.toHaveBeenCalled();
+  });
+
+  it('SAKHI caller whose own Sakhi record is not found is forbidden, not 404', async () => {
+    sakhiClient.findById.mockResolvedValue(null);
+    await expect(service.create(dto, sakhi, authHeader)).rejects.toMatchObject({ status: 403 });
+    expect(repository.create).not.toHaveBeenCalled();
+  });
+
+  it('a caller who holds both ADMIN and SAKHI roles gets the ADMIN bypass, not the SAKHI ownership check', async () => {
+    const adminAndSakhi = { id: 'admin-1', roles: ['ADMIN', 'SAKHI'] };
+    repository.create.mockResolvedValue({ id: '1' } as never);
+
+    await service.create(dto, adminAndSakhi, authHeader);
+
+    expect(sakhiClient.findById).not.toHaveBeenCalled();
+    expect(repository.create).toHaveBeenCalledWith(dto);
+  });
+
+  it('a caller who holds both SUPERVISOR and SAKHI roles gets the SUPERVISOR ownership check, not the SAKHI one', async () => {
+    const supervisorAndSakhi = { id: 'supervisor-1', roles: ['SUPERVISOR', 'SAKHI'] };
+    sakhiClient.findById.mockResolvedValue({ sakhiId: 'sakhi-1', supervisorId: 'supervisor-1' });
+    repository.create.mockResolvedValue({ id: '1' } as never);
+
+    await service.create(dto, supervisorAndSakhi, authHeader);
+
+    // Looked up by dto.recipientUserId ('sakhi-1'), not by the caller's own
+    // id — proves the SUPERVISOR branch ran, not the SAKHI one (which would
+    // have looked up the caller's own id instead).
+    expect(sakhiClient.findById).toHaveBeenCalledWith('sakhi-1', authHeader);
+    expect(repository.create).toHaveBeenCalledWith(dto);
+  });
+
   it('propagates repository errors on create', async () => {
     repository.create.mockRejectedValue(new Error('db down'));
     await expect(service.create(dto, admin, authHeader)).rejects.toThrow('db down');
