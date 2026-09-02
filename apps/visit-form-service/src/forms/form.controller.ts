@@ -103,7 +103,7 @@ export function createFormController(service: FormService) {
       const updated = await service.updateSubmissionAnswers(
         id,
         edits,
-        req.user.id,
+        req.user,
         authorizationHeader,
       );
       res.json(ok(updated));

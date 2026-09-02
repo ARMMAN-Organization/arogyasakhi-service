@@ -3064,9 +3064,12 @@ describe('FormService', () => {
       },
     ];
 
+    const sakhiCaller = { id: 'sakhi-1', roles: ['SAKHI'] as const };
+
     function mockSubmission(overrides: Partial<Record<string, unknown>> = {}) {
       return {
         id: 'sub-1',
+        beneficiaryId: 'ben-1',
         formDataJson: {
           who_owns_the_phone: 'self',
           have_you_been_detected_with_sickle_cell_disease_or_sickle_cell_trait_sct:
@@ -3082,6 +3085,14 @@ describe('FormService', () => {
       };
     }
 
+    beforeEach(() => {
+      // Legitimate-edit tests: the calling SAKHI owns the submission's
+      // beneficiary (ben-1), so assertCallerOwnsBeneficiary's roster check
+      // passes and the edit proceeds — see the dedicated IDOR test below for
+      // the rejection path.
+      jest.mocked(findBeneficiaryOwnership).mockResolvedValue({ sakhiId: 'sakhi-1' } as never);
+    });
+
     it('patches one allowlisted field, updating both formDataJson and the matching FormAnswer row', async () => {
       repository.findSubmissionById.mockResolvedValue(mockSubmission() as never);
       repository.updateSubmissionAnswers.mockResolvedValue({
@@ -3092,7 +3103,7 @@ describe('FormService', () => {
       await service.updateSubmissionAnswers(
         'sub-1',
         [{ fieldCode: 'who_owns_the_phone', value: 'husband' }],
-        'sakhi-1',
+        sakhiCaller,
         'Bearer token',
       );
 
@@ -3121,7 +3132,7 @@ describe('FormService', () => {
             value: 'sickle_cell_trait_sct_carrier',
           },
         ],
-        'sakhi-1',
+        sakhiCaller,
         'Bearer token',
       );
 
@@ -3151,7 +3162,7 @@ describe('FormService', () => {
       await service.updateSubmissionAnswers(
         'sub-1',
         [{ fieldCode: 'enter_the_beneficiary_address', value: 'New address' }],
-        'sakhi-1',
+        sakhiCaller,
         'Bearer token',
       );
 
@@ -3172,7 +3183,7 @@ describe('FormService', () => {
             { fieldCode: 'enter_the_beneficiary_address', value: 'New address' },
             { fieldCode: 'trimester_of_preganancy', value: 'third' },
           ],
-          'sakhi-1',
+          sakhiCaller,
           'Bearer token',
         ),
       ).rejects.toThrow(/not editable after submission/);
@@ -3187,7 +3198,7 @@ describe('FormService', () => {
         service.updateSubmissionAnswers(
           'sub-1',
           [{ fieldCode: 'lmp_date', value: '2026-01-01' }],
-          'sakhi-1',
+          sakhiCaller,
           'Bearer token',
         ),
       ).rejects.toThrow(/not editable after submission/);
@@ -3202,7 +3213,7 @@ describe('FormService', () => {
         service.updateSubmissionAnswers(
           'sub-1',
           [{ fieldCode: 'not_a_real_field', value: 'x' }],
-          'sakhi-1',
+          sakhiCaller,
           'Bearer token',
         ),
       ).rejects.toThrow(/Unknown fieldCode/);
@@ -3217,7 +3228,7 @@ describe('FormService', () => {
         service.updateSubmissionAnswers(
           'missing-sub',
           [{ fieldCode: 'enter_the_beneficiary_address', value: 'x' }],
-          'sakhi-1',
+          sakhiCaller,
           'Bearer token',
         ),
       ).rejects.toThrow(/not found/);
@@ -3230,7 +3241,7 @@ describe('FormService', () => {
       await service.updateSubmissionAnswers(
         'sub-1',
         [{ fieldCode: 'enter_the_beneficiary_address', value: 'New address' }],
-        'sakhi-1',
+        sakhiCaller,
         'Bearer token',
       );
 
@@ -3252,7 +3263,7 @@ describe('FormService', () => {
       await service.updateSubmissionAnswers(
         'sub-1',
         [{ fieldCode: 'enter_the_beneficiary_address', value: 'Old address' }],
-        'sakhi-1',
+        sakhiCaller,
         'Bearer token',
       );
 
@@ -3278,7 +3289,7 @@ describe('FormService', () => {
         service.updateSubmissionAnswers(
           'sub-1',
           [{ fieldCode: 'enter_the_beneficiary_address', value: 'New address' }],
-          'sakhi-1',
+          sakhiCaller,
           'Bearer token',
         ),
       ).resolves.toBeDefined();
@@ -3296,7 +3307,7 @@ describe('FormService', () => {
             { fieldCode: 'not_a_real_field', value: 'x' },
             { fieldCode: 'trimester_of_preganancy', value: 'third' },
           ],
-          'sakhi-1',
+          sakhiCaller,
           'Bearer token',
         ),
       ).rejects.toThrow(/Unknown fieldCode/);
@@ -3325,10 +3336,64 @@ describe('FormService', () => {
         service.updateSubmissionAnswers(
           'sub-1',
           [{ fieldCode: 'weight_kg', value: 60 }],
-          'sakhi-1',
+          sakhiCaller,
           'Bearer token',
         ),
       ).rejects.toThrow(/not editable after submission/);
+    });
+
+    // Critical-severity IDOR (write path): a SAKHI who does not own/have in
+    // their roster the beneficiary behind this submission must be rejected
+    // BEFORE any edit is checked or applied — not silently succeed against a
+    // beneficiary case they have no legitimate relationship to.
+    it("rejects the edit (IDOR guard) when the calling SAKHI does not own the submission's beneficiary, before any edit is applied", async () => {
+      repository.findSubmissionById.mockResolvedValue(mockSubmission() as never);
+      jest.mocked(findBeneficiaryOwnership).mockResolvedValue({ sakhiId: 'someone-else' } as never);
+
+      await expect(
+        service.updateSubmissionAnswers(
+          'sub-1',
+          [{ fieldCode: 'who_owns_the_phone', value: 'husband' }],
+          sakhiCaller,
+          'Bearer token',
+        ),
+      ).rejects.toThrow(/outside your own roster/);
+
+      expect(repository.updateSubmissionAnswers).not.toHaveBeenCalled();
+      expect(auditClient.log).not.toHaveBeenCalled();
+    });
+
+    it("throws not-found (IDOR guard) when the submission's beneficiary case does not exist", async () => {
+      repository.findSubmissionById.mockResolvedValue(mockSubmission() as never);
+      jest.mocked(findBeneficiaryOwnership).mockResolvedValue(null);
+
+      await expect(
+        service.updateSubmissionAnswers(
+          'sub-1',
+          [{ fieldCode: 'who_owns_the_phone', value: 'husband' }],
+          sakhiCaller,
+          'Bearer token',
+        ),
+      ).rejects.toThrow(/not found/i);
+
+      expect(repository.updateSubmissionAnswers).not.toHaveBeenCalled();
+    });
+
+    it("checks ownership against the submission's own beneficiaryId", async () => {
+      repository.findSubmissionById.mockResolvedValue(
+        mockSubmission({ beneficiaryId: 'ben-42' }) as never,
+      );
+      repository.updateSubmissionAnswers.mockResolvedValue(mockSubmission() as never);
+      jest.mocked(findBeneficiaryOwnership).mockResolvedValue({ sakhiId: 'sakhi-1' } as never);
+
+      await service.updateSubmissionAnswers(
+        'sub-1',
+        [{ fieldCode: 'who_owns_the_phone', value: 'husband' }],
+        sakhiCaller,
+        'Bearer token',
+      );
+
+      expect(jest.mocked(findBeneficiaryOwnership)).toHaveBeenCalledWith('ben-42', 'Bearer token');
     });
   });
 });

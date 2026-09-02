@@ -874,15 +874,26 @@ export class FormService {
    * The audit write happens only after that transaction commits, and is
    * best-effort (logged, not thrown) — an audit-write failure must never
    * roll back an edit that's already durably applied.
+   *
+   * IDOR guard: submissionId is caller-supplied — without this check any
+   * authenticated SAKHI could edit any beneficiary's submission regardless
+   * of whose case it is. Same shared ownership check as
+   * getLatestVisitVitals (SAKHI own-case only, SUPERVISOR own-roster only,
+   * MANAGER/ADMIN unrestricted), run against the submission's own
+   * beneficiaryId, before any allowlist/validation logic — an unauthorized
+   * caller must be rejected before any edit is even checked, not just
+   * before it is applied.
    */
   async updateSubmissionAnswers(
     submissionId: string,
     edits: PatchFormSubmissionAnswersInput['edits'],
-    actorUserId: string,
+    caller: { id: string; roles: readonly string[]; projectId?: string | null },
     authorizationHeader: string,
   ) {
     const submission = await this.repository.findSubmissionById(submissionId);
     if (!submission) throw notFound('Form submission not found.');
+
+    await assertCallerOwnsBeneficiary(submission.beneficiaryId, caller, authorizationHeader);
 
     const formCode = submission.formVersion.formDefinition.formCode;
     const fields = schemaJsonSchema.parse(submission.formVersion.schemaJson);
@@ -935,7 +946,7 @@ export class FormService {
 
     try {
       await this.auditClient.log(
-        actorUserId,
+        caller.id,
         'FORM_ANSWER_EDIT',
         'FormSubmission',
         submissionId,

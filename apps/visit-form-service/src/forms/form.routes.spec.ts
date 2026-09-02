@@ -110,7 +110,7 @@ describe('form routes — PATCH /form-submissions/:id/answers', () => {
     expect(service.updateSubmissionAnswers).toHaveBeenCalledWith(
       submissionId,
       validBody.edits,
-      'sakhi-user-1',
+      expect.objectContaining({ id: 'sakhi-user-1', roles: ['SAKHI'] }),
       expect.any(String),
     );
   });
