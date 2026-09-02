@@ -1,3 +1,4 @@
+import type { ServiceTokenClient } from '@armman/service-commons';
 import { createDocumentedRouter, type DocumentedRouter } from '../app.module';
 import type { PrismaService } from '../prisma/prisma.service';
 import { SyncBatchRepository } from './syncBatch.repository';
@@ -20,9 +21,17 @@ import { registerSyncPendingRoutes } from './syncPending.routes';
  * `operations.module.ts` in supervisor-operations-service for the same
  * shared-registry pattern across multiple sub-domains).
  */
-export function createSyncBatchModule(prisma: PrismaService): DocumentedRouter {
+export function createSyncBatchModule(
+  prisma: PrismaService,
+  serviceTokenClient: ServiceTokenClient | null,
+  syncDelayThresholdHours: number,
+): DocumentedRouter {
   const batchRepository = new SyncBatchRepository(prisma);
-  const batchService = new SyncBatchService(batchRepository);
+  const batchService = new SyncBatchService(
+    batchRepository,
+    serviceTokenClient,
+    syncDelayThresholdHours,
+  );
   const pendingRepository = new SyncPendingRepository(prisma);
   const pendingService = new SyncPendingService(pendingRepository);
 

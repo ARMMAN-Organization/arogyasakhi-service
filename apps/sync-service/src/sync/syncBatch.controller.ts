@@ -30,5 +30,21 @@ export function createSyncBatchController(service: SyncBatchService) {
       );
       res.json(ok({ lastSyncedAt: lastSyncedAt ? lastSyncedAt.toISOString() : null }));
     }),
+
+    getLastSyncedAtByRoster: asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const roster = await service.getLastSyncedAtByRoster(req.user, authorizationHeader);
+      res.json(
+        ok(
+          roster.map((r) => ({
+            userId: r.userId,
+            lastSyncedAt: r.lastSyncedAt ? r.lastSyncedAt.toISOString() : null,
+            isDelayed: r.isDelayed,
+          })),
+        ),
+      );
+    }),
   };
 }

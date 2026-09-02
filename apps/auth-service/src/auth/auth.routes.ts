@@ -5,6 +5,7 @@ import type { AuthService } from './auth.service';
 import { createAuthController } from './auth.controller';
 import { loginSchema } from './dto/login.dto';
 import { refreshSchema } from './dto/refresh.dto';
+import { serviceTokenSchema } from './dto/service-token.dto';
 import { createUserSchema } from './dto/create-user.dto';
 import { updateUserSchema } from './dto/update-user.dto';
 import {
@@ -61,6 +62,20 @@ const authTokensSchema = z.object({
   geographyUnitId: z.string().uuid().nullable().openapi({
     description: "The primary role assignment's geography scope.",
   }),
+});
+
+const serviceTokenRequestSchema = serviceTokenSchema.extend({
+  clientId: serviceTokenSchema.shape.clientId.openapi({ example: 'visit-form-service' }),
+  clientSecret: serviceTokenSchema.shape.clientSecret.openapi({ example: 'REPLACE_ME' }),
+});
+
+const serviceTokenResponseSchema = z.object({
+  accessToken: z.string().openapi({
+    description:
+      'JWT access token (RS256), roles: ["SYSTEM"], short-lived (JWT_ADMIN_ACCESS_TOKEN_TTL).',
+  }),
+  expiresIn: z.number().openapi({ description: 'Access token lifetime in seconds.', example: 900 }),
+  roles: z.array(z.string()).openapi({ example: ['SYSTEM'] }),
 });
 
 const userProfileSchema = z.object({
@@ -193,6 +208,28 @@ export function registerAuthRoutes(
     authenticate(signer),
     validateBody(refreshSchema),
     controller.logout,
+  );
+
+  doc.post(
+    '/auth/service-token',
+    {
+      summary:
+        'Client-credentials exchange for a machine identity — used by automated jobs/crons ' +
+        'that need to call an ADMIN/SYSTEM-only endpoint without a human user. No refresh ' +
+        'token is issued; callers re-mint per run.',
+      tags: ['Auth'],
+      responses: {
+        200: { description: 'Service token issued', schema: envelope(serviceTokenResponseSchema) },
+        400: errorResponse(400, { message: 'clientSecret: Required' }),
+        401: errorResponse(401, {
+          message: 'Invalid credentials.',
+          description: 'Unauthenticated — clientId/clientSecret did not match an active account',
+        }),
+        500: errorResponse(500),
+      },
+    },
+    validateBody(serviceTokenRequestSchema),
+    controller.issueServiceToken,
   );
 
   doc.post(

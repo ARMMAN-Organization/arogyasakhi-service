@@ -137,6 +137,27 @@ model UserSession {
   @@map("user_sessions")
 }
 
+// Not in the ERD — added to give backend jobs/crons a real machine identity
+// (client-credentials grant) instead of forwarding a human's own JWT, which
+// was the only "server-to-server" pattern that existed before this table.
+// Deliberately separate from users/user_roles: a service account is never a
+// person, never logs in via /auth/login, and never holds a session.
+model ServiceAccount {
+  id               String    @id @default(uuid()) @map("service_account_id")
+  name             String    @db.VarChar(120)
+  clientId         String    @unique @map("client_id") @db.VarChar(80)
+  clientSecretHash String    @map("client_secret_hash") @db.VarChar(255)
+  // The single role code embedded in every token this account mints, e.g.
+  // "SYSTEM". A plain string (not a Role relation) — service accounts are
+  // intentionally outside the human role/permission model.
+  role             String    @db.VarChar(50)
+  isActive         Boolean   @default(true) @map("is_active")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  @@map("service_accounts")
+}
+
 // Column set matches ERD Appendix A.1 (funders, projects) exactly.
 
 enum FunderStatus {

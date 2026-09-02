@@ -1,10 +1,12 @@
-import type { AuthenticatedUser } from '@armman/service-commons';
+import type { AuthenticatedUser, ServiceTokenClient } from '@armman/service-commons';
 import { SyncBatchService } from './syncBatch.service';
 import type { SyncBatchRepository } from './syncBatch.repository';
 import type { CreateSyncBatchInput } from './dto/create-syncBatch.dto';
 import { listSakhiIdsForSupervisor } from './sakhi.client';
+import { createSyncDelayEscalationEvent } from './systemEscalation.client';
 
 jest.mock('./sakhi.client');
+jest.mock('./systemEscalation.client');
 
 const AUTH_HEADER = 'Bearer test-token';
 const CALLER_ID = '99999999-9999-9999-9999-999999999999';
@@ -24,13 +26,15 @@ describe('SyncBatchService', () => {
     findMany: jest.fn(),
     create: jest.fn(),
     findLastSyncedAt: jest.fn(),
+    findLastSyncedAtByUserIds: jest.fn(),
   } as unknown as jest.Mocked<SyncBatchRepository>;
   const listSakhiIdsForSupervisorMock = jest.mocked(listSakhiIdsForSupervisor);
+  const createSyncDelayEscalationEventMock = jest.mocked(createSyncDelayEscalationEvent);
   let service: SyncBatchService;
 
   beforeEach(() => {
     jest.resetAllMocks();
-    service = new SyncBatchService(repository);
+    service = new SyncBatchService(repository, null, 48);
   });
 
   it('lists via repository', async () => {
@@ -193,5 +197,91 @@ describe('SyncBatchService', () => {
         expect(repository.findLastSyncedAt).toHaveBeenCalledWith('some-other-user');
       },
     );
+  });
+
+  describe('getLastSyncedAtByRoster', () => {
+    const SUPERVISOR = caller({ roles: ['SUPERVISOR'], projectId: 'project-1' });
+
+    it('rejects a SUPERVISOR caller with no project scope', async () => {
+      await expect(
+        service.getLastSyncedAtByRoster(
+          caller({ roles: ['SUPERVISOR'], projectId: null }),
+          AUTH_HEADER,
+        ),
+      ).rejects.toThrow('Supervisor caller has no project scope.');
+    });
+
+    it('flags a roster member as delayed when they have never synced', async () => {
+      listSakhiIdsForSupervisorMock.mockResolvedValue(['sakhi-a']);
+      repository.findLastSyncedAtByUserIds.mockResolvedValue(new Map());
+
+      const result = await service.getLastSyncedAtByRoster(SUPERVISOR, AUTH_HEADER);
+
+      expect(result).toEqual([{ userId: 'sakhi-a', lastSyncedAt: null, isDelayed: true }]);
+    });
+
+    it('flags a roster member as delayed when their last sync exceeds the threshold', async () => {
+      listSakhiIdsForSupervisorMock.mockResolvedValue(['sakhi-a']);
+      const oldSync = new Date(Date.now() - 72 * 60 * 60 * 1000);
+      repository.findLastSyncedAtByUserIds.mockResolvedValue(new Map([['sakhi-a', oldSync]]));
+
+      const result = await service.getLastSyncedAtByRoster(SUPERVISOR, AUTH_HEADER);
+
+      expect(result).toEqual([{ userId: 'sakhi-a', lastSyncedAt: oldSync, isDelayed: true }]);
+    });
+
+    it('does not flag a roster member synced within the threshold', async () => {
+      listSakhiIdsForSupervisorMock.mockResolvedValue(['sakhi-a']);
+      const recentSync = new Date(Date.now() - 1 * 60 * 60 * 1000);
+      repository.findLastSyncedAtByUserIds.mockResolvedValue(new Map([['sakhi-a', recentSync]]));
+
+      const result = await service.getLastSyncedAtByRoster(SUPERVISOR, AUTH_HEADER);
+
+      expect(result).toEqual([{ userId: 'sakhi-a', lastSyncedAt: recentSync, isDelayed: false }]);
+    });
+
+    it('does not attempt to raise an escalation when no service token client is configured', async () => {
+      listSakhiIdsForSupervisorMock.mockResolvedValue(['sakhi-a']);
+      repository.findLastSyncedAtByUserIds.mockResolvedValue(new Map());
+
+      await service.getLastSyncedAtByRoster(SUPERVISOR, AUTH_HEADER);
+
+      expect(createSyncDelayEscalationEventMock).not.toHaveBeenCalled();
+    });
+
+    it('raises a SYNC_DELAY escalation for each delayed roster member when a token client is configured', async () => {
+      const tokenClient = {
+        getToken: jest.fn().mockResolvedValue('system-token'),
+      } as unknown as ServiceTokenClient;
+      service = new SyncBatchService(repository, tokenClient, 48);
+      listSakhiIdsForSupervisorMock.mockResolvedValue(['sakhi-a', 'sakhi-b']);
+      const recentSync = new Date();
+      repository.findLastSyncedAtByUserIds.mockResolvedValue(new Map([['sakhi-b', recentSync]]));
+      createSyncDelayEscalationEventMock.mockResolvedValue({
+        id: 'event-1',
+        sakhiUserId: 'sakhi-a',
+        escalationType: 'SYNC_DELAY',
+        status: 'OPEN',
+      });
+
+      await service.getLastSyncedAtByRoster(SUPERVISOR, AUTH_HEADER);
+
+      expect(createSyncDelayEscalationEventMock).toHaveBeenCalledTimes(1);
+      expect(createSyncDelayEscalationEventMock).toHaveBeenCalledWith('sakhi-a', 'system-token');
+    });
+
+    it('does not fail the read when raising an escalation throws', async () => {
+      const tokenClient = {
+        getToken: jest.fn().mockResolvedValue('system-token'),
+      } as unknown as ServiceTokenClient;
+      service = new SyncBatchService(repository, tokenClient, 48);
+      listSakhiIdsForSupervisorMock.mockResolvedValue(['sakhi-a']);
+      repository.findLastSyncedAtByUserIds.mockResolvedValue(new Map());
+      createSyncDelayEscalationEventMock.mockRejectedValue(new Error('boom'));
+
+      const result = await service.getLastSyncedAtByRoster(SUPERVISOR, AUTH_HEADER);
+
+      expect(result).toEqual([{ userId: 'sakhi-a', lastSyncedAt: null, isDelayed: true }]);
+    });
   });
 });

@@ -22,6 +22,11 @@ export function createAuthController(service: AuthService) {
       res.status(200).json(ok({ loggedOut: true }));
     }),
 
+    issueServiceToken: asyncHandler(async (req, res) => {
+      const token = await service.issueServiceToken(req.body);
+      res.status(200).json(ok(token));
+    }),
+
     createUser: asyncHandler(async (req, res, next) => {
       // authenticate(signer) runs first and calls next(unauthorized()) if it
       // fails, so req.user is always populated by the time this handler runs.

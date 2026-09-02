@@ -7,6 +7,7 @@ import {
   errorHandler,
   notFoundHandler,
   requestId,
+  ServiceTokenClient,
 } from '@armman/service-commons';
 import { appConfig } from './config/app-config';
 import { PrismaService } from './prisma/prisma.service';
@@ -53,7 +54,18 @@ export function createApp(prisma: PrismaService): Application {
   });
   app.use(requestId);
 
-  const syncBatchModule = createSyncBatchModule(prisma);
+  const serviceTokenClient =
+    appConfig.SERVICE_ACCOUNT_CLIENT_ID && appConfig.SERVICE_ACCOUNT_CLIENT_SECRET
+      ? new ServiceTokenClient(
+          appConfig.SERVICE_ACCOUNT_CLIENT_ID,
+          appConfig.SERVICE_ACCOUNT_CLIENT_SECRET,
+        )
+      : null;
+  const syncBatchModule = createSyncBatchModule(
+    prisma,
+    serviceTokenClient,
+    appConfig.SYNC_DELAY_THRESHOLD_HOURS,
+  );
 
   // All routes live under the global `api/v1` prefix.
   const api = express.Router();
