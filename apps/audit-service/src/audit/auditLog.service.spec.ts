@@ -158,14 +158,18 @@ describe('AuditLogService', () => {
 
   describe('idempotency via localAuditUuid', () => {
     it('a second create() with the same localAuditUuid returns the existing row without inserting again', async () => {
-      const existing = { id: 'existing-1', localAuditUuid: 'device-abc-001' } as never;
-      repository.findByLocalAuditUuid.mockResolvedValue(existing);
-
       const dto: CreateAuditLogInput = {
+        actorUserId: 'user-1',
         action: 'CREATE',
         entityType: 'Beneficiary',
+        entityId: 'entity-1',
         localAuditUuid: 'device-abc-001',
       };
+      // Matches dto on actorUserId/action/entityType/entityId — a genuine
+      // replay of the same logical write, so it must be returned as-is.
+      const existing = { id: 'existing-1', ...dto } as never;
+      repository.findByLocalAuditUuid.mockResolvedValue(existing);
+
       await expect(service.create(dto, admin)).resolves.toBe(existing);
       expect(repository.create).not.toHaveBeenCalled();
     });
@@ -185,17 +189,80 @@ describe('AuditLogService', () => {
     });
 
     it('a concurrent P2002 race on localAuditUuid is resolved to the winning row, not a 500', async () => {
-      repository.findByLocalAuditUuid.mockResolvedValueOnce(null);
-      repository.create.mockRejectedValue(uniqueConstraintError());
-      const winner = { id: 'winner-1', localAuditUuid: 'device-abc-003' } as never;
-      repository.findByLocalAuditUuid.mockResolvedValueOnce(winner);
-
       const dto: CreateAuditLogInput = {
+        actorUserId: 'user-1',
         action: 'CREATE',
         entityType: 'Beneficiary',
+        entityId: 'entity-1',
         localAuditUuid: 'device-abc-003',
       };
+      repository.findByLocalAuditUuid.mockResolvedValueOnce(null);
+      repository.create.mockRejectedValue(uniqueConstraintError());
+      // The row that won the race matches dto on the identity fields — i.e.
+      // the race was two attempts at the SAME logical write, a safe replay.
+      const winner = { id: 'winner-1', ...dto } as never;
+      repository.findByLocalAuditUuid.mockResolvedValueOnce(winner);
+
       await expect(service.create(dto, admin)).resolves.toBe(winner);
+    });
+
+    it('rejects with 409 when localAuditUuid already exists on a DIFFERENT actor/action row (cross-actor IDOR)', async () => {
+      // A SAKHI submits a validly-allowlisted action/actorUserId (their own),
+      // but the localAuditUuid they supply already exists on an unrelated
+      // row written earlier by a SUPERVISOR for a completely different
+      // action/entity. The idempotency lookup must not silently return that
+      // other row's contents — it must reject as a genuine UUID collision.
+      const unrelatedRow = {
+        id: 'other-row-1',
+        actorUserId: 'supervisor-1',
+        action: 'QUICK_RESPONSE_REJECT_LOAN',
+        entityType: 'ReopenRequest',
+        entityId: 'reopen-99',
+        beforeJson: null,
+        afterJson: { secret: 'unrelated case data' },
+        localAuditUuid: 'reused-uuid-from-sakhi',
+      } as never;
+      repository.findByLocalAuditUuid.mockResolvedValue(unrelatedRow);
+
+      const dto: CreateAuditLogInput = {
+        actorUserId: 'sakhi-1',
+        action: 'LMP_CHANGE_APPROVED',
+        entityType: 'ApprovalRequest',
+        entityId: 'req-1',
+        localAuditUuid: 'reused-uuid-from-sakhi',
+      };
+
+      await expect(service.create(dto, sakhi)).rejects.toThrow(
+        expect.objectContaining({ status: 409 }),
+      );
+      expect(repository.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects with 409 on the P2002 race path when the winning row belongs to a different logical write', async () => {
+      const dto: CreateAuditLogInput = {
+        actorUserId: 'user-1',
+        action: 'CREATE',
+        entityType: 'Beneficiary',
+        entityId: 'entity-1',
+        localAuditUuid: 'device-abc-race-mismatch',
+      };
+      repository.findByLocalAuditUuid.mockResolvedValueOnce(null);
+      repository.create.mockRejectedValue(uniqueConstraintError());
+      // The row that won the race belongs to a different actor/entity than
+      // this dto — a genuine collision, not the same logical write racing.
+      const winner = {
+        id: 'winner-mismatch-1',
+        actorUserId: 'someone-else',
+        action: 'CREATE',
+        entityType: 'Beneficiary',
+        entityId: 'entity-999',
+        localAuditUuid: 'device-abc-race-mismatch',
+      } as never;
+      repository.findByLocalAuditUuid.mockResolvedValueOnce(winner);
+
+      await expect(service.create(dto, admin)).rejects.toThrow(
+        expect.objectContaining({ status: 409 }),
+      );
     });
 
     it('re-throws a non-unique-constraint error even with localAuditUuid set', async () => {

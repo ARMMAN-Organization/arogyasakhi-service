@@ -1,6 +1,9 @@
-import { forbidden } from '@armman/service-commons';
+import { conflict, forbidden } from '@armman/service-commons';
 import type { AuditLogRepository } from './auditLog.repository';
 import type { CreateAuditLogInput } from './dto/create-auditLog.dto';
+
+/** Shape returned by {@link AuditLogRepository.findByLocalAuditUuid}. */
+type ExistingAuditLog = Awaited<ReturnType<AuditLogRepository['findByLocalAuditUuid']>>;
 
 export interface CallerIdentity {
   id: string;
@@ -36,6 +39,30 @@ const ALLOWED_ACTION_PREFIXES: Record<string, readonly string[]> = {
   SAKHI: ['LMP_CHANGE_', 'FORM_ANSWER_EDIT'],
 };
 
+/**
+ * Verifies a row found by localAuditUuid genuinely is a retry of `toCreate`,
+ * not an unrelated row that happens to share the client-supplied UUID.
+ *
+ * localAuditUuid is client-generated and globally unique across ALL callers
+ * — without this check, a caller could supply a UUID that collides with a
+ * different actor/action/entity's row (predicted, observed, or maliciously
+ * guessed) and have that unrelated row's full contents — including another
+ * actor's PII-adjacent audit data — returned as if it were their own,
+ * before this create's own authorization is ever reached (cross-actor IDOR).
+ * `beforeJson`/`afterJson` are deliberately excluded: they may legitimately
+ * be recomputed slightly differently between retries of the same logical
+ * write.
+ */
+function isSameLogicalEntry(existing: ExistingAuditLog, toCreate: CreateAuditLogInput): boolean {
+  return (
+    existing !== null &&
+    (existing.actorUserId ?? undefined) === toCreate.actorUserId &&
+    existing.action === toCreate.action &&
+    existing.entityType === toCreate.entityType &&
+    (existing.entityId ?? undefined) === toCreate.entityId
+  );
+}
+
 /** Audit log domain logic. Data access is delegated to the repository. */
 export class AuditLogService {
   constructor(private readonly repository: AuditLogRepository) {}
@@ -68,6 +95,18 @@ export class AuditLogService {
    * null) hits the column's own unique constraint on create() — caught here
    * and turned into the same idempotent-replay result as a sequential retry,
    * rather than a raw 500.
+   *
+   * The row found by localAuditUuid is only ever returned as-is when
+   * isSameLogicalEntry confirms it matches this caller's actorUserId/
+   * action/entityType/entityId — localAuditUuid is a client-generated value
+   * with no scoping to the caller, so returning any row matched purely by
+   * that UUID would let one caller read another actor's audit entry (e.g. a
+   * different Sakhi's or a Supervisor's) just by supplying (or colliding
+   * with) its UUID, before this create's own authorization is reached
+   * (cross-actor IDOR — security review finding, 2026-09-02). A UUID that
+   * matches a row belonging to a different logical write is a genuine
+   * collision, not a safe retry, so it 409s instead — same shape as
+   * risk-referral-service's visitId idempotent-create handling.
    */
   async create(dto: CreateAuditLogInput, caller: CallerIdentity) {
     let toCreate = dto;
@@ -88,7 +127,15 @@ export class AuditLogService {
 
     if (toCreate.localAuditUuid) {
       const existing = await this.repository.findByLocalAuditUuid(toCreate.localAuditUuid);
-      if (existing) return existing;
+      if (existing) {
+        if (!isSameLogicalEntry(existing, toCreate)) {
+          throw conflict(
+            'This localAuditUuid is already used by a different audit entry — this looks like a ' +
+              'UUID collision, not a retry of the same request.',
+          );
+        }
+        return existing;
+      }
     }
 
     try {
@@ -96,7 +143,15 @@ export class AuditLogService {
     } catch (err) {
       if (toCreate.localAuditUuid && isUniqueConstraintViolation(err)) {
         const winner = await this.repository.findByLocalAuditUuid(toCreate.localAuditUuid);
-        if (winner) return winner;
+        if (winner) {
+          if (!isSameLogicalEntry(winner, toCreate)) {
+            throw conflict(
+              'This localAuditUuid is already used by a different audit entry — this looks like a ' +
+                'UUID collision, not a retry of the same request.',
+            );
+          }
+          return winner;
+        }
       }
       throw err;
     }
