@@ -195,7 +195,8 @@ jobs:
           }
 
           if grep -q '^LOCKFILE_CHANGED=1' remote.out; then
-            echo "::warning::package-lock.json changed. npm ci is deliberately not run here — if a service fails to boot on a missing dependency, install manually."
+            echo "::error::package-lock.json changed. npm ci is deliberately not run here on every deploy (see the WHY THE LOGIC RUNS ON THE BOX comment above) — but a changed lockfile means a dependency may be missing from the box's node_modules, which fails the build at runtime instead of here (e.g. node-cron, 2026-09-02). Run 'npm ci' on the box in \$DEV_WORKSPACE, then re-run this deploy."
+            exit 1
           fi
           if grep -q '^UNKNOWN=' remote.out; then
             echo "::error::Unknown service(s): $(sed -n 's/^UNKNOWN=//p' remote.out)"
