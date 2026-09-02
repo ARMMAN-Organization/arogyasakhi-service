@@ -231,7 +231,10 @@ describe('LmpChangeRequestService', () => {
       it('resolves to the winner instead of throwing when create() races on localRequestUuid', async () => {
         const winner = approvalRequest();
         repository.create.mockRejectedValue(
-          Object.assign(new Error('Unique constraint failed'), { code: 'P2002' }),
+          Object.assign(new Error('Unique constraint failed'), {
+            code: 'P2002',
+            meta: { target: ['local_request_uuid'] },
+          }),
         );
         repository.findByLocalRequestUuid.mockResolvedValueOnce(null).mockResolvedValueOnce(winner);
         quickResponseService.getLmpChangeRequestDetail.mockResolvedValue(
@@ -246,7 +249,10 @@ describe('LmpChangeRequestService', () => {
 
       it('re-throws when the P2002 race cannot be resolved to a winner', async () => {
         repository.create.mockRejectedValue(
-          Object.assign(new Error('Unique constraint failed'), { code: 'P2002' }),
+          Object.assign(new Error('Unique constraint failed'), {
+            code: 'P2002',
+            meta: { target: ['local_request_uuid'] },
+          }),
         );
         repository.findByLocalRequestUuid.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
 

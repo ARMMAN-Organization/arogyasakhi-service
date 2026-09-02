@@ -1,18 +1,30 @@
-import { HttpError, notFound } from '@armman/service-commons';
+import { HttpError, conflict, notFound } from '@armman/service-commons';
 import type { LmpChangeRequestRepository } from './lmp-change-request.repository';
 import type { LookupClient } from '../quick-response/lookup.client';
 import type { QuickResponseService } from '../quick-response/quick-response.service';
 import type { BeneficiaryClient } from '../quick-response/beneficiary.client';
 import type { CreateLmpChangeRequestInput } from './dto/create-lmpChangeRequest.dto';
 
-/** Narrows a caught Prisma error to a unique-constraint violation (P2002). */
-function isUniqueConstraintViolation(err: unknown): boolean {
-  return (
-    typeof err === 'object' &&
-    err !== null &&
-    'code' in err &&
-    (err as { code: unknown }).code === 'P2002'
-  );
+/**
+ * Narrows a caught Prisma error to a unique-constraint violation (P2002) on
+ * `columnName` specifically — not just any P2002 — mirroring
+ * risk-referral-service's referral.prisma-errors.ts (same fix, same day,
+ * added there specifically because an unscoped P2002 check misattributes
+ * any future unrelated unique constraint on the same table as this one;
+ * not cross-service-imported per the forklift rule, so kept as its own
+ * copy here — security review finding, 2026-09-02). Safe today only
+ * because approval_requests has exactly one non-PK unique column
+ * (localRequestUuid); the moment a second one is added, an unscoped check
+ * would silently misreport that unrelated collision as an idempotent
+ * replay of this one.
+ */
+function isUniqueConstraintViolation(err: unknown, columnName: string): boolean {
+  if (typeof err !== 'object' || err === null || !('code' in err)) return false;
+  if ((err as { code: unknown }).code !== 'P2002') return false;
+  const meta = (err as { meta?: unknown }).meta;
+  if (typeof meta !== 'object' || meta === null || !('target' in meta)) return false;
+  const target = (meta as { target?: unknown }).target;
+  return Array.isArray(target) ? target.includes(columnName) : target === columnName;
 }
 
 /**
@@ -84,6 +96,26 @@ export class LmpChangeRequestService {
 
     const existing = await this.repository.findByLocalRequestUuid(dto.localRequestUuid);
     if (existing) {
+      // Confirms `existing` is genuinely a retry of THIS request, not an
+      // unrelated one that happens to share this caller's localRequestUuid
+      // (e.g. a client-side UUID-generation bug) — mirrors audit-service's
+      // isSameLogicalEntry, added the same day for the identical purpose
+      // (security review finding, 2026-09-02). Not a cross-actor IDOR:
+      // getLmpChangeRequestDetail below re-resolves the row's OWN
+      // beneficiaryId through beneficiaryClient.getById, which already
+      // enforces SAKHI-own/SUPERVISOR-roster scoping, so an out-of-scope
+      // collision would 403 regardless — this only catches the narrower
+      // same-caller, different-beneficiary collision as a clear 409 instead
+      // of silently returning the wrong request.
+      if (
+        existing.beneficiaryId !== dto.beneficiaryId ||
+        existing.requestedByUserId !== requestedByUserId
+      ) {
+        throw conflict(
+          `localRequestUuid "${dto.localRequestUuid}" already exists for a different ` +
+            'beneficiary/requester.',
+        );
+      }
       return {
         detail: await this.quickResponseService.getLmpChangeRequestDetail(
           existing.id,
@@ -120,9 +152,13 @@ export class LmpChangeRequestService {
         localRequestUuid: dto.localRequestUuid,
       });
     } catch (err) {
-      if (isUniqueConstraintViolation(err)) {
+      if (isUniqueConstraintViolation(err, 'local_request_uuid')) {
         const winner = await this.repository.findByLocalRequestUuid(dto.localRequestUuid);
-        if (winner) {
+        if (
+          winner &&
+          winner.beneficiaryId === dto.beneficiaryId &&
+          winner.requestedByUserId === requestedByUserId
+        ) {
           return {
             detail: await this.quickResponseService.getLmpChangeRequestDetail(
               winner.id,
@@ -130,6 +166,12 @@ export class LmpChangeRequestService {
             ),
             wasCreated: false,
           };
+        }
+        if (winner) {
+          throw conflict(
+            `localRequestUuid "${dto.localRequestUuid}" already exists for a different ` +
+              'beneficiary/requester.',
+          );
         }
       }
       throw err;
