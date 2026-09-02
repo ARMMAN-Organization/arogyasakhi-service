@@ -27,7 +27,19 @@ interface FormDraft {
   entityType: 'MOTHER' | 'CHILD' | 'REFERRAL' | 'SYSTEM';
   versionNo: string;
   payload: { schemaJson: unknown[]; validationJson: unknown[] };
+  // rules-service's rule_sets.rule_set_id — no cross-service relation
+  // (forklift rule), so these are the fixed ids rules-service's own seed.ts
+  // assigns its RISK_RULE_PACKS entries. Omitted for every formCode with no
+  // corresponding RiskCondition.phase rule pack in code today
+  // (REGISTRATION/DELIVERY/PP) — wiring one of those would pass createSubmission's
+  // FORM_CODE_TO_RISK_PHASE guard but the rule pack itself doesn't exist,
+  // failing every submission (see form.service.ts's guard comment).
+  riskRuleSetId?: string;
 }
+
+// Must match rules-service/prisma/seed.ts's RISK_RULE_PACKS fixed ids exactly.
+const ANC_RISK_RULE_SET_ID = '55555555-5555-4555-8555-555555555551';
+const INFANT_RISK_RULE_SET_ID = '55555555-5555-4555-8555-555555555561';
 
 /** Same checksum computation as FormService — sha256 over the schema JSON. */
 function computeChecksum(schemaJson: unknown): Buffer {
@@ -70,6 +82,7 @@ const FORMS: FormDraft[] = [
     entityType: 'MOTHER',
     versionNo: 'v1',
     payload: ancVisitPayload,
+    riskRuleSetId: ANC_RISK_RULE_SET_ID,
   },
   {
     formCode: 'INFANT_VISIT',
@@ -90,6 +103,7 @@ const FORMS: FormDraft[] = [
     entityType: 'CHILD',
     versionNo: 'v1',
     payload: infantVisitPayload,
+    riskRuleSetId: INFANT_RISK_RULE_SET_ID,
   },
   // CCV (13-24m) is confirmed in SRS v3.0 to reuse INC's clinical fields and
   // HR thresholds verbatim — "No separate CCV-specific guidelines required"
@@ -102,6 +116,7 @@ const FORMS: FormDraft[] = [
     entityType: 'CHILD',
     versionNo: 'v1',
     payload: infantVisitPayload,
+    riskRuleSetId: INFANT_RISK_RULE_SET_ID,
   },
   {
     formCode: 'DELIVERY_VISIT',
@@ -123,6 +138,7 @@ const FORMS: FormDraft[] = [
     entityType: 'CHILD',
     versionNo: 'v1',
     payload: neonatalVisitPayload,
+    riskRuleSetId: INFANT_RISK_RULE_SET_ID,
   },
   // Referral, closure, and reopen workflow forms — transcribed field-for-field
   // from docs/Revised_App_Form_Final_20.3.26.xlsx.md ("Referral form",
@@ -189,6 +205,7 @@ async function seedForms(): Promise<SeedResult> {
         formName: form.formName,
         entityType: form.entityType,
         status: 'ACTIVE',
+        riskRuleSetId: form.riskRuleSetId ?? null,
         formVersions: {
           create: {
             versionNo: form.versionNo,

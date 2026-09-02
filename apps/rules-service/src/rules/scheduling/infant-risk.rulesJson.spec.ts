@@ -422,15 +422,19 @@ describe('infantRiskRulesJson', () => {
     expect(result.overallRiskCategory).toBe('LOW');
   });
 
-  it('throws when conditionIds is missing an entry a graded input requires', async () => {
+  it('skips only the affected condition when conditionIds is missing an entry a graded input requires, grading everything else normally', async () => {
     const incompleteIds: Record<string, string | undefined> = { ...CONDITION_IDS };
     incompleteIds.WASTING = undefined;
 
-    await expect(
-      evaluateRulePack(infantRiskRulesJson, {
-        ...NORMAL_VITALS_INFANT,
-        conditionIds: incompleteIds,
-      }),
-    ).rejects.toThrow();
+    const result = await evaluateRulePack(infantRiskRulesJson, {
+      ...NORMAL_VITALS_INFANT,
+      conditionIds: incompleteIds,
+    });
+
+    expect(result.conditions.some((c) => c.riskConditionId === CONDITION_IDS.WASTING)).toBe(false);
+    expect(
+      result.conditions.some((c) => c.riskConditionId === CONDITION_IDS.LOW_BIRTH_WEIGHT),
+    ).toBe(true);
+    expect(result.conditions.length).toBeGreaterThan(0);
   });
 });

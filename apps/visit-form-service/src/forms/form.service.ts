@@ -585,6 +585,13 @@ export class FormService {
     const complications =
       answers.did_you_experience_any_complications_during_birth_delivery_in_previous_pregnancies;
     const lmpDate = answers.lmp_date;
+    // Sickle Cell Disease/Trait (MOTHER_REGISTRATION Q60) — read at the
+    // beneficiary's first ANC_VISIT rather than graded at registration
+    // itself, since anc-risk.rulesJson.ts (RISK category) is the only rule
+    // pack this beneficiary's answers are evaluated against; see that pack's
+    // top doc comment for the interim-measure rationale (issue #191).
+    const sickleCellStatus =
+      answers.have_you_been_detected_with_sickle_cell_disease_or_sickle_cell_trait_sct;
 
     return {
       ...(typeof age === 'number' ? { age } : {}),
@@ -593,6 +600,7 @@ export class FormService {
       ...(typeof abortions === 'number' ? { abortions } : {}),
       ...(Array.isArray(complications) ? { priorComplications: complications } : {}),
       ...(typeof lmpDate === 'string' ? { lmpDate } : {}),
+      ...(typeof sickleCellStatus === 'string' ? { sickleCellStatus } : {}),
     };
   }
 
