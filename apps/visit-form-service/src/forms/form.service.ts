@@ -514,6 +514,10 @@ export class FormService {
           ruleSetId: version.formDefinition.riskRuleSetId,
           riskPhase,
           answers,
+          // Date-only slice of the server-assigned submittedAt — needed by
+          // risk-referral-service to trigger automatic HR-visit generation
+          // (SRS FR-S-5.2(b)) when this evaluation detects an HR condition.
+          actualCompletionDate: created.submittedAt.toISOString().slice(0, 10),
         },
         authorizationHeader,
       );

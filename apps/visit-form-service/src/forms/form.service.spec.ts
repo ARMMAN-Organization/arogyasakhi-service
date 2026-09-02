@@ -2057,6 +2057,7 @@ describe('FormService', () => {
               priorComplications: ['no_complications'],
               visitDate: '2026-08-01T00:00:00.000Z',
             },
+            actualCompletionDate: '2026-08-01',
           }),
           'Bearer test-token',
         );

@@ -5,8 +5,17 @@ import type { CreateRiskAssessmentInput } from './dto/create-riskAssessment.dto'
 import { evaluateRuleSet } from './ruleSet.client';
 import { resolveRiskGradeLookupId } from './lookup.client';
 import { pushRiskConditionSummary } from './beneficiaryRiskSummary.client';
+import { generateHrVisitSchedule } from './visitScheduleGenerate.client';
 import { BeneficiaryClient } from '../referrals/beneficiary.client';
 import { listSakhiIdsForSupervisor } from '../referrals/sakhi.client';
+
+/**
+ * The only risk phases an HR visit can ever be generated for (SRS FR-S-5.3;
+ * BR-06/SR-NN-01 explicitly forbids HR visits in the neonatal phase, and
+ * REGISTRATION/DELIVERY/PP have no HR-visit concept of their own — see
+ * hr.rulesJson.ts's own phase guard, which this list mirrors).
+ */
+const HR_VISIT_ELIGIBLE_PHASES = new Set(['ANC', 'INC', 'CCV']);
 
 /**
  * Maps RiskCondition.phase (this service's own RiskPhase enum) to
@@ -181,6 +190,32 @@ export class RiskAssessmentService {
       hrDetectedFlag,
       flags,
     });
+
+    // Best-effort HR visit generation (SRS FR-S-5.2(b)) — only when this
+    // evaluation actually detected an HR condition, the phase can carry an
+    // HR visit at all (HR_VISIT_ELIGIBLE_PHASES), and the caller supplied
+    // the visit's actual completion date (older/other callers that omit it
+    // simply don't get this trigger — no HR-visit generation was ever
+    // wired up for them before this, so this is strictly additive).
+    // Failure here must never roll back or fail the already-committed
+    // RiskAssessment/RiskFlag write above.
+    if (hrDetectedFlag && HR_VISIT_ELIGIBLE_PHASES.has(dto.riskPhase) && dto.actualCompletionDate) {
+      const result = await generateHrVisitSchedule(
+        dto.beneficiaryId,
+        {
+          phase: dto.riskPhase as 'ANC' | 'INC' | 'CCV',
+          hrDetectedThisVisit: true,
+          actualCompletionDate: dto.actualCompletionDate,
+        },
+        authorizationHeader,
+      );
+      if (!result.ok) {
+        console.error(
+          `Failed to generate HR visit schedule for beneficiary ${dto.beneficiaryId} ` +
+            `(assessment ${assessment.id}): ${result.error}`,
+        );
+      }
+    }
 
     // Best-effort push per distinct condition — failures are logged and
     // swallowed (see beneficiaryRiskSummary.client.ts's doc comment); the
