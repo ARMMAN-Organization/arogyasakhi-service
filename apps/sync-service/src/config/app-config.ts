@@ -16,6 +16,33 @@ const schema = z.object({
         .filter(Boolean),
     ),
   PUBLIC_BASE_URLS: publicBaseUrlsSchema,
+  // Client-credentials identity (POST /auth/service-token) this service
+  // authenticates as, to call the ADMIN/SYSTEM-only POST /escalation-events
+  // from GET /sync/last-synced/by-roster's read-time SYNC_DELAY check.
+  // Optional: that check is skipped (roster data is still returned) when
+  // unset, rather than failing the whole read over a not-yet-provisioned
+  // credential. The `.transform` treats a present-but-empty value (the
+  // .env.example convention of leaving the key present with no value) the
+  // same as the key being absent — `.optional()` alone only tolerates
+  // `undefined`, so an empty string would otherwise still fail `.min(1)`
+  // and crash the whole service at boot (loadConfig calls process.exit(1)
+  // on any schema validation failure) instead of just skipping this check.
+  SERVICE_ACCOUNT_CLIENT_ID: z
+    .string()
+    .optional()
+    .transform((v) => v || undefined),
+  SERVICE_ACCOUNT_CLIENT_SECRET: z
+    .string()
+    .optional()
+    .transform((v) => v || undefined),
+  // How many hours since the last COMPLETED sync before a roster member is
+  // flagged SYNC_DELAY. A plain env var for now, not a GoRules rule pack —
+  // unlike the clinical/visit-scheduling thresholds this repo's other rule
+  // packs encode, this is a single operational number with no
+  // visitFamily-style branching, and evaluating it via a rules-service round
+  // trip on every dashboard read adds latency this check doesn't need.
+  // Revisit if this ever needs per-project/per-geography variation.
+  SYNC_DELAY_THRESHOLD_HOURS: z.coerce.number().positive().default(48),
 });
 
 export type AppConfig = z.infer<typeof schema>;

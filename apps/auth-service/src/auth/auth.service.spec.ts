@@ -76,6 +76,9 @@ describe('AuthService', () => {
     updateUserTransaction: jest.fn(),
     reactivateUser: jest.fn(),
     findDisplayNameById: jest.fn(),
+    findServiceAccountByClientId: jest.fn(),
+    incrementServiceAccountFailedAuthCount: jest.fn(),
+    recordSuccessfulServiceAuth: jest.fn(),
   } as unknown as jest.Mocked<AuthRepository>;
 
   const signer = {
@@ -1216,6 +1219,81 @@ describe('AuthService', () => {
       await expect(service.reactivateUser('user-1', ADMIN_CALLER)).rejects.toMatchObject({
         status: 409,
       });
+    });
+  });
+
+  describe('issueServiceToken', () => {
+    const ACTIVE_SERVICE_ACCOUNT = {
+      id: 'service-account-1',
+      name: 'visit-form-service',
+      clientId: 'visit-form-service',
+      clientSecretHash: 'hashed-secret',
+      role: 'SYSTEM',
+      isActive: true,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    };
+
+    it('issues a SYSTEM-role token on correct clientId/clientSecret', async () => {
+      repository.findServiceAccountByClientId.mockResolvedValue(ACTIVE_SERVICE_ACCOUNT as never);
+      (verifyPassword as jest.Mock).mockResolvedValue(true);
+
+      const result = await service.issueServiceToken({
+        clientId: 'visit-form-service',
+        clientSecret: 'correct',
+      });
+
+      expect(result).toEqual({
+        accessToken: 'signed-access-token',
+        expiresIn: 900,
+        roles: ['SYSTEM'],
+      });
+      expect(signer.sign).toHaveBeenCalledWith(
+        { sub: 'service-account-1', roles: ['SYSTEM'], typ: 'service' },
+        '15m',
+      );
+      expect(repository.recordSuccessfulServiceAuth).toHaveBeenCalledWith('service-account-1');
+      expect(repository.incrementServiceAccountFailedAuthCount).not.toHaveBeenCalled();
+    });
+
+    it('401s on an unknown clientId — same generic message as a bad secret', async () => {
+      repository.findServiceAccountByClientId.mockResolvedValue(null);
+
+      await expect(
+        service.issueServiceToken({ clientId: 'unknown', clientSecret: 'anything' }),
+      ).rejects.toMatchObject({ status: 401, message: 'Invalid credentials.' });
+      expect(signer.sign).not.toHaveBeenCalled();
+      // No account id to attach a failed-attempt count to.
+      expect(repository.incrementServiceAccountFailedAuthCount).not.toHaveBeenCalled();
+    });
+
+    it('401s on a correct clientId with the wrong secret, and records the failed attempt', async () => {
+      repository.findServiceAccountByClientId.mockResolvedValue(ACTIVE_SERVICE_ACCOUNT as never);
+      (verifyPassword as jest.Mock).mockResolvedValue(false);
+
+      await expect(
+        service.issueServiceToken({ clientId: 'visit-form-service', clientSecret: 'wrong' }),
+      ).rejects.toMatchObject({ status: 401, message: 'Invalid credentials.' });
+      expect(signer.sign).not.toHaveBeenCalled();
+      expect(repository.incrementServiceAccountFailedAuthCount).toHaveBeenCalledWith(
+        'service-account-1',
+      );
+    });
+
+    it('401s on a deactivated service account, even with the correct secret, and records the failed attempt', async () => {
+      repository.findServiceAccountByClientId.mockResolvedValue({
+        ...ACTIVE_SERVICE_ACCOUNT,
+        isActive: false,
+      } as never);
+      (verifyPassword as jest.Mock).mockResolvedValue(true);
+
+      await expect(
+        service.issueServiceToken({ clientId: 'visit-form-service', clientSecret: 'correct' }),
+      ).rejects.toMatchObject({ status: 401, message: 'Invalid credentials.' });
+      expect(signer.sign).not.toHaveBeenCalled();
+      expect(repository.incrementServiceAccountFailedAuthCount).toHaveBeenCalledWith(
+        'service-account-1',
+      );
     });
   });
 });
