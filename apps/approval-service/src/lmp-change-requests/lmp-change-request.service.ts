@@ -2,6 +2,7 @@ import { HttpError } from '@armman/service-commons';
 import type { LmpChangeRequestRepository } from './lmp-change-request.repository';
 import type { LookupClient } from '../quick-response/lookup.client';
 import type { QuickResponseService } from '../quick-response/quick-response.service';
+import type { BeneficiaryClient } from '../quick-response/beneficiary.client';
 import type { CreateLmpChangeRequestInput } from './dto/create-lmpChangeRequest.dto';
 
 /** Narrows a caught Prisma error to a unique-constraint violation (P2002). */
@@ -28,6 +29,7 @@ export class LmpChangeRequestService {
     private readonly repository: LmpChangeRequestRepository,
     private readonly lookupClient: LookupClient,
     private readonly quickResponseService: QuickResponseService,
+    private readonly beneficiaryClient: BeneficiaryClient,
   ) {}
 
   /**
@@ -49,6 +51,15 @@ export class LmpChangeRequestService {
    * Returns the response in the same shape callers get from the existing
    * `GET /lmp-change-requests/:id` route, `wasCreated` telling the route
    * whether to answer 201 (new) or 200 (idempotent replay).
+   *
+   * Delegates ownership scoping to beneficiary-service's own
+   * GET /beneficiaries/:id (SAKHI-own-case / SUPERVISOR-roster /
+   * MANAGER-unrestricted) rather than duplicating that IDOR check here —
+   * this service owns no sakhiId data of its own. A 403/404 from that call
+   * propagates as-is; only on success does this write an approval_requests
+   * row. Without this, any authenticated SAKHI could raise an LMP change
+   * request against any beneficiary system-wide, not just their own
+   * roster/cases — same pattern as reopen-request.service.ts's create().
    */
   async create(
     dto: CreateLmpChangeRequestInput,
@@ -58,6 +69,8 @@ export class LmpChangeRequestService {
     detail: Awaited<ReturnType<QuickResponseService['getLmpChangeRequestDetail']>>;
     wasCreated: boolean;
   }> {
+    await this.beneficiaryClient.getById(dto.beneficiaryId, authorizationHeader);
+
     const existing = await this.repository.findByLocalRequestUuid(dto.localRequestUuid);
     if (existing) {
       return {
@@ -126,8 +139,20 @@ export class LmpChangeRequestService {
    * `QuickResponseService.getLmpChangeRequestDetail`'s existing mapping for
    * each row rather than duplicating its beneficiary/pada/sakhi enrichment
    * and requestPayloadJson unwrapping.
+   *
+   * Delegates ownership scoping to beneficiary-service's own
+   * GET /beneficiaries/:id (SAKHI-own-case / SUPERVISOR-roster /
+   * MANAGER-unrestricted) rather than duplicating that IDOR check here —
+   * same pattern as create() and reopen-request.service.ts's
+   * listByBeneficiaryId(). Without this, any caller could enumerate LMP
+   * change request history (beneficiary PII, pada name, Sakhi name/mobile
+   * via getLmpChangeRequestDetail) for any beneficiaryId. A 403/404 from
+   * that call propagates as-is; only on success does this query the
+   * repository.
    */
   async listByBeneficiaryId(beneficiaryId: string, authorizationHeader: string) {
+    await this.beneficiaryClient.getById(beneficiaryId, authorizationHeader);
+
     const rows = await this.repository.findByBeneficiaryId(beneficiaryId);
     return Promise.all(
       rows.map((row) =>

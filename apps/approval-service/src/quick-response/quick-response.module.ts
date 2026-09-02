@@ -27,12 +27,13 @@ import { VisitClient } from './visit.client';
 export function createQuickResponseModule(prisma: PrismaService): DocumentedRouter {
   const repository = new QuickResponseRepository(prisma);
   const lookupClient = new LookupClient();
+  const beneficiaryClient = new BeneficiaryClient();
   const service = new QuickResponseService(
     repository,
     lookupClient,
     new EscalationClient(),
     new ReopenRequestClient(),
-    new BeneficiaryClient(),
+    beneficiaryClient,
     new NotificationClient(),
     new ClosureClient(),
     new ReferralClient(),
@@ -47,6 +48,7 @@ export function createQuickResponseModule(prisma: PrismaService): DocumentedRout
     new LmpChangeRequestRepository(prisma),
     lookupClient,
     service,
+    beneficiaryClient,
   );
   const doc = createDocumentedRouter();
   registerQuickResponseRoutes(doc, service);

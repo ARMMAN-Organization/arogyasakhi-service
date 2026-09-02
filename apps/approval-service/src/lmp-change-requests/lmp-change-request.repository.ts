@@ -50,11 +50,21 @@ export class LmpChangeRequestRepository {
    * most-recent-first — lets the Sakhi app poll for status without a
    * separate polling resource. A beneficiary with no LMP change requests
    * returns an empty array, not an error.
+   *
+   * Capped at 20 rows (matching GET /referrals' existing 50-row convention,
+   * scaled down since LMP change requests are far less frequent per
+   * beneficiary) — each row's detail is resolved via
+   * QuickResponseService.getLmpChangeRequestDetail, which itself fans out
+   * ~4 downstream HTTP calls per row, so an unbounded list here is an N+1
+   * amplifier. This only caps the row count; resolving the shared
+   * beneficiary/pada/sakhi context once per list call instead of once per
+   * row is a larger refactor, left as a follow-up.
    */
   findByBeneficiaryId(beneficiaryId: string) {
     return this.prisma.approvalRequest.findMany({
       where: { requestType: 'LMP_CHANGE', beneficiaryId, isDeleted: false },
       orderBy: { createdAt: 'desc' },
+      take: 20,
     });
   }
 }

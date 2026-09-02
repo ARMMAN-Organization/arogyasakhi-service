@@ -2,6 +2,7 @@ import { LmpChangeRequestService } from './lmp-change-request.service';
 import type { LmpChangeRequestRepository } from './lmp-change-request.repository';
 import type { LookupClient } from '../quick-response/lookup.client';
 import type { QuickResponseService } from '../quick-response/quick-response.service';
+import type { BeneficiaryClient } from '../quick-response/beneficiary.client';
 import type { CreateLmpChangeRequestInput } from './dto/create-lmpChangeRequest.dto';
 import type { ApprovalRequest } from '../../../../node_modules/.prisma/client-approval-service';
 
@@ -63,6 +64,9 @@ describe('LmpChangeRequestService', () => {
   const quickResponseService = {
     getLmpChangeRequestDetail: jest.fn(),
   } as unknown as jest.Mocked<QuickResponseService>;
+  const beneficiaryClient = {
+    getById: jest.fn(),
+  } as unknown as jest.Mocked<BeneficiaryClient>;
 
   let service: LmpChangeRequestService;
   const sakhiId = '33333333-3333-3333-3333-333333333333';
@@ -78,10 +82,69 @@ describe('LmpChangeRequestService', () => {
     jest.resetAllMocks();
     repository.findByLocalRequestUuid.mockResolvedValue(null);
     lookupClient.resolveApprovalStatusId.mockResolvedValue('55555555-5555-5555-5555-555555555555');
-    service = new LmpChangeRequestService(repository, lookupClient, quickResponseService);
+    beneficiaryClient.getById.mockResolvedValue({
+      id: dto.beneficiaryId,
+      sakhiId,
+      pii: { fullName: 'Test Beneficiary', padaId: null },
+      motherCaseDetails: null,
+      riskConditionSummaries: [],
+    });
+    service = new LmpChangeRequestService(
+      repository,
+      lookupClient,
+      quickResponseService,
+      beneficiaryClient,
+    );
   });
 
   describe('create', () => {
+    // Critical-severity IDOR (write path): a SAKHI who is not authorized for
+    // this beneficiary (per beneficiary-service's own ownership check) must
+    // be rejected before any approval_requests row is written.
+    it('rejects create() (IDOR guard) when the caller is not authorized for the beneficiary, before any row is written', async () => {
+      beneficiaryClient.getById.mockRejectedValue(
+        Object.assign(new Error('This beneficiary is outside your own roster.'), { status: 403 }),
+      );
+
+      await expect(service.create(dto, sakhiId, authHeader)).rejects.toThrow(
+        /outside your own roster/,
+      );
+
+      expect(repository.findByLocalRequestUuid).not.toHaveBeenCalled();
+      expect(repository.create).not.toHaveBeenCalled();
+    });
+
+    it('throws not-found (IDOR guard) when the beneficiary does not exist', async () => {
+      beneficiaryClient.getById.mockResolvedValue(null);
+
+      // getById returning null means "not found" per BeneficiaryClient's own
+      // contract; create() does not itself translate that to an error since
+      // beneficiaryClient.getById(...) is only awaited for its ownership
+      // side-effect (a throw), matching the reopen-request.service.ts
+      // reference exactly — a null return (as opposed to a throw) is not
+      // expected from a real beneficiary-service 404, which throws instead.
+      // This test locks in getById's actual documented behavior: a 404 from
+      // beneficiary-service surfaces as a thrown HttpError, not a null.
+      beneficiaryClient.getById.mockRejectedValue(
+        Object.assign(new Error('Beneficiary not found.'), { status: 404 }),
+      );
+
+      await expect(service.create(dto, sakhiId, authHeader)).rejects.toThrow(/not found/i);
+
+      expect(repository.create).not.toHaveBeenCalled();
+    });
+
+    it('calls beneficiaryClient.getById with the dto beneficiaryId and authorizationHeader before creating', async () => {
+      repository.create.mockResolvedValue(approvalRequest());
+      quickResponseService.getLmpChangeRequestDetail.mockResolvedValue(
+        lmpChangeRequestDetail() as never,
+      );
+
+      await service.create(dto, sakhiId, authHeader);
+
+      expect(beneficiaryClient.getById).toHaveBeenCalledWith(dto.beneficiaryId, authHeader);
+    });
+
     it('creates a new row with the correct requestPayloadJson', async () => {
       const created = approvalRequest();
       repository.create.mockResolvedValue(created);
@@ -216,6 +279,43 @@ describe('LmpChangeRequestService', () => {
 
   describe('listByBeneficiaryId', () => {
     const beneficiaryId = '22222222-2222-2222-2222-222222222222';
+
+    // Critical-severity IDOR (read path): a caller not authorized for this
+    // beneficiary must be rejected before the repository is ever queried —
+    // the returned detail includes beneficiary PII, pada name, and the
+    // Sakhi's name/mobile via getLmpChangeRequestDetail/resolveCommonFields.
+    it('rejects listByBeneficiaryId() (IDOR guard) when the caller is not authorized for the beneficiary', async () => {
+      beneficiaryClient.getById.mockRejectedValue(
+        Object.assign(new Error('This beneficiary is outside your own roster.'), { status: 403 }),
+      );
+
+      await expect(service.listByBeneficiaryId(beneficiaryId, authHeader)).rejects.toThrow(
+        /outside your own roster/,
+      );
+
+      expect(repository.findByBeneficiaryId).not.toHaveBeenCalled();
+      expect(quickResponseService.getLmpChangeRequestDetail).not.toHaveBeenCalled();
+    });
+
+    it('throws not-found (IDOR guard) when the beneficiary does not exist', async () => {
+      beneficiaryClient.getById.mockRejectedValue(
+        Object.assign(new Error('Beneficiary not found.'), { status: 404 }),
+      );
+
+      await expect(service.listByBeneficiaryId(beneficiaryId, authHeader)).rejects.toThrow(
+        /not found/i,
+      );
+
+      expect(repository.findByBeneficiaryId).not.toHaveBeenCalled();
+    });
+
+    it('calls beneficiaryClient.getById with the beneficiaryId and authorizationHeader before querying', async () => {
+      repository.findByBeneficiaryId.mockResolvedValue([]);
+
+      await service.listByBeneficiaryId(beneficiaryId, authHeader);
+
+      expect(beneficiaryClient.getById).toHaveBeenCalledWith(beneficiaryId, authHeader);
+    });
 
     it('returns the mapped detail for every row belonging to the beneficiary', async () => {
       const rowA = approvalRequest({ id: '11111111-1111-1111-1111-111111111111' });
