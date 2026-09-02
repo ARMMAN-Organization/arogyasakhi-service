@@ -65,6 +65,14 @@ export function toBulkScheduleRows(
   beneficiaryId: string,
   scheduleKind: GeneratableScheduleKind,
   evaluation: Record<string, unknown>,
+  // Used only by the HR branch — the count of this beneficiary's HR
+  // schedules of this visitType already on record, so the new row's
+  // sequenceNo (and thus its visitCode/localScheduleUuid) is unique per
+  // detection instead of always "1" (security review finding,
+  // 2026-09-02 — see visitSchedule.repository.ts's
+  // countByBeneficiaryAndVisitType doc comment for the bug this fixes).
+  // Every other scheduleKind ignores this parameter.
+  hrExistingCount = 0,
 ): BulkScheduleRow[] {
   switch (scheduleKind) {
     case 'ANC': {
@@ -150,7 +158,7 @@ export function toBulkScheduleRows(
           `HR evaluation returned an unrecognised visitName: "${hrVisit.visitName}".`,
         );
       }
-      return [toRow(beneficiaryId, hrType, hrType, 1, hrVisit, 'ACTUAL_VISIT')];
+      return [toRow(beneficiaryId, hrType, hrType, hrExistingCount + 1, hrVisit, 'ACTUAL_VISIT')];
     }
 
     case 'DELIVERY':

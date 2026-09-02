@@ -1,4 +1,5 @@
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '@armman/service-commons';
+import type { VisitCodeType } from '../../../../node_modules/.prisma/client-visit-form-service';
 import type { NewScheduleRow, VisitScheduleRepository } from './visitSchedule.repository';
 import { toDateOnly } from './dto/create-visit-schedule-bulk.dto';
 import type {
@@ -181,7 +182,31 @@ export class VisitScheduleService {
       authorizationHeader,
     );
 
-    const rows = toBulkScheduleRows(dto.beneficiaryId, dto.scheduleKind, evaluation);
+    // HR is cumulative (a new HR visit fires on every detection, per
+    // hr.rulesJson.ts) — toBulkScheduleRows needs how many this beneficiary
+    // already has of this exact visitType to number the new one uniquely
+    // (security review finding, 2026-09-02; see
+    // countByBeneficiaryAndVisitType's doc comment). Every other
+    // scheduleKind ignores this and the query is skipped for them.
+    const HR_VISIT_TYPE_BY_PHASE = {
+      ANC: 'ANC_HR',
+      INC: 'INC_HR',
+      CCV: 'CCV_HR',
+    } as const satisfies Record<string, VisitCodeType>;
+    const hrExistingCount =
+      dto.scheduleKind === 'HR'
+        ? await this.repository.countByBeneficiaryAndVisitType(
+            dto.beneficiaryId,
+            HR_VISIT_TYPE_BY_PHASE[dto.phase],
+          )
+        : 0;
+
+    const rows = toBulkScheduleRows(
+      dto.beneficiaryId,
+      dto.scheduleKind,
+      evaluation,
+      hrExistingCount,
+    );
     if (rows.length === 0) {
       return {
         beneficiaryId: dto.beneficiaryId,
