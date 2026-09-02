@@ -36,6 +36,7 @@ const auditLogRecordSchema = z.object({
   afterJson: jsonValueSchema.nullable(),
   ipAddress: z.string().nullable().openapi({ example: '203.0.113.10' }),
   deviceId: z.string().nullable(),
+  localAuditUuid: z.string().nullable(),
   createdAt: z.string().datetime(),
 });
 
