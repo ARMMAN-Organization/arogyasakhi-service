@@ -9,6 +9,15 @@ export class AuditLogRepository {
     return this.prisma.auditLog.findMany({ orderBy: { createdAt: 'desc' }, take: 50 });
   }
 
+  /**
+   * Finds an audit log entry previously created from this exact
+   * client-generated localAuditUuid — lets create() treat a
+   * dropped-connection retry as an idempotent replay instead of a new entry.
+   */
+  findByLocalAuditUuid(localAuditUuid: string) {
+    return this.prisma.auditLog.findFirst({ where: { localAuditUuid } });
+  }
+
   create(data: CreateAuditLogInput) {
     return this.prisma.auditLog.create({ data });
   }

@@ -47,6 +47,11 @@ export const createAuditLogSchema = z
     afterJson: jsonValueSchema.optional(),
     ipAddress: z.string().trim().min(1).max(45).optional(),
     deviceId: z.string().trim().min(1).optional(),
+    // Idempotency key for mobile-originated, offline-first callers (e.g. a
+    // Sakhi's LMP change / form answer edit decision synced with retries) —
+    // a dropped-connection retry resubmits the same client-generated value.
+    // Optional since ADMIN/SUPERVISOR callers don't need one.
+    localAuditUuid: z.string().trim().min(1).max(80).optional(),
   })
   .strict();
 

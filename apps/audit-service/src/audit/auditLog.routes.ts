@@ -90,17 +90,18 @@ export function registerAuditLogRoutes(doc: DocumentedRouter, service: AuditLogS
       },
     },
     trustGatewayIdentity,
-    // ADMIN direct use, plus SUPERVISOR so approval-service can log a Quick
-    // Response decision's audit entry on the caller's behalf (it forwards
-    // the deciding Supervisor's own Authorization header, same pattern
-    // supervisor-operations-service's SakhiClient uses — no separate
-    // service-to-service credential scheme in this codebase yet).
-    // service.create() constrains a non-ADMIN caller to their own
-    // actorUserId and to the QUICK_RESPONSE_* action namespace, so this
-    // widened role can only ever log the caller's own decisions — never
+    // ADMIN direct use, plus SUPERVISOR/SAKHI so approval-service and
+    // visit-form-service can log a caller's own decision's audit entry on
+    // their behalf (they forward the deciding user's own Authorization
+    // header, same pattern supervisor-operations-service's SakhiClient uses
+    // — no separate service-to-service credential scheme in this codebase
+    // yet). service.create() constrains a non-ADMIN caller to their own
+    // actorUserId and to that role's allowlisted action namespace
+    // (SUPERVISOR: QUICK_RESPONSE_*; SAKHI: LMP_CHANGE_*, FORM_ANSWER_EDIT_*),
+    // so a widened role can only ever log the caller's own decisions — never
     // forge an entry attributed to someone else or write an arbitrary
     // action/entityType.
-    requireRoles('ADMIN', 'SUPERVISOR'),
+    requireRoles('ADMIN', 'SUPERVISOR', 'SAKHI'),
     validateBody(createAuditLogRequestSchema),
     controller.create,
   );
