@@ -7,6 +7,7 @@ import { ApprovalClient } from '../reopen-requests/approval.client';
 import { LookupClient } from '../reopen-requests/lookup.client';
 import { NotificationClient } from '../reopen-requests/notification.client';
 import { BeneficiaryClient } from '../reopen-requests/beneficiary.client';
+import { SakhiClient } from '../reopen-requests/sakhi.client';
 
 /**
  * Composition root for the closures feature: wires repository → service → routes.
@@ -18,12 +19,14 @@ export function createClosureModule(prisma: PrismaService): DocumentedRouter {
   const lookupClient = new LookupClient();
   const notificationClient = new NotificationClient();
   const beneficiaryClient = new BeneficiaryClient();
+  const sakhiClient = new SakhiClient();
   const service = new ClosureService(
     repository,
     approvalClient,
     lookupClient,
     notificationClient,
     beneficiaryClient,
+    sakhiClient,
   );
   const doc = createDocumentedRouter();
   registerClosureRoutes(doc, service);

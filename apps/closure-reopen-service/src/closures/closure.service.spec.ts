@@ -4,6 +4,7 @@ import type { ApprovalClient } from '../reopen-requests/approval.client';
 import type { LookupClient } from '../reopen-requests/lookup.client';
 import type { NotificationClient } from '../reopen-requests/notification.client';
 import type { BeneficiaryClient } from '../reopen-requests/beneficiary.client';
+import type { SakhiClient } from '../reopen-requests/sakhi.client';
 import type { CreateClosureInput } from './dto/create-closure.dto';
 import type { DecideClosureInput } from './dto/decide-closure.dto';
 import type { ClosureType } from '../../../../node_modules/.prisma/client-closure-reopen-service';
@@ -40,7 +41,10 @@ describe('ClosureService', () => {
     create: jest.fn(),
     decide: jest.fn(),
   } as unknown as jest.Mocked<ClosureRepository>;
-  const approvalClient = { create: jest.fn() } as unknown as jest.Mocked<ApprovalClient>;
+  const approvalClient = {
+    create: jest.fn(),
+    findByClosureId: jest.fn(),
+  } as unknown as jest.Mocked<ApprovalClient>;
   const lookupClient = {
     resolveApprovalStatusId: jest.fn(),
     resolveClosureReasonCode: jest.fn(),
@@ -50,15 +54,18 @@ describe('ClosureService', () => {
     closeCase: jest.fn(),
     getById: jest.fn(),
   } as unknown as jest.Mocked<BeneficiaryClient>;
+  const sakhiClient = { getById: jest.fn() } as unknown as jest.Mocked<SakhiClient>;
   let service: ClosureService;
   const authHeader = 'Bearer token';
   const supervisorId = '44444444-4444-4444-4444-444444444444';
+  const approvalRequestId = '55555555-5555-5555-5555-555555555555';
   let consoleErrorSpy: jest.SpyInstance;
 
   beforeEach(() => {
     jest.resetAllMocks();
     consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
     repository.findByLocalClosureUuid.mockResolvedValue(null);
+    approvalClient.findByClosureId.mockResolvedValue({ id: approvalRequestId });
     beneficiaryClient.closeCase.mockResolvedValue({
       id: '22222222-2222-2222-2222-222222222222',
       currentStatus: 'CLOSED',
@@ -66,6 +73,7 @@ describe('ClosureService', () => {
     beneficiaryClient.getById.mockResolvedValue({
       id: '22222222-2222-2222-2222-222222222222',
       currentStatus: 'ACTIVE',
+      pii: { fullName: 'Asha Devi' },
     });
     lookupClient.resolveClosureReasonCode.mockResolvedValue('WITHDRAWAL');
     service = new ClosureService(
@@ -74,6 +82,7 @@ describe('ClosureService', () => {
       lookupClient,
       notificationClient,
       beneficiaryClient,
+      sakhiClient,
     );
   });
 
@@ -334,6 +343,61 @@ describe('ClosureService', () => {
         expect.any(String),
         expect.any(String),
         authHeader,
+        { linkedEntityType: 'QuickResponseCard', linkedEntityId: approvalRequestId },
+      );
+    });
+
+    it('interpolates the resolved Sakhi and beneficiary names into the title/body', async () => {
+      const pending = closureRow({ supervisorStatus: 'PENDING' });
+      const decided = { ...pending, supervisorStatus: 'APPROVED' as const, supervisorId };
+      repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(decided);
+      repository.decide.mockResolvedValue(true);
+      beneficiaryClient.getById.mockResolvedValue({
+        id: pending.beneficiaryId,
+        currentStatus: 'ACTIVE',
+        pii: { fullName: 'Asha Devi' },
+      });
+      sakhiClient.getById.mockResolvedValue({
+        sakhiId: pending.submittedByUserId,
+        displayName: 'Priya Sakhi',
+        mobileNumber: '+919000000123',
+      });
+
+      await service.decide(pending.id, supervisorId, { decision: 'APPROVED' }, authHeader);
+
+      expect(notificationClient.notify).toHaveBeenCalledWith(
+        pending.submittedByUserId,
+        'CLOSURE_REVIEW_UPDATE',
+        'Closure review — Priya Sakhi',
+        "Asha Devi's closure request was approved",
+        authHeader,
+        { linkedEntityType: 'QuickResponseCard', linkedEntityId: approvalRequestId },
+      );
+    });
+
+    it('falls back to a generic title when the Sakhi name lookup fails, keeping the beneficiary name already in hand', async () => {
+      const pending = closureRow({ supervisorStatus: 'PENDING' });
+      const decided = { ...pending, supervisorStatus: 'APPROVED' as const, supervisorId };
+      repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(decided);
+      repository.decide.mockResolvedValue(true);
+      beneficiaryClient.getById.mockResolvedValue({
+        id: pending.beneficiaryId,
+        currentStatus: 'ACTIVE',
+        pii: { fullName: 'Asha Devi' },
+      });
+      sakhiClient.getById.mockRejectedValue(new Error('auth-service down'));
+
+      await expect(
+        service.decide(pending.id, supervisorId, { decision: 'APPROVED' }, authHeader),
+      ).resolves.toBe(decided);
+
+      expect(notificationClient.notify).toHaveBeenCalledWith(
+        pending.submittedByUserId,
+        'CLOSURE_REVIEW_UPDATE',
+        'Closure review decided',
+        "Asha Devi's closure request was approved",
+        authHeader,
+        { linkedEntityType: 'QuickResponseCard', linkedEntityId: approvalRequestId },
       );
     });
 
@@ -442,6 +506,7 @@ describe('ClosureService', () => {
         beneficiaryClient.getById.mockResolvedValue({
           id: pending.beneficiaryId,
           currentStatus: 'ACTIVE',
+          pii: { fullName: 'Asha Devi' },
         });
 
         await expect(
@@ -518,6 +583,72 @@ describe('ClosureService', () => {
         service.decide(pending.id, supervisorId, { decision: 'APPROVED' }, authHeader),
       ).resolves.toBe(decided);
       expect(consoleErrorSpy).toHaveBeenCalled();
+    });
+
+    describe('Quick Response card linking', () => {
+      it('links the notification to the approval_requests id, not the closure id', async () => {
+        const pending = pendingClosure();
+        const decided = { ...pending, supervisorStatus: 'APPROVED' as const, supervisorId };
+        repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(decided);
+        repository.decide.mockResolvedValue(true);
+
+        await service.decide(pending.id, supervisorId, { decision: 'APPROVED' }, authHeader);
+
+        expect(approvalClient.findByClosureId).toHaveBeenCalledWith(pending.id, authHeader);
+        expect(notificationClient.notify).toHaveBeenCalledWith(
+          pending.submittedByUserId,
+          'CLOSURE_REVIEW_UPDATE',
+          expect.any(String),
+          expect.any(String),
+          authHeader,
+          { linkedEntityType: 'QuickResponseCard', linkedEntityId: approvalRequestId },
+        );
+      });
+
+      it('sends the notification without a linkedEntity when no approval request is found for the closure', async () => {
+        const pending = pendingClosure();
+        const decided = { ...pending, supervisorStatus: 'APPROVED' as const, supervisorId };
+        repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(decided);
+        repository.decide.mockResolvedValue(true);
+        approvalClient.findByClosureId.mockResolvedValue(null);
+
+        await expect(
+          service.decide(pending.id, supervisorId, { decision: 'APPROVED' }, authHeader),
+        ).resolves.toBe(decided);
+
+        expect(notificationClient.notify).toHaveBeenCalledWith(
+          pending.submittedByUserId,
+          'CLOSURE_REVIEW_UPDATE',
+          expect.any(String),
+          expect.any(String),
+          authHeader,
+          undefined,
+        );
+      });
+
+      it('sends the notification without a linkedEntity, and does not fail the decision, when the lookup throws', async () => {
+        const pending = pendingClosure();
+        const decided = { ...pending, supervisorStatus: 'APPROVED' as const, supervisorId };
+        repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(decided);
+        repository.decide.mockResolvedValue(true);
+        approvalClient.findByClosureId.mockRejectedValue(
+          Object.assign(new Error('Bad gateway'), { status: 502 }),
+        );
+
+        await expect(
+          service.decide(pending.id, supervisorId, { decision: 'APPROVED' }, authHeader),
+        ).resolves.toBe(decided);
+
+        expect(notificationClient.notify).toHaveBeenCalledWith(
+          pending.submittedByUserId,
+          'CLOSURE_REVIEW_UPDATE',
+          expect.any(String),
+          expect.any(String),
+          authHeader,
+          undefined,
+        );
+        expect(consoleErrorSpy).toHaveBeenCalled();
+      });
     });
   });
 });

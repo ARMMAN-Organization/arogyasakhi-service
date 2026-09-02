@@ -163,6 +163,33 @@ export class ReferralRepository {
   }
 
   /**
+   * Job-only read (overdueFollowup.job.ts) — every PENDING follow-up whose
+   * `followupDate` has passed, system-wide (not scoped to a caller's roster
+   * — this job runs as a machine identity, not on behalf of any one
+   * Supervisor). Bounded by `take` so one tick can't try to process an
+   * unbounded backlog in a single run; a backlog larger than that just gets
+   * picked up on the next tick.
+   */
+  findOverduePendingFollowups(today: Date, take: number) {
+    return this.prisma.referralFollowup.findMany({
+      where: {
+        isDeleted: false,
+        followupStatus: 'PENDING',
+        followupDate: { lt: today },
+        referral: { isDeleted: false },
+      },
+      orderBy: { followupDate: 'asc' },
+      take,
+      select: {
+        id: true,
+        referralId: true,
+        followupDate: true,
+        referral: { select: { beneficiaryId: true } },
+      },
+    });
+  }
+
+  /**
    * Only updates a row that is still in `fromStatus` — `updateMany`'s
    * affected count (rather than a separate read-then-write) is the
    * concurrency guard: if the referral's status already changed between the

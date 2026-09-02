@@ -50,6 +50,30 @@ function decodeCursor(cursor: string): ListCursor | null {
   }
 }
 
+interface PostEddCursor {
+  eddDate: string;
+  id: string;
+}
+
+/** Encodes findMotherIdsWithEddOnOrBefore's sort key (eddDate, id) as an opaque cursor. */
+function encodePostEddCursor(row: { eddDate: Date; id: string }): string {
+  const cursor: PostEddCursor = { eddDate: row.eddDate.toISOString(), id: row.id };
+  return Buffer.from(JSON.stringify(cursor)).toString('base64url');
+}
+
+/** Decodes a cursor produced by encodePostEddCursor; returns null on any malformed input. */
+function decodePostEddCursor(cursor: string): PostEddCursor | null {
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
+    if (typeof parsed?.eddDate === 'string' && typeof parsed?.id === 'string') {
+      return parsed as PostEddCursor;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 /** Data-access layer for beneficiary cases. Only this domain touches these tables. */
 export class BeneficiaryRepository {
   constructor(private readonly prisma: PrismaService) {}
@@ -801,6 +825,81 @@ export class BeneficiaryRepository {
       padaId: c.pii.padaId,
       latestGrade: worstByBeneficiary.get(c.id)?.grade ?? null,
     }));
+  }
+
+  /**
+   * MOTHER beneficiaries still in the ANC phase (i.e. `applyPhaseChange`'s
+   * ANC->PP transition hasn't happened yet, meaning no delivery outcome has
+   * been submitted) whose EDD is on or before `cutoffDate` — the candidate
+   * set for visit-form-service's post-EDD visit-generation job (EDD+7
+   * delivery-form-pending detection). Deliberately keyed off
+   * `BeneficiaryCase.currentPhase` — the one field `updatePhase` actually
+   * keeps authoritative — rather than `MotherCaseDetails.currentPhase` or
+   * `BeneficiaryCurrentSummary.dateOfDelivery`, neither of which any write
+   * path in this service ever populates. Unscoped (no sakhiId/roster filter)
+   * since the only caller is a system-wide background job, not a
+   * Sakhi/Supervisor/Manager viewing their own scope.
+   */
+  async findMotherIdsWithEddOnOrBefore(
+    cutoffDate: Date,
+    limit: number,
+    cursor: string | undefined,
+  ): Promise<{
+    items: { beneficiaryId: string; registrationDate: Date; eddDate: Date }[];
+    nextCursor: string | null;
+  }> {
+    const decodedCursor = cursor ? decodePostEddCursor(cursor) : null;
+
+    const rows = await this.prisma.beneficiaryCase.findMany({
+      where: {
+        isDeleted: false,
+        caseType: 'MOTHER',
+        currentStatus: 'ACTIVE',
+        currentPhase: 'ANC',
+        motherCaseDetails: { eddDate: { lte: cutoffDate } },
+        ...(decodedCursor
+          ? {
+              OR: [
+                { motherCaseDetails: { eddDate: { lt: new Date(decodedCursor.eddDate) } } },
+                {
+                  motherCaseDetails: { eddDate: new Date(decodedCursor.eddDate) },
+                  id: { gt: decodedCursor.id },
+                },
+              ],
+            }
+          : {}),
+      },
+      orderBy: [{ motherCaseDetails: { eddDate: 'asc' } }, { id: 'asc' }],
+      take: limit + 1,
+      select: {
+        id: true,
+        registrationDate: true,
+        motherCaseDetails: { select: { eddDate: true } },
+      },
+    });
+
+    const hasMore = rows.length > limit;
+    const page = hasMore ? rows.slice(0, limit) : rows;
+    // The `motherCaseDetails: { eddDate: ... }` filter above only matches
+    // rows with a related MotherCaseDetails record, so `eddDate` here is
+    // never null in practice — filtered (not asserted) so a future query
+    // change that loosens that guarantee fails closed (row dropped) rather
+    // than throwing on a non-null assertion.
+    const rowsWithEdd = page.flatMap((row) =>
+      row.motherCaseDetails ? [{ ...row, motherCaseDetails: row.motherCaseDetails }] : [],
+    );
+    const items = rowsWithEdd.map((row) => ({
+      beneficiaryId: row.id,
+      registrationDate: row.registrationDate,
+      eddDate: row.motherCaseDetails.eddDate,
+    }));
+    const lastRow = rowsWithEdd[rowsWithEdd.length - 1];
+    const nextCursor =
+      hasMore && lastRow
+        ? encodePostEddCursor({ eddDate: lastRow.motherCaseDetails.eddDate, id: lastRow.id })
+        : null;
+
+    return { items, nextCursor };
   }
 
   /**

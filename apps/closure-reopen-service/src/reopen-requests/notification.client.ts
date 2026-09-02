@@ -14,6 +14,7 @@ export class NotificationClient {
     title: string,
     body: string,
     authorizationHeader: string,
+    linkedEntity?: { linkedEntityType: string; linkedEntityId: string },
   ): Promise<void> {
     let res: Response;
     try {
@@ -26,6 +27,7 @@ export class NotificationClient {
           title,
           body,
           status: 'UNREAD',
+          ...linkedEntity,
         }),
       });
     } catch {

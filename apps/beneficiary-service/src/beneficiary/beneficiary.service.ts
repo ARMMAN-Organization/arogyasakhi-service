@@ -496,6 +496,26 @@ export class BeneficiaryService {
   }
 
   /**
+   * MOTHER beneficiaries whose EDD has passed `cutoffDate` and who are still
+   * in the ANC phase (no delivery outcome submitted yet) — for
+   * visit-form-service's post-EDD visit-generation job. SYSTEM-only (see
+   * beneficiary.routes.ts): unlike getIds/getPadaBreakdown, there is no
+   * sakhiId/roster scoping here — the only caller is a background job
+   * acting system-wide, not a human viewing their own scope.
+   */
+  async getPostEddPendingBeneficiaries(
+    cutoffDate: string,
+    limit: number,
+    cursor: string | undefined,
+  ) {
+    return this.repository.findMotherIdsWithEddOnOrBefore(
+      new Date(`${cutoffDate}T00:00:00.000Z`),
+      limit,
+      cursor,
+    );
+  }
+
+  /**
    * Pada Breakdown widget — one row per distinct pada the caller's in-scope
    * beneficiaries live in (a beneficiary with no padaId on record is
    * excluded, per findIdsGroupedByPada), each with a resolved padaName,

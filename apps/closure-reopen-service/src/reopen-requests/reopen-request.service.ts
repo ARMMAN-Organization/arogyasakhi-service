@@ -5,6 +5,7 @@ import type { NotificationClient } from './notification.client';
 import type { ApprovalClient } from './approval.client';
 import type { LookupClient } from './lookup.client';
 import type { BeneficiaryClient } from './beneficiary.client';
+import type { SakhiClient } from './sakhi.client';
 import type { CreateReopenRequestInput } from './dto/create-reopen-request.dto';
 import type { DecideReopenRequestInput } from './dto/decide-reopen-request.dto';
 
@@ -27,7 +28,51 @@ export class ReopenRequestService {
     private readonly approvalClient: ApprovalClient,
     private readonly lookupClient: LookupClient,
     private readonly beneficiaryClient: BeneficiaryClient,
+    private readonly sakhiClient: SakhiClient,
   ) {}
+
+  /** Best-effort — a name lookup failure falls back to no name (generic
+   * notification text) rather than blocking the decision it's attached to. */
+  private async resolveSakhiName(
+    sakhiId: string,
+    authorizationHeader: string,
+  ): Promise<string | null> {
+    try {
+      const sakhi = await this.sakhiClient.getById(sakhiId, authorizationHeader);
+      return sakhi?.displayName ?? null;
+    } catch (err) {
+      console.error(`Failed to resolve Sakhi ${sakhiId}'s name for a notification:`, err);
+      return null;
+    }
+  }
+
+  /**
+   * Best-effort — this reopen request's Quick Response card id
+   * (approval_requests.id), used to link the decision notification so
+   * GET /quick-response/:cardId can resolve it. A failure here (no matching
+   * approval request, or approval-service unreachable) must not block the
+   * decision — the notification is simply sent without a linkedEntity rather
+   * than with a reopen_requests-table id GET /quick-response/:cardId doesn't
+   * recognise.
+   */
+  private async resolveQuickResponseCardId(
+    reopenRequestId: string,
+    authorizationHeader: string,
+  ): Promise<string | null> {
+    try {
+      const approvalRequest = await this.approvalClient.findByReopenRequestId(
+        reopenRequestId,
+        authorizationHeader,
+      );
+      return approvalRequest?.id ?? null;
+    } catch (err) {
+      console.error(
+        `Failed to resolve the Quick Response card id for reopen request ${reopenRequestId}:`,
+        err,
+      );
+      return null;
+    }
+  }
 
   /**
    * All reopen requests for one beneficiary, most-recent first — for the
@@ -173,8 +218,13 @@ export class ReopenRequestService {
     // /beneficiaries/:id (SAKHI-own-case / SUPERVISOR-roster /
     // MANAGER-unrestricted) — same pattern create() already uses. Without
     // this, any SUPERVISOR who learns a reopen request id outside their own
-    // roster could approve or reject it (IDOR).
-    await this.beneficiaryClient.getById(existing.beneficiaryId, authorizationHeader);
+    // roster could approve or reject it (IDOR). Its response is also reused
+    // below for the Sakhi notification's beneficiary name, avoiding a
+    // second fetch.
+    const beneficiary = await this.beneficiaryClient.getById(
+      existing.beneficiaryId,
+      authorizationHeader,
+    );
 
     if (existing.supervisorStatus !== 'PENDING') {
       throw conflict('This reopen request has already been decided.');
@@ -215,14 +265,24 @@ export class ReopenRequestService {
         { decision: dto.decision, decisionNotes: dto.decisionNotes ?? null },
         authorizationHeader,
       );
+      const [sakhiName, cardId] = await Promise.all([
+        this.resolveSakhiName(existing.requestedByUserId, authorizationHeader),
+        this.resolveQuickResponseCardId(id, authorizationHeader),
+      ]);
+      const beneficiaryName = beneficiary?.pii.fullName ?? null;
       await this.notificationClient.notify(
         existing.requestedByUserId,
         'REOPEN_UPDATE',
-        'Reopen request decided',
-        dto.decision === 'APPROVED'
-          ? 'Your reopen request was approved.'
-          : 'Your reopen request was rejected.',
+        sakhiName ? `Reopen request — ${sakhiName}` : 'Reopen request decided',
+        beneficiaryName
+          ? dto.decision === 'APPROVED'
+            ? `${beneficiaryName}'s reopen request was approved`
+            : `${beneficiaryName}'s reopen request was rejected`
+          : dto.decision === 'APPROVED'
+            ? 'Your reopen request was approved.'
+            : 'Your reopen request was rejected.',
         authorizationHeader,
+        cardId ? { linkedEntityType: 'QuickResponseCard', linkedEntityId: cardId } : undefined,
       );
     } catch (err) {
       console.error(

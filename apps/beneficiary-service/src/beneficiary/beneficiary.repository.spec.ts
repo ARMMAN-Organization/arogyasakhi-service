@@ -2,7 +2,8 @@ import { BeneficiaryRepository } from './beneficiary.repository';
 
 describe('BeneficiaryRepository', () => {
   const groupBy = jest.fn();
-  const prisma = { beneficiaryCase: { groupBy } } as never;
+  const findMany = jest.fn();
+  const prisma = { beneficiaryCase: { groupBy, findMany } } as never;
   let repository: BeneficiaryRepository;
 
   beforeEach(() => {
@@ -372,6 +373,112 @@ describe('BeneficiaryRepository', () => {
         select: { id: true, sakhiId: true, caseType: true },
       });
       expect(result).toEqual({ id: 'ben-1', sakhiId: 'sakhi-1', caseType: 'MOTHER' });
+    });
+  });
+
+  describe('findMotherIdsWithEddOnOrBefore', () => {
+    it('queries MOTHER/ACTIVE/ANC-phase beneficiaries with eddDate <= cutoffDate', async () => {
+      findMany.mockResolvedValue([]);
+      const cutoffDate = new Date('2026-08-01T00:00:00.000Z');
+
+      await repository.findMotherIdsWithEddOnOrBefore(cutoffDate, 200, undefined);
+
+      expect(findMany).toHaveBeenCalledWith({
+        where: {
+          isDeleted: false,
+          caseType: 'MOTHER',
+          currentStatus: 'ACTIVE',
+          currentPhase: 'ANC',
+          motherCaseDetails: { eddDate: { lte: cutoffDate } },
+        },
+        orderBy: [{ motherCaseDetails: { eddDate: 'asc' } }, { id: 'asc' }],
+        take: 201,
+        select: {
+          id: true,
+          registrationDate: true,
+          motherCaseDetails: { select: { eddDate: true } },
+        },
+      });
+    });
+
+    it('maps rows to {beneficiaryId, registrationDate, eddDate} and reports no next page under the limit', async () => {
+      findMany.mockResolvedValue([
+        {
+          id: 'ben-1',
+          registrationDate: new Date('2026-01-01T00:00:00.000Z'),
+          motherCaseDetails: { eddDate: new Date('2026-07-01T00:00:00.000Z') },
+        },
+      ]);
+
+      const result = await repository.findMotherIdsWithEddOnOrBefore(
+        new Date('2026-08-01T00:00:00.000Z'),
+        200,
+        undefined,
+      );
+
+      expect(result.items).toEqual([
+        {
+          beneficiaryId: 'ben-1',
+          registrationDate: new Date('2026-01-01T00:00:00.000Z'),
+          eddDate: new Date('2026-07-01T00:00:00.000Z'),
+        },
+      ]);
+      expect(result.nextCursor).toBeNull();
+    });
+
+    it('returns a nextCursor and trims the extra row when more results exist beyond the limit', async () => {
+      const row = (n: number) => ({
+        id: `ben-${n}`,
+        registrationDate: new Date('2026-01-01T00:00:00.000Z'),
+        motherCaseDetails: { eddDate: new Date(`2026-07-0${n}T00:00:00.000Z`) },
+      });
+      findMany.mockResolvedValue([row(1), row(2)]);
+
+      const result = await repository.findMotherIdsWithEddOnOrBefore(
+        new Date('2026-08-01T00:00:00.000Z'),
+        1,
+        undefined,
+      );
+
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0].beneficiaryId).toBe('ben-1');
+      expect(result.nextCursor).not.toBeNull();
+    });
+
+    it('decodes a supplied cursor into an eddDate/id keyset filter', async () => {
+      findMany.mockResolvedValue([]);
+      const cursor = Buffer.from(
+        JSON.stringify({ eddDate: '2026-07-05T00:00:00.000Z', id: 'ben-5' }),
+      ).toString('base64url');
+
+      await repository.findMotherIdsWithEddOnOrBefore(
+        new Date('2026-08-01T00:00:00.000Z'),
+        200,
+        cursor,
+      );
+
+      const call = findMany.mock.calls[0][0];
+      expect(call.where.OR).toEqual([
+        { motherCaseDetails: { eddDate: { lt: new Date('2026-07-05T00:00:00.000Z') } } },
+        {
+          motherCaseDetails: { eddDate: new Date('2026-07-05T00:00:00.000Z') },
+          id: { gt: 'ben-5' },
+        },
+      ]);
+    });
+
+    it('treats a malformed cursor as "start from the beginning" rather than throwing', async () => {
+      findMany.mockResolvedValue([]);
+
+      await expect(
+        repository.findMotherIdsWithEddOnOrBefore(
+          new Date('2026-08-01T00:00:00.000Z'),
+          200,
+          'not-a-valid-cursor',
+        ),
+      ).resolves.toEqual({ items: [], nextCursor: null });
+
+      expect(findMany.mock.calls[0][0].where.OR).toBeUndefined();
     });
   });
 });
