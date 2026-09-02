@@ -2156,7 +2156,8 @@ describe('QuickResponseService', () => {
         expect.any(String),
         expect.any(String),
         authHeader,
-        { linkedEntityType: 'QuickResponseCard', linkedEntityId: card.id },
+        { linkedEntityType: 'Referral', linkedEntityId: card.referralId },
+        undefined,
       );
       expect(result.decision).toBe('APPROVE');
     });
@@ -2197,7 +2198,8 @@ describe('QuickResponseService', () => {
         'Referral follow-up — Priya Sakhi',
         "Asha Devi's referral follow-up was marked Lapsed",
         authHeader,
-        { linkedEntityType: 'QuickResponseCard', linkedEntityId: card.id },
+        { linkedEntityType: 'Referral', linkedEntityId: card.referralId },
+        undefined,
       );
     });
 
@@ -2230,11 +2232,12 @@ describe('QuickResponseService', () => {
         'Referral follow-up — Priya Sakhi',
         'Your referral follow-up was marked Lapsed by your Supervisor.',
         authHeader,
-        { linkedEntityType: 'QuickResponseCard', linkedEntityId: card.id },
+        { linkedEntityType: 'Referral', linkedEntityId: card.referralId },
+        undefined,
       );
     });
 
-    it('rejects: decides via ReferralClient with REFILL', async () => {
+    it('rejects: decides via ReferralClient with REFILL and notifies the Sakhi with a Fill Referral Form CTA', async () => {
       const card = referralIncompleteRequest();
       repository.findById.mockResolvedValue(card);
       referralClient.decide.mockResolvedValue({
@@ -2250,6 +2253,15 @@ describe('QuickResponseService', () => {
         authHeader,
       );
       expect(referralClient.decide).toHaveBeenCalledWith(card.referralId, 'REFILL', authHeader);
+      expect(notificationClient.notify).toHaveBeenCalledWith(
+        card.requestedByUserId,
+        'REFERRAL_INCOMPLETE_UPDATE',
+        expect.any(String),
+        expect.any(String),
+        authHeader,
+        { linkedEntityType: 'Referral', linkedEntityId: card.referralId },
+        'FILL_REFERRAL_FORM',
+      );
       expect(result.decision).toBe('REJECT');
     });
 

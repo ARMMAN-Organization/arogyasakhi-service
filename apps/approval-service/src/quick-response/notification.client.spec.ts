@@ -53,4 +53,34 @@ describe('NotificationClient', () => {
       client.notify('sakhi-1', 'SUPERVISOR_APPROVAL_REQUESTED', 'title', 'body', AUTH_HEADER),
     ).resolves.toBeUndefined();
   });
+
+  it('includes ctaType in the request body when given', async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 201 });
+
+    await client.notify(
+      'sakhi-1',
+      'REFERRAL_INCOMPLETE_UPDATE',
+      'title',
+      'body',
+      AUTH_HEADER,
+      { linkedEntityType: 'Referral', linkedEntityId: 'referral-1' },
+      'FILL_REFERRAL_FORM',
+    );
+
+    const options = fetchMock.mock.calls[0][1] as { body: string };
+    expect(JSON.parse(options.body)).toMatchObject({
+      linkedEntityType: 'Referral',
+      linkedEntityId: 'referral-1',
+      ctaType: 'FILL_REFERRAL_FORM',
+    });
+  });
+
+  it('omits ctaType from the request body when not given', async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 201 });
+
+    await client.notify('sakhi-1', 'SUPERVISOR_APPROVAL_REQUESTED', 'title', 'body', AUTH_HEADER);
+
+    const options = fetchMock.mock.calls[0][1] as { body: string };
+    expect(JSON.parse(options.body)).not.toHaveProperty('ctaType');
+  });
 });

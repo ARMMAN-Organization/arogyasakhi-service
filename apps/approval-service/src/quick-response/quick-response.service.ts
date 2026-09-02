@@ -1204,7 +1204,12 @@ export class QuickResponseService {
             ? 'Your referral follow-up was marked Lapsed by your Supervisor.'
             : 'Please refill the referral follow-up form.',
         authorizationHeader,
-        { linkedEntityType: 'QuickResponseCard', linkedEntityId: cardId },
+        // Points at the referral itself (not the now-irrelevant QuickResponseCard)
+        // so the Sakhi app can navigate straight to it — REJECT is the only
+        // decision that leaves something to act on; APPROVE marks the referral
+        // Lapsed, so there is nothing left to fill and no CTA is sent.
+        { linkedEntityType: 'Referral', linkedEntityId: existing.referralId },
+        dto.decision === 'REJECT' ? 'FILL_REFERRAL_FORM' : undefined,
       );
     } catch (err) {
       console.error(
