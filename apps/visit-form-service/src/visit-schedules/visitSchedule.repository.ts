@@ -59,6 +59,80 @@ export class VisitScheduleRepository {
   }
 
   /**
+   * OPEN schedules whose window has closed — the missed-visit job's
+   * candidate set (missedVisit.job.ts). Bounded by `take` so one tick can't
+   * try to process an unbounded backlog in a single run; a backlog larger
+   * than that just gets picked up on the next tick.
+   */
+  findOverdueOpenSchedules(now: Date, take: number) {
+    return this.prisma.visitSchedule.findMany({
+      where: { status: 'OPEN', windowEndDate: { lt: now }, isDeleted: false },
+      orderBy: { windowEndDate: 'asc' },
+      take,
+    });
+  }
+
+  /**
+   * Flips one schedule OPEN->MISSED. The `where: { status: 'OPEN' }` guard
+   * makes this idempotent under a concurrent run (or a retried job tick):
+   * `updateMany`'s matched count is 0 if another run already transitioned
+   * it, so the caller knows not to re-raise an escalation for it.
+   */
+  async markMissed(id: string): Promise<boolean> {
+    const result = await this.prisma.visitSchedule.updateMany({
+      where: { id, status: 'OPEN' },
+      data: { status: 'MISSED' },
+    });
+    return result.count > 0;
+  }
+
+  /**
+   * Reverts a schedule this same job tick already flipped to MISSED back to
+   * OPEN — used only when a downstream step after markMissed (VisitInstance
+   * write, escalation lookup/evaluation) throws. Without this, that schedule
+   * would never be selected by findOverdueOpenSchedules again and the
+   * required escalation would be silently and permanently lost (see
+   * missedVisit.job.ts's per-schedule try/catch). The `status: 'MISSED'`
+   * guard mirrors markMissed's own idempotency guard: only undoes this
+   * tick's own transition, never a MISSED row some other process already
+   * relied on.
+   */
+  async revertToOpen(id: string): Promise<boolean> {
+    const result = await this.prisma.visitSchedule.updateMany({
+      where: { id, status: 'MISSED' },
+      data: { status: 'OPEN' },
+    });
+    return result.count > 0;
+  }
+
+  /**
+   * Already-due schedules for this beneficiary+visitType, most-recent first
+   * — the missed-visit job walks this list counting the unbroken trailing
+   * run of MISSED to derive `consecutiveMissedCount` (scoped to the exact
+   * visitType, e.g. ANC vs ANC_HR are counted separately — see
+   * missedVisit.job.ts for why). Bounded to a small window since only the
+   * leading run matters, not the full history.
+   *
+   * `windowEndDate: { lte: asOf }` excludes schedules that aren't due yet —
+   * ANC/PP/INC schedules are generated as a full batch up front
+   * (scheduleMapper.ts), so a beneficiary typically has several future OPEN
+   * rows sitting ahead of the visit that just missed. Without this filter,
+   * those future rows sort first (scheduledDate desc) and
+   * countConsecutiveMissed breaks on the first non-MISSED row it sees,
+   * always returning 0 and silently defeating HR/consecutive-count
+   * escalation. `asOf` is the caller's `now`, not this call's own time, so
+   * a schedule reprocessed on retry sees the same "due" boundary as its
+   * first attempt.
+   */
+  findRecentByBeneficiaryAndVisitType(beneficiaryId: string, visitType: VisitCodeType, asOf: Date) {
+    return this.prisma.visitSchedule.findMany({
+      where: { beneficiaryId, visitType, isDeleted: false, windowEndDate: { lte: asOf } },
+      orderBy: { scheduledDate: 'desc' },
+      take: 20,
+    });
+  }
+
+  /**
    * Re-stamps a stored row's provenance after a rule-pack republish evaluates
    * an already-scheduled slot identically — the schedule content is unchanged
    * so no supersede is needed, but generatedByRuleVersionId must reflect the

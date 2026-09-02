@@ -1319,6 +1319,7 @@ describe('FormService', () => {
         stateId: 'state-1',
         districtId: 'district-1',
         childDateOfBirth: null,
+        fullName: 'Jane Doe',
       };
 
       const deliveryVersion = {
@@ -1572,6 +1573,7 @@ describe('FormService', () => {
         stateId: 'state-1',
         districtId: 'district-1',
         childDateOfBirth: null,
+        fullName: 'Jane Doe',
       };
 
       const deliveryVersion = {
@@ -2090,6 +2092,62 @@ describe('FormService', () => {
         );
       });
 
+      it('merges sickleCellStatus from the registration submission when present', async () => {
+        repository.findLatestSubmissionByBeneficiaryAndFormCode.mockResolvedValue({
+          formDataJson: {
+            gravida_total_number_of_pregnancies: 2,
+            have_you_been_detected_with_sickle_cell_disease_or_sickle_cell_trait_sct:
+              'sickle_cell_disease_scd',
+          },
+        } as never);
+
+        await service.createSubmission(
+          'ANC_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            visitId: 'visit-1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {},
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(triggerRiskAssessment)).toHaveBeenCalledWith(
+          expect.objectContaining({
+            answers: expect.objectContaining({ sickleCellStatus: 'sickle_cell_disease_scd' }),
+          }),
+          'Bearer test-token',
+        );
+      });
+
+      it('omits sickleCellStatus when the registration submission has no answer for it', async () => {
+        repository.findLatestSubmissionByBeneficiaryAndFormCode.mockResolvedValue({
+          formDataJson: { gravida_total_number_of_pregnancies: 2 },
+        } as never);
+
+        await service.createSubmission(
+          'ANC_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            visitId: 'visit-1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {},
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(triggerRiskAssessment)).toHaveBeenCalledWith(
+          expect.objectContaining({
+            answers: expect.not.objectContaining({ sickleCellStatus: expect.anything() }),
+          }),
+          'Bearer test-token',
+        );
+      });
+
       it('proceeds without registration-derived answers when no MOTHER_REGISTRATION submission exists', async () => {
         repository.findLatestSubmissionByBeneficiaryAndFormCode.mockResolvedValue(null);
 
@@ -2242,6 +2300,7 @@ describe('FormService', () => {
         stateId: 'state-1',
         districtId: 'district-1',
         childDateOfBirth: null,
+        fullName: 'Jane Doe',
       };
 
       const deliveryVersion = {

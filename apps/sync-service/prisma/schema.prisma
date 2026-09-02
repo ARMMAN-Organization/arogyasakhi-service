@@ -77,6 +77,10 @@ model SyncBatch {
 
   syncItems SyncItem[]
 
+  // Supports findLastSyncedAtByUserIds's groupBy(userId, status) with
+  // _max(completedAt) — the Supervisor roster dashboard's hot-path query,
+  // run on every dashboard load for the whole roster at once.
+  @@index([userId, status, completedAt])
   @@map("sync_batches")
 }
 

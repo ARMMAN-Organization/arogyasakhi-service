@@ -149,6 +149,8 @@ describe('toBulkScheduleRows', () => {
 
   it.each([
     ['ANC-HR', 'ANC_HR'],
+    ['PP-HR', 'PP_HR'],
+    ['NN-HR', 'NN_HR'],
     ['INC-HR', 'INC_HR'],
     ['CCV-HR', 'CCV_HR'],
   ])('maps a single %s row when generateHrVisit is true', (visitName, expectedType) => {
@@ -176,7 +178,7 @@ describe('toBulkScheduleRows', () => {
         generateHrVisit: true,
         cumulative: false,
         hrVisit: {
-          visitName: 'PP-HR',
+          visitName: 'DELIVERY-HR',
           scheduledDate: '2026-08-10',
           windowOpen: '2026-08-08',
           windowClose: '2026-08-12',

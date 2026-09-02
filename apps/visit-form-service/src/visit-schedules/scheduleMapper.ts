@@ -134,9 +134,18 @@ export function toBulkScheduleRows(
       }
       // hrVisit.visitName is "<phase>-HR" (e.g. "INC-HR") per hr.rulesJson.ts —
       // derive the visitCode/visitType from it instead of hardcoding one phase,
-      // since visitCodeTypeSchema defines distinct ANC_HR/INC_HR/CCV_HR values.
+      // since visitCodeTypeSchema defines distinct ANC_HR/PP_HR/NN_HR/INC_HR/
+      // CCV_HR values. PP_HR/NN_HR are accepted here so this mapper is ready
+      // the day hr.rulesJson.ts (rules-service) starts emitting them — it
+      // doesn't yet, so those two branches are currently unreachable.
       const hrType = hrVisit.visitName.replace('-', '_');
-      if (hrType !== 'ANC_HR' && hrType !== 'INC_HR' && hrType !== 'CCV_HR') {
+      if (
+        hrType !== 'ANC_HR' &&
+        hrType !== 'PP_HR' &&
+        hrType !== 'NN_HR' &&
+        hrType !== 'INC_HR' &&
+        hrType !== 'CCV_HR'
+      ) {
         throw badRequest(
           `HR evaluation returned an unrecognised visitName: "${hrVisit.visitName}".`,
         );

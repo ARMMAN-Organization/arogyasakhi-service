@@ -19,9 +19,20 @@ export interface CallerIdentity {
   readonly roles: readonly string[];
 }
 
-/** MANAGER and ADMIN are unrestricted — same convention as every other service. */
+/**
+ * MANAGER and ADMIN are unrestricted — same convention as every other
+ * service. SYSTEM is included too: postEddVisitGeneration.job.ts calls
+ * generateSchedule directly (in-process) with a service-token-backed SYSTEM
+ * identity, which has no Sakhi/Supervisor roster of its own to check
+ * against, same reasoning as escalation.routes.ts/notification.routes.ts
+ * already granting SYSTEM their ADMIN-only endpoints.
+ */
 function isPrivileged(caller: CallerIdentity): boolean {
-  return caller.roles.includes('MANAGER') || caller.roles.includes('ADMIN');
+  return (
+    caller.roles.includes('MANAGER') ||
+    caller.roles.includes('ADMIN') ||
+    caller.roles.includes('SYSTEM')
+  );
 }
 
 /** The digits at the end of a visitCode (e.g. "3" in "ANC3", "11" in "INC11"). */

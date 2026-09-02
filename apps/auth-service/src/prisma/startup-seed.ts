@@ -162,16 +162,104 @@ export async function seedAdminUsers(prisma: SeedPrismaClient): Promise<SeedResu
   return results;
 }
 
+const seedServiceAccountSchema = z.object({
+  name: z.string().min(1),
+  clientId: z.string().min(1),
+  clientSecret: z.string().min(1),
+  role: z.string().min(1).default('SYSTEM'),
+});
+
+/**
+ * Parses the SERVICE_ACCOUNTS env var (a JSON array of `{ name, clientId,
+ * clientSecret, role? }`) — same shape/fail-fast convention as
+ * {@link parseAdminEnv}. `role` defaults to "SYSTEM" since that's the only
+ * machine role in use today.
+ */
+function parseServiceAccountsEnv(): z.infer<typeof seedServiceAccountSchema>[] {
+  const raw = process.env.SERVICE_ACCOUNTS;
+  if (!raw) return [];
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(
+      'SERVICE_ACCOUNTS must be valid JSON (an array of {name, clientId, clientSecret, role?}).',
+    );
+  }
+
+  const result = z.array(seedServiceAccountSchema).safeParse(parsed);
+  if (!result.success) {
+    throw new Error(`SERVICE_ACCOUNTS is malformed: ${result.error.message}`);
+  }
+  return result.data;
+}
+
+/**
+ * Seeds machine-identity credentials from the `SERVICE_ACCOUNTS` env var —
+ * the client-credentials counterpart of {@link seedAdminUsers}. An account
+ * already existing by `clientId` is left untouched (secret never rotated by
+ * this step); rotate by changing the DB row directly or via a future admin
+ * endpoint, not by re-running startup with a new secret in the env var.
+ */
+export async function seedServiceAccounts(prisma: SeedPrismaClient): Promise<SeedResult[]> {
+  const accounts = parseServiceAccountsEnv();
+  if (accounts.length === 0) {
+    return [
+      {
+        step: 'seedServiceAccount',
+        created: false,
+        message: 'SERVICE_ACCOUNTS not set or empty — skipped.',
+      },
+    ];
+  }
+
+  const results: SeedResult[] = [];
+  for (const account of accounts) {
+    const existing = await prisma.serviceAccount.findUnique({
+      where: { clientId: account.clientId },
+    });
+    if (existing) {
+      results.push({
+        step: `seedServiceAccount:${account.clientId}`,
+        created: false,
+        message: `Service account ${account.clientId} already exists — skipped.`,
+      });
+      continue;
+    }
+
+    const clientSecretHash = await argon2.hash(account.clientSecret);
+    await prisma.serviceAccount.create({
+      data: {
+        name: account.name,
+        clientId: account.clientId,
+        clientSecretHash,
+        role: account.role,
+      },
+    });
+    results.push({
+      step: `seedServiceAccount:${account.clientId}`,
+      created: true,
+      message: `Seeded service account ${account.clientId} (role ${account.role}).`,
+    });
+  }
+  return results;
+}
+
 /**
  * Runs at app boot (before the HTTP server starts listening): ensures role
- * master data and the platform's ADMIN user(s) exist, self-healing a fresh
- * deployment without a separate manual seed step. SAKHI/SUPERVISOR/MANAGER
- * test users are NOT seeded here — they stay behind the manual
- * `npm run prisma:seed` script (prisma/seed.ts), since they're dev/test
- * fixtures, not master data the app needs to function.
+ * master data, the platform's ADMIN user(s), and any configured service
+ * accounts exist, self-healing a fresh deployment without a separate manual
+ * seed step. SAKHI/SUPERVISOR/MANAGER test users are NOT seeded here — they
+ * stay behind the manual `npm run prisma:seed` script (prisma/seed.ts),
+ * since they're dev/test fixtures, not master data the app needs to function.
  */
 export async function seedOnStartup(prisma: SeedPrismaClient): Promise<void> {
-  const results = [await seedRoles(prisma), ...(await seedAdminUsers(prisma))];
+  const results = [
+    await seedRoles(prisma),
+    ...(await seedAdminUsers(prisma)),
+    ...(await seedServiceAccounts(prisma)),
+  ];
 
   for (const r of results) {
     console.log(`[startup-seed] [${r.created ? 'created' : 'skipped'}] ${r.step}: ${r.message}`);

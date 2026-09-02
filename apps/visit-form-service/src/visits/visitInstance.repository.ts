@@ -37,6 +37,54 @@ export class VisitInstanceRepository {
   }
 
   /**
+   * Job-only write (missedVisit.job.ts) — flips every not-yet-completed
+   * instance on a schedule to the MISSED lookup value, bypassing
+   * updateStatus()'s human-caller ownership checks (this is a system
+   * transition, not a user PATCH). `completedAt: null` is the existing
+   * "not completed" proxy this repo already relies on elsewhere (see
+   * findManyByBeneficiaryId's doc comment) — a COMPLETED instance's
+   * completedAt is always set, so this WHERE clause can never overwrite one.
+   *
+   * Writes a VisitStatusHistory row per transitioned instance in the same
+   * transaction, same as updateStatus() below — every other status-changing
+   * path records one, and a cron-driven MISSED transition is no exception
+   * (see this file's own doc comment on VisitStatusHistory being "the
+   * record of when the MISSED transition itself happened").
+   * `changedByUserId` is the job's own system caller id, not a human's,
+   * matching missedVisit.job.ts's SYSTEM-role identity for this write.
+   */
+  async markMissedByScheduleId(
+    scheduleId: string,
+    missedStatusLookupValueId: string,
+    changedByUserId: string,
+  ): Promise<number> {
+    return this.prisma.$transaction(async (tx) => {
+      const targets = await tx.visitInstance.findMany({
+        where: { scheduleId, isDeleted: false, completedAt: null },
+        select: { id: true, statusLookupValueId: true },
+      });
+      if (targets.length === 0) return 0;
+
+      await tx.visitInstance.updateMany({
+        where: { id: { in: targets.map((t) => t.id) } },
+        data: { statusLookupValueId: missedStatusLookupValueId, statusCode: null },
+      });
+
+      await tx.visitStatusHistory.createMany({
+        data: targets.map((t) => ({
+          visitId: t.id,
+          fromStatusLookupValueId: t.statusLookupValueId,
+          toStatusLookupValueId: missedStatusLookupValueId,
+          changedByUserId,
+          changedAt: new Date(),
+        })),
+      });
+
+      return targets.length;
+    });
+  }
+
+  /**
    * The beneficiary's `limit` most-recently-completed INC-type visits
    * (visitType NEONATAL_VISIT/INC_VISIT's schedule-level VisitCodeType,
    * INC/INC_HR), most recent first — used by BR-13's CCV opening-risk-state

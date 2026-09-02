@@ -20,6 +20,7 @@ describe('createChildBeneficiary', () => {
     stateId: 'state-1',
     districtId: 'district-1',
     childDateOfBirth: null,
+    fullName: 'Jane Doe',
   };
 
   beforeEach(() => {

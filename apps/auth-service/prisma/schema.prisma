@@ -22,7 +22,6 @@ enum UserStatus {
   LOCKED
   PAUSED
   DELETED
-
 }
 
 enum UserRoleStatus {
@@ -30,7 +29,6 @@ enum UserRoleStatus {
   EXPIRED
   REVOKED
   INACTIVE
-
 }
 
 model User {
@@ -137,12 +135,38 @@ model UserSession {
   @@map("user_sessions")
 }
 
+// Not in the ERD — added to give backend jobs/crons a real machine identity
+// (client-credentials grant) instead of forwarding a human's own JWT, which
+// was the only "server-to-server" pattern that existed before this table.
+// Deliberately separate from users/user_roles: a service account is never a
+// person, never logs in via /auth/login, and never holds a session.
+model ServiceAccount {
+  id               String    @id @default(uuid()) @map("service_account_id")
+  name             String    @db.VarChar(120)
+  clientId         String    @unique @map("client_id") @db.VarChar(80)
+  clientSecretHash String    @map("client_secret_hash") @db.VarChar(255)
+  // The single role code embedded in every token this account mints, e.g.
+  // "SYSTEM". A plain string (not a Role relation) — service accounts are
+  // intentionally outside the human role/permission model.
+  role             String    @db.VarChar(50)
+  isActive         Boolean   @default(true) @map("is_active")
+  // Same convention as User.failedLoginCount/lastLoginAt — clientIds aren't
+  // secret (shipped in .env.example as descriptive strings like
+  // "sync-service"), so there is otherwise no record kept anywhere of
+  // repeated clientSecret guesses against POST /auth/service-token.
+  lastAuthAt       DateTime? @map("last_auth_at")
+  failedAuthCount  Int       @default(0) @map("failed_auth_count")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  @@map("service_accounts")
+}
+
 // Column set matches ERD Appendix A.1 (funders, projects) exactly.
 
 enum FunderStatus {
   ACTIVE
   INACTIVE
-
 }
 
 model Funder {
@@ -166,7 +190,6 @@ enum ProjectStatus {
   ACTIVE
   PAUSED
   CLOSED
-
 }
 
 model Project {
@@ -242,13 +265,11 @@ enum GeoType {
   SUBCENTRE
   VILLAGE
   PADA
-
 }
 
 enum GeographyUnitStatus {
   ACTIVE
   INACTIVE
-
 }
 
 model GeographyUnit {
@@ -285,16 +306,16 @@ enum GeographyStatus {
 }
 
 model State {
-  stateId         String    @id @default(uuid()) @map("state_id")
-  stateCode       String    @unique @map("state_code") @db.VarChar(80)
-  name            String    @db.VarChar(180)
+  stateId         String          @id @default(uuid()) @map("state_id")
+  stateCode       String          @unique @map("state_code") @db.VarChar(80)
+  name            String          @db.VarChar(180)
   status          GeographyStatus @default(ACTIVE)
-  createdAt       DateTime  @default(now()) @map("created_at")
-  createdByUserId String?   @map("created_by_user_id")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
-  updatedByUserId String?   @map("updated_by_user_id")
-  isDeleted       Boolean   @default(false) @map("is_deleted")
-  deletedAt       DateTime? @map("deleted_at")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  createdByUserId String?         @map("created_by_user_id")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+  updatedByUserId String?         @map("updated_by_user_id")
+  isDeleted       Boolean         @default(false) @map("is_deleted")
+  deletedAt       DateTime?       @map("deleted_at")
 
   districts District[]
 
@@ -302,18 +323,18 @@ model State {
 }
 
 model District {
-  districtId      String    @id @default(uuid()) @map("district_id")
-  stateId         String    @map("state_id")
-  state           State     @relation(fields: [stateId], references: [stateId], onDelete: Restrict)
-  districtCode    String    @map("district_code") @db.VarChar(80)
-  name            String    @db.VarChar(180)
+  districtId      String          @id @default(uuid()) @map("district_id")
+  stateId         String          @map("state_id")
+  state           State           @relation(fields: [stateId], references: [stateId], onDelete: Restrict)
+  districtCode    String          @map("district_code") @db.VarChar(80)
+  name            String          @db.VarChar(180)
   status          GeographyStatus @default(ACTIVE)
-  createdAt       DateTime  @default(now()) @map("created_at")
-  createdByUserId String?   @map("created_by_user_id")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
-  updatedByUserId String?   @map("updated_by_user_id")
-  isDeleted       Boolean   @default(false) @map("is_deleted")
-  deletedAt       DateTime? @map("deleted_at")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  createdByUserId String?         @map("created_by_user_id")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+  updatedByUserId String?         @map("updated_by_user_id")
+  isDeleted       Boolean         @default(false) @map("is_deleted")
+  deletedAt       DateTime?       @map("deleted_at")
 
   blocks Block[]
 
@@ -322,18 +343,18 @@ model District {
 }
 
 model Block {
-  blockId         String    @id @default(uuid()) @map("block_id")
-  districtId      String    @map("district_id")
-  district        District  @relation(fields: [districtId], references: [districtId], onDelete: Restrict)
-  blockCode       String    @map("block_code") @db.VarChar(80)
-  name            String    @db.VarChar(180)
+  blockId         String          @id @default(uuid()) @map("block_id")
+  districtId      String          @map("district_id")
+  district        District        @relation(fields: [districtId], references: [districtId], onDelete: Restrict)
+  blockCode       String          @map("block_code") @db.VarChar(80)
+  name            String          @db.VarChar(180)
   status          GeographyStatus @default(ACTIVE)
-  createdAt       DateTime  @default(now()) @map("created_at")
-  createdByUserId String?   @map("created_by_user_id")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
-  updatedByUserId String?   @map("updated_by_user_id")
-  isDeleted       Boolean   @default(false) @map("is_deleted")
-  deletedAt       DateTime? @map("deleted_at")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  createdByUserId String?         @map("created_by_user_id")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+  updatedByUserId String?         @map("updated_by_user_id")
+  isDeleted       Boolean         @default(false) @map("is_deleted")
+  deletedAt       DateTime?       @map("deleted_at")
 
   phcs Phc[]
 
@@ -342,18 +363,18 @@ model Block {
 }
 
 model Phc {
-  phcId           String    @id @default(uuid()) @map("phc_id")
-  blockId         String    @map("block_id")
-  block           Block     @relation(fields: [blockId], references: [blockId], onDelete: Restrict)
-  phcCode         String    @map("phc_code") @db.VarChar(80)
-  name            String    @db.VarChar(180)
+  phcId           String          @id @default(uuid()) @map("phc_id")
+  blockId         String          @map("block_id")
+  block           Block           @relation(fields: [blockId], references: [blockId], onDelete: Restrict)
+  phcCode         String          @map("phc_code") @db.VarChar(80)
+  name            String          @db.VarChar(180)
   status          GeographyStatus @default(ACTIVE)
-  createdAt       DateTime  @default(now()) @map("created_at")
-  createdByUserId String?   @map("created_by_user_id")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
-  updatedByUserId String?   @map("updated_by_user_id")
-  isDeleted       Boolean   @default(false) @map("is_deleted")
-  deletedAt       DateTime? @map("deleted_at")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  createdByUserId String?         @map("created_by_user_id")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+  updatedByUserId String?         @map("updated_by_user_id")
+  isDeleted       Boolean         @default(false) @map("is_deleted")
+  deletedAt       DateTime?       @map("deleted_at")
 
   subCentres SubCentre[]
 
@@ -362,18 +383,18 @@ model Phc {
 }
 
 model SubCentre {
-  subCentreId     String    @id @default(uuid()) @map("sub_centre_id")
-  phcId           String    @map("phc_id")
-  phc             Phc       @relation(fields: [phcId], references: [phcId], onDelete: Restrict)
-  subCentreCode   String    @map("sub_centre_code") @db.VarChar(80)
-  name            String    @db.VarChar(180)
+  subCentreId     String          @id @default(uuid()) @map("sub_centre_id")
+  phcId           String          @map("phc_id")
+  phc             Phc             @relation(fields: [phcId], references: [phcId], onDelete: Restrict)
+  subCentreCode   String          @map("sub_centre_code") @db.VarChar(80)
+  name            String          @db.VarChar(180)
   status          GeographyStatus @default(ACTIVE)
-  createdAt       DateTime  @default(now()) @map("created_at")
-  createdByUserId String?   @map("created_by_user_id")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
-  updatedByUserId String?   @map("updated_by_user_id")
-  isDeleted       Boolean   @default(false) @map("is_deleted")
-  deletedAt       DateTime? @map("deleted_at")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  createdByUserId String?         @map("created_by_user_id")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+  updatedByUserId String?         @map("updated_by_user_id")
+  isDeleted       Boolean         @default(false) @map("is_deleted")
+  deletedAt       DateTime?       @map("deleted_at")
 
   villages Village[]
 
@@ -382,18 +403,18 @@ model SubCentre {
 }
 
 model Village {
-  villageId       String    @id @default(uuid()) @map("village_id")
-  subCentreId     String    @map("sub_centre_id")
-  subCentre       SubCentre @relation(fields: [subCentreId], references: [subCentreId], onDelete: Restrict)
-  villageCode     String    @map("village_code") @db.VarChar(80)
-  name            String    @db.VarChar(180)
+  villageId       String          @id @default(uuid()) @map("village_id")
+  subCentreId     String          @map("sub_centre_id")
+  subCentre       SubCentre       @relation(fields: [subCentreId], references: [subCentreId], onDelete: Restrict)
+  villageCode     String          @map("village_code") @db.VarChar(80)
+  name            String          @db.VarChar(180)
   status          GeographyStatus @default(ACTIVE)
-  createdAt       DateTime  @default(now()) @map("created_at")
-  createdByUserId String?   @map("created_by_user_id")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
-  updatedByUserId String?   @map("updated_by_user_id")
-  isDeleted       Boolean   @default(false) @map("is_deleted")
-  deletedAt       DateTime? @map("deleted_at")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  createdByUserId String?         @map("created_by_user_id")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+  updatedByUserId String?         @map("updated_by_user_id")
+  isDeleted       Boolean         @default(false) @map("is_deleted")
+  deletedAt       DateTime?       @map("deleted_at")
 
   padas Pada[]
 
@@ -402,18 +423,18 @@ model Village {
 }
 
 model Pada {
-  padaId          String    @id @default(uuid()) @map("pada_id")
-  villageId       String    @map("village_id")
-  village         Village   @relation(fields: [villageId], references: [villageId], onDelete: Restrict)
-  padaCode        String    @map("pada_code") @db.VarChar(80)
-  name            String    @db.VarChar(180)
+  padaId          String          @id @default(uuid()) @map("pada_id")
+  villageId       String          @map("village_id")
+  village         Village         @relation(fields: [villageId], references: [villageId], onDelete: Restrict)
+  padaCode        String          @map("pada_code") @db.VarChar(80)
+  name            String          @db.VarChar(180)
   status          GeographyStatus @default(ACTIVE)
-  createdAt       DateTime  @default(now()) @map("created_at")
-  createdByUserId String?   @map("created_by_user_id")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
-  updatedByUserId String?   @map("updated_by_user_id")
-  isDeleted       Boolean   @default(false) @map("is_deleted")
-  deletedAt       DateTime? @map("deleted_at")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  createdByUserId String?         @map("created_by_user_id")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+  updatedByUserId String?         @map("updated_by_user_id")
+  isDeleted       Boolean         @default(false) @map("is_deleted")
+  deletedAt       DateTime?       @map("deleted_at")
 
   @@unique([villageId, padaCode])
   @@map("padas")
@@ -520,7 +541,6 @@ model SupervisorProfile {
 enum DevicePlatform {
   ANDROID
   WEB
-
 }
 
 // ERD device_registry.status text is malformed ("REPLACED,PAUSED BLOCKED,Inactive");
@@ -532,7 +552,6 @@ enum DeviceStatus {
   PAUSED
   BLOCKED
   INACTIVE
-
 }
 
 // device_registry — ERD Appendix A (§4.1). Referenced by user_sessions.device_id
@@ -580,7 +599,6 @@ enum TargetPeriodType {
   QUARTERLY
   ANNUAL
   PROJECT_PERIOD
-
 }
 
 // project_registration_targets — ERD §4.1 (merged canonical definition). Per the
@@ -643,7 +661,6 @@ enum SakhiAssignmentType {
   TEMPORARY_COVERAGE
   PAUSED
   STOPPED
-
 }
 
 // sakhi_assignments — ERD Appendix A (§4.1). A Sakhi's project + geography scope.

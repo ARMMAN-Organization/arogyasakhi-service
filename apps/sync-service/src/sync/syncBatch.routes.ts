@@ -53,6 +53,14 @@ const lastSyncedResponseSchema = z.object({
   lastSyncedAt: z.string().datetime().nullable(),
 });
 
+const rosterSyncStatusSchema = z.object({
+  userId: z.string().uuid(),
+  lastSyncedAt: z.string().datetime().nullable(),
+  isDelayed: z.boolean().openapi({
+    description: 'true when lastSyncedAt is null or older than SYNC_DELAY_THRESHOLD_HOURS.',
+  }),
+});
+
 function envelope<T extends z.ZodTypeAny>(data: T) {
   return z.object({ success: z.literal(true), message: z.string(), data });
 }
@@ -109,6 +117,28 @@ export function registerSyncBatchRoutes(doc: DocumentedRouter, service: SyncBatc
     requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
     validate(lastSyncedQuerySchema, 'query'),
     controller.getLastSyncedAt,
+  );
+
+  doc.get(
+    '/sync/last-synced/by-roster',
+    {
+      summary:
+        "Supervisor dashboard: last-synced status for every Sakhi in the caller's own roster. " +
+        'Best-effort raises a SYNC_DELAY escalation for each delayed Sakhi (passive list — no ' +
+        'notification push, per SRS). SUPERVISOR only; no MANAGER/ADMIN "any roster" variant yet.',
+      tags: ['Sync'],
+      responses: {
+        200: {
+          description: 'Roster sync status',
+          schema: envelope(z.array(rosterSyncStatusSchema)),
+        },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR'),
+    controller.getLastSyncedAtByRoster,
   );
 
   doc.post(

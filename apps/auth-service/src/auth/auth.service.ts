@@ -15,6 +15,7 @@ import { toUserProfile, type AuthTokens, type CreatedUser, type UserProfile } fr
 import type { LoginInput } from './dto/login.dto';
 import type { CreateUserInput } from './dto/create-user.dto';
 import type { UpdateUserInput } from './dto/update-user.dto';
+import type { ServiceTokenInput } from './dto/service-token.dto';
 
 // Re-exported so importers of `./auth.service` keep resolving these types;
 // their definitions live in auth.mapper.ts.
@@ -24,6 +25,13 @@ export type { AuthTokens, CreatedUser, UserProfile } from './auth.mapper';
 export interface CallerScope {
   readonly id: string;
   readonly roles: string[];
+}
+
+/** Result of a client-credentials exchange — no refresh token; jobs re-mint per run. */
+export interface ServiceTokenResult {
+  accessToken: string;
+  expiresIn: number;
+  roles: string[];
 }
 
 /** Prisma unique-constraint violation code (mobileNumber/email/roleCode etc). */
@@ -91,6 +99,47 @@ export class AuthService {
     // Idempotent by design — revoking an already-revoked/non-existent session
     // is a no-op (updateMany matches zero rows), not an error.
     await this.repository.revokeSessionByRefreshTokenHash(tokenHash);
+  }
+
+  /**
+   * Client-credentials exchange for a machine identity — the real
+   * service-to-service auth this platform was missing (automated jobs
+   * previously had no way to call an ADMIN-only endpoint without forwarding
+   * a human's own token). No session/refresh token is issued: callers are
+   * short-lived jobs that just re-mint a token per run.
+   */
+  async issueServiceToken(input: ServiceTokenInput): Promise<ServiceTokenResult> {
+    const account = await this.repository.findServiceAccountByClientId(input.clientId);
+
+    // Same generic failure for "no such client" and "wrong secret" as login
+    // — never reveal which one it was. Also same failed-attempt tracking as
+    // login: clientIds aren't secret (shipped in .env.example as
+    // descriptive strings like "sync-service"), so without this an
+    // attacker who learns one could guess clientSecret unlimited times with
+    // no record kept anywhere and no lockout.
+    if (!account || !account.isActive) {
+      if (account) await this.repository.incrementServiceAccountFailedAuthCount(account.id);
+      throw unauthorized('Invalid credentials.');
+    }
+
+    const secretMatches = await verifyPassword(account.clientSecretHash, input.clientSecret);
+    if (!secretMatches) {
+      await this.repository.incrementServiceAccountFailedAuthCount(account.id);
+      throw unauthorized('Invalid credentials.');
+    }
+
+    await this.repository.recordSuccessfulServiceAuth(account.id);
+
+    const accessToken = await this.signer.sign(
+      { sub: account.id, roles: [account.role], typ: 'service' },
+      this.adminAccessTokenTtl,
+    );
+
+    return {
+      accessToken,
+      expiresIn: Math.floor(parseDurationMs(this.adminAccessTokenTtl) / 1000),
+      roles: [account.role],
+    };
   }
 
   /**

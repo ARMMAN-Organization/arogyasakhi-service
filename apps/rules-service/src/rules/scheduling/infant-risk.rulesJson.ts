@@ -109,24 +109,29 @@ const handler = (input) => {
 
   const results = [];
 
-  function requireConditionId(code) {
-    const id = conditionIds[code];
-    if (!id) throw new Error('conditionIds is missing an entry for ' + code);
-    return id;
-  }
-
   // hrGateByFirstInstance: for Hypothermia/Hyperthermia/Danger Signs, whose
   // HR-visit trigger is "single instance" per Appendix D Part 2 (unlike the
   // nutrition conditions above them, which HR-visit-trigger every instance
   // till normal) — see PR #172 review. isFirst defaults to true when the
   // caller's isFirstInstance map has no entry for this code, matching
   // anc-risk.rulesJson.ts's same default-true convention.
+  //
+  // A missing conditionIds entry for the given code skips ONLY this
+  // condition — every other condition's record() call still runs, matching
+  // anc-risk.rulesJson.ts's identical fix (see PR #208 review — a throw
+  // here previously aborted every condition graded after it in source
+  // order, a realistic failure mode whenever a new condition is added
+  // before risk_conditions/RiskCondition.phase is backfilled). No
+  // console/logging available in this GoRules sandbox, so the skip is
+  // silent — same rationale as anc-risk.rulesJson.ts.
   function record(code, grade, observedValueJson, opts) {
+    const riskConditionId = conditionIds[code];
+    if (!riskConditionId) return;
     opts = opts || {};
     const isFirst = firstInstance[code] !== false;
     const hrEligible = opts.hrVisitTrigger === true;
     results.push({
-      riskConditionId: requireConditionId(code),
+      riskConditionId,
       grade,
       gradeRank: GRADE_RANK[grade],
       isReferralTrigger: opts.referralTrigger === true,

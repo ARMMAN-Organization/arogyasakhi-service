@@ -26,6 +26,5 @@
     "conditionCode": "MENTAL_HEALTH_CONDITION",
     "conditionName": "Mental health condition (e.g., depression, anxiety)"
   },
-  { "conditionCode": "SICKLE_CELL_DISEASE", "conditionName": "Sickle Cell Disease (SCD)" },
   { "conditionCode": "SICKLE_CELL_TRAIT", "conditionName": "Sickle Cell Trait (SCT)/Carrier" }
 ]
