@@ -47,12 +47,11 @@
  *    merged in by form.service.ts from MOTHER_REGISTRATION's medical-history
  *    multiselect (`hypertension_high_bp`); gestationalHypertension would
  *    come from a per-visit field once one exists (none does today).
- *  - Hypotension's "or associated with shock features" clause STILL has no
- *    corresponding field — graded on the systolic-BP threshold alone.
- *    Issue #191 item 2's answer says to use "existing clinical
- *    signs/symptoms" rather than a new question, but does not say which of
- *    the existing danger-sign values count as a shock feature — a further
- *    clarification, not yet given.
+ *  - Hypotension's "or associated with shock features" clause is now
+ *    implemented (issue #191 item 2, answered): shock features are read
+ *    from the same shared danger-signs multiselect other conditions
+ *    already use, specifically dizziness/breathlessness/palpitation — no
+ *    new form question, matching APH's own precedent of reusing that list.
  *  - Gestational Weight Gain is captured as the Sakhi's own pre-graded
  *    radio answer ('normal'/'severe' on gestational_weight_gain), not a raw
  *    kg delta — this pack consumes that pre-graded value directly rather
@@ -292,8 +291,6 @@ const handler = (input, { dayjs }) => {
   }
 
   // --- Blood pressure: classify into Hypertension XOR Hypotension.
-  // No "shock features" field exists on either form (see this pack's doc
-  // comment) - Hypotension still grades on the systolic threshold alone.
   // Hypertension's Mild band DOES require "history of Hypertension or
   // Gestational Hypertension" per Appendix D — historyOfHypertension is
   // merged in by form.service.ts from MOTHER_REGISTRATION's medical-history
@@ -301,11 +298,19 @@ const handler = (input, { dayjs }) => {
   // come from a per-visit field if/when one exists (none does today, so
   // this is always undefined from a real ANC_VISIT submission — accepted
   // as-is per that same answer, which named it as a currently-captured
-  // visit-level field without giving its actual question_code). ---
+  // visit-level field without giving its actual question_code).
+  //
+  // Hypotension's Mild band is "Systolic <90 mmHg OR associated with shock
+  // features" — issue #191 item 2 (answered): shock features are read from
+  // the same shared danger-signs multiselect other conditions already use
+  // (dizziness/breathlessness/palpitation), not a new question, matching
+  // APH's own precedent of reusing that list (bleeding_from_vagina). ---
   const systolicBp = input.blood_pressure_bp_systolic;
   const diastolicBp = input.blood_pressure_bp_diastolic;
   const historyOfHypertension = input.historyOfHypertension === true;
   const gestationalHypertension = input.gestationalHypertension === true;
+  const SHOCK_FEATURE_SIGNS = ['dizziness', 'breathlessness', 'palpitation'];
+  const shockFeaturesPresent = SHOCK_FEATURE_SIGNS.some((s) => experiencedSigns.indexOf(s) !== -1);
   let hypotensionFlagged = false;
   if (typeof systolicBp === 'number' && typeof diastolicBp === 'number') {
     let htnGrade = 'NORMAL';
@@ -318,7 +323,7 @@ const handler = (input, { dayjs }) => {
       if (historyOfHypertension || gestationalHypertension) htnGrade = 'MILD';
     }
 
-    const hypoGrade = systolicBp < 90 ? 'MILD' : 'NORMAL';
+    const hypoGrade = systolicBp < 90 || shockFeaturesPresent ? 'MILD' : 'NORMAL';
     hypotensionFlagged = hypoGrade !== 'NORMAL';
 
     const htnFlagged = htnGrade === 'MODERATE' || htnGrade === 'SEVERE';
@@ -329,7 +334,7 @@ const handler = (input, { dayjs }) => {
     // Hypotension trigger is resolved after all conditions are known (needs
     // "accompanied by any other flagged condition") — recorded provisionally
     // here, patched below once every other condition has been evaluated.
-    record('HYPOTENSION', hypoGrade, { systolicBp }, {
+    record('HYPOTENSION', hypoGrade, { systolicBp, shockFeaturesPresent }, {
       referralTrigger: false,
       hrVisitTrigger: false,
     });
