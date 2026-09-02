@@ -10,21 +10,28 @@ export interface CallerIdentity {
   roles: string[];
 }
 
-/** Narrows a caught Prisma error to a unique-constraint violation (P2002). */
-function isUniqueConstraintViolation(err: unknown): boolean {
-  return (
-    typeof err === 'object' &&
-    err !== null &&
-    'code' in err &&
-    (err as { code: unknown }).code === 'P2002'
-  );
+/**
+ * Narrows a caught Prisma error to a unique-constraint violation (P2002) on
+ * `columnName` specifically — not just any P2002 (security review finding,
+ * 2026-09-02). Safe today only because audit_log has exactly one non-PK
+ * unique column (local_audit_uuid); the moment a second one is added, an
+ * unscoped check would silently misreport that unrelated collision as an
+ * idempotent replay of this one. Same fix as
+ * lmp-change-request.service.ts's identical copy (added the same day; not
+ * cross-service-imported per the forklift rule).
+ */
+function isUniqueConstraintViolation(err: unknown, columnName: string): boolean {
+  if (typeof err !== 'object' || err === null || !('code' in err)) return false;
+  if ((err as { code: unknown }).code !== 'P2002') return false;
+  const meta = (err as { meta?: unknown }).meta;
+  if (typeof meta !== 'object' || meta === null || !('target' in meta)) return false;
+  const target = (meta as { target?: unknown }).target;
+  return Array.isArray(target) ? target.includes(columnName) : target === columnName;
 }
 
 // Action-name prefixes a non-ADMIN role may log, keyed by role. A caller in
 // one of these roles may only write actions starting with one of its listed
-// prefixes, and actorUserId is always forced to the caller's own id — so a
-// widened role can never forge an entry attributed to someone else or write
-// an arbitrary action/entityType.
+// prefixes, and actorUserId is always forced to the caller's own id.
 const ALLOWED_ACTION_PREFIXES: Record<string, readonly string[]> = {
   // approval-service forwards both a Quick Response decision's and an
   // LMP-change decision's audit entry using the deciding Supervisor's own
@@ -42,6 +49,20 @@ const ALLOWED_ACTION_PREFIXES: Record<string, readonly string[]> = {
   // suffix (see the plan's Task 5) — a trailing-underscore prefix would not
   // match that literal and would 403 the caller this allowance exists for.
   SAKHI: ['FORM_ANSWER_EDIT'],
+};
+
+// entityType a non-ADMIN caller must supply for a given action prefix —
+// closes the gap the prefix check alone leaves open (security review
+// finding, 2026-09-02): without this, a SAKHI whose action passes the
+// FORM_ANSWER_EDIT prefix check could still supply any entityType/entityId
+// she likes, fabricating an audit entry that appears to document an edit to
+// an entity she has no relationship to. Checked only when the action has an
+// entry here — QUICK_RESPONSE_ has no real caller/entityType yet (nothing in
+// this codebase writes that action today), so it is deliberately left
+// unconstrained until a real call site defines what entityType it should use.
+const REQUIRED_ENTITY_TYPE_BY_ACTION_PREFIX: Record<string, string> = {
+  FORM_ANSWER_EDIT: 'FormSubmission',
+  LMP_CHANGE_: 'MotherCaseDetails',
 };
 
 /**
@@ -122,8 +143,13 @@ export class AuditLogService {
     let toCreate = dto;
     if (!caller.roles.includes('ADMIN')) {
       const allowedPrefixes = caller.roles.flatMap((role) => ALLOWED_ACTION_PREFIXES[role] ?? []);
-      if (!allowedPrefixes.some((prefix) => dto.action.startsWith(prefix))) {
+      const matchedPrefix = allowedPrefixes.find((prefix) => dto.action.startsWith(prefix));
+      if (!matchedPrefix) {
         throw forbidden('Caller role may not log this action.');
+      }
+      const requiredEntityType = REQUIRED_ENTITY_TYPE_BY_ACTION_PREFIX[matchedPrefix];
+      if (requiredEntityType && dto.entityType !== requiredEntityType) {
+        throw forbidden(`Action "${matchedPrefix}" must use entityType "${requiredEntityType}".`);
       }
       if (
         caller.roles.includes('SAKHI') &&
@@ -151,7 +177,7 @@ export class AuditLogService {
     try {
       return await this.repository.create(toCreate);
     } catch (err) {
-      if (toCreate.localAuditUuid && isUniqueConstraintViolation(err)) {
+      if (toCreate.localAuditUuid && isUniqueConstraintViolation(err, 'local_audit_uuid')) {
         const winner = await this.repository.findByLocalAuditUuid(toCreate.localAuditUuid);
         if (winner) {
           if (!isSameLogicalEntry(winner, toCreate)) {

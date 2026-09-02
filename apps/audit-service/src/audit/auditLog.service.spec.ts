@@ -4,7 +4,7 @@ import type { CreateAuditLogInput } from './dto/create-auditLog.dto';
 
 /** Mimics Prisma's P2002 unique-constraint-violation error shape. */
 function uniqueConstraintError(): unknown {
-  return { code: 'P2002' };
+  return { code: 'P2002', meta: { target: ['local_audit_uuid'] } };
 }
 
 describe('AuditLogService', () => {
@@ -93,7 +93,7 @@ describe('AuditLogService', () => {
       const dto: CreateAuditLogInput = {
         actorUserId: 'someone-else',
         action,
-        entityType: 'ApprovalRequest',
+        entityType: 'MotherCaseDetails',
         entityId: 'req-1',
       };
       repository.create.mockResolvedValue({ id: '1' } as never);
@@ -101,6 +101,19 @@ describe('AuditLogService', () => {
       expect(repository.create).toHaveBeenCalledWith({ ...dto, actorUserId: 'supervisor-1' });
     },
   );
+
+  it('SUPERVISOR logging an LMP_CHANGE_ action with the wrong entityType is forbidden', async () => {
+    const dto: CreateAuditLogInput = {
+      actorUserId: 'supervisor-1',
+      action: 'LMP_CHANGE_APPROVED',
+      entityType: 'ApprovalRequest',
+      entityId: 'req-1',
+    };
+    await expect(service.create(dto, supervisor)).rejects.toThrow(
+      expect.objectContaining({ status: 403 }),
+    );
+    expect(repository.create).not.toHaveBeenCalled();
+  });
 
   it('SUPERVISOR logging a non-QUICK_RESPONSE_/non-LMP_CHANGE_ action is forbidden', async () => {
     const dto: CreateAuditLogInput = {
@@ -127,7 +140,7 @@ describe('AuditLogService', () => {
         const dto: CreateAuditLogInput = {
           actorUserId: 'sakhi-1',
           action,
-          entityType: 'Beneficiary',
+          entityType: 'FormSubmission',
           entityId: 'entity-1',
         };
         repository.create.mockResolvedValue({ id: '1' } as never);
@@ -135,6 +148,19 @@ describe('AuditLogService', () => {
         expect(repository.create).toHaveBeenCalledWith({ ...dto, actorUserId: 'sakhi-1' });
       },
     );
+
+    it('SAKHI logging FORM_ANSWER_EDIT with the wrong entityType is forbidden', async () => {
+      const dto: CreateAuditLogInput = {
+        actorUserId: 'sakhi-1',
+        action: 'FORM_ANSWER_EDIT',
+        entityType: 'Beneficiary',
+        entityId: 'entity-1',
+      };
+      await expect(service.create(dto, sakhi)).rejects.toThrow(
+        expect.objectContaining({ status: 403 }),
+      );
+      expect(repository.create).not.toHaveBeenCalled();
+    });
 
     it.each(['LMP_CHANGE_APPROVED', 'LMP_CHANGE_REJECTED'])(
       'SAKHI logging %s is forbidden — only a SUPERVISOR may log an LMP-change decision',
@@ -259,7 +285,7 @@ describe('AuditLogService', () => {
       const dto: CreateAuditLogInput = {
         actorUserId: 'supervisor-1',
         action: 'LMP_CHANGE_APPROVED',
-        entityType: 'ApprovalRequest',
+        entityType: 'MotherCaseDetails',
         entityId: 'req-1',
         localAuditUuid: 'reused-uuid-from-supervisor',
       };
