@@ -35,6 +35,7 @@ function approvalRequest(overrides: Partial<Record<string, unknown>> = {}) {
     decisionStatusLookupId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
     decisionPayloadJson: null,
     decidedAt: null,
+    localRequestUuid: null,
     createdAt: new Date('2026-08-05T10:00:00.000Z'),
     createdByUserId: null,
     updatedAt: new Date('2026-08-05T10:00:00.000Z'),
@@ -1451,6 +1452,110 @@ describe('QuickResponseService', () => {
         raisedAt: expect.any(String),
       });
       expect(beneficiaryClient.getById).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getCardDetails', () => {
+    it('resolves multiple ids and returns all found cards', async () => {
+      repository.findById.mockImplementation((async (id: string) => {
+        if (id === '11111111-1111-1111-1111-111111111111') {
+          return approvalRequest({ requestType: 'SOMETHING_UNKNOWN', reopenRequestId: null });
+        }
+        if (id === '55555555-5555-5555-5555-555555555555') {
+          return approvalRequest({
+            id: '55555555-5555-5555-5555-555555555555',
+            requestType: 'SOMETHING_UNKNOWN',
+            reopenRequestId: null,
+          });
+        }
+        return null;
+      }) as never);
+      escalationClient.findById.mockResolvedValue(null);
+
+      const result = await service.getCardDetails(
+        ['11111111-1111-1111-1111-111111111111', '55555555-5555-5555-5555-555555555555'],
+        managerCaller,
+        authHeader,
+      );
+
+      expect(result).toHaveLength(2);
+      expect(result.map((card) => card.cardId).sort()).toEqual(
+        ['11111111-1111-1111-1111-111111111111', '55555555-5555-5555-5555-555555555555'].sort(),
+      );
+    });
+
+    it('dedupes a repeated id in the requested list', async () => {
+      repository.findById.mockResolvedValue(
+        approvalRequest({ requestType: 'SOMETHING_UNKNOWN', reopenRequestId: null }),
+      );
+      escalationClient.findById.mockResolvedValue(null);
+
+      const result = await service.getCardDetails(
+        ['11111111-1111-1111-1111-111111111111', '11111111-1111-1111-1111-111111111111'],
+        managerCaller,
+        authHeader,
+      );
+
+      expect(result).toHaveLength(1);
+      expect(repository.findById).toHaveBeenCalledTimes(1);
+    });
+
+    it('omits an id that matches neither approval_requests nor escalation_events, without failing the batch', async () => {
+      repository.findById.mockImplementation((async (id: string) =>
+        id === '11111111-1111-1111-1111-111111111111'
+          ? approvalRequest({ requestType: 'SOMETHING_UNKNOWN', reopenRequestId: null })
+          : null) as never);
+      escalationClient.findById.mockResolvedValue(null);
+
+      const result = await service.getCardDetails(
+        ['11111111-1111-1111-1111-111111111111', '99999999-9999-9999-9999-999999999999'],
+        managerCaller,
+        authHeader,
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]).toMatchObject({ cardId: '11111111-1111-1111-1111-111111111111' });
+    });
+
+    it("omits an id outside a SUPERVISOR caller's roster, without failing the batch", async () => {
+      sakhiClient.getOwnSakhiIds.mockResolvedValue(['44444444-4444-4444-4444-444444444444']);
+      repository.findById.mockImplementation((async (id: string) => {
+        if (id === '11111111-1111-1111-1111-111111111111') {
+          return approvalRequest({ requestType: 'SOMETHING_UNKNOWN', reopenRequestId: null });
+        }
+        if (id === '66666666-6666-6666-6666-666666666666') {
+          return approvalRequest({
+            id: '66666666-6666-6666-6666-666666666666',
+            requestType: 'SOMETHING_UNKNOWN',
+            reopenRequestId: null,
+            requestedByUserId: 'some-other-sakhi',
+          });
+        }
+        return null;
+      }) as never);
+      escalationClient.findById.mockResolvedValue(null);
+
+      const result = await service.getCardDetails(
+        ['11111111-1111-1111-1111-111111111111', '66666666-6666-6666-6666-666666666666'],
+        supervisorCaller('project-1'),
+        authHeader,
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]).toMatchObject({ cardId: '11111111-1111-1111-1111-111111111111' });
+    });
+
+    it('returns an empty array when none of the requested ids resolve', async () => {
+      repository.findById.mockResolvedValue(null);
+      escalationClient.findById.mockResolvedValue(null);
+
+      const result = await service.getCardDetails(
+        ['11111111-1111-1111-1111-111111111111', '99999999-9999-9999-9999-999999999999'],
+        managerCaller,
+        authHeader,
+      );
+
+      expect(result).toEqual([]);
     });
   });
 

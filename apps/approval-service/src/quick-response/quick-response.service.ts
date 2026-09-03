@@ -340,6 +340,35 @@ export class QuickResponseService {
   }
 
   /**
+   * Batch counterpart to getCardDetail(), backing GET /quick-response/details
+   * — the Supervisor app's card-detail screen opens a whole page of Quick
+   * Response cards at once and previously issued one getCardDetail() call
+   * per card, overloading the gateway with N×4 concurrent downstream fetches
+   * (each card enrichment fans out to ~4 services). This resolves all
+   * requested ids concurrently in one call instead.
+   *
+   * Deliberately best-effort per id, mirroring safeResolve()'s "don't fail
+   * the page" contract: a card that's not found, inaccessible to this
+   * caller, or fails enrichment is silently omitted from the result rather
+   * than failing the whole batch — one bad id in a 6-card page shouldn't
+   * blank the other 5.
+   */
+  async getCardDetails(cardIds: string[], caller: CallerScope, authorizationHeader: string) {
+    const uniqueIds = Array.from(new Set(cardIds));
+    const settled = await Promise.allSettled(
+      uniqueIds.map((cardId) => this.getCardDetail(cardId, caller, authorizationHeader)),
+    );
+    return settled
+      .filter(
+        (
+          result,
+        ): result is PromiseFulfilledResult<Awaited<ReturnType<typeof this.getCardDetail>>> =>
+          result.status === 'fulfilled',
+      )
+      .map((result) => result.value);
+  }
+
+  /**
    * Wraps one supplementary enrichment lookup: logs and returns null on
    * failure rather than throwing, so one unreachable downstream service
    * degrades only its own field instead of failing the whole card detail.
