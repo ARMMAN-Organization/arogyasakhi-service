@@ -439,4 +439,58 @@ export class VisitInstanceRepository {
       return true;
     });
   }
+
+  /**
+   * Undoes a soft-delete across every visit/form record owned by one Sakhi
+   * — backs the DATA_RESTORE approval flow (approval-service's
+   * decideDataRestoreCard), mirroring beneficiary-service's
+   * restoreForSakhi. `VisitInstance.sakhiId` is the only model here with a
+   * direct Sakhi reference; VisitSchedule has no sakhiId of its own (only
+   * beneficiaryId), so its restore is scoped to schedules backing this
+   * Sakhi's own visit instances rather than by Sakhi directly.
+   * VisitStatusHistory/FormSubmission/FormAnswer cascade via visitId/
+   * submissionId. VisitMaster/FormDefinition/FormVersion are global
+   * reference data with no per-Sakhi scope and are intentionally excluded.
+   */
+  async restoreForSakhi(sakhiUserId: string): Promise<{ restoredVisitCount: number }> {
+    const visits = await this.prisma.visitInstance.findMany({
+      where: { sakhiId: sakhiUserId, isDeleted: true },
+      select: { id: true, scheduleId: true },
+    });
+    if (visits.length === 0) return { restoredVisitCount: 0 };
+
+    const visitIds = visits.map((v) => v.id);
+    const scheduleIds = [...new Set(visits.map((v) => v.scheduleId))];
+
+    const submissions = await this.prisma.formSubmission.findMany({
+      where: { visitId: { in: visitIds } },
+      select: { id: true },
+    });
+    const submissionIds = submissions.map((s) => s.id);
+
+    await this.prisma.$transaction([
+      this.prisma.visitInstance.updateMany({
+        where: { id: { in: visitIds } },
+        data: { isDeleted: false, deletedAt: null },
+      }),
+      this.prisma.visitSchedule.updateMany({
+        where: { id: { in: scheduleIds } },
+        data: { isDeleted: false, deletedAt: null },
+      }),
+      this.prisma.visitStatusHistory.updateMany({
+        where: { visitId: { in: visitIds } },
+        data: { isDeleted: false, deletedAt: null },
+      }),
+      this.prisma.formSubmission.updateMany({
+        where: { id: { in: submissionIds } },
+        data: { isDeleted: false, deletedAt: null },
+      }),
+      this.prisma.formAnswer.updateMany({
+        where: { submissionId: { in: submissionIds } },
+        data: { isDeleted: false, deletedAt: null },
+      }),
+    ]);
+
+    return { restoredVisitCount: visitIds.length };
+  }
 }

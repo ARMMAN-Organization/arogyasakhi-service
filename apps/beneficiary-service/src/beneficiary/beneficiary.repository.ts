@@ -930,4 +930,60 @@ export class BeneficiaryRepository {
       riskConditionSummaries: summariesByBeneficiary.get(c.id) ?? [],
     }));
   }
+
+  /**
+   * Undoes a soft-delete across every beneficiary-family record owned by one
+   * Sakhi — backs the DATA_RESTORE approval flow (approval-service's
+   * decideDataRestoreCard). `BeneficiaryCase.sakhiId` is the only model with
+   * a direct Sakhi reference; MotherCaseDetails/ChildCaseDetails/
+   * ConsentRecord cascade via `beneficiaryId`, and BeneficiaryPii via the
+   * case's own `piiId` — so cases are resolved first, unfiltered by
+   * `isDeleted` (a restore target is expected to already be soft-deleted),
+   * then every related table is restored by id.
+   *
+   * Deliberately does not touch `currentStatus` or write a
+   * BeneficiaryStatusHistory row: unlike reactivateCase() (a CLOSED->ACTIVE
+   * status transition on an otherwise-live row), this only reverses
+   * isDeleted/deletedAt on rows that were removed outright — a distinct
+   * operation as far as this service's own data model is concerned, and one
+   * plain enough that a case's `toStatus` here would be undefined. Audit
+   * logging for this action lives centrally in approval-service's decide
+   * path (AuditClient), matching how REOPEN's approval-level audit entry is
+   * not duplicated as a local status-history row either.
+   */
+  async restoreForSakhi(sakhiUserId: string): Promise<{ restoredCaseCount: number }> {
+    const cases = await this.prisma.beneficiaryCase.findMany({
+      where: { sakhiId: sakhiUserId, isDeleted: true },
+      select: { id: true, piiId: true },
+    });
+    if (cases.length === 0) return { restoredCaseCount: 0 };
+
+    const caseIds = cases.map((c) => c.id);
+    const piiIds = cases.map((c) => c.piiId);
+
+    await this.prisma.$transaction([
+      this.prisma.beneficiaryCase.updateMany({
+        where: { id: { in: caseIds } },
+        data: { isDeleted: false, deletedAt: null },
+      }),
+      this.prisma.beneficiaryPii.updateMany({
+        where: { id: { in: piiIds } },
+        data: { isDeleted: false, deletedAt: null },
+      }),
+      this.prisma.motherCaseDetails.updateMany({
+        where: { beneficiaryId: { in: caseIds } },
+        data: { isDeleted: false, deletedAt: null },
+      }),
+      this.prisma.childCaseDetails.updateMany({
+        where: { beneficiaryId: { in: caseIds } },
+        data: { isDeleted: false, deletedAt: null },
+      }),
+      this.prisma.consentRecord.updateMany({
+        where: { beneficiaryId: { in: caseIds } },
+        data: { isDeleted: false, deletedAt: null },
+      }),
+    ]);
+
+    return { restoredCaseCount: caseIds.length };
+  }
 }

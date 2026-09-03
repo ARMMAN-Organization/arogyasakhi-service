@@ -5,6 +5,7 @@ import type { visitSummaryQuerySchema } from './dto/visit-summary-query.dto';
 import type { countByBeneficiarySchema } from './dto/count-by-beneficiary.dto';
 import type { byPadaSchema } from './dto/by-pada.dto';
 import type { visitHistoryQuerySchema } from './dto/visit-history-query.dto';
+import type { RestoreForSakhiInput } from './dto/restore-for-sakhi.dto';
 
 /**
  * Visit instance request handlers. Mounted under the global `api/v1`
@@ -83,6 +84,13 @@ export function createVisitInstanceController(service: VisitInstanceService) {
           ),
         ),
       );
+    }),
+
+    restoreForSakhi: asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const { sakhiUserId } = req.body as RestoreForSakhiInput;
+      const result = await service.restoreForSakhi(sakhiUserId);
+      res.json(ok(result));
     }),
   };
 }

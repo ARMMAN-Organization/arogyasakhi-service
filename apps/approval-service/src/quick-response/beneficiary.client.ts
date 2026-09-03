@@ -136,4 +136,48 @@ export class BeneficiaryClient {
     const body = (await res.json()) as { data: BeneficiaryCaseRecord };
     return body.data;
   }
+
+  /**
+   * Restores every beneficiary-family record previously soft-deleted for
+   * one Sakhi, by calling beneficiary-service's PATCH /beneficiaries/restore
+   * through the gateway — used by the DATA_RESTORE card's approved-decision
+   * path (decideDataRestoreCard) alongside UserClient.reactivateUser and
+   * VisitClient.restoreForSakhi. Not tolerated by this client itself — the
+   * caller decides how a failure here should be surfaced (see
+   * decideDataRestoreCard's own doc comment on partial-failure handling).
+   */
+  async restoreForSakhi(
+    sakhiUserId: string,
+    authorizationHeader: string,
+  ): Promise<{ restoredCaseCount: number }> {
+    let res: Response;
+    try {
+      res = await fetch(`${appConfig.API_GATEWAY_BASE_URL}/api/v1/beneficiaries/restore`, {
+        method: 'PATCH',
+        headers: { Authorization: authorizationHeader, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sakhiUserId }),
+        signal: AbortSignal.timeout(DOWNSTREAM_FETCH_TIMEOUT_MS),
+      });
+    } catch {
+      throw badGateway(
+        "Unable to restore the Sakhi's beneficiary data — beneficiary-service is unreachable.",
+      );
+    }
+
+    if (!res.ok) {
+      if (res.status >= 400 && res.status < 500) {
+        const body = (await res.json().catch(() => null)) as { message?: string } | null;
+        throw new HttpError(
+          res.status,
+          body?.message ?? "Unable to restore the Sakhi's beneficiary data.",
+        );
+      }
+      throw badGateway(
+        "Unable to restore the Sakhi's beneficiary data — beneficiary-service returned an error.",
+      );
+    }
+
+    const body = (await res.json()) as { data: { restoredCaseCount: number } };
+    return body.data;
+  }
 }

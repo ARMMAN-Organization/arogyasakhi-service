@@ -453,6 +453,18 @@ export class VisitInstanceService {
       }),
     };
   }
+
+  /**
+   * Server-to-server only — see restore-for-sakhi.dto.ts and the
+   * repository method's own doc comment for the full rationale. No
+   * caller-scoping check here (unlike updateStatus's roster/own-record
+   * checks): SYSTEM/ADMIN-only route access is the authorization boundary,
+   * since this restores everything a Sakhi owned rather than one
+   * caller-chosen visit.
+   */
+  async restoreForSakhi(sakhiUserId: string) {
+    return this.repository.restoreForSakhi(sakhiUserId);
+  }
 }
 
 /**

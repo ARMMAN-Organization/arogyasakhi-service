@@ -43,6 +43,7 @@ describe('BeneficiaryService', () => {
     updatePhase: jest.fn(),
     closeCase: jest.fn(),
     reactivateCase: jest.fn(),
+    restoreForSakhi: jest.fn(),
     markPendingTransfer: jest.fn(),
     countByCaseType: jest.fn(),
     countByRiskGrade: jest.fn(),
@@ -3360,6 +3361,27 @@ describe('BeneficiaryService', () => {
           grade: null,
           gradeRank: null,
         }),
+      );
+    });
+  });
+
+  describe('restoreForSakhi', () => {
+    it('delegates to the repository and returns its result', async () => {
+      repository.restoreForSakhi.mockResolvedValue({ restoredCaseCount: 3 });
+
+      const result = await service.restoreForSakhi('77777777-7777-7777-7777-777777777777');
+
+      expect(repository.restoreForSakhi).toHaveBeenCalledWith(
+        '77777777-7777-7777-7777-777777777777',
+      );
+      expect(result).toEqual({ restoredCaseCount: 3 });
+    });
+
+    it('propagates a repository error', async () => {
+      repository.restoreForSakhi.mockRejectedValue(new Error('db down'));
+
+      await expect(service.restoreForSakhi('77777777-7777-7777-7777-777777777777')).rejects.toThrow(
+        'db down',
       );
     });
   });

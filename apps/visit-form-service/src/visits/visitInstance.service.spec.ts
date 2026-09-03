@@ -26,6 +26,7 @@ describe('VisitInstanceService', () => {
     findByPada: jest.fn(),
     countByBeneficiary: jest.fn(),
     findRecentCompletedVisits: jest.fn(),
+    restoreForSakhi: jest.fn(),
   } as unknown as jest.Mocked<VisitInstanceRepository>;
   let service: VisitInstanceService;
 
@@ -1081,6 +1082,27 @@ describe('VisitInstanceService', () => {
         service.getVisitHistory('ben-1', { limit: 2 }, SAKHI_CALLER, AUTH_HEADER),
       ).rejects.toThrow(/not found/i);
       expect(repository.findRecentCompletedVisits).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('restoreForSakhi', () => {
+    it('delegates to the repository and returns its result', async () => {
+      repository.restoreForSakhi.mockResolvedValue({ restoredVisitCount: 3 });
+
+      const result = await service.restoreForSakhi('77777777-7777-7777-7777-777777777777');
+
+      expect(repository.restoreForSakhi).toHaveBeenCalledWith(
+        '77777777-7777-7777-7777-777777777777',
+      );
+      expect(result).toEqual({ restoredVisitCount: 3 });
+    });
+
+    it('propagates a repository error', async () => {
+      repository.restoreForSakhi.mockRejectedValue(new Error('db down'));
+
+      await expect(service.restoreForSakhi('77777777-7777-7777-7777-777777777777')).rejects.toThrow(
+        'db down',
+      );
     });
   });
 });

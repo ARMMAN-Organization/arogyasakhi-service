@@ -916,7 +916,13 @@ export class QuickResponseService {
         authorizationHeader,
       );
     } else if (existing.requestType === 'DATA_RESTORE') {
-      result = await this.decideDataRestoreCard(cardId, existing, dto, authorizationHeader);
+      result = await this.decideDataRestoreCard(
+        cardId,
+        existing,
+        dto,
+        decidedByUserId,
+        authorizationHeader,
+      );
     } else if (existing.requestType === 'CLOSURE_REVIEW') {
       result = await this.decideClosureReviewCard(cardId, existing, dto, authorizationHeader);
     } else if (existing.requestType === 'REFERRAL_INCOMPLETE') {
@@ -1343,31 +1349,109 @@ export class QuickResponseService {
   }
 
   /**
-   * Decides a DATA_RESTORE card. Note this does NOT implement the SRS's
-   * literal FR-SV-4.6 wording ("data restore is initiated for that Sakhi's
-   * device") — that flow remains unconfirmed with ARMMAN and unbuilt. This
-   * implements a specifically-approved narrower behavior instead: on
-   * APPROVE, reactivates the requesting Sakhi's own user account
-   * (requestedByUserId) via auth-service's PATCH /users/:id/reactivate.
-   * Not tolerated — same rule as every other reactivation this service
-   * performs (LMP change, reopen, referral/closure decisions): a Supervisor
-   * who approved this needs to know if the reactivation didn't actually
-   * happen, not receive a false "success". REJECT makes no auth-service
-   * call and grants no account changes. Either way the Sakhi is notified,
-   * best-effort.
+   * Decides a DATA_RESTORE card. On APPROVE: reactivates the requesting
+   * Sakhi's own user account (requestedByUserId) via auth-service's
+   * PATCH /users/:id/reactivate, then restores her beneficiary and
+   * visit/form data via beneficiary-service's PATCH /beneficiaries/restore
+   * and visit-form-service's PATCH /visits/restore. REJECT makes none of
+   * these calls and grants no account/data changes.
+   *
+   * Note: nothing in this codebase currently creates a valid DATA_RESTORE
+   * card — there is no deactivation trigger anywhere that soft-deletes a
+   * Sakhi's data in the first place (auth-service only has the reverse,
+   * reactivateUser). This method is built ready for that trigger once
+   * product defines it; until then, approving a DATA_RESTORE card is a
+   * no-op restore (nothing was soft-deleted, so both restore calls report
+   * zero rows restored) beyond the account reactivation.
+   *
+   * User reactivation is NOT tolerated — same rule as every other
+   * reactivation this service performs (LMP change, reopen, referral/
+   * closure decisions): a Supervisor who approved this needs to know if the
+   * reactivation didn't actually happen, not receive a false "success".
+   *
+   * The two data-restore calls ARE tolerated (best-effort, independently),
+   * because unlike reactivateUser they run after the decision is already
+   * committed and the account is already reactivated — there is no
+   * cross-service transaction to roll back to (forklift architecture), so
+   * failing the whole request here would leave the account reactivated
+   * anyway while telling the caller the decision failed, which is worse
+   * than the alternative. Instead, each restore call's own success/failure
+   * is written verbatim into the audit-log entry's afterJson (queryable,
+   * durable — not just a console.error) so a partial failure is visible for
+   * manual follow-up rather than silently lost. Sakhi notification remains
+   * best-effort, matching every other card type's decide path.
    */
   private async decideDataRestoreCard(
     cardId: string,
     existing: { requestedByUserId: string },
     dto: DecideQuickResponseInput,
+    decidedByUserId: string,
     authorizationHeader: string,
   ) {
     if (dto.decision !== 'APPROVE' && dto.decision !== 'REJECT') {
       throw badRequest('decision: Must be APPROVE or REJECT for a DATA_RESTORE card.');
     }
 
+    let beneficiaryRestoreResult: { restoredCaseCount: number } | { error: string } | null = null;
+    let visitRestoreResult: { restoredVisitCount: number } | { error: string } | null = null;
+
     if (dto.decision === 'APPROVE') {
       await this.userClient.reactivateUser(existing.requestedByUserId, authorizationHeader);
+
+      try {
+        beneficiaryRestoreResult = await this.beneficiaryClient.restoreForSakhi(
+          existing.requestedByUserId,
+          authorizationHeader,
+        );
+      } catch (err) {
+        console.error(
+          `DATA_RESTORE card ${cardId} approved (account reactivated) but restoring ` +
+            `beneficiary data failed (needs manual follow-up):`,
+          err,
+        );
+        beneficiaryRestoreResult = { error: err instanceof Error ? err.message : String(err) };
+      }
+
+      try {
+        visitRestoreResult = await this.visitClient.restoreForSakhi(
+          existing.requestedByUserId,
+          authorizationHeader,
+        );
+      } catch (err) {
+        console.error(
+          `DATA_RESTORE card ${cardId} approved (account reactivated) but restoring ` +
+            `visit/form data failed (needs manual follow-up):`,
+          err,
+        );
+        visitRestoreResult = { error: err instanceof Error ? err.message : String(err) };
+      }
+    }
+
+    try {
+      if (dto.decision === 'APPROVE') {
+        await this.auditClient.log(
+          decidedByUserId,
+          'DATA_RESTORE_APPROVED',
+          'User',
+          existing.requestedByUserId,
+          { beneficiaryRestoreResult, visitRestoreResult },
+          authorizationHeader,
+        );
+      } else {
+        await this.auditClient.log(
+          decidedByUserId,
+          'DATA_RESTORE_REJECTED',
+          'User',
+          existing.requestedByUserId,
+          { decision: 'REJECTED', reason: dto.decisionNotes ?? null },
+          authorizationHeader,
+        );
+      }
+    } catch (err) {
+      console.error(
+        `DATA_RESTORE card ${cardId} was decided (${dto.decision}) but writing the audit entry failed:`,
+        err,
+      );
     }
 
     try {

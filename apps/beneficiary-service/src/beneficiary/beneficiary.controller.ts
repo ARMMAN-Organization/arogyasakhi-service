@@ -13,6 +13,7 @@ import type { idsQuerySchema } from './dto/ids-query.dto';
 import { parseIdsParam, type byIdsWithRiskQuerySchema } from './dto/by-ids-with-risk-query.dto';
 import type { batchRiskConditionSummaryQuerySchema } from './dto/batch-risk-condition-summary-query.dto';
 import type { postEddPendingQuerySchema } from './dto/post-edd-pending-query.dto';
+import type { RestoreForSakhiInput } from './dto/restore-for-sakhi.dto';
 
 /**
  * Beneficiary request handlers. Mounted under the global `api/v1` prefix
@@ -217,6 +218,13 @@ export function createBeneficiaryController(service: BeneficiaryService) {
       if (!authorizationHeader) return next(unauthorized());
       const updated = await service.applyTransfer(req.params.id, req.user, authorizationHeader);
       res.json(ok(updated));
+    }),
+
+    restoreForSakhi: asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const { sakhiUserId } = req.body as RestoreForSakhiInput;
+      const result = await service.restoreForSakhi(sakhiUserId);
+      res.json(ok(result));
     }),
   };
 }
