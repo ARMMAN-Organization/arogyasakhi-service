@@ -35,3 +35,4 @@ docs/test-runs/
 # copy is authoritative. Any change has to be copied across manually, and a box
 # rebuild needs it restored — keep a copy somewhere durable.
 tools/deploy-dev.sh
+.worktrees/

@@ -32,6 +32,13 @@ model AuditLog {
   // device_registry.device_id — owned by another service, no cross-service relation.
   deviceId    String?  @map("device_id")
   createdAt   DateTime @default(now()) @map("created_at")
+  // Idempotency key for mobile-originated, offline-first callers (e.g. a
+  // Sakhi's LMP change / form answer edit decision synced with retries) —
+  // nullable so ADMIN/SUPERVISOR callers that don't supply one are unaffected;
+  // a plain UNIQUE index on a nullable column allows unlimited NULLs and
+  // enforces uniqueness only among non-null values. Same pattern as
+  // approval_requests.local_request_uuid / reopen_requests.local_reopen_request_uuid.
+  localAuditUuid String? @unique @map("local_audit_uuid") @db.VarChar(80)
 
   @@map("audit_log")
 }

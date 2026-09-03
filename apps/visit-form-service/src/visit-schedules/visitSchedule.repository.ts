@@ -133,6 +133,22 @@ export class VisitScheduleRepository {
   }
 
   /**
+   * Total count of this beneficiary's schedules of `visitType` ever created
+   * (including MISSED/COMPLETED/SUPERSEDED — every past HR visit still
+   * counts toward "how many have there been"), used by scheduleMapper.ts's
+   * HR branch to compute the next sequenceNo. Without this, every HR
+   * detection for the same beneficiary+phase produced the same hardcoded
+   * sequenceNo (1), and thus the same localScheduleUuid — the second
+   * detection's bulk-persistence idempotency check then saw a row with the
+   * same key but different scheduledDate and 409'd, silently defeating
+   * ANC/INC HR's "cumulative — a new HR visit fires on every detection"
+   * design (security review finding, 2026-09-02).
+   */
+  countByBeneficiaryAndVisitType(beneficiaryId: string, visitType: VisitCodeType) {
+    return this.prisma.visitSchedule.count({ where: { beneficiaryId, visitType } });
+  }
+
+  /**
    * Re-stamps a stored row's provenance after a rule-pack republish evaluates
    * an already-scheduled slot identically — the schedule content is unchanged
    * so no supersede is needed, but generatedByRuleVersionId must reflect the

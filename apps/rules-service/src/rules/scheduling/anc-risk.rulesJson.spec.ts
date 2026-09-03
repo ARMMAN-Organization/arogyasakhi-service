@@ -129,14 +129,50 @@ describe('ancRiskRulesJson', () => {
     expect(hypo.grade).toBe('NORMAL');
   });
 
-  it('grades BP 137/86 as Hypertension MILD on the range alone (no history-of-hypertension field exists)', async () => {
+  it('grades BP 137/86 as NORMAL (not MILD) when historyOfHypertension is absent — Mild requires BOTH the BP range AND history', async () => {
     const result = await evaluateRulePack(ancRiskRulesJson, {
       ...NORMAL_VITALS,
       blood_pressure_bp_systolic: 137,
       blood_pressure_bp_diastolic: 86,
     });
 
+    expect(findCondition(result, CONDITION_IDS.HYPERTENSION).grade).toBe('NORMAL');
+  });
+
+  it('grades BP 137/86 as Hypertension MILD when historyOfHypertension is true', async () => {
+    const result = await evaluateRulePack(ancRiskRulesJson, {
+      ...NORMAL_VITALS,
+      blood_pressure_bp_systolic: 137,
+      blood_pressure_bp_diastolic: 86,
+      historyOfHypertension: true,
+    });
+
+    const htn = findCondition(result, CONDITION_IDS.HYPERTENSION);
+    expect(htn.grade).toBe('MILD');
+    expect(htn.isReferralTrigger).toBe(false);
+    expect(htn.isHrVisitTrigger).toBe(false);
+  });
+
+  it('grades BP 137/86 as Hypertension MILD when gestationalHypertension is true (history OR gestational)', async () => {
+    const result = await evaluateRulePack(ancRiskRulesJson, {
+      ...NORMAL_VITALS,
+      blood_pressure_bp_systolic: 137,
+      blood_pressure_bp_diastolic: 86,
+      gestationalHypertension: true,
+    });
+
     expect(findCondition(result, CONDITION_IDS.HYPERTENSION).grade).toBe('MILD');
+  });
+
+  it('Moderate/Severe Hypertension bands are unaffected by historyOfHypertension (BP threshold alone still governs)', async () => {
+    const result = await evaluateRulePack(ancRiskRulesJson, {
+      ...NORMAL_VITALS,
+      blood_pressure_bp_systolic: 145,
+      blood_pressure_bp_diastolic: 95,
+      historyOfHypertension: false,
+    });
+
+    expect(findCondition(result, CONDITION_IDS.HYPERTENSION).grade).toBe('MODERATE');
   });
 
   it('grades Hypotension MILD but does not trigger referral/HR visit when it is the only flagged condition', async () => {
@@ -162,6 +198,67 @@ describe('ancRiskRulesJson', () => {
     expect(hypo.grade).toBe('MILD');
     expect(hypo.isReferralTrigger).toBe(true);
     expect(hypo.isHrVisitTrigger).toBe(true);
+  });
+
+  describe('Hypotension shock features (issue #191 item 2)', () => {
+    it('grades MILD via shock features (dizziness) even when systolicBp is in the normal range', async () => {
+      const result = await evaluateRulePack(ancRiskRulesJson, {
+        ...NORMAL_VITALS,
+        blood_pressure_bp_systolic: 110,
+        have_you_been_experiencing_any_of_these_since_the_last_visit: ['dizziness'],
+      });
+
+      expect(findCondition(result, CONDITION_IDS.HYPOTENSION).grade).toBe('MILD');
+    });
+
+    it('grades MILD via shock features (breathlessness) even when systolicBp is in the normal range', async () => {
+      const result = await evaluateRulePack(ancRiskRulesJson, {
+        ...NORMAL_VITALS,
+        blood_pressure_bp_systolic: 110,
+        have_you_been_experiencing_any_of_these_since_the_last_visit: ['breathlessness'],
+      });
+
+      expect(findCondition(result, CONDITION_IDS.HYPOTENSION).grade).toBe('MILD');
+    });
+
+    it('grades MILD via shock features (palpitation) even when systolicBp is in the normal range', async () => {
+      const result = await evaluateRulePack(ancRiskRulesJson, {
+        ...NORMAL_VITALS,
+        blood_pressure_bp_systolic: 110,
+        have_you_been_experiencing_any_of_these_since_the_last_visit: ['palpitation'],
+      });
+
+      expect(findCondition(result, CONDITION_IDS.HYPOTENSION).grade).toBe('MILD');
+    });
+
+    it('does not grade MILD for a danger sign that is not a shock feature (e.g. severe_abdominal_pain), with normal BP', async () => {
+      const result = await evaluateRulePack(ancRiskRulesJson, {
+        ...NORMAL_VITALS,
+        blood_pressure_bp_systolic: 110,
+        have_you_been_experiencing_any_of_these_since_the_last_visit: ['severe_abdominal_pain'],
+      });
+
+      expect(findCondition(result, CONDITION_IDS.HYPOTENSION).grade).toBe('NORMAL');
+    });
+
+    it('still grades MILD on the BP threshold alone, with no shock features present', async () => {
+      const result = await evaluateRulePack(ancRiskRulesJson, {
+        ...NORMAL_VITALS,
+        blood_pressure_bp_systolic: 85,
+      });
+
+      expect(findCondition(result, CONDITION_IDS.HYPOTENSION).grade).toBe('MILD');
+    });
+
+    it('grades MILD when BOTH the BP threshold and a shock feature are present (not double-counted)', async () => {
+      const result = await evaluateRulePack(ancRiskRulesJson, {
+        ...NORMAL_VITALS,
+        blood_pressure_bp_systolic: 85,
+        have_you_been_experiencing_any_of_these_since_the_last_visit: ['dizziness'],
+      });
+
+      expect(findCondition(result, CONDITION_IDS.HYPOTENSION).grade).toBe('MILD');
+    });
   });
 
   it('grades Hyperglycemia MILD and triggers every instance', async () => {

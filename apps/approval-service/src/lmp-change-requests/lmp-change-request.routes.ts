@@ -1,7 +1,9 @@
 import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
 import { z } from 'zod';
 import type { QuickResponseService } from '../quick-response/quick-response.service';
+import type { LmpChangeRequestService } from './lmp-change-request.service';
 import { decideLmpChangeRequestSchema } from './dto/decide-lmp-change-request.dto';
+import { createLmpChangeRequestSchema } from './dto/create-lmpChangeRequest.dto';
 import {
   asyncHandler,
   ok,
@@ -18,6 +20,19 @@ extendZodWithOpenApi(z);
 const idParamsSchema = z
   .object({ id: z.string().uuid().openapi({ example: '123e4567-e89b-12d3-a456-426614174000' }) })
   .strict();
+
+const listByBeneficiaryQuerySchema = z
+  .object({
+    beneficiaryId: z.string().uuid().openapi({ example: '123e4567-e89b-12d3-a456-426614174000' }),
+  })
+  .strict();
+
+const createLmpChangeRequestRequestSchema = createLmpChangeRequestSchema.extend({
+  newLmpDate: createLmpChangeRequestSchema.shape.newLmpDate.openapi({
+    type: 'string',
+    format: 'date-time',
+  }),
+});
 
 const decideLmpChangeRequestRequestSchema = decideLmpChangeRequestSchema.extend({
   decision: decideLmpChangeRequestSchema.shape.decision.openapi({ example: 'APPROVE' }),
@@ -54,14 +69,91 @@ function envelope<T extends z.ZodTypeAny>(data: T) {
 /**
  * LMP Change Request HTTP routes. Mounted under the global `api/v1` prefix,
  * on the same `doc` router and `QuickResponseService` instance as Quick
- * Response's own routes — this is a thin, dedicated-URL wrapper around the
- * existing LMP_CHANGE card decision, not a separate feature with its own
- * data/logic. `:id` is the underlying approval_requests row's own id.
+ * Response's own routes — GET /:id and POST /:id/decision are thin,
+ * dedicated-URL wrappers around the existing LMP_CHANGE card decision, not a
+ * separate feature with its own data/logic. `:id` is the underlying
+ * approval_requests row's own id.
+ *
+ * POST / and GET / (this file's own creation + beneficiary-scoped list) are
+ * genuinely new: no code anywhere previously created an LMP_CHANGE approval
+ * request. They're handled by the new `LmpChangeRequestService`, kept
+ * separate from `QuickResponseService` (which already owns
+ * decide/getDetail) rather than growing that file further.
  */
 export function registerLmpChangeRequestRoutes(
   doc: DocumentedRouter,
   service: QuickResponseService,
+  lmpChangeRequestService: LmpChangeRequestService,
 ) {
+  doc.post(
+    '/lmp-change-requests',
+    {
+      summary: "Raise a Sakhi's LMP change request (FR-SV-4.2)",
+      tags: ['LMP Change Requests'],
+      responses: {
+        201: {
+          description: 'LMP change request created',
+          schema: envelope(lmpChangeRequestDetailSchema),
+        },
+        200: {
+          description:
+            'Idempotent replay — an LMP change request with this localRequestUuid ' +
+            'already exists; the original is returned unchanged',
+          schema: envelope(lmpChangeRequestDetailSchema),
+        },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI'),
+    validateBody(createLmpChangeRequestRequestSchema),
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const { detail, wasCreated } = await lmpChangeRequestService.create(
+        req.body,
+        req.user.id,
+        authorizationHeader,
+      );
+      res.status(wasCreated ? 201 : 200).json(ok(detail));
+    }),
+  );
+
+  doc.get(
+    '/lmp-change-requests',
+    {
+      summary:
+        "A beneficiary's LMP change request history, most-recent first — lets the Sakhi app " +
+        'poll for status after submitting one (FR-SV-4.2). `beneficiaryId` is required.',
+      tags: ['LMP Change Requests'],
+      query: listByBeneficiaryQuerySchema,
+      responses: {
+        200: {
+          description: "Beneficiary's LMP change requests (empty array if none)",
+          schema: envelope(z.array(lmpChangeRequestDetailSchema)),
+        },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER'),
+    validate(listByBeneficiaryQuerySchema, 'query'),
+    asyncHandler(async (req, res, next) => {
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const result = await lmpChangeRequestService.listByBeneficiaryId(
+        req.query.beneficiaryId as string,
+        authorizationHeader,
+      );
+      res.json(ok(result));
+    }),
+  );
+
   doc.get(
     '/lmp-change-requests/:id',
     {

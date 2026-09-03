@@ -5,6 +5,7 @@ import { createFormController } from './form.controller';
 import { createDraftVersionSchema } from './dto/create-draft-version.dto';
 import { patchFormVersionSchema } from './dto/patch-form-version.dto';
 import { createSubmissionSchema } from './dto/create-submission.dto';
+import { patchFormSubmissionAnswersSchema } from './dto/patch-formSubmissionAnswers.dto';
 import { envelope, formSubmissionSchema, formVersionSchema } from './form.schemas';
 import {
   errorResponse,
@@ -37,6 +38,7 @@ const activeVersionQuerySchema = z
   })
   .strict();
 const beneficiaryIdParamsSchema = z.object({ beneficiaryId: z.string().uuid() }).strict();
+const submissionIdParamsSchema = z.object({ id: z.string().uuid() }).strict();
 
 const vitalsSnapshotSchema = z.object({
   visitId: z.string().uuid().nullable(),
@@ -323,5 +325,42 @@ export function registerFormRoutes(doc: DocumentedRouter, service: FormService) 
     requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER'),
     validate(beneficiaryIdParamsSchema, 'params'),
     controller.getDeliveryOutcomes,
+  );
+
+  doc.patch(
+    '/form-submissions/:id/answers',
+    {
+      summary:
+        'Edits a SRS Appendix J.4 "post-submission editable field" answer on an already-' +
+        'submitted form — the only way (besides the dedicated LMP-correction/Supervisor-' +
+        'approval flow, which this endpoint deliberately excludes) a Sakhi can correct an ' +
+        'already-submitted answer without approval. All-or-nothing: if any edit names a ' +
+        "fieldCode that isn't on the submission's own form, or isn't allowlisted for that " +
+        'form code, none of the edits in the request are applied. Every applied edit is ' +
+        "written to audit-service's audit log (action FORM_ANSWER_EDIT) with both the prior " +
+        'and new value of each edited field.',
+      tags: ['Forms'],
+      params: submissionIdParamsSchema,
+      responses: {
+        200: { description: 'Answers updated', schema: envelope(formSubmissionSchema) },
+        400: errorResponse(400, {
+          message: 'Unknown fieldCode(s) for form "MOTHER_REGISTRATION": not_a_real_field.',
+        }),
+        401: errorResponse(401),
+        403: errorResponse(403),
+        404: errorResponse(404, { message: 'Form submission not found.' }),
+        422: errorResponse(422, {
+          message:
+            'The following field(s) are not editable after submission for form ' +
+            '"MOTHER_REGISTRATION": lmp_date.',
+        }),
+        500: errorResponse(500),
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI'),
+    validate(submissionIdParamsSchema, 'params'),
+    validateBody(patchFormSubmissionAnswersSchema),
+    controller.updateSubmissionAnswers,
   );
 }

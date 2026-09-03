@@ -111,7 +111,13 @@ export function registerVisitScheduleRoutes(doc: DocumentedRouter, service: Visi
         "(ANC/PP/NN/INC/HR/DELIVERY) via rules-service's published GoRules SCHEDULE pack, " +
         'instead of trusting caller-supplied dates (FR-S-2.2A). CCV is not covered here — see ' +
         'ccvOpeningRiskState.resolver.ts. DELIVERY returns a dispatch decision with no schedule ' +
-        'rows of its own; the caller issues separate /generate calls for PP/NN/INC per that plan.',
+        'rows of its own; the caller issues separate /generate calls for PP/NN/INC per that plan. ' +
+        'MANAGER/ADMIN are permitted (not just SAKHI/SUPERVISOR) so risk-referral-service can ' +
+        "forward a MANAGER/ADMIN-originated risk assessment's own HR-visit-generation trigger " +
+        '(RiskAssessmentService.create -> generateHrVisitSchedule) without a 403 — that call ' +
+        "reuses the caller's own Authorization header, whatever role it carries; " +
+        'assertCanTouchBeneficiary already treats MANAGER/ADMIN as unrestricted via isPrivileged() ' +
+        '(security review finding, 2026-09-02).',
       tags: ['Visit Schedules'],
       responses: {
         201: {
@@ -135,7 +141,7 @@ export function registerVisitScheduleRoutes(doc: DocumentedRouter, service: Visi
       },
     },
     trustGatewayIdentity,
-    requireRoles('SAKHI', 'SUPERVISOR'),
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
     validateBody(generateVisitScheduleSchema),
     controller.generate,
   );

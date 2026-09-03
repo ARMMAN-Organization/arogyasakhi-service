@@ -5,12 +5,14 @@ import type { CreateRiskAssessmentInput } from './dto/create-riskAssessment.dto'
 import { evaluateRuleSet } from './ruleSet.client';
 import { resolveRiskGradeLookupId } from './lookup.client';
 import { pushRiskConditionSummary } from './beneficiaryRiskSummary.client';
+import { generateHrVisitSchedule } from './visitScheduleGenerate.client';
 import { BeneficiaryClient } from '../referrals/beneficiary.client';
 import { listSakhiIdsForSupervisor } from '../referrals/sakhi.client';
 
 jest.mock('./ruleSet.client');
 jest.mock('./lookup.client');
 jest.mock('./beneficiaryRiskSummary.client');
+jest.mock('./visitScheduleGenerate.client');
 jest.mock('../referrals/sakhi.client');
 
 describe('RiskAssessmentService', () => {
@@ -32,6 +34,7 @@ describe('RiskAssessmentService', () => {
   const evaluateRuleSetMock = jest.mocked(evaluateRuleSet);
   const resolveRiskGradeLookupIdMock = jest.mocked(resolveRiskGradeLookupId);
   const pushRiskConditionSummaryMock = jest.mocked(pushRiskConditionSummary);
+  const generateHrVisitScheduleMock = jest.mocked(generateHrVisitSchedule);
   const listSakhiIdsForSupervisorMock = jest.mocked(listSakhiIdsForSupervisor);
 
   const CALLER_ID = '99999999-9999-9999-9999-999999999999';
@@ -69,6 +72,7 @@ describe('RiskAssessmentService', () => {
     repository.findConsecutiveNoImprovementCount.mockResolvedValue(new Map([['ANEMIA', 0]]));
     resolveRiskGradeLookupIdMock.mockResolvedValue('grade-lookup-id-1');
     pushRiskConditionSummaryMock.mockResolvedValue({ ok: true });
+    generateHrVisitScheduleMock.mockResolvedValue({ ok: true });
   });
 
   describe('IDOR guard', () => {
@@ -606,6 +610,107 @@ describe('RiskAssessmentService', () => {
         expect.objectContaining({ isFirstInstance: true, consecutiveNoImprovementCount: null }),
         AUTH_HEADER,
       );
+    });
+  });
+
+  describe('HR visit generation (SRS FR-S-5.2(b))', () => {
+    function hrTriggeringEvaluation() {
+      evaluateRuleSetMock.mockResolvedValue({
+        ruleVersionId: 'rule-version-1',
+        overallRiskCategory: 'CRITICAL',
+        conditions: [
+          {
+            riskConditionId: 'cond-1',
+            grade: 'SEVERE',
+            gradeRank: 3,
+            isReferralTrigger: true,
+            isEducationTrigger: true,
+            isHrVisitTrigger: true,
+            observedValueJson: { sickleCellStatus: 'sickle_cell_disease_scd' },
+          },
+        ],
+      });
+      repository.create.mockResolvedValue({ id: 'assessment-1' } as never);
+    }
+
+    beforeEach(() => {
+      repository.findBySubmissionId.mockResolvedValue(null);
+    });
+
+    it('calls generateHrVisitSchedule when hrDetectedFlag is true, phase is ANC/INC/CCV, and actualCompletionDate is given', async () => {
+      hrTriggeringEvaluation();
+
+      await service.create(
+        { ...dto, riskPhase: 'ANC', actualCompletionDate: '2026-09-01' },
+        caller(),
+        AUTH_HEADER,
+      );
+
+      expect(generateHrVisitScheduleMock).toHaveBeenCalledWith(
+        dto.beneficiaryId,
+        { phase: 'ANC', hrDetectedThisVisit: true, actualCompletionDate: '2026-09-01' },
+        AUTH_HEADER,
+      );
+    });
+
+    it('does not call generateHrVisitSchedule when hrDetectedFlag is false', async () => {
+      evaluateRuleSetMock.mockResolvedValue({
+        ruleVersionId: 'rule-version-1',
+        overallRiskCategory: 'NORMAL',
+        conditions: [
+          {
+            riskConditionId: 'cond-1',
+            grade: 'NORMAL',
+            gradeRank: 0,
+            isReferralTrigger: false,
+            isEducationTrigger: false,
+            isHrVisitTrigger: false,
+            observedValueJson: {},
+          },
+        ],
+      });
+      repository.create.mockResolvedValue({ id: 'assessment-1' } as never);
+
+      await service.create(
+        { ...dto, riskPhase: 'ANC', actualCompletionDate: '2026-09-01' },
+        caller(),
+        AUTH_HEADER,
+      );
+
+      expect(generateHrVisitScheduleMock).not.toHaveBeenCalled();
+    });
+
+    it('does not call generateHrVisitSchedule for NN phase, even when hrDetectedFlag is true (BR-06)', async () => {
+      hrTriggeringEvaluation();
+
+      await service.create(
+        { ...dto, riskPhase: 'NN', actualCompletionDate: '2026-09-01' },
+        caller(),
+        AUTH_HEADER,
+      );
+
+      expect(generateHrVisitScheduleMock).not.toHaveBeenCalled();
+    });
+
+    it('does not call generateHrVisitSchedule when actualCompletionDate is not provided', async () => {
+      hrTriggeringEvaluation();
+
+      await service.create({ ...dto, riskPhase: 'ANC' }, caller(), AUTH_HEADER);
+
+      expect(generateHrVisitScheduleMock).not.toHaveBeenCalled();
+    });
+
+    it('still returns the persisted assessment (no rollback) when generateHrVisitSchedule fails', async () => {
+      hrTriggeringEvaluation();
+      generateHrVisitScheduleMock.mockResolvedValue({ ok: false, error: 'network down' });
+
+      const result = await service.create(
+        { ...dto, riskPhase: 'ANC', actualCompletionDate: '2026-09-01' },
+        caller(),
+        AUTH_HEADER,
+      );
+
+      expect(result).toEqual({ id: 'assessment-1' });
     });
   });
 

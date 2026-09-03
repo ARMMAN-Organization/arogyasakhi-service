@@ -1,0 +1,223 @@
+import { HttpError, conflict, notFound } from '@armman/service-commons';
+import type { LmpChangeRequestRepository } from './lmp-change-request.repository';
+import type { LookupClient } from '../quick-response/lookup.client';
+import type { QuickResponseService } from '../quick-response/quick-response.service';
+import type { BeneficiaryClient } from '../quick-response/beneficiary.client';
+import type { CreateLmpChangeRequestInput } from './dto/create-lmpChangeRequest.dto';
+
+/**
+ * Narrows a caught Prisma error to a unique-constraint violation (P2002) on
+ * `columnName` specifically — not just any P2002 — mirroring
+ * risk-referral-service's referral.prisma-errors.ts (same fix, same day,
+ * added there specifically because an unscoped P2002 check misattributes
+ * any future unrelated unique constraint on the same table as this one;
+ * not cross-service-imported per the forklift rule, so kept as its own
+ * copy here — security review finding, 2026-09-02). Safe today only
+ * because approval_requests has exactly one non-PK unique column
+ * (localRequestUuid); the moment a second one is added, an unscoped check
+ * would silently misreport that unrelated collision as an idempotent
+ * replay of this one.
+ */
+function isUniqueConstraintViolation(err: unknown, columnName: string): boolean {
+  if (typeof err !== 'object' || err === null || !('code' in err)) return false;
+  if ((err as { code: unknown }).code !== 'P2002') return false;
+  const meta = (err as { meta?: unknown }).meta;
+  if (typeof meta !== 'object' || meta === null || !('target' in meta)) return false;
+  const target = (meta as { target?: unknown }).target;
+  return Array.isArray(target) ? target.includes(columnName) : target === columnName;
+}
+
+/**
+ * LMP_CHANGE approval request creation + beneficiary-scoped listing.
+ * LMP_CHANGE has no table of its own — every row here is a plain
+ * `approval_requests` row with `requestType: 'LMP_CHANGE'` (see
+ * quick-response.service.ts's getLmpChangeRequestDetail, whose card-decision
+ * side already reads/decides these rows). This service only adds the
+ * missing creation side and a read-only list; decision stays owned by
+ * QuickResponseService, unchanged.
+ */
+export class LmpChangeRequestService {
+  constructor(
+    private readonly repository: LmpChangeRequestRepository,
+    private readonly lookupClient: LookupClient,
+    private readonly quickResponseService: QuickResponseService,
+    private readonly beneficiaryClient: BeneficiaryClient,
+  ) {}
+
+  /**
+   * Raises a Sakhi's LMP change request (FR-SV-4.2's raise side).
+   *
+   * Idempotent replay: a dropped-connection retry resubmits the same
+   * client-generated localRequestUuid. Returns the original request
+   * unchanged instead of creating a duplicate row — this mobile flow is
+   * offline-first and expected to retry, same convention as reopen
+   * requests' localReopenRequestUuid.
+   *
+   * A concurrent retry racing on the same localRequestUuid (two near-
+   * simultaneous requests both passing the findByLocalRequestUuid check as
+   * null) hits the column's own unique constraint on create() — caught here
+   * and turned into the same idempotent-replay result as a sequential retry,
+   * rather than a raw 500. Same pattern as reopen-request.service.ts's
+   * create().
+   *
+   * Returns the response in the same shape callers get from the existing
+   * `GET /lmp-change-requests/:id` route, `wasCreated` telling the route
+   * whether to answer 201 (new) or 200 (idempotent replay).
+   *
+   * Delegates ownership scoping to beneficiary-service's own
+   * GET /beneficiaries/:id (SAKHI-own-case / SUPERVISOR-roster /
+   * MANAGER-unrestricted) rather than duplicating that IDOR check here —
+   * this service owns no sakhiId data of its own. A 403/404 from that call
+   * propagates as-is; only on success does this write an approval_requests
+   * row. Without this, any authenticated SAKHI could raise an LMP change
+   * request against any beneficiary system-wide, not just their own
+   * roster/cases — same pattern as reopen-request.service.ts's create().
+   *
+   * beneficiaryClient.getById resolves to `null` (rather than throwing) when
+   * beneficiary-service returns a genuine 404 for a beneficiaryId that does
+   * not exist at all — distinct from the out-of-roster case, which throws.
+   * That null must be turned into a 404 here, or a nonexistent beneficiaryId
+   * would silently pass this guard and create an orphaned approval_requests
+   * row.
+   */
+  async create(
+    dto: CreateLmpChangeRequestInput,
+    requestedByUserId: string,
+    authorizationHeader: string,
+  ): Promise<{
+    detail: Awaited<ReturnType<QuickResponseService['getLmpChangeRequestDetail']>>;
+    wasCreated: boolean;
+  }> {
+    const beneficiary = await this.beneficiaryClient.getById(
+      dto.beneficiaryId,
+      authorizationHeader,
+    );
+    if (!beneficiary) throw notFound('The beneficiary linked to this request was not found.');
+
+    const existing = await this.repository.findByLocalRequestUuid(dto.localRequestUuid);
+    if (existing) {
+      // Confirms `existing` is genuinely a retry of THIS request, not an
+      // unrelated one that happens to share this caller's localRequestUuid
+      // (e.g. a client-side UUID-generation bug) — mirrors audit-service's
+      // isSameLogicalEntry, added the same day for the identical purpose
+      // (security review finding, 2026-09-02). Not a cross-actor IDOR:
+      // getLmpChangeRequestDetail below re-resolves the row's OWN
+      // beneficiaryId through beneficiaryClient.getById, which already
+      // enforces SAKHI-own/SUPERVISOR-roster scoping, so an out-of-scope
+      // collision would 403 regardless — this only catches the narrower
+      // same-caller, different-beneficiary collision as a clear 409 instead
+      // of silently returning the wrong request.
+      if (
+        existing.beneficiaryId !== dto.beneficiaryId ||
+        existing.requestedByUserId !== requestedByUserId
+      ) {
+        throw conflict(
+          `localRequestUuid "${dto.localRequestUuid}" already exists for a different ` +
+            'beneficiary/requester.',
+        );
+      }
+      return {
+        detail: await this.quickResponseService.getLmpChangeRequestDetail(
+          existing.id,
+          authorizationHeader,
+        ),
+        wasCreated: false,
+      };
+    }
+
+    const decisionStatusLookupId = await this.lookupClient.resolveApprovalStatusId(
+      'PENDING',
+      authorizationHeader,
+    );
+    if (!decisionStatusLookupId) {
+      // Unlike REOPEN's best-effort card-raise (its ReopenRequest row is
+      // already committed and is its own source of truth), there is no
+      // separate resource here — the approval_requests row IS the LMP change
+      // request, and decisionStatusLookupId is a required column, so a
+      // missing PENDING lookup value means the row genuinely cannot be
+      // created, not a tolerable side-effect failure.
+      throw new HttpError(
+        500,
+        'No PENDING APPROVAL_STATUS lookup value was found for this environment.',
+      );
+    }
+
+    let created;
+    try {
+      created = await this.repository.create({
+        beneficiaryId: dto.beneficiaryId,
+        requestedByUserId,
+        decisionStatusLookupId,
+        requestPayloadJson: dto,
+        localRequestUuid: dto.localRequestUuid,
+      });
+    } catch (err) {
+      if (isUniqueConstraintViolation(err, 'local_request_uuid')) {
+        const winner = await this.repository.findByLocalRequestUuid(dto.localRequestUuid);
+        if (
+          winner &&
+          winner.beneficiaryId === dto.beneficiaryId &&
+          winner.requestedByUserId === requestedByUserId
+        ) {
+          return {
+            detail: await this.quickResponseService.getLmpChangeRequestDetail(
+              winner.id,
+              authorizationHeader,
+            ),
+            wasCreated: false,
+          };
+        }
+        if (winner) {
+          throw conflict(
+            `localRequestUuid "${dto.localRequestUuid}" already exists for a different ` +
+              'beneficiary/requester.',
+          );
+        }
+      }
+      throw err;
+    }
+
+    return {
+      detail: await this.quickResponseService.getLmpChangeRequestDetail(
+        created.id,
+        authorizationHeader,
+      ),
+      wasCreated: true,
+    };
+  }
+
+  /**
+   * All LMP change requests for one beneficiary, most-recent-first — lets
+   * the Sakhi app poll for status after submitting one (FR-SV-4.2). Reuses
+   * `QuickResponseService.getLmpChangeRequestDetail`'s existing mapping for
+   * each row rather than duplicating its beneficiary/pada/sakhi enrichment
+   * and requestPayloadJson unwrapping.
+   *
+   * Delegates ownership scoping to beneficiary-service's own
+   * GET /beneficiaries/:id (SAKHI-own-case / SUPERVISOR-roster /
+   * MANAGER-unrestricted) rather than duplicating that IDOR check here —
+   * same pattern as create() and reopen-request.service.ts's
+   * listByBeneficiaryId(). Without this, any caller could enumerate LMP
+   * change request history (beneficiary PII, pada name, Sakhi name/mobile
+   * via getLmpChangeRequestDetail) for any beneficiaryId. A 403/404 from
+   * that call propagates as-is; only on success does this query the
+   * repository.
+   *
+   * beneficiaryClient.getById resolves to `null` (rather than throwing) when
+   * beneficiary-service returns a genuine 404 for a beneficiaryId that does
+   * not exist at all — distinct from the out-of-roster case, which throws.
+   * That null must be turned into a 404 here, or a nonexistent beneficiaryId
+   * would silently pass this guard.
+   */
+  async listByBeneficiaryId(beneficiaryId: string, authorizationHeader: string) {
+    const beneficiary = await this.beneficiaryClient.getById(beneficiaryId, authorizationHeader);
+    if (!beneficiary) throw notFound('The beneficiary linked to this request was not found.');
+
+    const rows = await this.repository.findByBeneficiaryId(beneficiaryId);
+    return Promise.all(
+      rows.map((row) =>
+        this.quickResponseService.getLmpChangeRequestDetail(row.id, authorizationHeader),
+      ),
+    );
+  }
+}

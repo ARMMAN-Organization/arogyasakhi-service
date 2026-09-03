@@ -1,6 +1,7 @@
 import { addDays } from '@armman/core';
 import {
   badGateway,
+  badRequest,
   conflict,
   forbidden,
   notFound,
@@ -16,6 +17,7 @@ import { listSakhiIdsForSupervisor } from './sakhi.client';
 import { resolveReferralTypeLookupId } from './lookup.client';
 import { IncentiveClient } from './incentive.client';
 import { isUniqueConstraintViolation } from './referral.prisma-errors';
+import { assertSakhiOwnsReferral } from './assertSakhiOwnsReferral';
 
 /** Referral domain logic. Data access is delegated to the repository. */
 export class ReferralService {
@@ -25,8 +27,54 @@ export class ReferralService {
     private readonly incentiveClient: IncentiveClient = new IncentiveClient(),
   ) {}
 
-  list() {
-    return this.repository.findMany();
+  /**
+   * `beneficiaryId` given: SAKHI must own that beneficiary
+   * (assertSakhiOwnsReferral), SUPERVISOR must have it on their roster,
+   * MANAGER unrestricted — same scoping decide() already applies (ADMIN
+   * cannot reach this route at all — see requireRoles('SAKHI',
+   * 'SUPERVISOR', 'MANAGER') on GET /referrals). `beneficiaryId` omitted
+   * (the "most recent 50, system-wide" listing): SAKHI/SUPERVISOR must
+   * supply one (400) rather than getting an unscoped cross-beneficiary
+   * listing; only MANAGER may call this unfiltered (security review
+   * finding, 2026-09-02 — GET /referrals had no ownership/roster scoping
+   * at all).
+   */
+  async list(
+    beneficiaryId: string | undefined,
+    caller: AuthenticatedUser,
+    authorizationHeader: string,
+  ) {
+    if (!beneficiaryId) {
+      if (!caller.roles.includes('MANAGER')) {
+        throw badRequest('beneficiaryId is required for SAKHI/SUPERVISOR callers.');
+      }
+      return this.repository.findMany(undefined);
+    }
+
+    if (caller.roles.includes('SAKHI')) {
+      await assertSakhiOwnsReferral(
+        { beneficiaryId },
+        caller,
+        this.beneficiaryClient,
+        authorizationHeader,
+      );
+    } else if (caller.roles.includes('SUPERVISOR')) {
+      if (!caller.projectId) {
+        throw forbidden('Supervisor caller has no project scope.');
+      }
+      const beneficiary = await this.beneficiaryClient.getById(beneficiaryId, authorizationHeader);
+      if (!beneficiary) throw notFound('Beneficiary not found.');
+      const roster = await listSakhiIdsForSupervisor(
+        caller.projectId,
+        caller.id,
+        authorizationHeader,
+      );
+      if (!roster.includes(beneficiary.sakhiId)) {
+        throw forbidden("This beneficiary is outside this Supervisor's roster.");
+      }
+    }
+
+    return this.repository.findMany(beneficiaryId);
   }
 
   /**
@@ -229,9 +277,18 @@ export class ReferralService {
    *   caller can't "refill" a referral that was never in that state.
    * - COMPLETE (FR-SV-4.9 approve): PENDING_FOLLOWUP -> COMPLETED.
    *
+   * All three decisions persist decidedByUserId/decidedAt/decisionNotes —
+   * mirroring ReopenRequest's own decision-audit fields — so a REFILL is no
+   * longer indistinguishable from no decision ever happening. LAPSE/COMPLETE
+   * write these atomically with the status change (repository.updateStatus);
+   * REFILL writes only these three fields via a plain update
+   * (repository.updateDecisionOnly), since it never changes status.
+   *
    * Both real status transitions use the same PENDING_FOLLOWUP-only
    * conditional update — a referral not in that state 409s rather than
-   * silently no-op'ing.
+   * silently no-op'ing. REFILL re-checks the same PENDING_FOLLOWUP guard
+   * just above, but (having no status to protect) uses a plain update rather
+   * than a conditional one.
    *
    * A SUPERVISOR caller may only decide a referral belonging to a
    * beneficiary assigned to their own Sakhi roster — referrals carries no
@@ -275,14 +332,33 @@ export class ReferralService {
       throw conflict(`Cannot decide a referral with status ${existing.status}.`);
     }
 
+    const decisionAudit = {
+      decidedByUserId: caller.id,
+      decidedAt: new Date(),
+      decisionNotes: dto.decisionNotes ?? null,
+    };
+
     if (dto.decision === 'REFILL') {
-      return existing;
+      const updatedRefill = await this.repository.updateDecisionOnly(id, decisionAudit);
+      if (!updatedRefill) {
+        // Raced with another decision between the read above and the
+        // conditional update — same as the LAPSE/COMPLETE branch below.
+        throw conflict(`Cannot decide a referral with status ${existing.status}.`);
+      }
+      const refilled = await this.repository.findById(id);
+      if (!refilled) throw notFound('Referral not found.');
+      return refilled;
     }
 
     await this.assertDecisionMatchesReferralType(existing, dto.decision, authorizationHeader);
 
     const toStatus = dto.decision === 'LAPSE' ? 'LAPSED' : 'COMPLETED';
-    const updated = await this.repository.updateStatus(id, 'PENDING_FOLLOWUP', toStatus);
+    const updated = await this.repository.updateStatus(
+      id,
+      'PENDING_FOLLOWUP',
+      toStatus,
+      decisionAudit,
+    );
     if (!updated) {
       // Raced with another decision between the read above and the
       // conditional update — same outcome as the check above, just caught a

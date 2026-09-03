@@ -38,6 +38,9 @@ function referral(overrides: Partial<Record<string, unknown>> = {}) {
     status: 'PENDING_FOLLOWUP' as const,
     validTill: null,
     supervisorApprovalStatus: 'NOT_REQUIRED' as const,
+    decidedByUserId: null,
+    decidedAt: null,
+    decisionNotes: null,
     createdAt: new Date(),
     createdByUserId: null,
     updatedAt: new Date(),
@@ -57,6 +60,7 @@ describe('ReferralService', () => {
     findFollowupSummary: jest.fn(),
     create: jest.fn(),
     updateStatus: jest.fn(),
+    updateDecisionOnly: jest.fn(),
     countSummary: jest.fn(),
     countPendingFollowupsByBeneficiary: jest.fn(),
     findFollowupsByBeneficiary: jest.fn(),
@@ -208,22 +212,44 @@ describe('ReferralService', () => {
   });
 
   describe('decide', () => {
-    it('LAPSE: marks a PENDING_FOLLOWUP referral as LAPSED', async () => {
+    it('LAPSE: marks a PENDING_FOLLOWUP referral as LAPSED and persists the decision audit trail', async () => {
       const pending = referral();
       const decided = referral({ status: 'LAPSED' });
       repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(decided);
       repository.updateStatus.mockResolvedValue(true);
 
-      const dto: DecideReferralInput = { decision: 'LAPSE' };
-      await expect(service.decide(pending.id, dto, caller(), AUTH_HEADER)).resolves.toBe(decided);
+      const dto: DecideReferralInput = { decision: 'LAPSE', decisionNotes: 'Missed twice.' };
+      const supervisor = caller({ id: 'supervisor-1' });
+      await expect(service.decide(pending.id, dto, supervisor, AUTH_HEADER)).resolves.toBe(decided);
       expect(repository.updateStatus).toHaveBeenCalledWith(
         pending.id,
         'PENDING_FOLLOWUP',
         'LAPSED',
+        {
+          decidedByUserId: 'supervisor-1',
+          decidedAt: expect.any(Date),
+          decisionNotes: 'Missed twice.',
+        },
       );
     });
 
-    it('COMPLETE: marks a PENDING_FOLLOWUP referral as COMPLETED', async () => {
+    it('LAPSE with no decisionNotes persists null, no error', async () => {
+      const pending = referral();
+      const decided = referral({ status: 'LAPSED' });
+      repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(decided);
+      repository.updateStatus.mockResolvedValue(true);
+
+      await service.decide(pending.id, { decision: 'LAPSE' }, caller(), AUTH_HEADER);
+
+      expect(repository.updateStatus).toHaveBeenCalledWith(
+        pending.id,
+        'PENDING_FOLLOWUP',
+        'LAPSED',
+        expect.objectContaining({ decisionNotes: null }),
+      );
+    });
+
+    it('COMPLETE: marks a PENDING_FOLLOWUP referral as COMPLETED and persists the decision audit trail', async () => {
       const pending = referral({ referralTypeLookupValueId: 'lookup-accompanied' });
       const decided = referral({
         referralTypeLookupValueId: 'lookup-accompanied',
@@ -232,22 +258,66 @@ describe('ReferralService', () => {
       repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(decided);
       repository.updateStatus.mockResolvedValue(true);
 
-      const dto: DecideReferralInput = { decision: 'COMPLETE' };
-      await expect(service.decide(pending.id, dto, caller(), AUTH_HEADER)).resolves.toBe(decided);
+      const dto: DecideReferralInput = { decision: 'COMPLETE', decisionNotes: 'Visited facility.' };
+      const manager = caller({ id: 'manager-1' });
+      await expect(service.decide(pending.id, dto, manager, AUTH_HEADER)).resolves.toBe(decided);
       expect(repository.updateStatus).toHaveBeenCalledWith(
         pending.id,
         'PENDING_FOLLOWUP',
         'COMPLETED',
+        {
+          decidedByUserId: 'manager-1',
+          decidedAt: expect.any(Date),
+          decisionNotes: 'Visited facility.',
+        },
       );
     });
 
-    it('REFILL: makes no status change, returns the referral as-is', async () => {
+    it('REFILL: makes no status change, persists the decision audit trail via updateDecisionOnly', async () => {
+      const pending = referral();
+      const decided = referral({ decisionNotes: 'Please retry.' });
+      repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(decided);
+      repository.updateDecisionOnly.mockResolvedValue(true);
+
+      const dto: DecideReferralInput = { decision: 'REFILL', decisionNotes: 'Please retry.' };
+      const supervisor = caller({ id: 'supervisor-2' });
+      await expect(service.decide(pending.id, dto, supervisor, AUTH_HEADER)).resolves.toBe(decided);
+      expect(repository.updateStatus).not.toHaveBeenCalled();
+      expect(repository.updateDecisionOnly).toHaveBeenCalledWith(pending.id, {
+        decidedByUserId: 'supervisor-2',
+        decidedAt: expect.any(Date),
+        decisionNotes: 'Please retry.',
+      });
+    });
+
+    it('REFILL with no decisionNotes persists null, no error, and status stays PENDING_FOLLOWUP', async () => {
+      const pending = referral();
+      const decided = referral({ decisionNotes: null });
+      repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(decided);
+      repository.updateDecisionOnly.mockResolvedValue(true);
+
+      const result = await service.decide(
+        pending.id,
+        { decision: 'REFILL' },
+        caller(),
+        AUTH_HEADER,
+      );
+
+      expect(result.status).toBe('PENDING_FOLLOWUP');
+      expect(repository.updateDecisionOnly).toHaveBeenCalledWith(
+        pending.id,
+        expect.objectContaining({ decisionNotes: null }),
+      );
+    });
+
+    it('REFILL: 409s when updateDecisionOnly reports no row matched (status changed concurrently)', async () => {
       const pending = referral();
       repository.findById.mockResolvedValue(pending);
+      repository.updateDecisionOnly.mockResolvedValue(false);
 
-      const dto: DecideReferralInput = { decision: 'REFILL' };
-      await expect(service.decide(pending.id, dto, caller(), AUTH_HEADER)).resolves.toBe(pending);
-      expect(repository.updateStatus).not.toHaveBeenCalled();
+      await expect(
+        service.decide(pending.id, { decision: 'REFILL' }, caller(), AUTH_HEADER),
+      ).rejects.toMatchObject({ status: 409 });
     });
 
     it('404s on an unknown id', async () => {
@@ -426,6 +496,7 @@ describe('ReferralService', () => {
 
       it('never checks referral type for REFILL', async () => {
         repository.findById.mockResolvedValue(referral());
+        repository.updateDecisionOnly.mockResolvedValue(true);
 
         await service.decide(
           '11111111-1111-1111-1111-111111111111',
@@ -494,7 +565,9 @@ describe('ReferralService', () => {
 
     it('REJECT makes no status change and never triggers the incentive, regardless of type', async () => {
       const pending = referral();
-      repository.findById.mockResolvedValue(pending);
+      const decided = referral();
+      repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(decided);
+      repository.updateDecisionOnly.mockResolvedValue(true);
 
       const result = await accompaniedService.decideAccompanied(
         pending.id,
@@ -503,53 +576,149 @@ describe('ReferralService', () => {
         AUTH_HEADER,
       );
 
-      expect(result).toBe(pending);
+      expect(result).toBe(decided);
+      expect(result.status).toBe('PENDING_FOLLOWUP');
       expect(repository.updateStatus).not.toHaveBeenCalled();
       expect(incentiveClient.triggerAccompaniedReferral).not.toHaveBeenCalled();
     });
   });
 
-  it('lists via repository', async () => {
-    repository.findMany.mockResolvedValue([]);
-    await expect(service.list()).resolves.toEqual([]);
-    expect(repository.findMany).toHaveBeenCalledTimes(1);
-  });
+  describe('list', () => {
+    const beneficiaryId = '22222222-2222-2222-2222-222222222222';
 
-  it('returns the repository list unchanged', async () => {
-    const listDto: CreateReferralInput = {
-      beneficiaryId: '22222222-2222-2222-2222-222222222222',
-      referralTypeLookupValueId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
-      referralDate: new Date('2026-07-01'),
-      facilityType: 'PHC',
-      facilityName: 'Community PHC',
-      status: 'INITIATED',
-      supervisorApprovalStatus: 'NOT_REQUIRED',
-    };
-    const rows = [
-      {
-        id: '11111111-1111-1111-1111-111111111111',
-        beneficiaryId: listDto.beneficiaryId,
-        visitId: null,
-        sourceSubmissionId: null,
-        referralTypeLookupValueId: listDto.referralTypeLookupValueId,
-        referralDate: listDto.referralDate,
-        triggerConditionListJson: null,
-        facilityType: listDto.facilityType ?? null,
-        facilityName: listDto.facilityName ?? null,
-        photoEvidenceMediaAssetId: null,
-        status: listDto.status,
-        validTill: null,
-        supervisorApprovalStatus: listDto.supervisorApprovalStatus,
-        createdAt: new Date(),
-        createdByUserId: null,
-        updatedAt: new Date(),
-        updatedByUserId: null,
-        isDeleted: false,
-        deletedAt: null,
-      },
-    ];
-    repository.findMany.mockResolvedValue(rows);
-    await expect(service.list()).resolves.toBe(rows);
+    it('MANAGER omitting beneficiaryId: 200, unfiltered', async () => {
+      repository.findMany.mockResolvedValue([]);
+
+      await expect(
+        service.list(undefined, caller({ roles: ['MANAGER'] }), AUTH_HEADER),
+      ).resolves.toEqual([]);
+
+      expect(repository.findMany).toHaveBeenCalledTimes(1);
+      expect(repository.findMany).toHaveBeenCalledWith(undefined);
+    });
+
+    it('SAKHI omitting beneficiaryId: 400, repository never queried', async () => {
+      await expect(
+        service.list(undefined, caller({ roles: ['SAKHI'] }), AUTH_HEADER),
+      ).rejects.toMatchObject({ status: 400 });
+
+      expect(repository.findMany).not.toHaveBeenCalled();
+    });
+
+    it('SUPERVISOR omitting beneficiaryId: 400, repository never queried', async () => {
+      await expect(
+        service.list(undefined, caller({ roles: ['SUPERVISOR'] }), AUTH_HEADER),
+      ).rejects.toMatchObject({ status: 400 });
+
+      expect(repository.findMany).not.toHaveBeenCalled();
+    });
+
+    it('SAKHI who owns the beneficiary: 200, filtered', async () => {
+      beneficiaryClient.getById.mockResolvedValue({
+        id: beneficiaryId,
+        sakhiId: 'sakhi-1',
+      } as never);
+      repository.findMany.mockResolvedValue([]);
+
+      await expect(
+        service.list(beneficiaryId, caller({ id: 'sakhi-1', roles: ['SAKHI'] }), AUTH_HEADER),
+      ).resolves.toEqual([]);
+
+      expect(repository.findMany).toHaveBeenCalledWith(beneficiaryId);
+    });
+
+    it('SAKHI who does not own the beneficiary: 403, repository never queried', async () => {
+      beneficiaryClient.getById.mockResolvedValue({
+        id: beneficiaryId,
+        sakhiId: 'someone-else',
+      } as never);
+
+      await expect(
+        service.list(beneficiaryId, caller({ id: 'sakhi-1', roles: ['SAKHI'] }), AUTH_HEADER),
+      ).rejects.toMatchObject({ status: 403 });
+
+      expect(repository.findMany).not.toHaveBeenCalled();
+    });
+
+    it('SUPERVISOR with the beneficiary on their roster: 200, filtered', async () => {
+      beneficiaryClient.getById.mockResolvedValue({
+        id: beneficiaryId,
+        sakhiId: 'sakhi-1',
+      } as never);
+      listSakhiIdsForSupervisorMock.mockResolvedValue(['sakhi-1']);
+      repository.findMany.mockResolvedValue([]);
+
+      await expect(
+        service.list(
+          beneficiaryId,
+          caller({ roles: ['SUPERVISOR'], projectId: 'project-1' }),
+          AUTH_HEADER,
+        ),
+      ).resolves.toEqual([]);
+
+      expect(repository.findMany).toHaveBeenCalledWith(beneficiaryId);
+    });
+
+    it('SUPERVISOR with the beneficiary outside their roster: 403, repository never queried', async () => {
+      beneficiaryClient.getById.mockResolvedValue({
+        id: beneficiaryId,
+        sakhiId: 'sakhi-1',
+      } as never);
+      listSakhiIdsForSupervisorMock.mockResolvedValue(['some-other-sakhi']);
+
+      await expect(
+        service.list(
+          beneficiaryId,
+          caller({ roles: ['SUPERVISOR'], projectId: 'project-1' }),
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 403 });
+
+      expect(repository.findMany).not.toHaveBeenCalled();
+    });
+
+    it('returns the repository list unchanged', async () => {
+      const listDto: CreateReferralInput = {
+        beneficiaryId,
+        referralTypeLookupValueId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        referralDate: new Date('2026-07-01'),
+        facilityType: 'PHC',
+        facilityName: 'Community PHC',
+        status: 'INITIATED',
+        supervisorApprovalStatus: 'NOT_REQUIRED',
+      };
+      const rows = [
+        {
+          id: '11111111-1111-1111-1111-111111111111',
+          beneficiaryId: listDto.beneficiaryId,
+          visitId: null,
+          sourceSubmissionId: null,
+          referralTypeLookupValueId: listDto.referralTypeLookupValueId,
+          referralDate: listDto.referralDate,
+          triggerConditionListJson: null,
+          facilityType: listDto.facilityType ?? null,
+          facilityName: listDto.facilityName ?? null,
+          photoEvidenceMediaAssetId: null,
+          status: listDto.status,
+          validTill: null,
+          supervisorApprovalStatus: listDto.supervisorApprovalStatus,
+          decidedByUserId: null,
+          decidedAt: null,
+          decisionNotes: null,
+          createdAt: new Date(),
+          createdByUserId: null,
+          updatedAt: new Date(),
+          updatedByUserId: null,
+          isDeleted: false,
+          deletedAt: null,
+        },
+      ];
+      repository.findMany.mockResolvedValue(rows);
+
+      await expect(
+        service.list(undefined, caller({ roles: ['MANAGER'] }), AUTH_HEADER),
+      ).resolves.toBe(rows);
+    });
   });
 
   describe('getDecisionStatusByIds', () => {

@@ -77,6 +77,7 @@ describe('ApprovalRequestService', () => {
     updatedByUserId: null,
     isDeleted: false,
     deletedAt: null,
+    localRequestUuid: null,
   };
 
   const sakhiRecord: SakhiRecord = {

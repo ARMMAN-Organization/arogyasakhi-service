@@ -18,6 +18,7 @@ const CONDITION_IDS = {
   NEURO_DEVELOPMENTAL_STATUS: '22222222-2222-2222-2222-222222222210',
   INFANT_DANGER_SIGNS: '22222222-2222-2222-2222-222222222211',
   FEEDING_ADEQUACY: '22222222-2222-2222-2222-222222222212',
+  ACTIVITY_LEVEL: '22222222-2222-2222-2222-222222222213',
 };
 
 // Real INFANT_VISIT/INC_VISIT/CCV_VISIT question codes (see
@@ -34,7 +35,8 @@ const NORMAL_VITALS_INFANT = {
   child_respiratory_rate_2_12_months: 50,
   is_the_child_showing_all_developmental_milestones_as_per_his_her_age: 'yes',
   is_the_baby_showing_any_danger_signs_since_last_visit: ['no_abnormal_signs_symptoms'],
-  current_feeding_practice: ['exclusive_breastfeeding'],
+  feeding_concerns: ['no_concerns'],
+  activity_level: 'active_and_moving',
 };
 
 // Real NEONATAL_VISIT question codes (see
@@ -48,7 +50,8 @@ const NORMAL_VITALS_NEONATAL = {
   nutritional_status_underweight: 'normal',
   umbilical_cord_care: 'clean_and_dry',
   danger_signs: ['no_abnormal_signs_symptoms'],
-  current_feeding_practice: 'exclusive_breastfeeding',
+  feeding_concerns: ['no_concerns'],
+  activity_level: 'active_and_moving',
 };
 
 function findCondition(result: RulePackEvaluation, conditionId: string): RiskEvaluationResult {
@@ -331,16 +334,61 @@ describe('infantRiskRulesJson', () => {
     expect(findCondition(result, CONDITION_IDS.RESPIRATORY_DISTRESS).grade).toBe('NORMAL');
   });
 
-  it('grades Neuro-developmental status MILD when milestones answer is "no", triggers referral but not HR visit', async () => {
+  it('grades Neuro-developmental status SEVERE when a milestone is missed, triggers both referral and HR visit', async () => {
     const result = await evaluateRulePack(infantRiskRulesJson, {
       ...NORMAL_VITALS_INFANT,
       is_the_child_showing_all_developmental_milestones_as_per_his_her_age: 'no',
     });
 
     const dev = findCondition(result, CONDITION_IDS.NEURO_DEVELOPMENTAL_STATUS);
-    expect(dev.grade).toBe('MILD');
+    expect(dev.grade).toBe('SEVERE');
     expect(dev.isReferralTrigger).toBe(true);
+    expect(dev.isHrVisitTrigger).toBe(true);
+  });
+
+  it('grades Neuro-developmental status NORMAL when all milestones are achieved, no triggers', async () => {
+    const result = await evaluateRulePack(infantRiskRulesJson, {
+      ...NORMAL_VITALS_INFANT,
+      is_the_child_showing_all_developmental_milestones_as_per_his_her_age: 'yes',
+    });
+
+    const dev = findCondition(result, CONDITION_IDS.NEURO_DEVELOPMENTAL_STATUS);
+    expect(dev.grade).toBe('NORMAL');
+    expect(dev.isReferralTrigger).toBe(false);
     expect(dev.isHrVisitTrigger).toBe(false);
+  });
+
+  it('grades Activity Level NORMAL for active_and_moving', async () => {
+    const result = await evaluateRulePack(infantRiskRulesJson, {
+      ...NORMAL_VITALS_INFANT,
+      activity_level: 'active_and_moving',
+    });
+
+    const activity = findCondition(result, CONDITION_IDS.ACTIVITY_LEVEL);
+    expect(activity.grade).toBe('NORMAL');
+    expect(activity.isReferralTrigger).toBe(false);
+  });
+
+  it('grades Activity Level MILD for reduced_movement, no referral (assessment finding only)', async () => {
+    const result = await evaluateRulePack(infantRiskRulesJson, {
+      ...NORMAL_VITALS_INFANT,
+      activity_level: 'reduced_movement',
+    });
+
+    const activity = findCondition(result, CONDITION_IDS.ACTIVITY_LEVEL);
+    expect(activity.grade).toBe('MILD');
+    expect(activity.isReferralTrigger).toBe(false);
+  });
+
+  it('grades Activity Level SEVERE for lethargic, triggers referral', async () => {
+    const result = await evaluateRulePack(infantRiskRulesJson, {
+      ...NORMAL_VITALS_INFANT,
+      activity_level: 'lethargic',
+    });
+
+    const activity = findCondition(result, CONDITION_IDS.ACTIVITY_LEVEL);
+    expect(activity.grade).toBe('SEVERE');
+    expect(activity.isReferralTrigger).toBe(true);
   });
 
   it('grades any Danger Sign present (INFANT_VISIT field) as a single MILD condition row, triggering both referral and HR visit', async () => {
@@ -385,10 +433,10 @@ describe('infantRiskRulesJson', () => {
     expect(findCondition(result, CONDITION_IDS.INFANT_DANGER_SIGNS).grade).toBe('MILD');
   });
 
-  it('grades Feeding adequacy MILD and triggers referral for not_able_to_drink_feed', async () => {
+  it('grades Feeding adequacy MILD and triggers referral for any feeding_concerns value other than no_concerns', async () => {
     const result = await evaluateRulePack(infantRiskRulesJson, {
       ...NORMAL_VITALS_INFANT,
-      current_feeding_practice: ['not_able_to_drink_feed'],
+      feeding_concerns: ['baby_refusing_to_feed'],
     });
 
     const feeding = findCondition(result, CONDITION_IDS.FEEDING_ADEQUACY);
@@ -397,13 +445,24 @@ describe('infantRiskRulesJson', () => {
     expect(feeding.isHrVisitTrigger).toBe(false);
   });
 
-  it('grades Feeding adequacy NORMAL for exclusive_breastfeeding', async () => {
+  it('grades Feeding adequacy NORMAL when feeding_concerns is exactly no_concerns', async () => {
     const result = await evaluateRulePack(infantRiskRulesJson, {
       ...NORMAL_VITALS_INFANT,
-      current_feeding_practice: ['exclusive_breastfeeding'],
+      feeding_concerns: ['no_concerns'],
     });
 
     expect(findCondition(result, CONDITION_IDS.FEEDING_ADEQUACY).grade).toBe('NORMAL');
+  });
+
+  it('is not graded when feeding_concerns is absent (field not on this form/visit)', async () => {
+    const vitalsWithoutFeedingConcerns: Record<string, unknown> = { ...NORMAL_VITALS_INFANT };
+    delete vitalsWithoutFeedingConcerns.feeding_concerns;
+
+    const result = await evaluateRulePack(infantRiskRulesJson, vitalsWithoutFeedingConcerns);
+
+    expect(
+      result.conditions.some((c) => c.riskConditionId === CONDITION_IDS.FEEDING_ADEQUACY),
+    ).toBe(false);
   });
 
   it('rolls up overallRiskCategory to CRITICAL when any condition is SEVERE', async () => {

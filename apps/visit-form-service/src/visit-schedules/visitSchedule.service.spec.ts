@@ -36,6 +36,7 @@ describe('VisitScheduleService', () => {
     findById: jest.fn(),
     createAllOrNothing: jest.fn(),
     updateGeneratedByRuleVersionId: jest.fn(),
+    countByBeneficiaryAndVisitType: jest.fn(),
   } as unknown as jest.Mocked<VisitScheduleRepository>;
   let service: VisitScheduleService;
 
@@ -69,6 +70,7 @@ describe('VisitScheduleService', () => {
     });
     repository.findByLocalScheduleUuids.mockResolvedValue([]);
     repository.findByBeneficiaryAndVisitCodes.mockResolvedValue([]);
+    repository.countByBeneficiaryAndVisitType.mockResolvedValue(0);
   });
 
   function baseDto(

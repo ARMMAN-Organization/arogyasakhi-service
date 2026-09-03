@@ -4,6 +4,7 @@ import { FormRepository } from './form.repository';
 import { FormService } from './form.service';
 import { registerFormRoutes } from './form.routes';
 import { VisitInstanceRepository } from '../visits/visitInstance.repository';
+import { AuditClient } from './audit.client';
 
 /** Composition root for the forms feature: wires repository -> service -> routes. */
 export function createFormModule(prisma: PrismaService): DocumentedRouter {
@@ -18,7 +19,7 @@ export function createFormModule(prisma: PrismaService): DocumentedRouter {
   // enough that duplicating them here would drift, so the dependency is
   // taken directly instead).
   const visitInstanceRepository = new VisitInstanceRepository(prisma);
-  const service = new FormService(repository, visitInstanceRepository);
+  const service = new FormService(repository, visitInstanceRepository, new AuditClient());
   const doc = createDocumentedRouter();
   registerFormRoutes(doc, service);
   return doc;

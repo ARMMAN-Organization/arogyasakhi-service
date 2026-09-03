@@ -4,6 +4,7 @@ import { schemaJsonSchema, validationJsonSchema } from './dto/form-field.dto';
 import type { CreateDraftVersionInput } from './dto/create-draft-version.dto';
 import type { PatchFormVersionInput } from './dto/patch-form-version.dto';
 import type { CreateSubmissionInput } from './dto/create-submission.dto';
+import type { PatchFormSubmissionAnswersInput } from './dto/patch-formSubmissionAnswers.dto';
 import {
   buildFormAnswers,
   computeChecksum,
@@ -11,6 +12,8 @@ import {
   toApiFormVersion,
 } from './form.mapper';
 import { validateSubmission } from './form-validation';
+import { getEditableFieldCodes } from './form-answer-edit-allowlist';
+import type { AuditClient } from './audit.client';
 import { syncSocioDemographics } from '../beneficiaries/socio-demographics.client';
 import { syncHealthHistory } from '../beneficiaries/health-history.client';
 import { findBeneficiaryById } from '../beneficiaries/beneficiary.client';
@@ -82,6 +85,7 @@ export class FormService {
   constructor(
     private readonly repository: FormRepository,
     private readonly visitInstanceRepository: VisitInstanceRepository,
+    private readonly auditClient: AuditClient,
   ) {}
 
   /**
@@ -510,6 +514,10 @@ export class FormService {
           ruleSetId: version.formDefinition.riskRuleSetId,
           riskPhase,
           answers,
+          // Date-only slice of the server-assigned submittedAt — needed by
+          // risk-referral-service to trigger automatic HR-visit generation
+          // (SRS FR-S-5.2(b)) when this evaluation detects an HR condition.
+          actualCompletionDate: created.submittedAt.toISOString().slice(0, 10),
         },
         authorizationHeader,
       );
@@ -592,6 +600,16 @@ export class FormService {
     // top doc comment for the interim-measure rationale (issue #191).
     const sickleCellStatus =
       answers.have_you_been_detected_with_sickle_cell_disease_or_sickle_cell_trait_sct;
+    // History of Hypertension (issue #191 item 4, answered) — MOTHER_REGISTRATION's
+    // medical-history multiselect already captures this; no new form question
+    // needed. Only merged when the multiselect itself was actually answered,
+    // so anc-risk.rulesJson.ts can tell "no registration data yet" (undefined,
+    // condition skipped) apart from "answered, no hypertension" (false).
+    const medicalConditions =
+      answers.have_you_ever_been_diagnosed_with_or_treated_for_any_of_the_following_medical_conditions;
+    const historyOfHypertension = Array.isArray(medicalConditions)
+      ? medicalConditions.includes('hypertension_high_bp')
+      : undefined;
 
     return {
       ...(typeof age === 'number' ? { age } : {}),
@@ -601,6 +619,7 @@ export class FormService {
       ...(Array.isArray(complications) ? { priorComplications: complications } : {}),
       ...(typeof lmpDate === 'string' ? { lmpDate } : {}),
       ...(typeof sickleCellStatus === 'string' ? { sickleCellStatus } : {}),
+      ...(historyOfHypertension !== undefined ? { historyOfHypertension } : {}),
     };
   }
 
@@ -856,6 +875,118 @@ export class FormService {
       );
 
     return { outcomes };
+  }
+
+  /**
+   * Applies a SRS Appendix J.4 "post-submission editable field" edit to an
+   * already-submitted form — the only path (besides the dedicated LMP
+   * correction/approval flow, which this endpoint deliberately excludes;
+   * see form-answer-edit-allowlist.ts's own doc comment) that lets a Sakhi
+   * correct an already-submitted answer without Supervisor approval.
+   *
+   * All-or-nothing: if ANY edit's fieldCode is unknown on the submission's
+   * own form definition, or isn't allowlisted for that formCode, the WHOLE
+   * request is rejected and none of the edits apply — never a partial
+   * patch. Unknown-fieldCode (400) is checked and reported before
+   * not-allowlisted (422) so a caller sees the more fundamental problem
+   * first when a request has both kinds of issue.
+   *
+   * The `formDataJson` merge and the FormAnswer upserts happen in one
+   * repository-level transaction (see FormRepository.updateSubmissionAnswers)
+   * so the raw payload and its normalized projection can never diverge.
+   * The audit write happens only after that transaction commits, and is
+   * best-effort (logged, not thrown) — an audit-write failure must never
+   * roll back an edit that's already durably applied.
+   *
+   * IDOR guard: submissionId is caller-supplied — without this check any
+   * authenticated SAKHI could edit any beneficiary's submission regardless
+   * of whose case it is. Same shared ownership check as
+   * getLatestVisitVitals (SAKHI own-case only, SUPERVISOR own-roster only,
+   * MANAGER/ADMIN unrestricted), run against the submission's own
+   * beneficiaryId, before any allowlist/validation logic — an unauthorized
+   * caller must be rejected before any edit is even checked, not just
+   * before it is applied.
+   */
+  async updateSubmissionAnswers(
+    submissionId: string,
+    edits: PatchFormSubmissionAnswersInput['edits'],
+    caller: { id: string; roles: readonly string[]; projectId?: string | null },
+    authorizationHeader: string,
+    localAuditUuid?: string,
+  ) {
+    const submission = await this.repository.findSubmissionById(submissionId);
+    if (!submission) throw notFound('Form submission not found.');
+
+    await assertCallerOwnsBeneficiary(submission.beneficiaryId, caller, authorizationHeader);
+
+    const formCode = submission.formVersion.formDefinition.formCode;
+    const fields = schemaJsonSchema.parse(submission.formVersion.schemaJson);
+    const knownFieldCodes = new Set(fields.map((f) => f.question_code));
+    const editableFieldCodes = new Set(getEditableFieldCodes(formCode));
+
+    const unknownFieldCodes = edits
+      .map((e) => e.fieldCode)
+      .filter((code) => !knownFieldCodes.has(code));
+    if (unknownFieldCodes.length) {
+      throw badRequest(
+        `Unknown fieldCode(s) for form "${formCode}": ${unknownFieldCodes.join(', ')}.`,
+      );
+    }
+
+    const notAllowlisted = edits
+      .map((e) => e.fieldCode)
+      .filter((code) => !editableFieldCodes.has(code));
+    if (notAllowlisted.length) {
+      throw unprocessable(
+        `The following field(s) are not editable after submission for form "${formCode}": ` +
+          `${notAllowlisted.join(', ')}.`,
+      );
+    }
+
+    const existingFormData = submission.formDataJson as Record<string, unknown>;
+    const beforeJson: Record<string, unknown> = {};
+    const afterJson: Record<string, unknown> = {};
+    const editedFormData: Record<string, unknown> = {};
+    for (const edit of edits) {
+      beforeJson[edit.fieldCode] = existingFormData[edit.fieldCode] ?? null;
+      afterJson[edit.fieldCode] = edit.value;
+      editedFormData[edit.fieldCode] = edit.value;
+    }
+    const mergedFormDataJson = { ...existingFormData, ...editedFormData };
+
+    // Reuses the exact same type-dispatch logic createSubmission's own
+    // buildFormAnswers uses — only decomposes the edited subset (the rest
+    // of the submission's answers are untouched). Fields in
+    // BENEFICIARY_DUPLICATED_FIELD_CODES (e.g. mobile_number, gravida_*)
+    // are skipped here too, same as on original submission — they have no
+    // form_answers row to update; formDataJson is still patched for them.
+    const answerRows = buildFormAnswers(fields, editedFormData);
+
+    const updated = await this.repository.updateSubmissionAnswers(
+      submissionId,
+      mergedFormDataJson,
+      answerRows,
+    );
+
+    try {
+      await this.auditClient.log(
+        caller.id,
+        'FORM_ANSWER_EDIT',
+        'FormSubmission',
+        submissionId,
+        beforeJson,
+        afterJson,
+        authorizationHeader,
+        localAuditUuid,
+      );
+    } catch (err) {
+      console.error(
+        `Form submission ${submissionId}'s answers were edited but writing the audit entry failed:`,
+        err,
+      );
+    }
+
+    return toApiFormSubmission(updated);
   }
 }
 

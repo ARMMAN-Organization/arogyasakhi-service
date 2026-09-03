@@ -294,6 +294,12 @@ model Referral {
   updatedByUserId           String?                  @map("updated_by_user_id")
   isDeleted                 Boolean                  @default(false) @map("is_deleted")
   deletedAt                 DateTime?                @map("deleted_at")
+  // users.user_id — owned by another service, no cross-service relation. Set
+  // by decide() for all three decisions (LAPSE/REFILL/COMPLETE) — mirrors
+  // ReopenRequest's decidedByUserId/decidedAt/decisionNotes trio.
+  decidedByUserId           String?                  @map("decided_by_user_id")
+  decidedAt                 DateTime?                @map("decided_at")
+  decisionNotes             String?                  @map("decision_notes")
 
   referralTriggerSources ReferralTriggerSource[]
   referralFollowups      ReferralFollowup[]

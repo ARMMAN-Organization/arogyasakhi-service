@@ -16,6 +16,7 @@ export class NotificationClient {
     body: string,
     authorizationHeader: string,
     linkedEntity?: { linkedEntityType: string; linkedEntityId: string },
+    ctaType?: string,
   ): Promise<void> {
     let res: Response;
     try {
@@ -29,6 +30,7 @@ export class NotificationClient {
           body,
           status: 'UNREAD',
           ...linkedEntity,
+          ...(ctaType ? { ctaType } : {}),
         }),
         signal: AbortSignal.timeout(DOWNSTREAM_FETCH_TIMEOUT_MS),
       });

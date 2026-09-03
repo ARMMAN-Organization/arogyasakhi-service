@@ -28,6 +28,12 @@ export async function triggerRiskAssessment(
     // which already owns formCode -> phase knowledge) supplies it.
     riskPhase: string;
     answers: Record<string, unknown>;
+    // Date-only (YYYY-MM-DD) — the submission's own submittedAt, needed by
+    // risk-referral-service to trigger automatic HR-visit generation (SRS
+    // FR-S-5.2(b)) when this evaluation detects an HR condition. Optional —
+    // a caller with no meaningful completion date (none exist today) simply
+    // gets no HR-visit trigger, matching the pre-existing behavior.
+    actualCompletionDate?: string;
   },
   authorizationHeader: string,
 ): Promise<void> {

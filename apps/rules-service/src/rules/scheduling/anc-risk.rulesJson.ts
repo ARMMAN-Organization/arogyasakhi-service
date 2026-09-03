@@ -42,12 +42,16 @@
  *    (have_you_been_experiencing_any_of_these_since_the_last_visit). Graded
  *    MILD (present) vs NORMAL (absent) only, not by bleeding severity.
  *  - Hypertension's Mild band ("Systolic 135-139/Diastolic 85-89 AND
- *    history of Hypertension or Gestational Hypertension") has no
- *    corresponding "history of hypertension" field on either form — the
- *    history condition is dropped; this band grades MILD on the BP range
- *    alone.
- *  - Hypotension's "or associated with shock features" clause has no
- *    corresponding field — graded on the systolic-BP threshold alone.
+ *    history of Hypertension or Gestational Hypertension") is now fully
+ *    implemented (issue #191 item 4, answered): historyOfHypertension is
+ *    merged in by form.service.ts from MOTHER_REGISTRATION's medical-history
+ *    multiselect (`hypertension_high_bp`); gestationalHypertension would
+ *    come from a per-visit field once one exists (none does today).
+ *  - Hypotension's "or associated with shock features" clause is now
+ *    implemented (issue #191 item 2, answered): shock features are read
+ *    from the same shared danger-signs multiselect other conditions
+ *    already use, specifically dizziness/breathlessness/palpitation — no
+ *    new form question, matching APH's own precedent of reusing that list.
  *  - Gestational Weight Gain is captured as the Sakhi's own pre-graded
  *    radio answer ('normal'/'severe' on gestational_weight_gain), not a raw
  *    kg delta — this pack consumes that pre-graded value directly rather
@@ -68,22 +72,23 @@
  * is added.
  *
  * Bad Obstetric History (below) grades only G>4/L<P/abortions>=2/prior
- * complications — Appendix D §1.3 also lists Pre-term delivery and LSCS
- * without spacing as BOH criteria, but neither is captured as a discrete
- * form field on MOTHER_REGISTRATION today, so this pack cannot evaluate
- * them; not implemented pending ARMMAN confirming whether new form fields
- * are needed (issue #191).
+ * complications, read from MOTHER_REGISTRATION's existing "previous
+ * complications" question (issue #191 item 3, confirmed — no new field
+ * needed, this is the intended source). Appendix D §1.3 also lists
+ * Pre-term delivery and LSCS without spacing as BOH criteria; #191's
+ * answer does not add a dedicated field for either, so both remain
+ * unevaluated by this pack — a real, confirmed gap, not an oversight.
  *
- * Sickle Cell Disease (SCD) is graded as an INTERIM MEASURE, pending GitHub
- * issue #191 (item 10): Appendix D's Anemia table ties SCD to the Moderate
- * tier, but the app-form spec (Q60) says SCD selected -> Severe risk +
- * referral — these two sources conflict and ARMMAN has not yet confirmed
- * which is correct. This pack currently grades SCD as SEVERE, matching the
- * app-form spec, since that's the more specific source for this exact
- * question and matches the field's own stated risk action. If issue #191
- * is answered as Moderate instead, this grading must be revisited. Sickle
- * Cell Trait (SCT) is deliberately left ungraded — its effect, if any, is
- * also unconfirmed by #191.
+ * Sickle Cell Disease (SCD) is graded as an INTERIM MEASURE. Issue #191
+ * (item 5) confirms SCD affects risk grading and requires referral — but
+ * does not explicitly restate which tier (Appendix D's Anemia table ties
+ * SCD to Moderate; the app-form spec, Q60, says SCD selected -> Severe risk
+ * + referral). This pack still grades SCD as SEVERE, matching the app-form
+ * spec (the more specific source for this exact question, and consistent
+ * with #191's confirmed referral requirement); revisit if a future answer
+ * explicitly says Moderate instead. Sickle Cell Trait (SCT) is confirmed by
+ * #191 to have no defined risk grade "unless clinically confirmed" — still
+ * deliberately left ungraded here.
  *
  * SCD is graded at the beneficiary's first ANC_VISIT (via
  * sickleCellStatus, merged in from MOTHER_REGISTRATION by
@@ -286,21 +291,39 @@ const handler = (input, { dayjs }) => {
   }
 
   // --- Blood pressure: classify into Hypertension XOR Hypotension.
-  // No "history of hypertension" or "shock features" field exists on
-  // either form (see this pack's doc comment) - both grade on the BP
-  // threshold alone. ---
+  // Hypertension's Mild band DOES require "history of Hypertension or
+  // Gestational Hypertension" per Appendix D — historyOfHypertension is
+  // merged in by form.service.ts from MOTHER_REGISTRATION's medical-history
+  // multiselect (issue #191 answer, item 4); gestationalHypertension would
+  // come from a per-visit field if/when one exists (none does today, so
+  // this is always undefined from a real ANC_VISIT submission — accepted
+  // as-is per that same answer, which named it as a currently-captured
+  // visit-level field without giving its actual question_code).
+  //
+  // Hypotension's Mild band is "Systolic <90 mmHg OR associated with shock
+  // features" — issue #191 item 2 (answered): shock features are read from
+  // the same shared danger-signs multiselect other conditions already use
+  // (dizziness/breathlessness/palpitation), not a new question, matching
+  // APH's own precedent of reusing that list (bleeding_from_vagina). ---
   const systolicBp = input.blood_pressure_bp_systolic;
   const diastolicBp = input.blood_pressure_bp_diastolic;
+  const historyOfHypertension = input.historyOfHypertension === true;
+  const gestationalHypertension = input.gestationalHypertension === true;
+  const SHOCK_FEATURE_SIGNS = ['dizziness', 'breathlessness', 'palpitation'];
+  const shockFeaturesPresent = SHOCK_FEATURE_SIGNS.some((s) => experiencedSigns.indexOf(s) !== -1);
   let hypotensionFlagged = false;
   if (typeof systolicBp === 'number' && typeof diastolicBp === 'number') {
     let htnGrade = 'NORMAL';
     if (systolicBp >= 160 || diastolicBp >= 110) htnGrade = 'SEVERE';
     else if (systolicBp >= 140 || diastolicBp >= 90) htnGrade = 'MODERATE';
-    else if ((systolicBp >= 135 && systolicBp <= 139) || (diastolicBp >= 85 && diastolicBp <= 89)) {
-      htnGrade = 'MILD';
+    else if (
+      (systolicBp >= 135 && systolicBp <= 139) ||
+      (diastolicBp >= 85 && diastolicBp <= 89)
+    ) {
+      if (historyOfHypertension || gestationalHypertension) htnGrade = 'MILD';
     }
 
-    const hypoGrade = systolicBp < 90 ? 'MILD' : 'NORMAL';
+    const hypoGrade = systolicBp < 90 || shockFeaturesPresent ? 'MILD' : 'NORMAL';
     hypotensionFlagged = hypoGrade !== 'NORMAL';
 
     const htnFlagged = htnGrade === 'MODERATE' || htnGrade === 'SEVERE';
@@ -311,7 +334,7 @@ const handler = (input, { dayjs }) => {
     // Hypotension trigger is resolved after all conditions are known (needs
     // "accompanied by any other flagged condition") — recorded provisionally
     // here, patched below once every other condition has been evaluated.
-    record('HYPOTENSION', hypoGrade, { systolicBp }, {
+    record('HYPOTENSION', hypoGrade, { systolicBp, shockFeaturesPresent }, {
       referralTrigger: false,
       hrVisitTrigger: false,
     });

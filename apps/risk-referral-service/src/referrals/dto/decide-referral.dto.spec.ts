@@ -25,4 +25,44 @@ describe('decideReferralSchema', () => {
     const result = decideReferralSchema.safeParse({ decision: 'LAPSE', extra: 'x' });
     expect(result.success).toBe(false);
   });
+
+  it('accepts decisionNotes when present', () => {
+    const result = decideReferralSchema.safeParse({
+      decision: 'REFILL',
+      decisionNotes: 'Beneficiary was unavailable, please retry next week.',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('is valid without decisionNotes (optional)', () => {
+    const result = decideReferralSchema.safeParse({ decision: 'LAPSE' });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.decisionNotes).toBeUndefined();
+    }
+  });
+
+  it('rejects an empty-string decisionNotes', () => {
+    const result = decideReferralSchema.safeParse({ decision: 'LAPSE', decisionNotes: '' });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a decisionNotes longer than 1000 characters', () => {
+    const result = decideReferralSchema.safeParse({
+      decision: 'LAPSE',
+      decisionNotes: 'a'.repeat(1001),
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('trims decisionNotes', () => {
+    const result = decideReferralSchema.safeParse({
+      decision: 'LAPSE',
+      decisionNotes: '  padded  ',
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.decisionNotes).toBe('padded');
+    }
+  });
 });

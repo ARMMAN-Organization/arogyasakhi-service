@@ -5,8 +5,17 @@ import type { CreateReferralInput } from './dto/create-referral.dto';
 export class ReferralRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  findMany() {
-    return this.prisma.referral.findMany({ orderBy: { createdAt: 'desc' }, take: 50 });
+  /**
+   * Most-recent-50 referrals, optionally scoped to one `beneficiaryId` — the
+   * beneficiary-scoped case backs a beneficiary detail screen's referral
+   * history; omitting it keeps the existing unfiltered behavior.
+   */
+  findMany(beneficiaryId?: string) {
+    return this.prisma.referral.findMany({
+      where: beneficiaryId ? { beneficiaryId } : undefined,
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
   }
 
   findById(id: string) {
@@ -220,15 +229,45 @@ export class ReferralRepository {
    * caller's `findById` and this call, the count comes back 0 and the
    * service turns that into a 409 instead of silently overwriting a
    * since-changed referral. Same pattern as closures/reopen-requests.
+   *
+   * Sets the decision audit trail (decidedByUserId/decidedAt/decisionNotes)
+   * atomically with the status change, for the LAPSE/COMPLETE decisions —
+   * mirrors ReopenRequest's own decision-audit fields.
    */
   async updateStatus(
     id: string,
     fromStatus: 'PENDING_FOLLOWUP',
     toStatus: 'LAPSED' | 'COMPLETED',
+    decision: { decidedByUserId: string; decidedAt: Date; decisionNotes: string | null },
   ): Promise<boolean> {
     const result = await this.prisma.referral.updateMany({
       where: { id, isDeleted: false, status: fromStatus },
-      data: { status: toStatus },
+      data: { status: toStatus, ...decision },
+    });
+    return result.count > 0;
+  }
+
+  /**
+   * Records a REFILL decision's audit trail without changing `status` — the
+   * REFILL business rule is "referral stays PENDING_FOLLOWUP". Uses the same
+   * conditional-updateMany-as-concurrency-guard pattern as updateStatus
+   * (fixed per security review, 2026-09-02): the caller's own
+   * `existing.status === 'PENDING_FOLLOWUP'` check reads a snapshot taken
+   * before any SUPERVISOR-roster-scoping HTTP call, not immediately before
+   * this write, so two concurrent decisions on the same referral could
+   * previously race — an unconditional `update` here would silently
+   * overwrite decidedByUserId/decidedAt/decisionNotes with the loser's
+   * values after a status-changing decide() had already committed, with no
+   * 409 to signal it. Gated on status: 'PENDING_FOLLOWUP' now, same as
+   * updateStatus, so that race correctly 409s instead.
+   */
+  async updateDecisionOnly(
+    id: string,
+    decision: { decidedByUserId: string; decidedAt: Date; decisionNotes: string | null },
+  ): Promise<boolean> {
+    const result = await this.prisma.referral.updateMany({
+      where: { id, isDeleted: false, status: 'PENDING_FOLLOWUP' },
+      data: decision,
     });
     return result.count > 0;
   }

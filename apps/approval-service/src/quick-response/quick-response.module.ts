@@ -4,11 +4,14 @@ import { QuickResponseRepository } from './quick-response.repository';
 import { QuickResponseService } from './quick-response.service';
 import { registerQuickResponseRoutes } from './quick-response.routes';
 import { registerLmpChangeRequestRoutes } from '../lmp-change-requests/lmp-change-request.routes';
+import { LmpChangeRequestRepository } from '../lmp-change-requests/lmp-change-request.repository';
+import { LmpChangeRequestService } from '../lmp-change-requests/lmp-change-request.service';
 import { LookupClient } from './lookup.client';
 import { EscalationClient } from './escalation.client';
 import { ReopenRequestClient } from './reopen-request.client';
 import { BeneficiaryClient } from './beneficiary.client';
 import { NotificationClient } from './notification.client';
+import { AuditClient } from './audit.client';
 import { ClosureClient } from './closure.client';
 import { ReferralClient } from './referral.client';
 import { IncentiveClient } from './incentive.client';
@@ -23,12 +26,14 @@ import { VisitClient } from './visit.client';
  */
 export function createQuickResponseModule(prisma: PrismaService): DocumentedRouter {
   const repository = new QuickResponseRepository(prisma);
+  const lookupClient = new LookupClient();
+  const beneficiaryClient = new BeneficiaryClient();
   const service = new QuickResponseService(
     repository,
-    new LookupClient(),
+    lookupClient,
     new EscalationClient(),
     new ReopenRequestClient(),
-    new BeneficiaryClient(),
+    beneficiaryClient,
     new NotificationClient(),
     new ClosureClient(),
     new ReferralClient(),
@@ -37,9 +42,16 @@ export function createQuickResponseModule(prisma: PrismaService): DocumentedRout
     new SakhiClient(),
     new GeographyClient(),
     new VisitClient(),
+    new AuditClient(),
+  );
+  const lmpChangeRequestService = new LmpChangeRequestService(
+    new LmpChangeRequestRepository(prisma),
+    lookupClient,
+    service,
+    beneficiaryClient,
   );
   const doc = createDocumentedRouter();
   registerQuickResponseRoutes(doc, service);
-  registerLmpChangeRequestRoutes(doc, service);
+  registerLmpChangeRequestRoutes(doc, service, lmpChangeRequestService);
   return doc;
 }

@@ -40,6 +40,17 @@ export const createRiskAssessmentSchema = z
     // riskAssessment.service.ts's create()).
     riskPhase: riskPhaseSchema,
     answers: z.record(nestedJsonValueSchema),
+    // The submission's actual completion date (date-only, YYYY-MM-DD) — the
+    // caller's own submittedAt, needed to trigger automatic HR-visit
+    // generation (SRS FR-S-5.2(b): "...15 days from the ACTUAL completion
+    // date") when this evaluation detects an HR condition. Optional for
+    // backward compatibility with any caller that doesn't have a visit
+    // completion date (e.g. no real ANC_HR/INC_HR/CCV_HR generation is
+    // attempted when omitted — see riskAssessment.service.ts's create()).
+    actualCompletionDate: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, 'must be a date-only string (YYYY-MM-DD), not a datetime')
+      .optional(),
   })
   .strict();
 
