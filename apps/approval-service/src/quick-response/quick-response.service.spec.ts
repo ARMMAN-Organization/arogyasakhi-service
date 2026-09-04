@@ -86,6 +86,7 @@ describe('QuickResponseService', () => {
     applyLmpChange: jest.fn(),
     getById: jest.fn(),
     getManyWithRisk: jest.fn(),
+    restoreForSakhi: jest.fn(),
   } as unknown as jest.Mocked<BeneficiaryClient>;
   const notificationClient = { notify: jest.fn() } as unknown as jest.Mocked<NotificationClient>;
   const closureClient = {
@@ -108,7 +109,10 @@ describe('QuickResponseService', () => {
     getOwnSakhiIds: jest.fn(),
   } as unknown as jest.Mocked<SakhiClient>;
   const geographyClient = { getById: jest.fn() } as unknown as jest.Mocked<GeographyClient>;
-  const visitClient = { getById: jest.fn() } as unknown as jest.Mocked<VisitClient>;
+  const visitClient = {
+    getById: jest.fn(),
+    restoreForSakhi: jest.fn(),
+  } as unknown as jest.Mocked<VisitClient>;
   const auditClient = { log: jest.fn() } as unknown as jest.Mocked<AuditClient>;
   let service: QuickResponseService;
   const authHeader = 'Bearer token';
@@ -2127,6 +2131,203 @@ describe('QuickResponseService', () => {
       expect(rejected).toHaveLength(1);
       expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({ status: 409 });
       expect(userClient.reactivateUser).toHaveBeenCalledTimes(1);
+    });
+
+    it('approves: restores beneficiary and visit data for the Sakhi after reactivating', async () => {
+      const card = dataRestoreRequest();
+      repository.findById.mockResolvedValue(card);
+      userClient.reactivateUser.mockResolvedValue({
+        id: card.requestedByUserId as string,
+        status: 'ACTIVE',
+      });
+      beneficiaryClient.restoreForSakhi.mockResolvedValue({ restoredCaseCount: 2 });
+      visitClient.restoreForSakhi.mockResolvedValue({ restoredVisitCount: 5 });
+
+      const result = await service.decide(
+        card.id as string,
+        { cardSource: 'approval_requests', decision: 'APPROVE' },
+        decidedByCaller,
+        authHeader,
+      );
+
+      expect(beneficiaryClient.restoreForSakhi).toHaveBeenCalledWith(
+        card.requestedByUserId,
+        authHeader,
+      );
+      expect(visitClient.restoreForSakhi).toHaveBeenCalledWith(card.requestedByUserId, authHeader);
+      expect(result.decision).toBe('APPROVE');
+    });
+
+    it('approves: writes an audit entry recording both restore results', async () => {
+      const card = dataRestoreRequest();
+      repository.findById.mockResolvedValue(card);
+      userClient.reactivateUser.mockResolvedValue({
+        id: card.requestedByUserId as string,
+        status: 'ACTIVE',
+      });
+      beneficiaryClient.restoreForSakhi.mockResolvedValue({ restoredCaseCount: 2 });
+      visitClient.restoreForSakhi.mockResolvedValue({ restoredVisitCount: 5 });
+
+      await service.decide(
+        card.id as string,
+        { cardSource: 'approval_requests', decision: 'APPROVE' },
+        decidedByCaller,
+        authHeader,
+      );
+
+      expect(auditClient.log).toHaveBeenCalledWith(
+        DECIDED_BY_USER_ID,
+        'DATA_RESTORE_APPROVED',
+        'User',
+        card.requestedByUserId,
+        {
+          beneficiaryRestoreResult: { restoredCaseCount: 2 },
+          visitRestoreResult: { restoredVisitCount: 5 },
+        },
+        authHeader,
+      );
+    });
+
+    it('rejects: writes an audit entry that makes no restore claim', async () => {
+      const card = dataRestoreRequest();
+      repository.findById.mockResolvedValue(card);
+
+      await service.decide(
+        card.id as string,
+        { cardSource: 'approval_requests', decision: 'REJECT', decisionNotes: 'Not eligible' },
+        decidedByCaller,
+        authHeader,
+      );
+
+      expect(auditClient.log).toHaveBeenCalledWith(
+        DECIDED_BY_USER_ID,
+        'DATA_RESTORE_REJECTED',
+        'User',
+        card.requestedByUserId,
+        { decision: 'REJECTED', reason: 'Not eligible' },
+        authHeader,
+      );
+      expect(beneficiaryClient.restoreForSakhi).not.toHaveBeenCalled();
+      expect(visitClient.restoreForSakhi).not.toHaveBeenCalled();
+    });
+
+    it('does not fail the approval when the beneficiary restore fails, and records the failure in the audit entry', async () => {
+      const card = dataRestoreRequest();
+      repository.findById.mockResolvedValue(card);
+      userClient.reactivateUser.mockResolvedValue({
+        id: card.requestedByUserId as string,
+        status: 'ACTIVE',
+      });
+      beneficiaryClient.restoreForSakhi.mockRejectedValue(new Error('beneficiary-service down'));
+      visitClient.restoreForSakhi.mockResolvedValue({ restoredVisitCount: 5 });
+
+      const result = await service.decide(
+        card.id as string,
+        { cardSource: 'approval_requests', decision: 'APPROVE' },
+        decidedByCaller,
+        authHeader,
+      );
+
+      expect(result.decision).toBe('APPROVE');
+      expect(consoleErrorSpy).toHaveBeenCalled();
+      expect(auditClient.log).toHaveBeenCalledWith(
+        DECIDED_BY_USER_ID,
+        'DATA_RESTORE_APPROVED',
+        'User',
+        card.requestedByUserId,
+        {
+          beneficiaryRestoreResult: { error: 'beneficiary-service down' },
+          visitRestoreResult: { restoredVisitCount: 5 },
+        },
+        authHeader,
+      );
+      // The account was already reactivated and that succeeded — a Sakhi
+      // still gets notified even though her data restore partially failed.
+      expect(notificationClient.notify).toHaveBeenCalled();
+    });
+
+    it('does not fail the approval when the visit restore fails, and records the failure in the audit entry', async () => {
+      const card = dataRestoreRequest();
+      repository.findById.mockResolvedValue(card);
+      userClient.reactivateUser.mockResolvedValue({
+        id: card.requestedByUserId as string,
+        status: 'ACTIVE',
+      });
+      beneficiaryClient.restoreForSakhi.mockResolvedValue({ restoredCaseCount: 2 });
+      visitClient.restoreForSakhi.mockRejectedValue(new Error('visit-form-service down'));
+
+      const result = await service.decide(
+        card.id as string,
+        { cardSource: 'approval_requests', decision: 'APPROVE' },
+        decidedByCaller,
+        authHeader,
+      );
+
+      expect(result.decision).toBe('APPROVE');
+      expect(auditClient.log).toHaveBeenCalledWith(
+        DECIDED_BY_USER_ID,
+        'DATA_RESTORE_APPROVED',
+        'User',
+        card.requestedByUserId,
+        {
+          beneficiaryRestoreResult: { restoredCaseCount: 2 },
+          visitRestoreResult: { error: 'visit-form-service down' },
+        },
+        authHeader,
+      );
+    });
+
+    it('does not fail the approval when both restore calls fail, and records both failures', async () => {
+      const card = dataRestoreRequest();
+      repository.findById.mockResolvedValue(card);
+      userClient.reactivateUser.mockResolvedValue({
+        id: card.requestedByUserId as string,
+        status: 'ACTIVE',
+      });
+      beneficiaryClient.restoreForSakhi.mockRejectedValue(new Error('beneficiary-service down'));
+      visitClient.restoreForSakhi.mockRejectedValue(new Error('visit-form-service down'));
+
+      const result = await service.decide(
+        card.id as string,
+        { cardSource: 'approval_requests', decision: 'APPROVE' },
+        decidedByCaller,
+        authHeader,
+      );
+
+      expect(result.decision).toBe('APPROVE');
+      expect(auditClient.log).toHaveBeenCalledWith(
+        DECIDED_BY_USER_ID,
+        'DATA_RESTORE_APPROVED',
+        'User',
+        card.requestedByUserId,
+        {
+          beneficiaryRestoreResult: { error: 'beneficiary-service down' },
+          visitRestoreResult: { error: 'visit-form-service down' },
+        },
+        authHeader,
+      );
+    });
+
+    it('does not fail the approval when writing the audit entry throws, and the Sakhi is still notified', async () => {
+      const card = dataRestoreRequest();
+      repository.findById.mockResolvedValue(card);
+      userClient.reactivateUser.mockResolvedValue({
+        id: card.requestedByUserId as string,
+        status: 'ACTIVE',
+      });
+      beneficiaryClient.restoreForSakhi.mockResolvedValue({ restoredCaseCount: 0 });
+      visitClient.restoreForSakhi.mockResolvedValue({ restoredVisitCount: 0 });
+      auditClient.log.mockRejectedValue(new Error('audit-service down'));
+
+      const result = await service.decide(
+        card.id as string,
+        { cardSource: 'approval_requests', decision: 'APPROVE' },
+        decidedByCaller,
+        authHeader,
+      );
+
+      expect(result.decision).toBe('APPROVE');
+      expect(notificationClient.notify).toHaveBeenCalled();
     });
   });
 

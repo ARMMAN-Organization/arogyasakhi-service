@@ -561,11 +561,41 @@ describe('ReopenRequestService', () => {
       service.decide(pending.id, supervisorId, { decision: 'APPROVED' }, authHeader),
     ).resolves.toBe(decided);
     expect(repository.decide).toHaveBeenCalled();
+    // reactivateCase is fire-and-forget (not awaited before responding — see
+    // decide()'s doc comment), so its rejection's console.error runs on a
+    // later microtask than decide()'s own return; flush the microtask queue
+    // before asserting on it.
+    await new Promise(process.nextTick);
     expect(consoleErrorSpy).toHaveBeenCalled();
     // The audit/notification calls still run — a downstream reactivation
     // failure isn't a reason to also skip the audit trail or Sakhi notice.
     expect(auditClient.log).toHaveBeenCalled();
     expect(notificationClient.notify).toHaveBeenCalled();
+  });
+
+  it('does not wait for beneficiary reactivation to complete before returning the decided reopen request', async () => {
+    const pending = reopenRequest();
+    const decided = reopenRequest({ supervisorStatus: 'APPROVED', decidedByUserId: supervisorId });
+    repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(decided);
+    repository.decide.mockResolvedValue(true);
+    let resolveReactivate!: (value: { id: string; currentStatus: string }) => void;
+    beneficiaryClient.reactivateCase.mockReturnValue(
+      new Promise((resolve) => {
+        resolveReactivate = resolve;
+      }),
+    );
+
+    // reactivateCase is deliberately never resolved during this test — if
+    // decide() awaited it, this would hang and the test would time out.
+    await expect(
+      service.decide(pending.id, supervisorId, { decision: 'APPROVED' }, authHeader),
+    ).resolves.toBe(decided);
+    expect(beneficiaryClient.reactivateCase).toHaveBeenCalledWith(
+      pending.beneficiaryId,
+      authHeader,
+    );
+
+    resolveReactivate({ id: pending.beneficiaryId, currentStatus: 'ACTIVE' });
   });
 
   describe('Quick Response card linking', () => {

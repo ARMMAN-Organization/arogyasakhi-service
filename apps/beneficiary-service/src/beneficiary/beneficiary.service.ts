@@ -34,7 +34,11 @@ import {
   resolvePadaUnits,
   resolveVillageNames,
 } from '../geography/geography.client';
-import { resolveLookupIdsByValueCode, resolveLookupValues } from '../lookups/lookup.client';
+import {
+  resolveLookupIdsByValueCode,
+  resolveLookupValues,
+  type ResolvedLookupValue,
+} from '../lookups/lookup.client';
 import {
   getSakhiName,
   listSakhiIdsForSupervisor,
@@ -87,7 +91,16 @@ async function withResolvedSocioDemographics<T extends Record<string, unknown>>(
     requests[field] = { categoryCode, lookupValueId: (socio[field] as string | null) ?? null };
   }
 
-  const resolved = await resolveLookupValues(requests, authorizationHeader);
+  let resolved: Record<string, ResolvedLookupValue | null>;
+  try {
+    resolved = await resolveLookupValues(requests, authorizationHeader);
+  } catch (err) {
+    console.error(
+      'Failed to resolve socio-demographics lookup values — returning socioDemographics unresolved:',
+      err,
+    );
+    return caseDetail;
+  }
 
   const withResolved = { ...socio };
   for (const field of Object.keys(SOCIO_DEMOGRAPHICS_LOOKUP_CATEGORIES)) {
@@ -1411,5 +1424,23 @@ export class BeneficiaryService {
       statusHistory: [] as BeneficiaryStatusHistory[],
     };
     return withResolvedSocioDemographics(projected, authorizationHeader);
+  }
+
+  /**
+   * See restore-for-sakhi.dto.ts and the repository method's own doc
+   * comment for the full rationale. Reachable by a human SUPERVISOR role
+   * (same route gate as reactivateCase), not just server-to-server, so it
+   * needs the same IDOR guard as any other single-Sakhi mutation:
+   * assertCallerCanTouchCase, called with sakhiUserId itself rather than a
+   * case's sakhiId — SUPERVISOR may only restore a Sakhi in their own
+   * roster; SYSTEM/ADMIN are unscoped.
+   */
+  async restoreForSakhi(
+    sakhiUserId: string,
+    caller: AuthenticatedUser,
+    authorizationHeader: string,
+  ) {
+    await assertCallerCanTouchCase(sakhiUserId, caller, authorizationHeader);
+    return this.repository.restoreForSakhi(sakhiUserId);
   }
 }

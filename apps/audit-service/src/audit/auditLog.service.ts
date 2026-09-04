@@ -41,7 +41,12 @@ const ALLOWED_ACTION_PREFIXES: Record<string, readonly string[]> = {
   // who originally requested the LMP change isn't in the request chain when a
   // Supervisor later decides the card — so LMP_CHANGE_* audit entries are
   // always, and can only be, attributed to the deciding Supervisor.
-  SUPERVISOR: ['QUICK_RESPONSE_', 'LMP_CHANGE_'],
+  // decideDataRestoreCard forwards the deciding Supervisor's own
+  // Authorization header the same way as LMP_CHANGE_ above — the DATA_RESTORE
+  // card's decide endpoint is the same requireRoles('SUPERVISOR')-gated
+  // POST /quick-response/:cardId/decision, so DATA_RESTORE_* entries are
+  // always attributed to the deciding Supervisor, never the Sakhi.
+  SUPERVISOR: ['QUICK_RESPONSE_', 'LMP_CHANGE_', 'DATA_RESTORE_'],
   // visit-form-service will forward a Sakhi's own form answer edit audit
   // entry the same way. The prefix is written without a trailing underscore
   // (deliberately just 'FORM_ANSWER_EDIT') because the sibling task that adds
@@ -63,6 +68,7 @@ const ALLOWED_ACTION_PREFIXES: Record<string, readonly string[]> = {
 const REQUIRED_ENTITY_TYPE_BY_ACTION_PREFIX: Record<string, string> = {
   FORM_ANSWER_EDIT: 'FormSubmission',
   LMP_CHANGE_: 'MotherCaseDetails',
+  DATA_RESTORE_: 'User',
 };
 
 /**
@@ -106,10 +112,10 @@ export class AuditLogService {
    * widened role can never forge an entry attributed to someone else or
    * write an arbitrary action/entityType.
    *
-   * LMP_CHANGE_* is allowlisted under SUPERVISOR, not SAKHI: the deciding
-   * Supervisor is the only caller in the request chain when an LMP-change
-   * card is decided, so that entry is always attributed to them (see
-   * ALLOWED_ACTION_PREFIXES above).
+   * LMP_CHANGE_* and DATA_RESTORE_* are allowlisted under SUPERVISOR, not
+   * SAKHI: the deciding Supervisor is the only caller in the request chain
+   * when an LMP-change or DATA_RESTORE card is decided, so those entries
+   * are always attributed to them (see ALLOWED_ACTION_PREFIXES above).
    *
    * SAKHI additionally 403s outright if the client-supplied actorUserId
    * names someone other than the caller, rather than silently overriding it

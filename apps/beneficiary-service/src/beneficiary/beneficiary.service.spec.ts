@@ -43,6 +43,7 @@ describe('BeneficiaryService', () => {
     updatePhase: jest.fn(),
     closeCase: jest.fn(),
     reactivateCase: jest.fn(),
+    restoreForSakhi: jest.fn(),
     markPendingTransfer: jest.fn(),
     countByCaseType: jest.fn(),
     countByRiskGrade: jest.fn(),
@@ -1592,6 +1593,25 @@ describe('BeneficiaryService', () => {
 
       expect(resolveLookupValuesMock).not.toHaveBeenCalled();
       expect(result.socioDemographics).toBeNull();
+    });
+
+    it('degrades to unresolved socioDemographics, without failing the request, when the lookup resolver is unreachable', async () => {
+      const found = {
+        id: 'x',
+        pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
+        socioDemographics: { religionLookupId: 'religion-uuid-1' },
+      };
+      repository.findById.mockResolvedValue(found as never);
+      resolveLookupValuesMock.mockRejectedValue(
+        Object.assign(new Error('bad gateway'), { status: 502 }),
+      );
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+
+      const result = await service.getById('x', caller({ roles: ['ADMIN'] }), AUTH_HEADER);
+
+      expect(result.socioDemographics).toEqual({ religionLookupId: 'religion-uuid-1' });
+      expect(consoleErrorSpy).toHaveBeenCalled();
+      consoleErrorSpy.mockRestore();
     });
 
     it('returns null socioDemographics for a case with no row yet', async () => {
@@ -3361,6 +3381,67 @@ describe('BeneficiaryService', () => {
           gradeRank: null,
         }),
       );
+    });
+  });
+
+  describe('restoreForSakhi', () => {
+    const targetSakhiId = '77777777-7777-7777-7777-777777777777';
+
+    it('delegates to the repository and returns its result for a privileged (ADMIN) caller', async () => {
+      repository.restoreForSakhi.mockResolvedValue({ restoredCaseCount: 3 });
+
+      const result = await service.restoreForSakhi(
+        targetSakhiId,
+        caller({ roles: ['ADMIN'] }),
+        AUTH_HEADER,
+      );
+
+      expect(repository.restoreForSakhi).toHaveBeenCalledWith(targetSakhiId);
+      expect(listSakhiIdsForSupervisorMock).not.toHaveBeenCalled();
+      expect(result).toEqual({ restoredCaseCount: 3 });
+    });
+
+    it('403s when a SUPERVISOR targets a Sakhi outside their own roster', async () => {
+      listSakhiIdsForSupervisorMock.mockResolvedValue(['some-other-sakhi']);
+
+      await expect(
+        service.restoreForSakhi(targetSakhiId, caller({ roles: ['SUPERVISOR'] }), AUTH_HEADER),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(repository.restoreForSakhi).not.toHaveBeenCalled();
+    });
+
+    it('allows a SUPERVISOR to restore a Sakhi in their own roster', async () => {
+      repository.restoreForSakhi.mockResolvedValue({ restoredCaseCount: 2 });
+      listSakhiIdsForSupervisorMock.mockResolvedValue([targetSakhiId]);
+
+      const result = await service.restoreForSakhi(
+        targetSakhiId,
+        caller({ roles: ['SUPERVISOR'] }),
+        AUTH_HEADER,
+      );
+
+      expect(repository.restoreForSakhi).toHaveBeenCalledWith(targetSakhiId);
+      expect(result).toEqual({ restoredCaseCount: 2 });
+    });
+
+    it('403s when a SUPERVISOR caller has no project scope', async () => {
+      await expect(
+        service.restoreForSakhi(
+          targetSakhiId,
+          caller({ roles: ['SUPERVISOR'], projectId: null }),
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(repository.restoreForSakhi).not.toHaveBeenCalled();
+      expect(listSakhiIdsForSupervisorMock).not.toHaveBeenCalled();
+    });
+
+    it('propagates a repository error', async () => {
+      repository.restoreForSakhi.mockRejectedValue(new Error('db down'));
+
+      await expect(
+        service.restoreForSakhi(targetSakhiId, caller({ roles: ['ADMIN'] }), AUTH_HEADER),
+      ).rejects.toThrow('db down');
     });
   });
 });

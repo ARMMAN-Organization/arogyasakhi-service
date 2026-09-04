@@ -115,7 +115,35 @@ describe('AuditLogService', () => {
     expect(repository.create).not.toHaveBeenCalled();
   });
 
-  it('SUPERVISOR logging a non-QUICK_RESPONSE_/non-LMP_CHANGE_ action is forbidden', async () => {
+  it.each(['DATA_RESTORE_APPROVED', 'DATA_RESTORE_REJECTED'])(
+    'SUPERVISOR logging %s (a DATA_RESTORE decision) has actorUserId forced to their own id',
+    async (action) => {
+      const dto: CreateAuditLogInput = {
+        actorUserId: 'someone-else',
+        action,
+        entityType: 'User',
+        entityId: 'sakhi-1',
+      };
+      repository.create.mockResolvedValue({ id: '1' } as never);
+      await service.create(dto, supervisor);
+      expect(repository.create).toHaveBeenCalledWith({ ...dto, actorUserId: 'supervisor-1' });
+    },
+  );
+
+  it('SUPERVISOR logging a DATA_RESTORE_ action with the wrong entityType is forbidden', async () => {
+    const dto: CreateAuditLogInput = {
+      actorUserId: 'supervisor-1',
+      action: 'DATA_RESTORE_APPROVED',
+      entityType: 'ApprovalRequest',
+      entityId: 'req-1',
+    };
+    await expect(service.create(dto, supervisor)).rejects.toThrow(
+      expect.objectContaining({ status: 403 }),
+    );
+    expect(repository.create).not.toHaveBeenCalled();
+  });
+
+  it('SUPERVISOR logging a non-QUICK_RESPONSE_/non-LMP_CHANGE_/non-DATA_RESTORE_ action is forbidden', async () => {
     const dto: CreateAuditLogInput = {
       action: 'DELETE_EVERYTHING',
       entityType: 'Beneficiary',
@@ -170,6 +198,22 @@ describe('AuditLogService', () => {
           action,
           entityType: 'ApprovalRequest',
           entityId: 'req-1',
+        };
+        await expect(service.create(dto, sakhi)).rejects.toThrow(
+          expect.objectContaining({ status: 403 }),
+        );
+        expect(repository.create).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(['DATA_RESTORE_APPROVED', 'DATA_RESTORE_REJECTED'])(
+      'SAKHI logging %s is forbidden — only a SUPERVISOR may log a DATA_RESTORE decision',
+      async (action) => {
+        const dto: CreateAuditLogInput = {
+          actorUserId: 'sakhi-1',
+          action,
+          entityType: 'User',
+          entityId: 'sakhi-1',
         };
         await expect(service.create(dto, sakhi)).rejects.toThrow(
           expect.objectContaining({ status: 403 }),

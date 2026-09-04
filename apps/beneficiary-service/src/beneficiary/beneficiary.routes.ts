@@ -19,6 +19,7 @@ import { idsQuerySchema } from './dto/ids-query.dto';
 import { byIdsWithRiskQuerySchema } from './dto/by-ids-with-risk-query.dto';
 import { batchRiskConditionSummaryQuerySchema } from './dto/batch-risk-condition-summary-query.dto';
 import { postEddPendingQuerySchema } from './dto/post-edd-pending-query.dto';
+import { restoreForSakhiSchema } from './dto/restore-for-sakhi.dto';
 import { upsertSocioDemographicsSchema } from './dto/upsert-socio-demographics.dto';
 import { upsertRiskConditionSummarySchema } from './dto/upsert-risk-condition-summary.dto';
 import { applyLmpChangeSchema } from './dto/apply-lmp-change.dto';
@@ -882,6 +883,38 @@ export function registerBeneficiaryRoutes(doc: DocumentedRouter, service: Benefi
     requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
     validate(idParamsSchema, 'params'),
     controller.reactivateCase,
+  );
+
+  doc.patch(
+    '/beneficiaries/restore',
+    {
+      summary:
+        'Restore every beneficiary-family record previously soft-deleted for one Sakhi — ' +
+        "called by approval-service's own DATA_RESTORE decide path, forwarding the " +
+        "deciding Supervisor's Authorization header — SYSTEM/ADMIN also allowed for a " +
+        'future direct/service-token caller. ' +
+        'Undoes isDeleted/deletedAt across BeneficiaryCase, BeneficiaryPii, ' +
+        'MotherCaseDetails, ChildCaseDetails, and ConsentRecord; does not touch ' +
+        "currentStatus or write a status-history row (see the repository method's own " +
+        'doc comment). A no-op (200, restoredCaseCount: 0) if the Sakhi has nothing ' +
+        'currently soft-deleted.',
+      tags: ['Beneficiaries'],
+      body: restoreForSakhiSchema,
+      responses: {
+        200: {
+          description: 'Restore applied (or a no-op if nothing was soft-deleted)',
+          schema: envelope(z.object({ restoredCaseCount: z.number().int().nonnegative() })),
+        },
+        400: errorResponse(400, { message: 'sakhiUserId: Invalid uuid' }),
+        401: errorResponse(401),
+        403: errorResponse(403),
+        500: errorResponse(500),
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'SYSTEM', 'ADMIN'),
+    validateBody(restoreForSakhiSchema),
+    controller.restoreForSakhi,
   );
 
   doc.patch(

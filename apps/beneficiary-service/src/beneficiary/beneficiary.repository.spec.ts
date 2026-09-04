@@ -3,11 +3,25 @@ import { BeneficiaryRepository } from './beneficiary.repository';
 describe('BeneficiaryRepository', () => {
   const groupBy = jest.fn();
   const findMany = jest.fn();
-  const prisma = { beneficiaryCase: { groupBy, findMany } } as never;
+  const beneficiaryCaseUpdateMany = jest.fn();
+  const beneficiaryPiiUpdateMany = jest.fn();
+  const motherCaseDetailsUpdateMany = jest.fn();
+  const childCaseDetailsUpdateMany = jest.fn();
+  const consentRecordUpdateMany = jest.fn();
+  const $transaction = jest.fn((ops: unknown[]) => Promise.all(ops));
+  const prisma = {
+    beneficiaryCase: { groupBy, findMany, updateMany: beneficiaryCaseUpdateMany },
+    beneficiaryPii: { updateMany: beneficiaryPiiUpdateMany },
+    motherCaseDetails: { updateMany: motherCaseDetailsUpdateMany },
+    childCaseDetails: { updateMany: childCaseDetailsUpdateMany },
+    consentRecord: { updateMany: consentRecordUpdateMany },
+    $transaction,
+  } as never;
   let repository: BeneficiaryRepository;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    $transaction.mockImplementation((ops: unknown[]) => Promise.all(ops));
     repository = new BeneficiaryRepository(prisma);
   });
 
@@ -479,6 +493,54 @@ describe('BeneficiaryRepository', () => {
       ).resolves.toEqual({ items: [], nextCursor: null });
 
       expect(findMany.mock.calls[0][0].where.OR).toBeUndefined();
+    });
+  });
+
+  describe('restoreForSakhi', () => {
+    const sakhiUserId = '77777777-7777-7777-7777-777777777777';
+
+    it('restores every related table for each soft-deleted case owned by the Sakhi', async () => {
+      findMany.mockResolvedValue([
+        { id: 'case-1', piiId: 'pii-1' },
+        { id: 'case-2', piiId: 'pii-2' },
+      ]);
+
+      const result = await repository.restoreForSakhi(sakhiUserId);
+
+      expect(findMany).toHaveBeenCalledWith({
+        where: { sakhiId: sakhiUserId, isDeleted: true },
+        select: { id: true, piiId: true },
+      });
+      expect(beneficiaryCaseUpdateMany).toHaveBeenCalledWith({
+        where: { id: { in: ['case-1', 'case-2'] } },
+        data: { isDeleted: false, deletedAt: null },
+      });
+      expect(beneficiaryPiiUpdateMany).toHaveBeenCalledWith({
+        where: { id: { in: ['pii-1', 'pii-2'] } },
+        data: { isDeleted: false, deletedAt: null },
+      });
+      expect(motherCaseDetailsUpdateMany).toHaveBeenCalledWith({
+        where: { beneficiaryId: { in: ['case-1', 'case-2'] } },
+        data: { isDeleted: false, deletedAt: null },
+      });
+      expect(childCaseDetailsUpdateMany).toHaveBeenCalledWith({
+        where: { beneficiaryId: { in: ['case-1', 'case-2'] } },
+        data: { isDeleted: false, deletedAt: null },
+      });
+      expect(consentRecordUpdateMany).toHaveBeenCalledWith({
+        where: { beneficiaryId: { in: ['case-1', 'case-2'] } },
+        data: { isDeleted: false, deletedAt: null },
+      });
+      expect(result).toEqual({ restoredCaseCount: 2 });
+    });
+
+    it('is a no-op when the Sakhi has nothing currently soft-deleted', async () => {
+      findMany.mockResolvedValue([]);
+
+      const result = await repository.restoreForSakhi(sakhiUserId);
+
+      expect($transaction).not.toHaveBeenCalled();
+      expect(result).toEqual({ restoredCaseCount: 0 });
     });
   });
 });

@@ -4,7 +4,21 @@ describe('VisitInstanceRepository', () => {
   const count = jest.fn();
   const findMany = jest.fn();
   const groupBy = jest.fn();
-  const prisma = { visitInstance: { count, findMany, groupBy } } as never;
+  const visitInstanceUpdateMany = jest.fn();
+  const visitScheduleUpdateMany = jest.fn();
+  const visitStatusHistoryUpdateMany = jest.fn();
+  const formSubmissionFindMany = jest.fn();
+  const formSubmissionUpdateMany = jest.fn();
+  const formAnswerUpdateMany = jest.fn();
+  const $transaction = jest.fn((ops: unknown[]) => Promise.all(ops));
+  const prisma = {
+    visitInstance: { count, findMany, groupBy, updateMany: visitInstanceUpdateMany },
+    visitSchedule: { updateMany: visitScheduleUpdateMany },
+    visitStatusHistory: { updateMany: visitStatusHistoryUpdateMany },
+    formSubmission: { findMany: formSubmissionFindMany, updateMany: formSubmissionUpdateMany },
+    formAnswer: { updateMany: formAnswerUpdateMany },
+    $transaction,
+  } as never;
   let repository: VisitInstanceRepository;
 
   const PENDING_ID = 'dddddddd-dddd-dddd-dddd-dddddddddddd';
@@ -14,6 +28,7 @@ describe('VisitInstanceRepository', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    $transaction.mockImplementation((ops: unknown[]) => Promise.all(ops));
     repository = new VisitInstanceRepository(prisma);
   });
 
@@ -418,6 +433,75 @@ describe('VisitInstanceRepository', () => {
       expect(count).toBe(0);
       expect(txUpdateMany).not.toHaveBeenCalled();
       expect(txCreateMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('restoreForSakhi', () => {
+    const sakhiUserId = '77777777-7777-7777-7777-777777777777';
+
+    it('restores every related table for each soft-deleted visit owned by the Sakhi', async () => {
+      findMany.mockResolvedValue([
+        { id: 'visit-1', scheduleId: 'schedule-1' },
+        { id: 'visit-2', scheduleId: 'schedule-2' },
+      ]);
+      formSubmissionFindMany.mockResolvedValue([{ id: 'submission-1' }, { id: 'submission-2' }]);
+
+      const result = await repository.restoreForSakhi(sakhiUserId);
+
+      expect(findMany).toHaveBeenCalledWith({
+        where: { sakhiId: sakhiUserId, isDeleted: true },
+        select: { id: true, scheduleId: true },
+      });
+      expect(formSubmissionFindMany).toHaveBeenCalledWith({
+        where: { visitId: { in: ['visit-1', 'visit-2'] } },
+        select: { id: true },
+      });
+      expect(visitInstanceUpdateMany).toHaveBeenCalledWith({
+        where: { id: { in: ['visit-1', 'visit-2'] } },
+        data: { isDeleted: false, deletedAt: null },
+      });
+      expect(visitScheduleUpdateMany).toHaveBeenCalledWith({
+        where: { id: { in: ['schedule-1', 'schedule-2'] } },
+        data: { isDeleted: false, deletedAt: null },
+      });
+      expect(visitStatusHistoryUpdateMany).toHaveBeenCalledWith({
+        where: { visitId: { in: ['visit-1', 'visit-2'] } },
+        data: { isDeleted: false, deletedAt: null },
+      });
+      expect(formSubmissionUpdateMany).toHaveBeenCalledWith({
+        where: { id: { in: ['submission-1', 'submission-2'] } },
+        data: { isDeleted: false, deletedAt: null },
+      });
+      expect(formAnswerUpdateMany).toHaveBeenCalledWith({
+        where: { submissionId: { in: ['submission-1', 'submission-2'] } },
+        data: { isDeleted: false, deletedAt: null },
+      });
+      expect(result).toEqual({ restoredVisitCount: 2 });
+    });
+
+    it('dedupes schedule ids shared across multiple visits', async () => {
+      findMany.mockResolvedValue([
+        { id: 'visit-1', scheduleId: 'schedule-1' },
+        { id: 'visit-2', scheduleId: 'schedule-1' },
+      ]);
+      formSubmissionFindMany.mockResolvedValue([]);
+
+      await repository.restoreForSakhi(sakhiUserId);
+
+      expect(visitScheduleUpdateMany).toHaveBeenCalledWith({
+        where: { id: { in: ['schedule-1'] } },
+        data: { isDeleted: false, deletedAt: null },
+      });
+    });
+
+    it('is a no-op when the Sakhi has nothing currently soft-deleted', async () => {
+      findMany.mockResolvedValue([]);
+
+      const result = await repository.restoreForSakhi(sakhiUserId);
+
+      expect($transaction).not.toHaveBeenCalled();
+      expect(formSubmissionFindMany).not.toHaveBeenCalled();
+      expect(result).toEqual({ restoredVisitCount: 0 });
     });
   });
 });

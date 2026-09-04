@@ -453,6 +453,34 @@ export class VisitInstanceService {
       }),
     };
   }
+
+  /**
+   * See restore-for-sakhi.dto.ts and the repository method's own doc
+   * comment for the full rationale. Reachable by a human SUPERVISOR role
+   * (same route gate as updateStatus), not just server-to-server, so it
+   * needs the same IDOR guard as any other single-Sakhi mutation: a
+   * SUPERVISOR may only restore a Sakhi in their own roster; SYSTEM/ADMIN
+   * are unscoped. Mirrors assertCallerOwnsBeneficiary's own SUPERVISOR
+   * branch, but scoped directly by sakhiUserId — there is no beneficiary to
+   * resolve ownership from here, since this restores everything a Sakhi
+   * owned rather than one caller-chosen visit.
+   */
+  async restoreForSakhi(sakhiUserId: string, caller: CallerIdentity, authorizationHeader: string) {
+    if (caller.roles.includes('SUPERVISOR')) {
+      if (!caller.projectId) {
+        throw forbidden('Supervisor caller has no project scope.');
+      }
+      const roster = await listSakhiIdsForSupervisor(
+        caller.projectId,
+        caller.id,
+        authorizationHeader,
+      );
+      if (!roster.includes(sakhiUserId)) {
+        throw forbidden("This Sakhi is outside this Supervisor's roster.");
+      }
+    }
+    return this.repository.restoreForSakhi(sakhiUserId);
+  }
 }
 
 /**

@@ -105,4 +105,23 @@ export class SakhiService {
     }
     return toApiSakhi(profile as unknown as Record<string, unknown>);
   }
+
+  /**
+   * Batch lookup for `GET /sakhis/by-ids`, backing Quick Response's
+   * page-level Sakhi name resolution (one call per page instead of one per
+   * card). An id outside the caller's project scope, or simply not found, is
+   * silently absent from the result rather than a 404/403 — a caller-supplied
+   * id list is never assumed pre-scoped, matching
+   * BeneficiaryClient.getManyWithRisk's contract on the beneficiary side.
+   * MANAGER/ADMIN are unrestricted, matching listByProject/getById above.
+   */
+  async getManyByIds(ids: string[], caller: CallerScope) {
+    if (ids.length === 0) return [];
+    const profiles = await this.repository.findManyByIds(ids);
+    const mapped = profiles.map((p) => toApiSakhi(p as unknown as Record<string, unknown>));
+    if (isPrivileged(caller)) {
+      return mapped;
+    }
+    return mapped.filter((s) => s.primaryProjectId === caller.projectId);
+  }
 }

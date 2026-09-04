@@ -21,4 +21,12 @@ export class SakhiRepository {
       include: { user: true },
     });
   }
+
+  /** Batch lookup by `users.user_id`, for `GET /sakhis/by-ids` — see `findById`. */
+  findManyByIds(userIds: string[]) {
+    return this.prisma.sakhiProfile.findMany({
+      where: { userId: { in: userIds }, isDeleted: false },
+      include: { user: true },
+    });
+  }
 }

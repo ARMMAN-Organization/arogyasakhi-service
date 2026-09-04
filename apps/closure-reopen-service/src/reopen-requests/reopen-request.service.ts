@@ -152,6 +152,17 @@ export class ReopenRequestService {
    * way, with a distinct log line calling out that this one needs manual
    * follow-up, not just a shrug.
    *
+   * Deliberately NOT awaited before responding: reactivateCase chains through
+   * beneficiary-service's own DB write plus two further downstream lookups
+   * (socio-demographics/risk-condition enrichment), and stacking that latency
+   * on top of this method's own beneficiary-service/audit/notification calls
+   * was tripping approval-service's fetch timeout on APPROVE only (REJECT
+   * skips this call entirely) — the Supervisor app saw "failed to submit"
+   * even though supervisorStatus had already committed as APPROVED. Since
+   * this call's success or failure was already never reflected in the
+   * response (see above), not waiting on it changes nothing about this
+   * method's contract, only how long the caller waits for it.
+   *
    * Writes the audit_log entry and notifies the Sakhi here, not in
    * approval-service's Quick Response layer — this endpoint is the only
    * place a reopen decision is actually persisted (Quick Response is one
@@ -197,16 +208,16 @@ export class ReopenRequestService {
     }
 
     if (dto.decision === 'APPROVED') {
-      try {
-        await this.beneficiaryClient.reactivateCase(existing.beneficiaryId, authorizationHeader);
-      } catch (err) {
-        console.error(
-          `Reopen request ${id} was approved but reactivating beneficiary ` +
-            `${existing.beneficiaryId} failed (this request cannot be re-decided to retry — ` +
-            `needs manual follow-up):`,
-          err,
-        );
-      }
+      this.beneficiaryClient
+        .reactivateCase(existing.beneficiaryId, authorizationHeader)
+        .catch((err: unknown) => {
+          console.error(
+            `Reopen request ${id} was approved but reactivating beneficiary ` +
+              `${existing.beneficiaryId} failed (this request cannot be re-decided to retry — ` +
+              `needs manual follow-up):`,
+            err,
+          );
+        });
     }
 
     const decided = await this.repository.findById(id);

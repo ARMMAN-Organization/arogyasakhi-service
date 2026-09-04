@@ -8,6 +8,7 @@ import { visitSummaryQuerySchema } from './dto/visit-summary-query.dto';
 import { countByBeneficiarySchema } from './dto/count-by-beneficiary.dto';
 import { byPadaSchema } from './dto/by-pada.dto';
 import { visitHistoryQuerySchema } from './dto/visit-history-query.dto';
+import { restoreForSakhiSchema } from './dto/restore-for-sakhi.dto';
 import {
   errorResponse,
   requireRoles,
@@ -321,6 +322,42 @@ export function registerVisitInstanceRoutes(doc: DocumentedRouter, service: Visi
     requireRoles('SAKHI'),
     validateBody(createVisitInstanceRequestSchema),
     controller.create,
+  );
+
+  // Registered before '/visits/:id' — Express matches routes in
+  // registration order, so if this came after, the literal 'restore'
+  // segment would be swallowed by :id's z.string().uuid() validator and
+  // 400 with "id: Invalid uuid" (the exact bug this ordering avoids).
+  doc.patch(
+    '/visits/restore',
+    {
+      summary:
+        'Restore every visit/form record previously soft-deleted for one Sakhi — ' +
+        "called by approval-service's own DATA_RESTORE decide path, forwarding the " +
+        "deciding Supervisor's Authorization header — SYSTEM/ADMIN also allowed for a " +
+        'future direct/service-token caller. ' +
+        'Undoes isDeleted/deletedAt across VisitInstance, VisitSchedule, ' +
+        'VisitStatusHistory, FormSubmission, and FormAnswer. VisitMaster/FormDefinition/' +
+        'FormVersion are global reference data and are intentionally excluded — they have ' +
+        'no per-Sakhi scope. A no-op (200, restoredVisitCount: 0) if the Sakhi has nothing ' +
+        'currently soft-deleted.',
+      tags: ['Visits'],
+      body: restoreForSakhiSchema,
+      responses: {
+        200: {
+          description: 'Restore applied (or a no-op if nothing was soft-deleted)',
+          schema: envelope(z.object({ restoredVisitCount: z.number().int().nonnegative() })),
+        },
+        400: errorResponse(400, { message: 'sakhiUserId: Invalid uuid' }),
+        401: errorResponse(401),
+        403: errorResponse(403),
+        500: errorResponse(500),
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'SYSTEM', 'ADMIN'),
+    validateBody(restoreForSakhiSchema),
+    controller.restoreForSakhi,
   );
 
   doc.get(
