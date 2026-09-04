@@ -556,6 +556,46 @@ describe('BeneficiaryRiskService', () => {
 
         expect(resolveHealthEducationMessagesMock).toHaveBeenCalledTimes(1);
       });
+
+      it('does NOT collapse riskPhase null and riskPhase ANC onto the same cache bucket (PR #222 review finding)', async () => {
+        // Both cases share isPostpartum === false under the old, collapsed
+        // cache key (`${conditionCode}:${isPostpartum}`) — this test
+        // proves a null-phase flag (meant to get every message,
+        // undifferentiated) and an ANC-phase flag (meant to get only
+        // non-postpartum messages) resolve independently within one call,
+        // even though toAssessmentView resolves every flag concurrently
+        // via Promise.all and whichever reached the cache first would
+        // previously have silently decided both.
+        resolveHealthEducationMessagesMock.mockResolvedValue([anemiaAncMessage, anemiaPpMessage]);
+        repository.findStateSnapshots.mockResolvedValue([]);
+        repository.findAssessmentsWithFlags.mockResolvedValue([
+          assessment({ id: 'a-legacy', riskPhase: null, riskFlags: [mappedFlag('ANEMIA')] }),
+          assessment({ id: 'a-anc', riskPhase: 'ANC', riskFlags: [mappedFlag('ANEMIA')] }),
+        ] as never);
+
+        const result = await service.getRiskProfile(BENEFICIARY_ID, caller(), AUTH_HEADER);
+
+        // findAssessmentsWithFlags returns most-recent-evaluatedAt-first
+        // (see repository); both fixtures share assessment()'s default
+        // evaluatedAt, so toAssessmentView preserves the mocked array's own
+        // order — a-legacy first, a-anc second, as returned above.
+        expect(result.assessments).toHaveLength(2);
+        const [legacyAssessment, ancAssessment] = result.assessments;
+        const legacyFlag = legacyAssessment.flags[0];
+        const ancFlag = ancAssessment.flags[0];
+
+        // riskPhase null -> every message, undifferentiated (both ANC and
+        // PP messages present).
+        expect(legacyFlag.educationContent).toEqual([
+          expect.objectContaining({ topicName: anemiaAncMessage.titleEn }),
+          expect.objectContaining({ topicName: anemiaPpMessage.titleEn }),
+        ]);
+        // riskPhase 'ANC' -> only the non-postpartum message — must NOT
+        // include the postpartum one, even resolved in the same call.
+        expect(ancFlag.educationContent).toEqual([
+          expect.objectContaining({ topicName: anemiaAncMessage.titleEn }),
+        ]);
+      });
     });
   });
 

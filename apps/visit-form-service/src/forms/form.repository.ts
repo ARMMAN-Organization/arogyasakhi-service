@@ -214,17 +214,37 @@ export class FormRepository {
 
   /**
    * How many non-deleted submissions exist for `beneficiaryId` against
-   * `formCode`'s form_definition — used to detect "this is the
-   * beneficiary's first-ever submission of this form" (e.g. Primigravida's
-   * first-ANC-visit-only health-education gate) by counting AFTER the
-   * current submission's own insert, so a count of exactly 1 means this
-   * submission is the first (findLatestSubmissionByBeneficiaryAndFormCode
-   * can't answer this on its own — it would always return the just-inserted
-   * row itself).
+   * `formCode`'s form_definition, created at or before `asOfCreatedAt` —
+   * used to detect "this WAS the beneficiary's first-ever submission of
+   * this form, at the time it was made" (e.g. Primigravida's
+   * first-ANC-visit-only health-education gate).
+   *
+   * `asOfCreatedAt` is required, not optional, specifically so a count of
+   * exactly 1 always means "first submission at that point in time" —
+   * without a cutoff, re-evaluating this on an idempotent replay long after
+   * later submissions have landed would see count>1 and wrongly conclude
+   * the original submission wasn't the first one, silently dropping
+   * first-visit-only content from the replayed response (review finding on
+   * PR #222: this exact drift). Callers pass:
+   *   - the just-created row's own `createdAt` on the fresh-submission path
+   *     (a count of exactly 1 there still means "this is the first",
+   *     since the row being counted is itself already inserted); or
+   *   - the original `existing.createdAt` on the idempotent-replay path,
+   *     so the count reflects the state at original-submission time, not
+   *     whatever has landed since.
    */
-  countSubmissionsByBeneficiaryAndFormCode(beneficiaryId: string, formCode: string) {
+  countSubmissionsByBeneficiaryAndFormCode(
+    beneficiaryId: string,
+    formCode: string,
+    asOfCreatedAt: Date,
+  ) {
     return this.prisma.formSubmission.count({
-      where: { beneficiaryId, isDeleted: false, formVersion: { formDefinition: { formCode } } },
+      where: {
+        beneficiaryId,
+        isDeleted: false,
+        formVersion: { formDefinition: { formCode } },
+        createdAt: { lte: asOfCreatedAt },
+      },
     });
   }
 

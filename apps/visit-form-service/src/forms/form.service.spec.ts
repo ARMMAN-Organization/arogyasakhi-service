@@ -1130,6 +1130,67 @@ describe('FormService', () => {
         expect(result).toMatchObject({ id: 'sub-winner' });
       });
 
+      it('resolves stageEducationContent for the race LOSER too, not just the sequential replay path (PR #222 review finding)', async () => {
+        const nnVersion = {
+          id: 'version-1',
+          status: 'PUBLISHED',
+          formDefinition: { formCode: 'NEONATAL_VISIT' },
+          schemaJson: [{ question_code: 'x', label: 'x', input_type: 'text', required: false }],
+          validationJson: [],
+        };
+        repository.findVersionById.mockResolvedValue(nnVersion as never);
+        repository.createSubmission.mockRejectedValue({ code: 'P2002' });
+        const winningRow = {
+          id: 'sub-winner',
+          beneficiaryId: 'b1',
+          submittedAt: new Date('2026-08-01T00:00:00.000Z'),
+          createdAt: new Date('2026-08-01T00:00:01.000Z'),
+        };
+        repository.findSubmissionByLocalUuid
+          .mockResolvedValueOnce(null)
+          .mockResolvedValueOnce(winningRow as never);
+        jest.mocked(resolveHealthEducationMessagesByStage).mockImplementation(async (stage) =>
+          stage === 'NN1 and NN2'
+            ? [
+                {
+                  id: 'm1',
+                  riskConditionId: null,
+                  conditionLabel: 'Neonatal Care',
+                  stage,
+                  messageOrder: 1,
+                  titleEn: 'Neonatal Care',
+                  bodyEn: 'x',
+                  bodyMarathi: '',
+                  mediaType: 'TEXT',
+                  mediaFile: null,
+                  sortOrder: 1,
+                },
+              ]
+            : ([] as never),
+        );
+
+        const result = await service.createSubmission(
+          'NEONATAL_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {},
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        // Previously this response dropped stageEducationContent entirely
+        // (not even an empty array) — the race loser's response shape was
+        // inconsistent with the sequential-replay path's response, for
+        // what should be an idempotent replay of the same logical
+        // submission.
+        expect(result.stageEducationContent).toEqual([
+          expect.objectContaining({ topicCode: 'Neonatal Care' }),
+        ]);
+      });
+
       it('rethrows a P2002 when no winning row can be found on re-query', async () => {
         repository.findSubmissionByLocalUuid.mockResolvedValue(null);
         repository.findVersionById.mockResolvedValue(publishedVersion as never);
@@ -2363,11 +2424,13 @@ describe('FormService', () => {
           schemaJson: [{ question_code: 'x', label: 'x', input_type: 'text', required: false }],
           validationJson: [],
         };
+        const createdAt = new Date('2026-08-01T00:00:01.000Z');
         repository.findSubmissionByLocalUuid.mockResolvedValue(null);
         repository.findVersionById.mockResolvedValue(ancVersion as never);
         repository.createSubmission.mockResolvedValue({
           id: 'sub-1',
           submittedAt: new Date('2026-08-01T00:00:00.000Z'),
+          createdAt,
         } as never);
         repository.findLatestSubmissionByBeneficiaryAndFormCode.mockResolvedValue(null);
         repository.countSubmissionsByBeneficiaryAndFormCode.mockResolvedValue(1);
@@ -2384,9 +2447,13 @@ describe('FormService', () => {
           'Bearer test-token',
         );
 
+        // createdAt is the just-created row's OWN createdAt (the count
+        // cutoff), not "now" — see countSubmissionsByBeneficiaryAndFormCode's
+        // doc comment on why this matters for replay correctness.
         expect(repository.countSubmissionsByBeneficiaryAndFormCode).toHaveBeenCalledWith(
           'b1',
           'ANC_VISIT',
+          createdAt,
         );
       });
 
@@ -2589,9 +2656,12 @@ describe('FormService', () => {
             formVersionId: 'version-1',
             beneficiaryId: 'b1',
             localSubmissionUuid: 'uuid-1',
-            // continue_with_closure gate not required here — stage resolution
-            // reads closure_reason directly, independent of resolveClosureRequest.
-            formData: { closure_reason: 'miscarriage' },
+            // continue_with_closure: 'yes' is required — closure_reason is
+            // only trusted when the Sakhi actually confirmed the closure
+            // (review finding on PR #222: reading it unconditionally could
+            // fire Post-loss content for a hidden-but-still-submitted
+            // closure_reason value even when no closure was created).
+            formData: { continue_with_closure: 'yes', closure_reason: 'miscarriage' },
           },
           'u1',
           'Bearer test-token',
@@ -2600,6 +2670,57 @@ describe('FormService', () => {
         expect(result.stageEducationContent).toEqual([
           expect.objectContaining({ topicCode: 'Post miscarriage/abortion/still birth' }),
         ]);
+      });
+
+      it('does NOT resolve Post-loss content for ANC_CLOSURE_VISIT when continue_with_closure is not yes, even if closure_reason is a loss reason', async () => {
+        const closureVersion = {
+          id: 'version-1',
+          status: 'PUBLISHED',
+          formDefinition: { formCode: 'ANC_CLOSURE_VISIT' },
+          schemaJson: [{ question_code: 'x', label: 'x', input_type: 'text', required: false }],
+          validationJson: [],
+        };
+        repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+        repository.findVersionById.mockResolvedValue(closureVersion as never);
+        repository.createSubmission.mockResolvedValue({
+          id: 'sub-1',
+          submittedAt: new Date('2026-08-01T00:00:00.000Z'),
+        } as never);
+        jest.mocked(resolveHealthEducationMessagesByStage).mockResolvedValue([
+          {
+            id: 'm1',
+            riskConditionId: null,
+            conditionLabel: 'Post miscarriage/abortion/still birth',
+            stage:
+              "If the delivery outcome is 'Still birth' or 'Miscarriage' and 'Abortion' in Closure form",
+            messageOrder: 1,
+            titleEn: 'Loss support',
+            bodyEn: 'x',
+            bodyMarathi: '',
+            mediaType: 'TEXT',
+            mediaFile: null,
+            sortOrder: 1,
+          },
+        ]);
+
+        // A Sakhi who selected continue_with_closure='yes' + a loss reason,
+        // then reconsidered and set continue_with_closure='no' before
+        // submitting, but whose client didn't clear the now-hidden
+        // closure_reason field — the exact hidden-field-state scenario
+        // flagged in review.
+        const result = await service.createSubmission(
+          'ANC_CLOSURE_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: { continue_with_closure: 'no', closure_reason: 'miscarriage' },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(result.stageEducationContent).toEqual([]);
       });
 
       it('returns an empty array for a formCode with no stage-based content (e.g. MOTHER_REGISTRATION)', async () => {

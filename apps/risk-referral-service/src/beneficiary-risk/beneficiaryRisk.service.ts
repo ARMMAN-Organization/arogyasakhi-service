@@ -36,18 +36,26 @@ const CONDITION_CODE_TO_LABEL: Record<string, string> = {
 };
 
 /**
- * Every seeded stage string for these 5 conditions contains the word
- * "postpartum" exactly when — and only when — it's the PP-phase message
- * (verified against health-education-messages.json's seed data). This is
- * the only stage-precision riskPhase alone can support: ANC assessments
- * can't be told apart into "as soon as detected" vs "2nd trimester" vs
- * "3rd trimester" sub-stages without a gestational-week calculation (that
- * belongs to the stage resolver, not this risk-flag path) — so an ANC-phase
- * assessment gets every non-postpartum message for the condition, and a
- * PP-phase assessment gets only the postpartum one.
+ * The exact seeded `stage` string that marks the PP-phase message, for each
+ * of the 5 CONDITION_CODE_TO_LABEL conditions (verified against
+ * health-education-messages.json's seed data as of this writing — every
+ * other stage string for these conditions is an ANC sub-stage: "as soon as
+ * detected during ANC visit", "2nd trimester (6th month)", etc.). Matched
+ * exactly, not by substring — a looser `stage.includes('postpartum')` match
+ * was flagged in review as fragile against a future content reword (e.g.
+ * cms-content-service's seed data changing the exact phrasing), silently
+ * degrading a PP-phase beneficiary to the COMING_SOON placeholder with no
+ * error anywhere in the pipeline. This still shares that fragility (a
+ * reworded stage string breaks the exact match the same way it would break
+ * a substring match) — the real fix is a typed `phase` column on
+ * HealthEducationMessage in cms-content-service, mirroring the RiskPhase
+ * enum this PR already added to risk_assessments, which would make this
+ * function unnecessary. Tracked as a followup, not done here (cross-service
+ * migration, out of scope for this PR's review-comment fixes).
  */
+const POSTPARTUM_STAGE = 'postpartum (PP1 or PP2 whichever is attended)';
 function isPostpartumStage(stage: string): boolean {
-  return stage.toLowerCase().includes('postpartum');
+  return stage === POSTPARTUM_STAGE;
 }
 
 interface RiskConditionSummaryAcc {
@@ -129,11 +137,18 @@ export class BeneficiaryRiskService {
       const conditionLabel = CONDITION_CODE_TO_LABEL[conditionCode];
       if (!conditionLabel) return Promise.resolve(comingSoonContent ? [comingSoonContent] : []);
 
-      const isPostpartum = riskPhase === 'PP';
-      const cacheKey = `${conditionCode}:${isPostpartum}`;
+      // 3-way discriminant, not a collapsed isPostpartum boolean — riskPhase
+      // null (legacy pre-migration row, "return every message
+      // undifferentiated") and riskPhase 'ANC' (non-postpartum) both map to
+      // isPostpartum: false, which would otherwise share one cache bucket
+      // and let whichever resolves first silently overwrite the other's
+      // filtering intent for the rest of this call.
+      const phaseKey = riskPhase === null ? 'null' : riskPhase === 'PP' ? 'PP' : 'other';
+      const cacheKey = `${conditionCode}:${phaseKey}`;
       const cached = contentCache.get(cacheKey);
       if (cached) return cached;
 
+      const isPostpartum = riskPhase === 'PP';
       const pending = (async (): Promise<EducationContent[]> => {
         const messages = await resolveHealthEducationMessages(conditionLabel, authorizationHeader);
         const filtered = riskPhase

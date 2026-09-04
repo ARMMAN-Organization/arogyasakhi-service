@@ -307,11 +307,15 @@ export class FormService {
       // write, so there's no double-creation risk to guard against (unlike
       // resolveDeliveryChildren/resolveClosureRequest above); recomputing it
       // just keeps a retried request's response shape consistent with the
-      // original.
+      // original. Passes existing.createdAt (the ORIGINAL row's insert
+      // time), not "now", so isFirstVisitOfFormCode-gated content (e.g.
+      // Primigravida) reflects the truth at original-submission time even
+      // when this replay lands long after later submissions have arrived.
       const stageEducationContent = await this.resolveStageEducationContentForSubmission(
         formCode,
         dto,
         existing.submittedAt,
+        existing.createdAt,
         authorizationHeader,
       );
       return toApiFormSubmission(existing, childBeneficiaryIds, stageEducationContent);
@@ -390,7 +394,22 @@ export class FormService {
         const existingRow = await this.repository.findSubmissionByLocalUuid(
           dto.localSubmissionUuid,
         );
-        if (existingRow) return toApiFormSubmission(existingRow);
+        if (existingRow) {
+          // Resolved here too, same as the sequential idempotent-replay
+          // path above — without this, the race LOSER's response silently
+          // dropped the stageEducationContent key entirely (not even an
+          // empty array), an inconsistent response shape for what should
+          // be an idempotent replay of the same logical submission (review
+          // finding on PR #222).
+          const stageEducationContent = await this.resolveStageEducationContentForSubmission(
+            formCode,
+            dto,
+            existingRow.submittedAt,
+            existingRow.createdAt,
+            authorizationHeader,
+          );
+          return toApiFormSubmission(existingRow, undefined, stageEducationContent);
+        }
         throw err;
       }
       // Backstop for the race the visitId check above can't close on its
@@ -491,66 +510,96 @@ export class FormService {
       }
     }
 
-    // Triggers the risk-grading pipeline for every visit-linked submission
-    // whose form has a risk_rule_set_id configured (see FormDefinition's
-    // schema comment) — a form with no ruleSetId set (e.g. SUPERVISOR/SYSTEM
-    // entityType forms) simply has nothing to evaluate. Best-effort, same
-    // stance as syncSocioDemographics above.
-    if (dto.visitId && version.formDefinition.riskRuleSetId) {
-      const riskPhase = FORM_CODE_TO_RISK_PHASE[formCode];
-      if (!riskPhase) {
-        // A form was given a riskRuleSetId out-of-band (no admin endpoint
-        // yet — see schema.prisma) without a matching FORM_CODE_TO_RISK_PHASE
-        // entry. Failing loudly here, instead of silently posting an invalid
-        // riskPhase that risk-referral-service's strict enum would reject
-        // downstream, surfaces the config gap immediately at submission time
-        // rather than as a permanently-broken, easy-to-miss best-effort
-        // console.warn (see PR #172 review).
-        throw new Error(
-          `Form "${formCode}" has a riskRuleSetId configured but no FORM_CODE_TO_RISK_PHASE ` +
-            'entry — add one before assigning this form a rule set.',
-        );
-      }
-      const answers =
-        formCode === 'ANC_VISIT'
-          ? {
-              ...dto.formData,
-              ...(await this.resolveAncRiskRegistrationAnswers(dto.beneficiaryId)),
-              // Fundal Height's GA-deviation calculation (anc-risk.rulesJson.ts)
-              // needs this visit's own date, per SRS Category 4's
-              // Floor((visit date - LMP) / 7) formula — the server-assigned
-              // submittedAt, not a client-suppliable field, so a caller can't
-              // skew its own GA calculation.
-              visitDate: created.submittedAt.toISOString(),
-            }
-          : dto.formData;
-      await triggerRiskAssessment(
-        {
-          beneficiaryId: dto.beneficiaryId,
-          visitId: dto.visitId,
-          submissionId: created.id,
-          ruleSetId: version.formDefinition.riskRuleSetId,
-          riskPhase,
-          answers,
-          // Date-only slice of the server-assigned submittedAt — needed by
-          // risk-referral-service to trigger automatic HR-visit generation
-          // (SRS FR-S-5.2(b)) when this evaluation detects an HR condition.
-          actualCompletionDate: created.submittedAt.toISOString().slice(0, 10),
-        },
-        authorizationHeader,
-      );
-    }
+    // Registration-derived answers (lmpDate, age, gravida, etc.) are needed
+    // by both the risk-trigger block below (ANC_VISIT's answers merge) and
+    // resolveStageEducationContentForSubmission (ANC_VISIT's gestational-
+    // week gate) — resolved once here and threaded into both, rather than
+    // each doing its own identical MOTHER_REGISTRATION lookup (review
+    // finding on PR #222: this was a duplicate DB read on the submission
+    // hot path). Resolved unconditionally (not just for ANC_VISIT) since
+    // it's cheap for a non-ANC formCode — resolveAncRiskRegistrationAnswers
+    // returns {} immediately for a beneficiary with no MOTHER_REGISTRATION
+    // submission, and both call sites below already gate their own use of
+    // it on formCode === 'ANC_VISIT'.
+    const registrationAnswers =
+      formCode === 'ANC_VISIT'
+        ? await this.resolveAncRiskRegistrationAnswers(dto.beneficiaryId)
+        : {};
 
-    // SRS's 16 stage-based health-education conditions (Danger Signs,
-    // Neonatal Care, POSTPARTUM Counselling, etc.) — unlike risk grading
-    // above, not gated on visitId/riskRuleSetId; resolveStageEducationContentForSubmission
-    // itself no-ops (returns []) for a formCode with no applicable stages.
-    const stageEducationContent = await this.resolveStageEducationContentForSubmission(
-      formCode,
-      dto,
-      created.submittedAt,
-      authorizationHeader,
-    );
+    // Risk grading (triggerRiskAssessment) and stage-based health-education
+    // content (resolveStageEducationContentForSubmission) are independent —
+    // neither reads the other's result — so they run concurrently rather
+    // than sequentially (review finding on PR #222: awaiting them one after
+    // another summed their DB+HTTP latency into the Sakhi-facing submission
+    // response instead of taking the max of the two).
+    const [, stageEducationContent] = await Promise.all([
+      (async () => {
+        // Triggers the risk-grading pipeline for every visit-linked
+        // submission whose form has a risk_rule_set_id configured (see
+        // FormDefinition's schema comment) — a form with no ruleSetId set
+        // (e.g. SUPERVISOR/SYSTEM entityType forms) simply has nothing to
+        // evaluate. Best-effort, same stance as syncSocioDemographics above.
+        if (!dto.visitId || !version.formDefinition.riskRuleSetId) return;
+
+        const riskPhase = FORM_CODE_TO_RISK_PHASE[formCode];
+        if (!riskPhase) {
+          // A form was given a riskRuleSetId out-of-band (no admin endpoint
+          // yet — see schema.prisma) without a matching
+          // FORM_CODE_TO_RISK_PHASE entry. Failing loudly here, instead of
+          // silently posting an invalid riskPhase that risk-referral-
+          // service's strict enum would reject downstream, surfaces the
+          // config gap immediately at submission time rather than as a
+          // permanently-broken, easy-to-miss best-effort console.warn (see
+          // PR #172 review).
+          throw new Error(
+            `Form "${formCode}" has a riskRuleSetId configured but no FORM_CODE_TO_RISK_PHASE ` +
+              'entry — add one before assigning this form a rule set.',
+          );
+        }
+        const answers =
+          formCode === 'ANC_VISIT'
+            ? {
+                ...dto.formData,
+                ...registrationAnswers,
+                // Fundal Height's GA-deviation calculation
+                // (anc-risk.rulesJson.ts) needs this visit's own date, per
+                // SRS Category 4's Floor((visit date - LMP) / 7) formula —
+                // the server-assigned submittedAt, not a client-suppliable
+                // field, so a caller can't skew its own GA calculation.
+                visitDate: created.submittedAt.toISOString(),
+              }
+            : dto.formData;
+        await triggerRiskAssessment(
+          {
+            beneficiaryId: dto.beneficiaryId,
+            visitId: dto.visitId,
+            submissionId: created.id,
+            ruleSetId: version.formDefinition.riskRuleSetId,
+            riskPhase,
+            answers,
+            // Date-only slice of the server-assigned submittedAt — needed
+            // by risk-referral-service to trigger automatic HR-visit
+            // generation (SRS FR-S-5.2(b)) when this evaluation detects an
+            // HR condition.
+            actualCompletionDate: created.submittedAt.toISOString().slice(0, 10),
+          },
+          authorizationHeader,
+        );
+      })(),
+      // SRS's 16 stage-based health-education conditions (Danger Signs,
+      // Neonatal Care, POSTPARTUM Counselling, etc.) — unlike risk grading
+      // above, not gated on visitId/riskRuleSetId;
+      // resolveStageEducationContentForSubmission itself no-ops (returns
+      // []) for a formCode with no applicable stages.
+      this.resolveStageEducationContentForSubmission(
+        formCode,
+        dto,
+        created.submittedAt,
+        created.createdAt,
+        authorizationHeader,
+        registrationAnswers,
+      ),
+    ]);
 
     return toApiFormSubmission(created, childBeneficiaryIds, stageEducationContent);
   }
@@ -666,7 +715,23 @@ export class FormService {
     formCode: string,
     dto: CreateSubmissionInput,
     submittedAt: Date,
+    // The submission ROW's own createdAt (not submittedAt, which is a
+    // client-suppliable/derived semantic date and not safe to use as a
+    // count cutoff) — the fresh-submission path passes the just-inserted
+    // row's own createdAt; the idempotent-replay path passes the ORIGINAL
+    // row's createdAt (not "now"), so isFirstVisitOfFormCode reflects the
+    // truth at original-submission time even when replayed long after
+    // later submissions have landed (review finding on PR #222).
+    createdAt: Date,
     authorizationHeader: string,
+    // Optional pre-resolved registration answers — the fresh-submission
+    // call site already resolves these once for the risk-trigger block and
+    // passes them through here too, avoiding a second identical
+    // MOTHER_REGISTRATION lookup (review finding on PR #222: this was a
+    // duplicate DB read on the submission hot path). The idempotent-replay
+    // call site has no risk-trigger block to share this with, so it's
+    // omitted there and resolved fresh inside this method instead.
+    preResolvedRegistrationAnswers?: Record<string, unknown>,
   ): Promise<StageEducationContent[]> {
     try {
       const visitDateIso = submittedAt.toISOString();
@@ -675,15 +740,21 @@ export class FormService {
       let isFirstVisitOfFormCode: boolean | undefined;
       if (formCode === 'ANC_VISIT') {
         const [registration, submissionCount] = await Promise.all([
-          this.resolveAncRiskRegistrationAnswers(dto.beneficiaryId),
-          this.repository.countSubmissionsByBeneficiaryAndFormCode(dto.beneficiaryId, 'ANC_VISIT'),
+          preResolvedRegistrationAnswers
+            ? Promise.resolve(preResolvedRegistrationAnswers)
+            : this.resolveAncRiskRegistrationAnswers(dto.beneficiaryId),
+          this.repository.countSubmissionsByBeneficiaryAndFormCode(
+            dto.beneficiaryId,
+            'ANC_VISIT',
+            createdAt,
+          ),
         ]);
         const lmpDate = registration.lmpDate;
         if (typeof lmpDate === 'string') {
           gestationalWeeks = gestationalWeeksAt(lmpDate, visitDateIso);
         }
-        // Called after this submission's own insert, so a count of exactly
-        // 1 means this IS the first ANC_VISIT — see
+        // A count of exactly 1, as of this submission's own createdAt,
+        // means this WAS the first ANC_VISIT at that point in time — see
         // countSubmissionsByBeneficiaryAndFormCode's own doc comment.
         isFirstVisitOfFormCode = submissionCount === 1;
       }
@@ -698,8 +769,20 @@ export class FormService {
 
       let closureReasonCode: string | undefined;
       if (formCode === 'ANC_CLOSURE_VISIT') {
+        // Gated on continue_with_closure, matching resolveClosureRequest's
+        // own established pattern for this exact field (see that method's
+        // doc comment) — validateSubmission/isVisible don't strip values
+        // submitted for a now-hidden field, so a Sakhi who selected
+        // continue_with_closure='yes' + closure_reason='miscarriage', then
+        // reconsidered and set continue_with_closure='no' before
+        // submitting (a common hidden-field-state UX gap on the mobile
+        // client), would otherwise still get Post-loss content fired here
+        // even though no closure was actually created — misleading content
+        // in the submission response (review finding on PR #222).
         const reason = dto.formData.closure_reason;
-        if (typeof reason === 'string') closureReasonCode = reason;
+        if (dto.formData.continue_with_closure === 'yes' && typeof reason === 'string') {
+          closureReasonCode = reason;
+        }
       }
 
       let hasStillbirth: boolean | undefined;
