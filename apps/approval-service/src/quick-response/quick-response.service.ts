@@ -52,6 +52,7 @@ interface ApprovalRequestCard {
   raisedAt: string;
   beneficiaryName: string | null;
   sakhiName: string | null;
+  sakhiEmployeeCode: string | null;
 }
 
 type QuickResponseCard = ApprovalRequestCard | EscalationCard;
@@ -161,16 +162,17 @@ export class QuickResponseService {
   }
 
   /**
-   * Page-level Sakhi name lookup for list() — one batch call for every
-   * unique Sakhi on the page via auth-service's GET /sakhis/by-ids, instead
-   * of one call per Sakhi (see sakhi.client.ts's getManyByIds). Best-effort:
-   * a failure here degrades the whole page's sakhiName to null rather than
-   * failing the list, matching resolveBeneficiaryNamesById's contract.
+   * Page-level Sakhi name/employeeCode lookup for list() — one batch call
+   * for every unique Sakhi on the page via auth-service's GET /sakhis/by-ids,
+   * instead of one call per Sakhi (see sakhi.client.ts's getManyByIds).
+   * Best-effort: a failure here degrades the whole page's sakhiName/
+   * sakhiEmployeeCode to null rather than failing the list, matching
+   * resolveBeneficiaryNamesById's contract.
    */
   private async resolveSakhiNamesById(
     sakhiIds: string[],
     authorizationHeader: string,
-  ): Promise<Map<string, string>> {
+  ): Promise<Map<string, { displayName: string; employeeCode: string | null }>> {
     if (sakhiIds.length === 0) return new Map();
     try {
       return await this.sakhiClient.getManyByIds(sakhiIds, authorizationHeader);
@@ -266,7 +268,7 @@ export class QuickResponseService {
     ]);
 
     let beneficiaryNames = new Map<string, string>();
-    let sakhiNames = new Map<string, string>();
+    let sakhis = new Map<string, { displayName: string; employeeCode: string | null }>();
     if (reconciledRows.length > 0) {
       const beneficiaryIds = Array.from(
         new Set(
@@ -274,7 +276,7 @@ export class QuickResponseService {
         ),
       );
       const sakhiIds = Array.from(new Set(reconciledRows.map((row) => row.requestedByUserId)));
-      [beneficiaryNames, sakhiNames] = await Promise.all([
+      [beneficiaryNames, sakhis] = await Promise.all([
         this.resolveBeneficiaryNamesById(beneficiaryIds, authorizationHeader),
         this.resolveSakhiNamesById(sakhiIds, authorizationHeader),
       ]);
@@ -287,7 +289,8 @@ export class QuickResponseService {
       beneficiaryId: row.beneficiaryId,
       raisedAt: row.createdAt.toISOString(),
       beneficiaryName: row.beneficiaryId ? (beneficiaryNames.get(row.beneficiaryId) ?? null) : null,
-      sakhiName: sakhiNames.get(row.requestedByUserId) ?? null,
+      sakhiName: sakhis.get(row.requestedByUserId)?.displayName ?? null,
+      sakhiEmployeeCode: sakhis.get(row.requestedByUserId)?.employeeCode ?? null,
     }));
 
     const merged: QuickResponseCard[] = [...approvalCards, ...escalationResult.cards].sort(
@@ -435,6 +438,7 @@ export class QuickResponseService {
       beneficiaryName: beneficiary.pii.fullName,
       padaName: pada?.name ?? null,
       sakhiName: sakhi?.displayName ?? null,
+      sakhiEmployeeCode: sakhi?.employeeCode ?? null,
       sakhiContactNumber: sakhi?.mobileNumber ?? null,
       riskDetails: beneficiary.riskConditionSummaries,
     };
@@ -470,6 +474,7 @@ export class QuickResponseService {
       return {
         ...this.thinCard(row),
         sakhiName: sakhi?.displayName ?? null,
+        sakhiEmployeeCode: sakhi?.employeeCode ?? null,
         sakhiId: row.requestedByUserId,
       };
     }
@@ -492,6 +497,7 @@ export class QuickResponseService {
         ...this.thinCard(row),
         padaName: common.padaName,
         sakhiName: common.sakhiName,
+        sakhiEmployeeCode: common.sakhiEmployeeCode,
         beneficiaryName: common.beneficiaryName,
         oldLmpDate: common.beneficiary.motherCaseDetails?.lmpDate ?? null,
         newLmpDate: payload?.newLmpDate ?? null,
@@ -516,6 +522,7 @@ export class QuickResponseService {
         ...this.thinCard(row),
         padaName: common.padaName,
         sakhiName: common.sakhiName,
+        sakhiEmployeeCode: common.sakhiEmployeeCode,
         beneficiaryName: common.beneficiaryName,
         closureType: closure?.closureType ?? null,
         closureReasonLookupValueId: closure?.closureReasonLookupValueId ?? null,
@@ -540,6 +547,7 @@ export class QuickResponseService {
         ...this.thinCard(row),
         padaName: common.padaName,
         sakhiName: common.sakhiName,
+        sakhiEmployeeCode: common.sakhiEmployeeCode,
         beneficiaryName: common.beneficiaryName,
         reasonForReopen: reopenRequest?.requestReason ?? null,
         riskDetails: common.riskDetails,
@@ -567,6 +575,7 @@ export class QuickResponseService {
         ...this.thinCard(row),
         padaName: common.padaName,
         sakhiName: common.sakhiName,
+        sakhiEmployeeCode: common.sakhiEmployeeCode,
         beneficiaryName: common.beneficiaryName,
         referralDate: referral?.referralDate ?? null,
         facilityType: referral?.facilityType ?? null,
@@ -588,6 +597,7 @@ export class QuickResponseService {
       ...this.thinCard(row),
       padaName: common.padaName,
       sakhiName: common.sakhiName,
+      sakhiEmployeeCode: common.sakhiEmployeeCode,
       beneficiaryName: common.beneficiaryName,
       visitReference: visit,
       referralsMissedCount: referral?.incompleteCount ?? null,
@@ -606,6 +616,7 @@ export class QuickResponseService {
         ...card,
         padaName: common.padaName,
         sakhiName: common.sakhiName,
+        sakhiEmployeeCode: common.sakhiEmployeeCode,
         beneficiaryName: common.beneficiaryName,
         eddDate,
         reason: eddDate ? `EDD approaching on ${eddDate.slice(0, 10)}` : null,
@@ -620,6 +631,7 @@ export class QuickResponseService {
       ...card,
       padaName: common.padaName,
       sakhiName: common.sakhiName,
+      sakhiEmployeeCode: common.sakhiEmployeeCode,
       beneficiaryName: common.beneficiaryName,
       visitType: card.escalationType,
       riskDetails: common.riskDetails,

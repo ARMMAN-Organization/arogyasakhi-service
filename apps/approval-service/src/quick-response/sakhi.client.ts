@@ -7,6 +7,7 @@ export interface SakhiRecord {
   displayName: string;
   mobileNumber: string;
   supervisorId: string | null;
+  employeeCode: string | null;
 }
 
 /**
@@ -44,17 +45,17 @@ export class SakhiClient {
   }
 
   /**
-   * Batch-resolves sakhiName for a page of Quick Response cards via
-   * auth-service's GET /sakhis/by-ids — one call per page instead of one
-   * per unique Sakhi (see resolveSakhiNamesById, the caller). Ids outside
-   * the caller's scope, or simply not found, are silently absent from the
-   * result (server-side behavior, not a 404/403), same as
+   * Batch-resolves sakhiName/sakhiEmployeeCode for a page of Quick Response
+   * cards via auth-service's GET /sakhis/by-ids — one call per page instead
+   * of one per unique Sakhi (see resolveSakhiNamesById, the caller). Ids
+   * outside the caller's scope, or simply not found, are silently absent
+   * from the result (server-side behavior, not a 404/403), same as
    * BeneficiaryClient.getManyWithRisk.
    */
   async getManyByIds(
     sakhiIds: string[],
     authorizationHeader: string,
-  ): Promise<Map<string, string>> {
+  ): Promise<Map<string, { displayName: string; employeeCode: string | null }>> {
     if (sakhiIds.length === 0) return new Map();
 
     let res: Response;
@@ -79,7 +80,12 @@ export class SakhiClient {
     }
 
     const body = (await res.json()) as { data: SakhiRecord[] };
-    return new Map(body.data.map((sakhi) => [sakhi.sakhiId, sakhi.displayName]));
+    return new Map(
+      body.data.map((sakhi) => [
+        sakhi.sakhiId,
+        { displayName: sakhi.displayName, employeeCode: sakhi.employeeCode },
+      ]),
+    );
   }
 
   /**

@@ -85,6 +85,7 @@ describe('ApprovalRequestService', () => {
     displayName: 'Asha Devi',
     mobileNumber: '9999999999',
     supervisorId: '66666666-6666-6666-6666-666666666666',
+    employeeCode: 'EMP-00123',
   };
 
   const beneficiaryRecord = {
