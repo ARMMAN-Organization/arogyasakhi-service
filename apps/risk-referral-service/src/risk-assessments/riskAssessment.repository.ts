@@ -19,6 +19,10 @@ export interface RiskAssessmentCreateData {
   visitId: string | null;
   submissionId: string;
   ruleVersionId: string;
+  // The caller's FORM_CODE_TO_RISK_PHASE-derived phase for this submission —
+  // see schema.prisma's RiskAssessment.riskPhase doc comment for why this is
+  // persisted (stage-appropriate health-education message selection).
+  riskPhase: RiskPhase;
   evaluatedAt: Date;
   overallRiskCategory: 'NORMAL' | 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
   overallHighRiskFlag: boolean;
@@ -184,6 +188,7 @@ export class RiskAssessmentRepository {
           visitId: data.visitId,
           submissionId: data.submissionId,
           ruleVersionId: data.ruleVersionId,
+          riskPhase: data.riskPhase,
           evaluatedAt: data.evaluatedAt,
           overallRiskCategory: data.overallRiskCategory,
           overallHighRiskFlag: data.overallHighRiskFlag,

@@ -5,10 +5,12 @@ import { BeneficiaryClient } from './beneficiary.client';
 import { listSakhiIdsForSupervisor } from './sakhi.client';
 import { resolveRiskGrades } from './riskGrade.client';
 import { resolveEducationContent } from './educationContent.client';
+import { resolveHealthEducationMessages } from './healthEducation.client';
 
 jest.mock('./sakhi.client');
 jest.mock('./riskGrade.client');
 jest.mock('./educationContent.client');
+jest.mock('./healthEducation.client');
 
 const BENEFICIARY_ID = '11111111-1111-1111-1111-111111111111';
 const AUTH_HEADER = 'Bearer test-token';
@@ -39,6 +41,7 @@ function assessment(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     id: 'assessment-1',
     evaluatedAt: new Date('2026-06-01'),
+    riskPhase: 'ANC',
     overallRiskCategory: 'HIGH',
     overallHighRiskFlag: true,
     hrDetectedFlag: true,
@@ -71,10 +74,16 @@ describe('BeneficiaryRiskService', () => {
   const listSakhiIdsForSupervisorMock = jest.mocked(listSakhiIdsForSupervisor);
   const resolveRiskGradesMock = jest.mocked(resolveRiskGrades);
   const resolveEducationContentMock = jest.mocked(resolveEducationContent);
+  const resolveHealthEducationMessagesMock = jest.mocked(resolveHealthEducationMessages);
   let service: BeneficiaryRiskService;
 
   beforeEach(() => {
     jest.resetAllMocks();
+    // Safe default for tests that trigger a mapped condition (e.g. ANEMIA)
+    // incidentally, without caring about its resolved content — matches the
+    // real client's contract of always resolving to an array, never
+    // undefined (see healthEducation.client.ts's own doc comment).
+    resolveHealthEducationMessagesMock.mockResolvedValue([]);
     service = new BeneficiaryRiskService(repository, beneficiaryClient);
   });
 
@@ -112,7 +121,7 @@ describe('BeneficiaryRiskService', () => {
               isReferralTrigger: true,
               isEducationTrigger: false,
               isHrVisitTrigger: true,
-              educationContent: null,
+              educationContent: [],
             },
           ],
         },
@@ -263,7 +272,7 @@ describe('BeneficiaryRiskService', () => {
       expect(repository.findStateSnapshots).not.toHaveBeenCalled();
     });
 
-    it('attaches educationContent to a flag with isEducationTrigger true', async () => {
+    it('attaches the COMING_SOON placeholder to a flag with isEducationTrigger true whose condition is unmapped', async () => {
       const COMING_SOON = {
         topicCode: 'COMING_SOON',
         topicName: 'Content coming soon',
@@ -274,6 +283,7 @@ describe('BeneficiaryRiskService', () => {
       repository.findStateSnapshots.mockResolvedValue([]);
       repository.findAssessmentsWithFlags.mockResolvedValue([
         assessment({
+          riskPhase: 'ANC',
           riskFlags: [
             {
               id: 'flag-1',
@@ -282,7 +292,8 @@ describe('BeneficiaryRiskService', () => {
               isReferralTrigger: false,
               isEducationTrigger: true,
               isHrVisitTrigger: false,
-              riskCondition: { conditionCode: 'ANEMIA', conditionName: 'Anemia' },
+              // APH isn't in CONDITION_CODE_TO_LABEL — falls back to COMING_SOON.
+              riskCondition: { conditionCode: 'APH', conditionName: 'Antepartum Haemorrhage' },
             },
           ],
         }),
@@ -290,25 +301,28 @@ describe('BeneficiaryRiskService', () => {
 
       const result = await service.getRiskProfile(BENEFICIARY_ID, caller(), AUTH_HEADER);
 
-      expect(result.assessments[0].flags[0].educationContent).toEqual(COMING_SOON);
+      expect(result.assessments[0].flags[0].educationContent).toEqual([COMING_SOON]);
       expect(resolveEducationContentMock).toHaveBeenCalledWith('COMING_SOON', AUTH_HEADER);
+      expect(resolveHealthEducationMessagesMock).not.toHaveBeenCalled();
     });
 
-    it('does not call resolveEducationContent for a flag with isEducationTrigger false', async () => {
+    it('does not resolve any content for a flag with isEducationTrigger false', async () => {
       repository.findStateSnapshots.mockResolvedValue([]);
       repository.findAssessmentsWithFlags.mockResolvedValue([assessment()] as never); // isEducationTrigger: false
 
       const result = await service.getRiskProfile(BENEFICIARY_ID, caller(), AUTH_HEADER);
 
-      expect(result.assessments[0].flags[0].educationContent).toBeNull();
+      expect(result.assessments[0].flags[0].educationContent).toEqual([]);
       expect(resolveEducationContentMock).not.toHaveBeenCalled();
+      expect(resolveHealthEducationMessagesMock).not.toHaveBeenCalled();
     });
 
-    it('sets educationContent to null (not an error) when cms-content-service resolution fails', async () => {
+    it('sets educationContent to an empty array (not an error) when cms-content-service resolution fails for an unmapped condition', async () => {
       resolveEducationContentMock.mockResolvedValue(null);
       repository.findStateSnapshots.mockResolvedValue([]);
       repository.findAssessmentsWithFlags.mockResolvedValue([
         assessment({
+          riskPhase: 'ANC',
           riskFlags: [
             {
               id: 'flag-1',
@@ -317,7 +331,7 @@ describe('BeneficiaryRiskService', () => {
               isReferralTrigger: false,
               isEducationTrigger: true,
               isHrVisitTrigger: false,
-              riskCondition: { conditionCode: 'ANEMIA', conditionName: 'Anemia' },
+              riskCondition: { conditionCode: 'APH', conditionName: 'Antepartum Haemorrhage' },
             },
           ],
         }),
@@ -325,10 +339,10 @@ describe('BeneficiaryRiskService', () => {
 
       const result = await service.getRiskProfile(BENEFICIARY_ID, caller(), AUTH_HEADER);
 
-      expect(result.assessments[0].flags[0].educationContent).toBeNull();
+      expect(result.assessments[0].flags[0].educationContent).toEqual([]);
     });
 
-    it('resolves COMING_SOON only once even with multiple triggered flags across assessments', async () => {
+    it('resolves COMING_SOON only once even with multiple triggered flags across assessments, for an unmapped condition', async () => {
       const COMING_SOON = {
         topicCode: 'COMING_SOON',
         topicName: 'Content coming soon',
@@ -344,16 +358,204 @@ describe('BeneficiaryRiskService', () => {
         isReferralTrigger: false,
         isEducationTrigger: true,
         isHrVisitTrigger: false,
-        riskCondition: { conditionCode: 'ANEMIA', conditionName: 'Anemia' },
+        riskCondition: { conditionCode: 'APH', conditionName: 'Antepartum Haemorrhage' },
       });
       repository.findAssessmentsWithFlags.mockResolvedValue([
-        assessment({ id: 'a-1', riskFlags: [triggeredFlag('flag-1'), triggeredFlag('flag-2')] }),
-        assessment({ id: 'a-2', riskFlags: [triggeredFlag('flag-3')] }),
+        assessment({
+          id: 'a-1',
+          riskPhase: 'ANC',
+          riskFlags: [triggeredFlag('flag-1'), triggeredFlag('flag-2')],
+        }),
+        assessment({ id: 'a-2', riskPhase: 'ANC', riskFlags: [triggeredFlag('flag-3')] }),
       ] as never);
 
       await service.getRiskProfile(BENEFICIARY_ID, caller(), AUTH_HEADER);
 
       expect(resolveEducationContentMock).toHaveBeenCalledTimes(1);
+    });
+
+    describe('the 5 SRS-mapped, risk-graded conditions (real content, not COMING_SOON)', () => {
+      const anemiaAncMessage = {
+        id: 'msg-1',
+        riskConditionId: null,
+        conditionLabel: 'Anemia',
+        stage: 'as soon as detected during ANC visit',
+        messageOrder: 1,
+        titleEn: 'Understanding Anemia',
+        bodyEn: 'Low Hb...',
+        bodyMarathi: '',
+        mediaType: 'TEXT',
+        mediaFile: null,
+        sortOrder: 1,
+      };
+      const anemiaPpMessage = {
+        id: 'msg-2',
+        riskConditionId: null,
+        conditionLabel: 'Anemia',
+        stage: 'postpartum (PP1 or PP2 whichever is attended)',
+        messageOrder: 2,
+        titleEn: 'Postpartum Counselling',
+        bodyEn: 'Focus: Monitoring Hb...',
+        bodyMarathi: '',
+        mediaType: 'TEXT',
+        mediaFile: null,
+        sortOrder: 1,
+      };
+
+      const mappedFlag = (conditionCode: string) => ({
+        id: 'flag-1',
+        riskGradeLookupValueId: 'grade-1',
+        observedValueJson: null,
+        isReferralTrigger: false,
+        isEducationTrigger: true,
+        isHrVisitTrigger: false,
+        riskCondition: { conditionCode, conditionName: conditionCode },
+      });
+
+      it.each([
+        ['ANEMIA', 'Anemia'],
+        ['HYPERTENSION', 'Gestational Hypertension'],
+        ['HYPERGLYCEMIA', 'Gestational Diabetes'],
+        ['GESTATIONAL_WEIGHT_GAIN', 'Inadequate Gestational weight gain'],
+        ['BAD_OBSTETRIC_HISTORY', 'Previous pregnancy complication'],
+      ])('maps %s to conditionLabel %s and resolves real content', async (conditionCode, label) => {
+        resolveHealthEducationMessagesMock.mockResolvedValue([anemiaAncMessage]);
+        repository.findStateSnapshots.mockResolvedValue([]);
+        repository.findAssessmentsWithFlags.mockResolvedValue([
+          assessment({ riskPhase: 'ANC', riskFlags: [mappedFlag(conditionCode)] }),
+        ] as never);
+
+        const result = await service.getRiskProfile(BENEFICIARY_ID, caller(), AUTH_HEADER);
+
+        expect(resolveHealthEducationMessagesMock).toHaveBeenCalledWith(label, AUTH_HEADER);
+        expect(result.assessments[0].flags[0].educationContent).toEqual([
+          {
+            topicCode: conditionCode,
+            topicName: 'Understanding Anemia',
+            mediaType: 'TEXT',
+            contentUrl: null,
+          },
+        ]);
+      });
+
+      it('regression: does NOT map DANGER_SIGNS or INFANT_DANGER_SIGNS here (they are Group B, stage-based, not risk-graded)', async () => {
+        const COMING_SOON = {
+          topicCode: 'COMING_SOON',
+          topicName: 'Content coming soon',
+          mediaType: 'QNA_TEXT',
+          contentUrl: null,
+        };
+        resolveEducationContentMock.mockResolvedValue(COMING_SOON);
+        repository.findStateSnapshots.mockResolvedValue([]);
+        repository.findAssessmentsWithFlags.mockResolvedValue([
+          assessment({
+            riskPhase: 'ANC',
+            riskFlags: [mappedFlag('DANGER_SIGNS'), mappedFlag('INFANT_DANGER_SIGNS')],
+          }),
+        ] as never);
+
+        const result = await service.getRiskProfile(BENEFICIARY_ID, caller(), AUTH_HEADER);
+
+        expect(resolveHealthEducationMessagesMock).not.toHaveBeenCalled();
+        expect(result.assessments[0].flags[0].educationContent).toEqual([COMING_SOON]);
+        expect(result.assessments[0].flags[1].educationContent).toEqual([COMING_SOON]);
+      });
+
+      it('on an ANC-phase assessment, returns every non-postpartum message for the condition, ordered', async () => {
+        resolveHealthEducationMessagesMock.mockResolvedValue([anemiaPpMessage, anemiaAncMessage]); // out of order on purpose
+        repository.findStateSnapshots.mockResolvedValue([]);
+        repository.findAssessmentsWithFlags.mockResolvedValue([
+          assessment({ riskPhase: 'ANC', riskFlags: [mappedFlag('ANEMIA')] }),
+        ] as never);
+
+        const result = await service.getRiskProfile(BENEFICIARY_ID, caller(), AUTH_HEADER);
+
+        expect(result.assessments[0].flags[0].educationContent).toEqual([
+          {
+            topicCode: 'ANEMIA',
+            topicName: anemiaAncMessage.titleEn,
+            mediaType: anemiaAncMessage.mediaType,
+            contentUrl: null,
+          },
+        ]);
+      });
+
+      it('on a PP-phase assessment, returns only the postpartum message for the condition', async () => {
+        resolveHealthEducationMessagesMock.mockResolvedValue([anemiaAncMessage, anemiaPpMessage]);
+        repository.findStateSnapshots.mockResolvedValue([]);
+        repository.findAssessmentsWithFlags.mockResolvedValue([
+          assessment({ riskPhase: 'PP', riskFlags: [mappedFlag('ANEMIA')] }),
+        ] as never);
+
+        const result = await service.getRiskProfile(BENEFICIARY_ID, caller(), AUTH_HEADER);
+
+        expect(result.assessments[0].flags[0].educationContent).toEqual([
+          {
+            topicCode: 'ANEMIA',
+            topicName: anemiaPpMessage.titleEn,
+            mediaType: anemiaPpMessage.mediaType,
+            contentUrl: null,
+          },
+        ]);
+      });
+
+      it('with riskPhase null (legacy pre-migration row), returns every message for the condition undifferentiated', async () => {
+        resolveHealthEducationMessagesMock.mockResolvedValue([anemiaAncMessage, anemiaPpMessage]);
+        repository.findStateSnapshots.mockResolvedValue([]);
+        repository.findAssessmentsWithFlags.mockResolvedValue([
+          assessment({ riskPhase: null, riskFlags: [mappedFlag('ANEMIA')] }),
+        ] as never);
+
+        const result = await service.getRiskProfile(BENEFICIARY_ID, caller(), AUTH_HEADER);
+
+        expect(result.assessments[0].flags[0].educationContent).toEqual([
+          expect.objectContaining({ topicName: anemiaAncMessage.titleEn }),
+          expect.objectContaining({ topicName: anemiaPpMessage.titleEn }),
+        ]);
+      });
+
+      it('falls back to COMING_SOON when a mapped condition has zero seeded content rows', async () => {
+        const COMING_SOON = {
+          topicCode: 'COMING_SOON',
+          topicName: 'Content coming soon',
+          mediaType: 'QNA_TEXT',
+          contentUrl: null,
+        };
+        resolveEducationContentMock.mockResolvedValue(COMING_SOON);
+        resolveHealthEducationMessagesMock.mockResolvedValue([]);
+        repository.findStateSnapshots.mockResolvedValue([]);
+        repository.findAssessmentsWithFlags.mockResolvedValue([
+          assessment({ riskPhase: 'ANC', riskFlags: [mappedFlag('ANEMIA')] }),
+        ] as never);
+
+        const result = await service.getRiskProfile(BENEFICIARY_ID, caller(), AUTH_HEADER);
+
+        expect(result.assessments[0].flags[0].educationContent).toEqual([COMING_SOON]);
+      });
+
+      it('resolves real content only once per (conditionCode, phase) pair, even across multiple assessments/flags', async () => {
+        resolveHealthEducationMessagesMock.mockResolvedValue([anemiaAncMessage]);
+        repository.findStateSnapshots.mockResolvedValue([]);
+        repository.findAssessmentsWithFlags.mockResolvedValue([
+          assessment({
+            id: 'a-1',
+            riskPhase: 'ANC',
+            riskFlags: [
+              { ...mappedFlag('ANEMIA'), id: 'flag-1' },
+              { ...mappedFlag('ANEMIA'), id: 'flag-2' },
+            ],
+          }),
+          assessment({
+            id: 'a-2',
+            riskPhase: 'ANC',
+            riskFlags: [{ ...mappedFlag('ANEMIA'), id: 'flag-3' }],
+          }),
+        ] as never);
+
+        await service.getRiskProfile(BENEFICIARY_ID, caller(), AUTH_HEADER);
+
+        expect(resolveHealthEducationMessagesMock).toHaveBeenCalledTimes(1);
+      });
     });
   });
 

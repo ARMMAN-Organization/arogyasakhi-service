@@ -73,4 +73,27 @@ export const formSubmissionSchema = z.object({
         'with at least one live birth. Omitted (not an empty array) otherwise.',
       example: ['34197cd7-7a54-4e7f-885c-f297313b9e81'],
     }),
+  stageEducationContent: z
+    .array(
+      z.object({
+        topicCode: z.string(),
+        topicName: z.string(),
+        mediaType: z.string(),
+        contentUrl: z.string().nullable(),
+      }),
+    )
+    .optional()
+    .openapi({
+      description:
+        "The SRS's stage-based (not risk-graded) health-education content applicable to " +
+        'this submission — e.g. Danger Signs on every ANC visit, POSTPARTUM Counselling on ' +
+        'every PP visit, Neonatal Care on NN1/NN2, gestational-week/age-gated content, and ' +
+        'pregnancy-loss content on a qualifying closure or delivery outcome. Always an ' +
+        "array (possibly empty) once present — distinct from childBeneficiaryIds's " +
+        '"omit if empty" convention. Independent of risk-referral-service\'s risk-flag-' +
+        'triggered educationContent (GET /beneficiaries/:id/risk) — see ' +
+        "healthEducationStage.resolver.ts's own doc comment for why these are two " +
+        'separate mechanisms.',
+      example: [],
+    }),
 });

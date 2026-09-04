@@ -27,6 +27,13 @@ import type { VisitInstanceRepository } from '../visits/visitInstance.repository
 import { resolveAndWriteCcvOpeningRiskState } from './ccvOpeningRiskState.resolver';
 import { resolveVisitCompletion } from './visitCompletion.resolver';
 import { EMPTY_VITALS, extractVitals } from './vitalsExtractor';
+import {
+  ageInMonthsAt,
+  gestationalWeeksAt,
+  hasStillbirthOutcome,
+  resolveStageEducationContent,
+  type StageEducationContent,
+} from './healthEducationStage.resolver';
 
 /**
  * Maps this service's own formCode to risk-referral-service's RiskCondition
@@ -296,7 +303,18 @@ export class FormService {
           ),
         );
       }
-      return toApiFormSubmission(existing, childBeneficiaryIds);
+      // Re-resolved on replay too — this is a read-through lookup, not a
+      // write, so there's no double-creation risk to guard against (unlike
+      // resolveDeliveryChildren/resolveClosureRequest above); recomputing it
+      // just keeps a retried request's response shape consistent with the
+      // original.
+      const stageEducationContent = await this.resolveStageEducationContentForSubmission(
+        formCode,
+        dto,
+        existing.submittedAt,
+        authorizationHeader,
+      );
+      return toApiFormSubmission(existing, childBeneficiaryIds, stageEducationContent);
     }
 
     const version = await this.repository.findVersionById(dto.formVersionId);
@@ -523,7 +541,18 @@ export class FormService {
       );
     }
 
-    return toApiFormSubmission(created, childBeneficiaryIds);
+    // SRS's 16 stage-based health-education conditions (Danger Signs,
+    // Neonatal Care, POSTPARTUM Counselling, etc.) — unlike risk grading
+    // above, not gated on visitId/riskRuleSetId; resolveStageEducationContentForSubmission
+    // itself no-ops (returns []) for a formCode with no applicable stages.
+    const stageEducationContent = await this.resolveStageEducationContentForSubmission(
+      formCode,
+      dto,
+      created.submittedAt,
+      authorizationHeader,
+    );
+
+    return toApiFormSubmission(created, childBeneficiaryIds, stageEducationContent);
   }
 
   /**
@@ -621,6 +650,86 @@ export class FormService {
       ...(typeof sickleCellStatus === 'string' ? { sickleCellStatus } : {}),
       ...(historyOfHypertension !== undefined ? { historyOfHypertension } : {}),
     };
+  }
+
+  /**
+   * Gathers the inputs healthEducationStage.resolver.ts needs and resolves
+   * the SRS's 16 stage-based health-education conditions for this
+   * submission — best-effort (every input source degrades to "gate doesn't
+   * apply" on failure, matching this method's own tolerance stance), never
+   * throws, and safe to call for a formCode the resolver has no stages for
+   * (returns []). Called for every submission, not just visit-linked ones —
+   * unlike risk grading (triggerRiskAssessment), stage-based content has no
+   * visitId/riskRuleSetId precondition in the SRS.
+   */
+  private async resolveStageEducationContentForSubmission(
+    formCode: string,
+    dto: CreateSubmissionInput,
+    submittedAt: Date,
+    authorizationHeader: string,
+  ): Promise<StageEducationContent[]> {
+    try {
+      const visitDateIso = submittedAt.toISOString();
+
+      let gestationalWeeks: number | undefined;
+      let isFirstVisitOfFormCode: boolean | undefined;
+      if (formCode === 'ANC_VISIT') {
+        const [registration, submissionCount] = await Promise.all([
+          this.resolveAncRiskRegistrationAnswers(dto.beneficiaryId),
+          this.repository.countSubmissionsByBeneficiaryAndFormCode(dto.beneficiaryId, 'ANC_VISIT'),
+        ]);
+        const lmpDate = registration.lmpDate;
+        if (typeof lmpDate === 'string') {
+          gestationalWeeks = gestationalWeeksAt(lmpDate, visitDateIso);
+        }
+        // Called after this submission's own insert, so a count of exactly
+        // 1 means this IS the first ANC_VISIT — see
+        // countSubmissionsByBeneficiaryAndFormCode's own doc comment.
+        isFirstVisitOfFormCode = submissionCount === 1;
+      }
+
+      let ageInMonths: number | undefined;
+      if (formCode === 'INC_VISIT') {
+        const beneficiary = await findBeneficiaryById(dto.beneficiaryId, authorizationHeader);
+        if (beneficiary?.childDateOfBirth) {
+          ageInMonths = ageInMonthsAt(beneficiary.childDateOfBirth, visitDateIso);
+        }
+      }
+
+      let closureReasonCode: string | undefined;
+      if (formCode === 'ANC_CLOSURE_VISIT') {
+        const reason = dto.formData.closure_reason;
+        if (typeof reason === 'string') closureReasonCode = reason;
+      }
+
+      let hasStillbirth: boolean | undefined;
+      if (formCode === 'DELIVERY_VISIT') {
+        hasStillbirth = hasStillbirthOutcome([
+          dto.formData.child1_delivery_outcome,
+          dto.formData.child2_delivery_outcome,
+          dto.formData.child3_delivery_outcome,
+        ]);
+      }
+
+      return await resolveStageEducationContent(
+        {
+          formCode,
+          gestationalWeeks,
+          ageInMonths,
+          isFirstVisitOfFormCode,
+          closureReasonCode,
+          hasStillbirthOutcome: hasStillbirth,
+        },
+        authorizationHeader,
+      );
+    } catch (err) {
+      console.error(
+        `Stage-based health-education content resolution failed for submission ` +
+          `${dto.localSubmissionUuid} (formCode ${formCode}) — degrading to no content:`,
+        err,
+      );
+      return [];
+    }
   }
 
   private async resolveDeliveryChildren(

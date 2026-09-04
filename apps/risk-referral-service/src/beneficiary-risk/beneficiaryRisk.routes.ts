@@ -24,14 +24,12 @@ const riskStateSnapshotSchema = z.object({
   createdAt: z.string().datetime(),
 });
 
-const educationContentSchema = z
-  .object({
-    topicCode: z.string(),
-    topicName: z.string(),
-    mediaType: z.string(),
-    contentUrl: z.string().nullable(),
-  })
-  .nullable();
+const educationContentSchema = z.object({
+  topicCode: z.string(),
+  topicName: z.string(),
+  mediaType: z.string(),
+  contentUrl: z.string().nullable(),
+});
 
 const riskFlagViewSchema = z.object({
   id: z.string().uuid(),
@@ -42,13 +40,17 @@ const riskFlagViewSchema = z.object({
   isReferralTrigger: z.boolean(),
   isEducationTrigger: z.boolean(),
   isHrVisitTrigger: z.boolean(),
-  educationContent: educationContentSchema.openapi({
+  educationContent: z.array(educationContentSchema).openapi({
     description:
-      'Resolved via cms-content-service when isEducationTrigger is true; null when ' +
+      'Resolved via cms-content-service when isEducationTrigger is true; empty array when ' +
       'isEducationTrigger is false, or when content resolution failed/degraded (this call ' +
-      'never fails the overall request — see educationContent.client.ts). Currently always ' +
-      'the same seeded "Content coming soon" placeholder topic — ARMMAN has not yet ' +
-      'delivered per-condition content (SRS Open Item 12).',
+      'never fails the overall request). For the 5 SRS-mapped conditions (Anemia, Gestational ' +
+      'Hypertension, Gestational Diabetes, Inadequate Gestational Weight Gain, Previous ' +
+      "Pregnancy Complication — see beneficiaryRisk.service.ts's CONDITION_CODE_TO_LABEL), " +
+      "returns ARMMAN's real content, ordered, filtered to the assessment's own riskPhase " +
+      '(ANC-phase gets every non-postpartum message; PP-phase gets only the postpartum one — ' +
+      "riskPhase alone can't distinguish finer ANC sub-stages). Every other condition falls " +
+      'back to the seeded "Content coming soon" placeholder topic.',
   }),
 });
 

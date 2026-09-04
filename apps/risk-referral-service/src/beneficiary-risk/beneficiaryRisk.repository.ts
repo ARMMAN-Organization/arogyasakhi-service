@@ -12,6 +12,11 @@ const STATE_SNAPSHOT_SELECT = {
 const ASSESSMENT_WITH_FLAGS_SELECT = {
   id: true,
   evaluatedAt: true,
+  // Which visit phase this assessment came from (ANC/PP/NN/...) — needed to
+  // pick the stage-appropriate health-education message for a risk-graded
+  // condition (see beneficiaryRisk.service.ts's toAssessmentView). Nullable
+  // on assessments created before this column existed.
+  riskPhase: true,
   overallRiskCategory: true,
   overallHighRiskFlag: true,
   hrDetectedFlag: true,

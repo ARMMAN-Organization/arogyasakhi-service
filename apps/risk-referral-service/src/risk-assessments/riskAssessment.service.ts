@@ -184,6 +184,7 @@ export class RiskAssessmentService {
       visitId: dto.visitId,
       submissionId: dto.submissionId,
       ruleVersionId: evaluation.ruleVersionId,
+      riskPhase: dto.riskPhase,
       evaluatedAt,
       overallRiskCategory: evaluation.overallRiskCategory,
       overallHighRiskFlag,

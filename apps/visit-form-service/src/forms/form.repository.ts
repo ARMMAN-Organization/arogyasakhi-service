@@ -213,6 +213,22 @@ export class FormRepository {
   }
 
   /**
+   * How many non-deleted submissions exist for `beneficiaryId` against
+   * `formCode`'s form_definition — used to detect "this is the
+   * beneficiary's first-ever submission of this form" (e.g. Primigravida's
+   * first-ANC-visit-only health-education gate) by counting AFTER the
+   * current submission's own insert, so a count of exactly 1 means this
+   * submission is the first (findLatestSubmissionByBeneficiaryAndFormCode
+   * can't answer this on its own — it would always return the just-inserted
+   * row itself).
+   */
+  countSubmissionsByBeneficiaryAndFormCode(beneficiaryId: string, formCode: string) {
+    return this.prisma.formSubmission.count({
+      where: { beneficiaryId, isDeleted: false, formVersion: { formDefinition: { formCode } } },
+    });
+  }
+
+  /**
    * The most recent visit-linked submission for `beneficiaryId` across the
    * clinical-visit form codes that actually capture vitals (ANC_VISIT,
    * POSTPARTUM_VISIT, NEONATAL_VISIT, INC_VISIT, CCV_VISIT — see
