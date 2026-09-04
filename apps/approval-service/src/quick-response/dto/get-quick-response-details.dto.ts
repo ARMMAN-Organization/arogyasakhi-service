@@ -1,13 +1,14 @@
 import { z } from 'zod';
 
 /**
- * Batch is a single query, not N concurrent per-card lookups, but still
- * capped so a caller can't ask for an unbounded IN(...) list in one request
- * — this is the entire fix for the Quick Response card-detail screen's
- * gateway-overloading N×4 concurrent fan-out (see
- * QuickResponseService.getCardDetails's doc comment). Kept below
- * list-quick-response.dto.ts's page `limit` max of 100: the Supervisor app's
- * card screen never opens more than a page's worth of cards at once.
+ * Caps how many card ids one batch request can ask for, so a caller can't
+ * pass an unbounded id list in one request. This only collapses the
+ * client→approval-service hop count from N to 1 — each card in the batch
+ * still fans out to ~4 downstream services during enrichment (see
+ * QuickResponseService.getCardDetails's doc comment), so downstream fan-out
+ * is not eliminated by this cap alone. Kept below list-quick-response.dto.ts's
+ * page `limit` max of 100: the Supervisor app's card screen never opens more
+ * than a page's worth of cards at once.
  */
 export const MAX_BATCH_CARD_IDS = 50;
 

@@ -1556,6 +1556,52 @@ describe('QuickResponseService', () => {
 
       expect(result).toEqual([]);
     });
+
+    it("resolves a SUPERVISOR caller's own Sakhi roster once for the whole batch, not once per id", async () => {
+      sakhiClient.getOwnSakhiIds.mockResolvedValue(['44444444-4444-4444-4444-444444444444']);
+      repository.findById.mockImplementation((async (id: string) =>
+        approvalRequest({ id, requestType: 'SOMETHING_UNKNOWN', reopenRequestId: null })) as never);
+      escalationClient.findById.mockResolvedValue(null);
+
+      const result = await service.getCardDetails(
+        [
+          '11111111-1111-1111-1111-111111111111',
+          '22222222-2222-2222-2222-222222222222',
+          '33333333-3333-3333-3333-333333333333',
+        ],
+        supervisorCaller('project-1'),
+        authHeader,
+      );
+
+      expect(result).toHaveLength(3);
+      expect(sakhiClient.getOwnSakhiIds).toHaveBeenCalledTimes(1);
+    });
+
+    it('logs and omits an id whose enrichment fails with an unexpected (non-HttpError) error, without failing the batch', async () => {
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+      repository.findById.mockImplementation((async (id: string) => {
+        if (id === '11111111-1111-1111-1111-111111111111') {
+          throw new Error('downstream service outage');
+        }
+        return approvalRequest({ id, requestType: 'SOMETHING_UNKNOWN', reopenRequestId: null });
+      }) as never);
+      escalationClient.findById.mockResolvedValue(null);
+
+      const result = await service.getCardDetails(
+        ['11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222'],
+        managerCaller,
+        authHeader,
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]).toMatchObject({ cardId: '22222222-2222-2222-2222-222222222222' });
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('unexpected failure'),
+        expect.any(Error),
+      );
+
+      consoleErrorSpy.mockRestore();
+    });
   });
 
   describe('decide — EDD_NEARING (escalation_events)', () => {
