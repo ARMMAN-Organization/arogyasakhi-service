@@ -249,14 +249,19 @@ describe('QuickResponseService', () => {
     });
 
     describe('batch-enriching approval_requests cards with names', () => {
-      it('populates beneficiaryName and sakhiName for approval cards on the page', async () => {
+      it('populates beneficiaryName, sakhiName, and sakhiEmployeeCode for approval cards on the page', async () => {
         repository.findMany.mockResolvedValue([approvalRequest()]);
         escalationClient.list.mockResolvedValue({ cards: [], nextCursor: null });
         beneficiaryClient.getManyWithRisk.mockResolvedValue(
           new Map([['22222222-2222-2222-2222-222222222222', 'Sita Kumari']]),
         );
         sakhiClient.getManyByIds.mockResolvedValue(
-          new Map([['44444444-4444-4444-4444-444444444444', 'Asha Devi']]),
+          new Map([
+            [
+              '44444444-4444-4444-4444-444444444444',
+              { displayName: 'Asha Devi', employeeCode: 'EMP-00123' },
+            ],
+          ]),
         );
 
         const result = await service.list(
@@ -267,10 +272,44 @@ describe('QuickResponseService', () => {
         expect(result.cards[0]).toMatchObject({
           beneficiaryName: 'Sita Kumari',
           sakhiName: 'Asha Devi',
+          sakhiEmployeeCode: 'EMP-00123',
         });
       });
 
-      it('leaves escalation cards unenriched (no beneficiaryName/sakhiName fields added)', async () => {
+      it('sets sakhiEmployeeCode to null when the Sakhi is found but has no employeeCode of her own', async () => {
+        repository.findMany.mockResolvedValue([approvalRequest()]);
+        escalationClient.list.mockResolvedValue({ cards: [], nextCursor: null });
+        sakhiClient.getManyByIds.mockResolvedValue(
+          new Map([
+            [
+              '44444444-4444-4444-4444-444444444444',
+              { displayName: 'Asha Devi', employeeCode: null },
+            ],
+          ]),
+        );
+
+        const result = await service.list(
+          { status: 'PENDING', limit: 50 },
+          managerCaller,
+          authHeader,
+        );
+        expect(result.cards[0]).toMatchObject({ sakhiName: 'Asha Devi', sakhiEmployeeCode: null });
+      });
+
+      it('sets sakhiName and sakhiEmployeeCode to null when the Sakhi is not found/outside scope', async () => {
+        repository.findMany.mockResolvedValue([approvalRequest()]);
+        escalationClient.list.mockResolvedValue({ cards: [], nextCursor: null });
+        sakhiClient.getManyByIds.mockResolvedValue(new Map());
+
+        const result = await service.list(
+          { status: 'PENDING', limit: 50 },
+          managerCaller,
+          authHeader,
+        );
+        expect(result.cards[0]).toMatchObject({ sakhiName: null, sakhiEmployeeCode: null });
+      });
+
+      it('leaves escalation cards unenriched (no beneficiaryName/sakhiName/sakhiEmployeeCode fields added)', async () => {
         repository.findMany.mockResolvedValue([]);
         escalationClient.list.mockResolvedValue({ cards: [escalationCard()], nextCursor: null });
 
@@ -281,6 +320,7 @@ describe('QuickResponseService', () => {
         );
         expect(result.cards[0]).not.toHaveProperty('beneficiaryName');
         expect(result.cards[0]).not.toHaveProperty('sakhiName');
+        expect(result.cards[0]).not.toHaveProperty('sakhiEmployeeCode');
       });
 
       it('calls getManyWithRisk once with a deduped beneficiaryId list', async () => {
@@ -315,13 +355,18 @@ describe('QuickResponseService', () => {
         );
       });
 
-      it('resolves DATA_RESTORE sakhiName from requestedByUserId', async () => {
+      it('resolves DATA_RESTORE sakhiName and sakhiEmployeeCode from requestedByUserId', async () => {
         repository.findMany.mockResolvedValue([
           approvalRequest({ requestType: 'DATA_RESTORE', beneficiaryId: null }),
         ]);
         escalationClient.list.mockResolvedValue({ cards: [], nextCursor: null });
         sakhiClient.getManyByIds.mockResolvedValue(
-          new Map([['44444444-4444-4444-4444-444444444444', 'Meena Kumari']]),
+          new Map([
+            [
+              '44444444-4444-4444-4444-444444444444',
+              { displayName: 'Meena Kumari', employeeCode: 'EMP-00456' },
+            ],
+          ]),
         );
 
         const result = await service.list(
@@ -329,7 +374,11 @@ describe('QuickResponseService', () => {
           managerCaller,
           authHeader,
         );
-        expect(result.cards[0]).toMatchObject({ sakhiName: 'Meena Kumari', beneficiaryName: null });
+        expect(result.cards[0]).toMatchObject({
+          sakhiName: 'Meena Kumari',
+          sakhiEmployeeCode: 'EMP-00456',
+          beneficiaryName: null,
+        });
       });
 
       it('sets beneficiaryName to null and excludes the row from the batch call when beneficiaryId is absent', async () => {
@@ -371,7 +420,7 @@ describe('QuickResponseService', () => {
         expect(consoleErrorSpy).toHaveBeenCalled();
       });
 
-      it('degrades sakhiName to null for the whole page, without failing list(), when the batch call throws', async () => {
+      it('degrades sakhiName and sakhiEmployeeCode to null for the whole page, without failing list(), when the batch call throws', async () => {
         repository.findMany.mockResolvedValue([approvalRequest()]);
         escalationClient.list.mockResolvedValue({ cards: [], nextCursor: null });
         sakhiClient.getManyByIds.mockRejectedValue(new Error('auth-service unreachable'));
@@ -381,7 +430,7 @@ describe('QuickResponseService', () => {
           managerCaller,
           authHeader,
         );
-        expect(result.cards[0]).toMatchObject({ sakhiName: null });
+        expect(result.cards[0]).toMatchObject({ sakhiName: null, sakhiEmployeeCode: null });
         expect(consoleErrorSpy).toHaveBeenCalled();
       });
     });
@@ -665,6 +714,7 @@ describe('QuickResponseService', () => {
         sakhiId: '88888888-8888-8888-8888-888888888888',
         displayName: 'Priya Sharma',
         mobileNumber: '+919000000123',
+        employeeCode: 'EMP-00123',
       });
       geographyClient.getById.mockResolvedValue({
         geographyUnitId: '99999999-9999-9999-9999-999999999999',
@@ -794,6 +844,7 @@ describe('QuickResponseService', () => {
       expect(result).toMatchObject({
         padaName: 'Sundarpada',
         sakhiName: 'Priya Sharma',
+        sakhiEmployeeCode: 'EMP-00123',
         beneficiaryName: 'Asha Devi',
         oldLmpDate: '2026-01-01T00:00:00.000Z',
         newLmpDate: '2026-02-01',
@@ -801,6 +852,50 @@ describe('QuickResponseService', () => {
         sakhiContactNumber: '+919000000123',
       });
       expect((result as unknown as { riskDetails: unknown[] }).riskDetails).toHaveLength(1);
+    });
+
+    it('LMP_CHANGE: sets sakhiEmployeeCode to null when the Sakhi has none of her own', async () => {
+      repository.findById.mockResolvedValue(
+        approvalRequest({
+          requestType: 'LMP_CHANGE',
+          reopenRequestId: null,
+          requestPayloadJson: { newLmpDate: '2026-02-01' },
+        }),
+      );
+      sakhiClient.getById.mockResolvedValue({
+        supervisorId: null,
+        sakhiId: '88888888-8888-8888-8888-888888888888',
+        displayName: 'Priya Sharma',
+        mobileNumber: '+919000000123',
+        employeeCode: null,
+      });
+
+      const result = await service.getCardDetail(
+        '11111111-1111-1111-1111-111111111111',
+        managerCaller,
+        authHeader,
+      );
+
+      expect(result).toMatchObject({ sakhiName: 'Priya Sharma', sakhiEmployeeCode: null });
+    });
+
+    it('LMP_CHANGE: degrades sakhiName and sakhiEmployeeCode to null when the Sakhi lookup fails', async () => {
+      repository.findById.mockResolvedValue(
+        approvalRequest({
+          requestType: 'LMP_CHANGE',
+          reopenRequestId: null,
+          requestPayloadJson: { newLmpDate: '2026-02-01' },
+        }),
+      );
+      sakhiClient.getById.mockRejectedValue(new Error('auth-service unreachable'));
+
+      const result = await service.getCardDetail(
+        '11111111-1111-1111-1111-111111111111',
+        managerCaller,
+        authHeader,
+      );
+
+      expect(result).toMatchObject({ sakhiName: null, sakhiEmployeeCode: null });
     });
 
     it('LMP_CHANGE: returns the sonography asset id when the payload carries one', async () => {
@@ -1367,7 +1462,7 @@ describe('QuickResponseService', () => {
       expect((result as unknown as { reason: string }).reason).toContain('2026-10-08');
     });
 
-    it('DATA_RESTORE: returns Sakhi name and id resolved from requestedByUserId', async () => {
+    it('DATA_RESTORE: returns Sakhi name, employeeCode, and id resolved from requestedByUserId', async () => {
       repository.findById.mockResolvedValue(
         approvalRequest({
           requestType: 'DATA_RESTORE',
@@ -1381,6 +1476,7 @@ describe('QuickResponseService', () => {
         sakhiId: 'sakhi-user-1',
         displayName: 'Meena Kumari',
         mobileNumber: '+919000000456',
+        employeeCode: 'EMP-00123',
       });
 
       const result = await service.getCardDetail(
@@ -1389,8 +1485,32 @@ describe('QuickResponseService', () => {
         authHeader,
       );
 
-      expect(result).toMatchObject({ sakhiName: 'Meena Kumari', sakhiId: 'sakhi-user-1' });
+      expect(result).toMatchObject({
+        sakhiName: 'Meena Kumari',
+        sakhiEmployeeCode: 'EMP-00123',
+        sakhiId: 'sakhi-user-1',
+      });
       expect(sakhiClient.getById).toHaveBeenCalledWith('sakhi-user-1', authHeader);
+    });
+
+    it('DATA_RESTORE: sets sakhiEmployeeCode to null when the Sakhi lookup fails', async () => {
+      repository.findById.mockResolvedValue(
+        approvalRequest({
+          requestType: 'DATA_RESTORE',
+          reopenRequestId: null,
+          beneficiaryId: null,
+          requestedByUserId: 'sakhi-user-1',
+        }),
+      );
+      sakhiClient.getById.mockRejectedValue(new Error('auth-service unreachable'));
+
+      const result = await service.getCardDetail(
+        '11111111-1111-1111-1111-111111111111',
+        managerCaller,
+        authHeader,
+      );
+
+      expect(result).toMatchObject({ sakhiName: null, sakhiEmployeeCode: null });
     });
 
     it('propagates a core beneficiary-lookup failure rather than degrading it to null', async () => {
@@ -1941,6 +2061,7 @@ describe('QuickResponseService', () => {
         sakhiId: card.requestedByUserId as string,
         displayName: 'Meena Kumari',
         mobileNumber: '+919000000456',
+        employeeCode: 'EMP-00123',
       });
 
       await service.decide(
@@ -2526,6 +2647,7 @@ describe('QuickResponseService', () => {
         sakhiId: card.requestedByUserId as string,
         displayName: 'Priya Sakhi',
         mobileNumber: '+919000000123',
+        employeeCode: 'EMP-00123',
       });
       beneficiaryClient.getById.mockResolvedValue({
         id: card.beneficiaryId as string,
@@ -2567,6 +2689,7 @@ describe('QuickResponseService', () => {
         sakhiId: card.requestedByUserId as string,
         displayName: 'Priya Sakhi',
         mobileNumber: '+919000000123',
+        employeeCode: 'EMP-00123',
       });
 
       await service.decide(
@@ -2716,6 +2839,7 @@ describe('QuickResponseService', () => {
         sakhiId: card.requestedByUserId as string,
         displayName: 'Priya Sakhi',
         mobileNumber: '+919000000123',
+        employeeCode: 'EMP-00123',
       });
 
       const result = await service.decide(
@@ -2771,6 +2895,7 @@ describe('QuickResponseService', () => {
         sakhiId: card.requestedByUserId as string,
         displayName: 'Priya Sakhi',
         mobileNumber: '+919000000123',
+        employeeCode: 'EMP-00123',
       });
 
       const pending = service.decide(
@@ -3067,6 +3192,7 @@ describe('QuickResponseService', () => {
         sakhiId: card.requestedByUserId as string,
         displayName: 'Priya Sakhi',
         mobileNumber: '+919000000123',
+        employeeCode: 'EMP-00123',
       });
       beneficiaryClient.getById.mockResolvedValue({
         id: card.beneficiaryId as string,

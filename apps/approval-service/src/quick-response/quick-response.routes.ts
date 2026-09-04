@@ -37,6 +37,7 @@ const quickResponseCardSchema = z
     // cards' own name enrichment is owned by notification-escalation-service.
     beneficiaryName: z.string().nullable().optional(),
     sakhiName: z.string().nullable().optional(),
+    sakhiEmployeeCode: z.string().nullable().optional(),
   })
   .passthrough();
 
