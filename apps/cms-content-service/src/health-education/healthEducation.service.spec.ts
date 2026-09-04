@@ -20,6 +20,7 @@ describe('HealthEducationService', () => {
     expect(repository.findMany).toHaveBeenCalledWith({
       riskConditionId: 'condition-1',
       stage: undefined,
+      conditionLabel: undefined,
     });
   });
 
@@ -31,10 +32,38 @@ describe('HealthEducationService', () => {
     expect(repository.findMany).toHaveBeenCalledWith({
       riskConditionId: undefined,
       stage: 'postpartum (PP1 or PP2 whichever is attended)',
+      conditionLabel: undefined,
     });
   });
 
-  it('passes no filters when neither is given, returning everything', async () => {
+  it('passes conditionLabel through to the repository', async () => {
+    repository.findMany.mockResolvedValue([]);
+
+    await service.listMessages({ conditionLabel: 'Anemia' });
+
+    expect(repository.findMany).toHaveBeenCalledWith({
+      riskConditionId: undefined,
+      stage: undefined,
+      conditionLabel: 'Anemia',
+    });
+  });
+
+  it('passes conditionLabel and stage together, narrowing to one message', async () => {
+    repository.findMany.mockResolvedValue([]);
+
+    await service.listMessages({
+      conditionLabel: 'Anemia',
+      stage: 'as soon as detected during ANC visit',
+    });
+
+    expect(repository.findMany).toHaveBeenCalledWith({
+      riskConditionId: undefined,
+      stage: 'as soon as detected during ANC visit',
+      conditionLabel: 'Anemia',
+    });
+  });
+
+  it('passes no filters when none are given, returning everything', async () => {
     repository.findMany.mockResolvedValue([]);
 
     await service.listMessages({});
@@ -42,6 +71,7 @@ describe('HealthEducationService', () => {
     expect(repository.findMany).toHaveBeenCalledWith({
       riskConditionId: undefined,
       stage: undefined,
+      conditionLabel: undefined,
     });
   });
 });

@@ -4,6 +4,7 @@ import { BeneficiaryClient } from './beneficiary.client';
 import { listSakhiIdsForSupervisor } from './sakhi.client';
 import { resolveRiskGrades } from './riskGrade.client';
 import { resolveEducationContent, type EducationContent } from './educationContent.client';
+import { resolveHealthEducationMessages } from './healthEducation.client';
 
 type StateSnapshotRow = Awaited<
   ReturnType<BeneficiaryRiskRepository['findStateSnapshots']>
@@ -12,6 +13,50 @@ type StateSnapshotRow = Awaited<
 type AssessmentWithFlagsRow = Awaited<
   ReturnType<BeneficiaryRiskRepository['findAssessmentsWithFlags']>
 >[number];
+
+/**
+ * RiskCondition.conditionCode -> HealthEducationMessage.conditionLabel, for
+ * the 5 SRS-specified "as soon as detected" risk-graded conditions
+ * (docs/Revised_App_Form_Final_20.3.26.xlsx.md, "Health education message"
+ * table, rows 1-5) that ARMMAN's delivered content actually covers. A flag
+ * whose conditionCode isn't listed here falls back to the COMING_SOON
+ * placeholder, same as before this map existed — this is additive, not a
+ * replacement for every condition. Every other condition in that same SRS
+ * table (Danger Signs, Neonatal Care, POSTPARTUM Counselling, etc.) is
+ * stage-based rather than risk-graded and is served by visit-form-service's
+ * health-education stage resolver instead — see that resolver's own doc
+ * comment for why those don't belong in this map.
+ */
+const CONDITION_CODE_TO_LABEL: Record<string, string> = {
+  ANEMIA: 'Anemia',
+  HYPERTENSION: 'Gestational Hypertension',
+  HYPERGLYCEMIA: 'Gestational Diabetes',
+  GESTATIONAL_WEIGHT_GAIN: 'Inadequate Gestational weight gain',
+  BAD_OBSTETRIC_HISTORY: 'Previous pregnancy complication',
+};
+
+/**
+ * The exact seeded `stage` string that marks the PP-phase message, for each
+ * of the 5 CONDITION_CODE_TO_LABEL conditions (verified against
+ * health-education-messages.json's seed data as of this writing — every
+ * other stage string for these conditions is an ANC sub-stage: "as soon as
+ * detected during ANC visit", "2nd trimester (6th month)", etc.). Matched
+ * exactly, not by substring — a looser `stage.includes('postpartum')` match
+ * was flagged in review as fragile against a future content reword (e.g.
+ * cms-content-service's seed data changing the exact phrasing), silently
+ * degrading a PP-phase beneficiary to the COMING_SOON placeholder with no
+ * error anywhere in the pipeline. This still shares that fragility (a
+ * reworded stage string breaks the exact match the same way it would break
+ * a substring match) — the real fix is a typed `phase` column on
+ * HealthEducationMessage in cms-content-service, mirroring the RiskPhase
+ * enum this PR already added to risk_assessments, which would make this
+ * function unnecessary. Tracked as a followup, not done here (cross-service
+ * migration, out of scope for this PR's review-comment fixes).
+ */
+const POSTPARTUM_STAGE = 'postpartum (PP1 or PP2 whichever is attended)';
+function isPostpartumStage(stage: string): boolean {
+  return stage === POSTPARTUM_STAGE;
+}
 
 interface RiskConditionSummaryAcc {
   riskConditionId: string;
@@ -67,19 +112,74 @@ export class BeneficiaryRiskService {
     ]);
 
     const hasTriggeredFlag = assessments.some((a) => a.riskFlags.some((f) => f.isEducationTrigger));
-    // Resolved once per call, not once per flag — every isEducationTrigger
-    // flag maps to the same COMING_SOON topic today (see this feature's
-    // implementation plan doc for why there's no per-condition mapping yet).
+    // Resolved once per call, not once per flag — the COMING_SOON fallback
+    // is identical content regardless of which unmapped condition triggered
+    // it (mapped conditions get real content below instead).
     const comingSoonContent = hasTriggeredFlag
       ? await resolveEducationContent('COMING_SOON', authorizationHeader)
       : null;
 
+    // Resolved once per distinct (conditionCode, isPostpartum) pair across
+    // the whole call, not once per flag/assessment — several assessments
+    // commonly re-trigger the same condition (e.g. Anemia flagged at every
+    // ANC visit until it resolves), and each pair maps to the same content
+    // regardless of which assessment it came from. Caches the in-flight
+    // Promise itself, not just its resolved value — toAssessmentView below
+    // resolves every flag concurrently via Promise.all, so two flags for the
+    // same (conditionCode, phase) pair can both reach this function before
+    // either has finished; caching only the settled value would let both
+    // still call resolveHealthEducationMessages.
+    const contentCache = new Map<string, Promise<EducationContent[]>>();
+    function resolveMappedContent(
+      conditionCode: string,
+      riskPhase: string | null,
+    ): Promise<EducationContent[]> {
+      const conditionLabel = CONDITION_CODE_TO_LABEL[conditionCode];
+      if (!conditionLabel) return Promise.resolve(comingSoonContent ? [comingSoonContent] : []);
+
+      // 3-way discriminant, not a collapsed isPostpartum boolean — riskPhase
+      // null (legacy pre-migration row, "return every message
+      // undifferentiated") and riskPhase 'ANC' (non-postpartum) both map to
+      // isPostpartum: false, which would otherwise share one cache bucket
+      // and let whichever resolves first silently overwrite the other's
+      // filtering intent for the rest of this call.
+      const phaseKey = riskPhase === null ? 'null' : riskPhase === 'PP' ? 'PP' : 'other';
+      const cacheKey = `${conditionCode}:${phaseKey}`;
+      const cached = contentCache.get(cacheKey);
+      if (cached) return cached;
+
+      const isPostpartum = riskPhase === 'PP';
+      const pending = (async (): Promise<EducationContent[]> => {
+        const messages = await resolveHealthEducationMessages(conditionLabel, authorizationHeader);
+        const filtered = riskPhase
+          ? messages.filter((m) => isPostpartumStage(m.stage) === isPostpartum)
+          : messages; // riskPhase null (pre-migration row) — return every message, undifferentiated.
+        const sorted = [...filtered].sort((a, b) => a.messageOrder - b.messageOrder);
+
+        return sorted.length > 0
+          ? sorted.map((m) => ({
+              topicCode: conditionCode,
+              topicName: m.titleEn ?? m.conditionLabel,
+              mediaType: m.mediaType,
+              contentUrl: m.mediaFile,
+            }))
+          : comingSoonContent
+            ? [comingSoonContent]
+            : [];
+      })();
+
+      contentCache.set(cacheKey, pending);
+      return pending;
+    }
+
+    const assessmentViews = await Promise.all(
+      assessments.map((assessment) => this.toAssessmentView(assessment, resolveMappedContent)),
+    );
+
     return {
       beneficiaryId,
       currentState: this.toCurrentStatePerPhase(snapshots),
-      assessments: assessments.map((assessment) =>
-        this.toAssessmentView(assessment, comingSoonContent),
-      ),
+      assessments: assessmentViews,
     };
   }
 
@@ -229,17 +329,15 @@ export class BeneficiaryRiskService {
   }
 
   /** Flattens each RiskFlag's nested RiskCondition into conditionCode/conditionName. */
-  private toAssessmentView(
+  private async toAssessmentView(
     assessment: AssessmentWithFlagsRow,
-    comingSoonContent: EducationContent | null,
+    resolveMappedContent: (
+      conditionCode: string,
+      riskPhase: string | null,
+    ) => Promise<EducationContent[]>,
   ) {
-    return {
-      id: assessment.id,
-      evaluatedAt: assessment.evaluatedAt,
-      overallRiskCategory: assessment.overallRiskCategory,
-      overallHighRiskFlag: assessment.overallHighRiskFlag,
-      hrDetectedFlag: assessment.hrDetectedFlag,
-      flags: assessment.riskFlags.map((flag) => ({
+    const flags = await Promise.all(
+      assessment.riskFlags.map(async (flag) => ({
         id: flag.id,
         conditionCode: flag.riskCondition.conditionCode,
         conditionName: flag.riskCondition.conditionName,
@@ -248,8 +346,19 @@ export class BeneficiaryRiskService {
         isReferralTrigger: flag.isReferralTrigger,
         isEducationTrigger: flag.isEducationTrigger,
         isHrVisitTrigger: flag.isHrVisitTrigger,
-        educationContent: flag.isEducationTrigger ? comingSoonContent : null,
+        educationContent: flag.isEducationTrigger
+          ? await resolveMappedContent(flag.riskCondition.conditionCode, assessment.riskPhase)
+          : [],
       })),
+    );
+
+    return {
+      id: assessment.id,
+      evaluatedAt: assessment.evaluatedAt,
+      overallRiskCategory: assessment.overallRiskCategory,
+      overallHighRiskFlag: assessment.overallHighRiskFlag,
+      hrDetectedFlag: assessment.hrDetectedFlag,
+      flags,
     };
   }
 }

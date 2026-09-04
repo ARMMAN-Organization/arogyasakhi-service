@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { FormField } from './dto/form-field.dto';
 import { BENEFICIARY_DUPLICATED_FIELD_CODES } from './beneficiary-duplicated-fields';
+import type { StageEducationContent } from './healthEducationStage.resolver';
 
 /** SHA-256 of the schema JSON, stored on form_versions.checksum for change detection. */
 export function computeChecksum(schemaJson: unknown): Buffer {
@@ -213,6 +214,7 @@ export function buildFormAnswers(
 export function toApiFormSubmission<T extends FormSubmissionRow>(
   s: T,
   childBeneficiaryIds?: string[],
+  stageEducationContent?: StageEducationContent[],
 ) {
   return {
     id: s.id,
@@ -227,5 +229,15 @@ export function toApiFormSubmission<T extends FormSubmissionRow>(
     createdAt: s.createdAt,
     updatedAt: s.updatedAt,
     ...(childBeneficiaryIds?.length ? { childBeneficiaryIds } : {}),
+    // SRS's 16 stage-based (not risk-graded) health-education conditions —
+    // see healthEducationStage.resolver.ts's own doc comment for why these
+    // are a separate mechanism from risk-referral-service's risk-flag-
+    // triggered content. Always present as an array (never omitted) once a
+    // caller passes it, even when empty — distinct from
+    // childBeneficiaryIds's "omit if empty" convention, since an empty
+    // stageEducationContent is a normal, expected outcome for most
+    // submissions (e.g. any form/visit with no matching stage content),
+    // not something worth hiding from the response shape.
+    ...(stageEducationContent !== undefined ? { stageEducationContent } : {}),
   };
 }

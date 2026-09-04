@@ -7,7 +7,7 @@ import type { HealthEducationRepository } from './healthEducation.repository';
 export class HealthEducationService {
   constructor(private readonly repository: HealthEducationRepository) {}
 
-  listMessages(filters: { riskConditionId?: string; stage?: string }) {
+  listMessages(filters: { riskConditionId?: string; stage?: string; conditionLabel?: string }) {
     return this.repository.findMany(filters);
   }
 }

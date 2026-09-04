@@ -189,6 +189,15 @@ model RiskAssessment {
   submissionId        String              @map("submission_id")
   // rule_versions.rule_version_id — owned by another service, no cross-service relation.
   ruleVersionId       String              @map("rule_version_id")
+  // The caller's FORM_CODE_TO_RISK_PHASE-derived phase for this submission
+  // (visit-form-service already computes and sends this as dto.riskPhase to
+  // resolve conditionIds — see riskAssessment.service.ts's create() — it just
+  // wasn't persisted before). Nullable so historical pre-migration rows are
+  // not backfilled/guessed; used to pick the stage-appropriate
+  // health-education message for a risk-graded condition (e.g. Anemia's
+  // "as soon as detected" ANC message vs its separate postpartum message) —
+  // see beneficiaryRisk.service.ts's toAssessmentView.
+  riskPhase           RiskPhase?          @map("risk_phase")
   evaluatedAt         DateTime            @map("evaluated_at")
   overallRiskCategory OverallRiskCategory @map("overall_risk_category")
   overallHighRiskFlag Boolean             @default(false) @map("overall_high_risk_flag")

@@ -6,6 +6,20 @@
 process.env.JWT_PUBLIC_KEY ??= 'test-key';
 
 const { SERVICE_ROUTES } = require('./routes') as typeof import('./routes');
+const appConfig = require('../config/app-config')
+  .appConfig as typeof import('../config/app-config').appConfig;
+
+describe('SERVICE_ROUTES coverage', () => {
+  it('proxies /form-submissions to visit-form-service, distinct from /forms', () => {
+    const formSubmissionsRoute = SERVICE_ROUTES.find((r) => r.prefix === '/form-submissions');
+    const formsRoute = SERVICE_ROUTES.find((r) => r.prefix === '/forms');
+
+    expect(formSubmissionsRoute).toBeDefined();
+    expect(formSubmissionsRoute?.target).toBe(appConfig.VISIT_FORM_SERVICE_URL);
+    expect(formSubmissionsRoute?.requiresAuth).toBe(true);
+    expect(formSubmissionsRoute).not.toBe(formsRoute);
+  });
+});
 
 describe('SERVICE_ROUTES ordering', () => {
   it('registers /visits/by-sakhi before the generic /visits prefix', () => {

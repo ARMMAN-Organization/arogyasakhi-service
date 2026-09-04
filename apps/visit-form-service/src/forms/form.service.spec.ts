@@ -23,6 +23,7 @@ import { createClosure, resolveClosureReasonLookupId } from '../closures/closure
 import { triggerRiskAssessment } from '../risk-assessments/riskAssessment.client';
 import { resolveAndWriteCcvOpeningRiskState } from './ccvOpeningRiskState.resolver';
 import { resolveVisitCompletion } from './visitCompletion.resolver';
+import { resolveHealthEducationMessagesByStage } from './healthEducation.client';
 
 jest.mock('../geography/geography.client');
 jest.mock('../beneficiaries/socio-demographics.client');
@@ -34,6 +35,7 @@ jest.mock('../closures/closure.client');
 jest.mock('../risk-assessments/riskAssessment.client');
 jest.mock('./ccvOpeningRiskState.resolver');
 jest.mock('./visitCompletion.resolver');
+jest.mock('./healthEducation.client');
 
 describe('FormService', () => {
   const repository = {
@@ -49,6 +51,7 @@ describe('FormService', () => {
     createSubmission: jest.fn(),
     findVisitById: jest.fn(),
     findLatestSubmissionByBeneficiaryAndFormCode: jest.fn(),
+    countSubmissionsByBeneficiaryAndFormCode: jest.fn(),
     findLatestVisitSubmission: jest.fn(),
     findLatestDeliverySubmission: jest.fn(),
     findSubmissionById: jest.fn(),
@@ -65,6 +68,11 @@ describe('FormService', () => {
 
   beforeEach(() => {
     jest.resetAllMocks();
+    // Safe defaults so tests unrelated to the stage-based health-education
+    // feature don't need to know about it — real content only in the
+    // dedicated describe block below.
+    jest.mocked(resolveHealthEducationMessagesByStage).mockResolvedValue([]);
+    repository.countSubmissionsByBeneficiaryAndFormCode.mockResolvedValue(1);
     service = new FormService(repository, visitInstanceRepository, auditClient);
   });
 
@@ -748,7 +756,7 @@ describe('FormService', () => {
       expect(repository.createSubmission).toHaveBeenCalledWith(
         expect.objectContaining({ validationStatus: 'VALID' }),
       );
-      expect(result).toEqual({ id: 'sub-1' });
+      expect(result).toEqual({ id: 'sub-1', stageEducationContent: [] });
     });
 
     describe('visit completion on submission', () => {
@@ -830,7 +838,7 @@ describe('FormService', () => {
           'Bearer test-token',
         );
 
-        expect(result).toEqual({ id: 'sub-1' });
+        expect(result).toEqual({ id: 'sub-1', stageEducationContent: [] });
         expect(repository.createSubmission).toHaveBeenCalled();
       });
     });
@@ -1120,6 +1128,67 @@ describe('FormService', () => {
         );
 
         expect(result).toMatchObject({ id: 'sub-winner' });
+      });
+
+      it('resolves stageEducationContent for the race LOSER too, not just the sequential replay path (PR #222 review finding)', async () => {
+        const nnVersion = {
+          id: 'version-1',
+          status: 'PUBLISHED',
+          formDefinition: { formCode: 'NEONATAL_VISIT' },
+          schemaJson: [{ question_code: 'x', label: 'x', input_type: 'text', required: false }],
+          validationJson: [],
+        };
+        repository.findVersionById.mockResolvedValue(nnVersion as never);
+        repository.createSubmission.mockRejectedValue({ code: 'P2002' });
+        const winningRow = {
+          id: 'sub-winner',
+          beneficiaryId: 'b1',
+          submittedAt: new Date('2026-08-01T00:00:00.000Z'),
+          createdAt: new Date('2026-08-01T00:00:01.000Z'),
+        };
+        repository.findSubmissionByLocalUuid
+          .mockResolvedValueOnce(null)
+          .mockResolvedValueOnce(winningRow as never);
+        jest.mocked(resolveHealthEducationMessagesByStage).mockImplementation(async (stage) =>
+          stage === 'NN1 and NN2'
+            ? [
+                {
+                  id: 'm1',
+                  riskConditionId: null,
+                  conditionLabel: 'Neonatal Care',
+                  stage,
+                  messageOrder: 1,
+                  titleEn: 'Neonatal Care',
+                  bodyEn: 'x',
+                  bodyMarathi: '',
+                  mediaType: 'TEXT',
+                  mediaFile: null,
+                  sortOrder: 1,
+                },
+              ]
+            : ([] as never),
+        );
+
+        const result = await service.createSubmission(
+          'NEONATAL_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {},
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        // Previously this response dropped stageEducationContent entirely
+        // (not even an empty array) — the race loser's response shape was
+        // inconsistent with the sequential-replay path's response, for
+        // what should be an idempotent replay of the same logical
+        // submission.
+        expect(result.stageEducationContent).toEqual([
+          expect.objectContaining({ topicCode: 'Neonatal Care' }),
+        ]);
       });
 
       it('rethrows a P2002 when no winning row can be found on re-query', async () => {
@@ -1553,7 +1622,7 @@ describe('FormService', () => {
           'Bearer test-token',
         );
 
-        expect(result).toEqual({ id: 'sub-1' });
+        expect(result).toEqual({ id: 'sub-1', stageEducationContent: [] });
         expect(jest.mocked(createChildBeneficiary)).not.toHaveBeenCalled();
       });
     });
@@ -2286,6 +2355,482 @@ describe('FormService', () => {
       });
     });
 
+    describe('stageEducationContent — SRS stage-based health-education wiring', () => {
+      it('resolves unconditional ANC content (Danger Signs) using registration-derived LMP for gestationalWeeks', async () => {
+        const ancVersion = {
+          id: 'version-1',
+          status: 'PUBLISHED',
+          formDefinition: { formCode: 'ANC_VISIT' },
+          schemaJson: [{ question_code: 'x', label: 'x', input_type: 'text', required: false }],
+          validationJson: [],
+        };
+        repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+        repository.findVersionById.mockResolvedValue(ancVersion as never);
+        repository.createSubmission.mockResolvedValue({
+          id: 'sub-1',
+          submittedAt: new Date('2026-08-01T00:00:00.000Z'),
+        } as never);
+        repository.findLatestSubmissionByBeneficiaryAndFormCode.mockResolvedValue({
+          formDataJson: { lmp_date: '2026-01-01' },
+        } as never);
+        repository.countSubmissionsByBeneficiaryAndFormCode.mockResolvedValue(3);
+        jest.mocked(resolveHealthEducationMessagesByStage).mockImplementation(async (stage) =>
+          stage === 'Show this for all the ANC visits'
+            ? [
+                {
+                  id: 'm1',
+                  riskConditionId: null,
+                  conditionLabel: 'Danger Signs during Pregnancy',
+                  stage,
+                  messageOrder: 1,
+                  titleEn: 'Danger Signs',
+                  bodyEn: 'x',
+                  bodyMarathi: '',
+                  mediaType: 'TEXT',
+                  mediaFile: null,
+                  sortOrder: 1,
+                },
+              ]
+            : ([] as never),
+        );
+
+        const result = await service.createSubmission(
+          'ANC_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {},
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(result.stageEducationContent).toEqual([
+          {
+            topicCode: 'Danger Signs during Pregnancy',
+            topicName: 'Danger Signs',
+            mediaType: 'TEXT',
+            contentUrl: null,
+          },
+        ]);
+      });
+
+      it("passes isFirstVisitOfFormCode true when this is the beneficiary's only ANC_VISIT submission so far", async () => {
+        const ancVersion = {
+          id: 'version-1',
+          status: 'PUBLISHED',
+          formDefinition: { formCode: 'ANC_VISIT' },
+          schemaJson: [{ question_code: 'x', label: 'x', input_type: 'text', required: false }],
+          validationJson: [],
+        };
+        const createdAt = new Date('2026-08-01T00:00:01.000Z');
+        repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+        repository.findVersionById.mockResolvedValue(ancVersion as never);
+        repository.createSubmission.mockResolvedValue({
+          id: 'sub-1',
+          submittedAt: new Date('2026-08-01T00:00:00.000Z'),
+          createdAt,
+        } as never);
+        repository.findLatestSubmissionByBeneficiaryAndFormCode.mockResolvedValue(null);
+        repository.countSubmissionsByBeneficiaryAndFormCode.mockResolvedValue(1);
+
+        await service.createSubmission(
+          'ANC_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {},
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        // createdAt is the just-created row's OWN createdAt (the count
+        // cutoff), not "now" — see countSubmissionsByBeneficiaryAndFormCode's
+        // doc comment on why this matters for replay correctness.
+        expect(repository.countSubmissionsByBeneficiaryAndFormCode).toHaveBeenCalledWith(
+          'b1',
+          'ANC_VISIT',
+          createdAt,
+        );
+      });
+
+      it('resolves Neonatal Care content for NEONATAL_VISIT, no LMP lookup needed', async () => {
+        const nnVersion = {
+          id: 'version-1',
+          status: 'PUBLISHED',
+          formDefinition: { formCode: 'NEONATAL_VISIT' },
+          schemaJson: [{ question_code: 'x', label: 'x', input_type: 'text', required: false }],
+          validationJson: [],
+        };
+        repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+        repository.findVersionById.mockResolvedValue(nnVersion as never);
+        repository.createSubmission.mockResolvedValue({
+          id: 'sub-1',
+          submittedAt: new Date('2026-08-01T00:00:00.000Z'),
+        } as never);
+        jest.mocked(resolveHealthEducationMessagesByStage).mockImplementation(async (stage) =>
+          stage === 'NN1 and NN2'
+            ? [
+                {
+                  id: 'm1',
+                  riskConditionId: null,
+                  conditionLabel: 'Neonatal Care',
+                  stage,
+                  messageOrder: 1,
+                  titleEn: 'Neonatal Care',
+                  bodyEn: 'x',
+                  bodyMarathi: '',
+                  mediaType: 'TEXT',
+                  mediaFile: null,
+                  sortOrder: 1,
+                },
+              ]
+            : ([] as never),
+        );
+
+        const result = await service.createSubmission(
+          'NEONATAL_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {},
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(result.stageEducationContent).toEqual([
+          expect.objectContaining({ topicCode: 'Neonatal Care' }),
+        ]);
+        expect(jest.mocked(findBeneficiaryById)).not.toHaveBeenCalled();
+      });
+
+      it("resolves age-gated INC content using the child beneficiary's date of birth", async () => {
+        const incVersion = {
+          id: 'version-1',
+          status: 'PUBLISHED',
+          formDefinition: { formCode: 'INC_VISIT' },
+          schemaJson: [{ question_code: 'x', label: 'x', input_type: 'text', required: false }],
+          validationJson: [],
+        };
+        repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+        repository.findVersionById.mockResolvedValue(incVersion as never);
+        repository.createSubmission.mockResolvedValue({
+          id: 'sub-1',
+          submittedAt: new Date('2026-08-01T00:00:00.000Z'),
+        } as never);
+        jest.mocked(findBeneficiaryById).mockResolvedValue({
+          childDateOfBirth: '2026-01-01',
+        } as never);
+        jest.mocked(resolveHealthEducationMessagesByStage).mockImplementation(async (stage) =>
+          stage === 'All INC visits between 6th and 10th month'
+            ? [
+                {
+                  id: 'm1',
+                  riskConditionId: null,
+                  conditionLabel: 'Infant Care: Complementary Feeding',
+                  stage,
+                  messageOrder: 3,
+                  titleEn: 'Complementary Feeding',
+                  bodyEn: 'x',
+                  bodyMarathi: '',
+                  mediaType: 'TEXT',
+                  mediaFile: null,
+                  sortOrder: 1,
+                },
+              ]
+            : ([] as never),
+        );
+
+        const result = await service.createSubmission(
+          'INC_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {},
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        // submittedAt 2026-08-01, DOB 2026-01-01 -> 7 months old, within the
+        // 6-10 month Complementary Feeding window.
+        expect(result.stageEducationContent).toEqual([
+          expect.objectContaining({ topicCode: 'Infant Care: Complementary Feeding' }),
+        ]);
+      });
+
+      it('resolves Post-loss content for a DELIVERY_VISIT submission recording a stillbirth', async () => {
+        const deliveryVersion = {
+          id: 'version-1',
+          status: 'PUBLISHED',
+          formDefinition: { formCode: 'DELIVERY_VISIT' },
+          schemaJson: [{ question_code: 'x', label: 'x', input_type: 'text', required: false }],
+          validationJson: [],
+        };
+        repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+        repository.findVersionById.mockResolvedValue(deliveryVersion as never);
+        repository.createSubmission.mockResolvedValue({
+          id: 'sub-1',
+          submittedAt: new Date('2026-08-01T00:00:00.000Z'),
+        } as never);
+        jest.mocked(resolveHealthEducationMessagesByStage).mockImplementation(async (stage) =>
+          stage.startsWith('If the delivery outcome')
+            ? [
+                {
+                  id: 'm1',
+                  riskConditionId: null,
+                  conditionLabel: 'Post miscarriage/abortion/still birth',
+                  stage,
+                  messageOrder: 1,
+                  titleEn: 'Loss support',
+                  bodyEn: 'x',
+                  bodyMarathi: '',
+                  mediaType: 'TEXT',
+                  mediaFile: null,
+                  sortOrder: 1,
+                },
+              ]
+            : ([] as never),
+        );
+
+        const result = await service.createSubmission(
+          'DELIVERY_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: { child1_delivery_outcome: 'antepartum_still_birth_fresh' },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(result.stageEducationContent).toEqual([
+          expect.objectContaining({ topicCode: 'Post miscarriage/abortion/still birth' }),
+        ]);
+      });
+
+      it('resolves Post-loss content for an ANC_CLOSURE_VISIT submission with a miscarriage reason', async () => {
+        const closureVersion = {
+          id: 'version-1',
+          status: 'PUBLISHED',
+          formDefinition: { formCode: 'ANC_CLOSURE_VISIT' },
+          schemaJson: [{ question_code: 'x', label: 'x', input_type: 'text', required: false }],
+          validationJson: [],
+        };
+        repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+        repository.findVersionById.mockResolvedValue(closureVersion as never);
+        repository.createSubmission.mockResolvedValue({
+          id: 'sub-1',
+          submittedAt: new Date('2026-08-01T00:00:00.000Z'),
+        } as never);
+        jest.mocked(resolveHealthEducationMessagesByStage).mockImplementation(async (stage) =>
+          stage.startsWith('If the delivery outcome')
+            ? [
+                {
+                  id: 'm1',
+                  riskConditionId: null,
+                  conditionLabel: 'Post miscarriage/abortion/still birth',
+                  stage,
+                  messageOrder: 1,
+                  titleEn: 'Loss support',
+                  bodyEn: 'x',
+                  bodyMarathi: '',
+                  mediaType: 'TEXT',
+                  mediaFile: null,
+                  sortOrder: 1,
+                },
+              ]
+            : ([] as never),
+        );
+
+        const result = await service.createSubmission(
+          'ANC_CLOSURE_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            // continue_with_closure: 'yes' is required — closure_reason is
+            // only trusted when the Sakhi actually confirmed the closure
+            // (review finding on PR #222: reading it unconditionally could
+            // fire Post-loss content for a hidden-but-still-submitted
+            // closure_reason value even when no closure was created).
+            formData: { continue_with_closure: 'yes', closure_reason: 'miscarriage' },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(result.stageEducationContent).toEqual([
+          expect.objectContaining({ topicCode: 'Post miscarriage/abortion/still birth' }),
+        ]);
+      });
+
+      it('does NOT resolve Post-loss content for ANC_CLOSURE_VISIT when continue_with_closure is not yes, even if closure_reason is a loss reason', async () => {
+        const closureVersion = {
+          id: 'version-1',
+          status: 'PUBLISHED',
+          formDefinition: { formCode: 'ANC_CLOSURE_VISIT' },
+          schemaJson: [{ question_code: 'x', label: 'x', input_type: 'text', required: false }],
+          validationJson: [],
+        };
+        repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+        repository.findVersionById.mockResolvedValue(closureVersion as never);
+        repository.createSubmission.mockResolvedValue({
+          id: 'sub-1',
+          submittedAt: new Date('2026-08-01T00:00:00.000Z'),
+        } as never);
+        jest.mocked(resolveHealthEducationMessagesByStage).mockResolvedValue([
+          {
+            id: 'm1',
+            riskConditionId: null,
+            conditionLabel: 'Post miscarriage/abortion/still birth',
+            stage:
+              "If the delivery outcome is 'Still birth' or 'Miscarriage' and 'Abortion' in Closure form",
+            messageOrder: 1,
+            titleEn: 'Loss support',
+            bodyEn: 'x',
+            bodyMarathi: '',
+            mediaType: 'TEXT',
+            mediaFile: null,
+            sortOrder: 1,
+          },
+        ]);
+
+        // A Sakhi who selected continue_with_closure='yes' + a loss reason,
+        // then reconsidered and set continue_with_closure='no' before
+        // submitting, but whose client didn't clear the now-hidden
+        // closure_reason field — the exact hidden-field-state scenario
+        // flagged in review.
+        const result = await service.createSubmission(
+          'ANC_CLOSURE_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: { continue_with_closure: 'no', closure_reason: 'miscarriage' },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(result.stageEducationContent).toEqual([]);
+      });
+
+      it('returns an empty array for a formCode with no stage-based content (e.g. MOTHER_REGISTRATION)', async () => {
+        const version = {
+          id: 'version-1',
+          status: 'PUBLISHED',
+          formDefinition: { formCode: 'MOTHER_REGISTRATION' },
+          schemaJson: [{ question_code: 'x', label: 'x', input_type: 'text', required: false }],
+          validationJson: [],
+        };
+        repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+        repository.findVersionById.mockResolvedValue(version as never);
+        repository.createSubmission.mockResolvedValue({
+          id: 'sub-1',
+          submittedAt: new Date('2026-08-01T00:00:00.000Z'),
+        } as never);
+
+        const result = await service.createSubmission(
+          'MOTHER_REGISTRATION',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {},
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(result.stageEducationContent).toEqual([]);
+        expect(jest.mocked(resolveHealthEducationMessagesByStage)).not.toHaveBeenCalled();
+      });
+
+      it('degrades to an empty array (never fails the submission) when resolution throws', async () => {
+        const ancVersion = {
+          id: 'version-1',
+          status: 'PUBLISHED',
+          formDefinition: { formCode: 'ANC_VISIT' },
+          schemaJson: [{ question_code: 'x', label: 'x', input_type: 'text', required: false }],
+          validationJson: [],
+        };
+        repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+        repository.findVersionById.mockResolvedValue(ancVersion as never);
+        repository.createSubmission.mockResolvedValue({
+          id: 'sub-1',
+          submittedAt: new Date('2026-08-01T00:00:00.000Z'),
+        } as never);
+        repository.countSubmissionsByBeneficiaryAndFormCode.mockRejectedValue(new Error('db down'));
+
+        const result = await service.createSubmission(
+          'ANC_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {},
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(result.stageEducationContent).toEqual([]);
+      });
+
+      it('re-resolves stageEducationContent on an idempotent replay (retried localSubmissionUuid)', async () => {
+        const existing = {
+          id: 'sub-1',
+          beneficiaryId: 'b1',
+          submittedAt: new Date('2026-08-01T00:00:00.000Z'),
+        };
+        repository.findSubmissionByLocalUuid.mockResolvedValue(existing as never);
+        jest.mocked(resolveHealthEducationMessagesByStage).mockImplementation(async (stage) =>
+          stage === 'NN1 and NN2'
+            ? [
+                {
+                  id: 'm1',
+                  riskConditionId: null,
+                  conditionLabel: 'Neonatal Care',
+                  stage,
+                  messageOrder: 1,
+                  titleEn: 'Neonatal Care',
+                  bodyEn: 'x',
+                  bodyMarathi: '',
+                  mediaType: 'TEXT',
+                  mediaFile: null,
+                  sortOrder: 1,
+                },
+              ]
+            : ([] as never),
+        );
+
+        const result = await service.createSubmission(
+          'NEONATAL_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'retry-uuid',
+            formData: {},
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(result.stageEducationContent).toEqual([
+          expect.objectContaining({ topicCode: 'Neonatal Care' }),
+        ]);
+        expect(repository.findVersionById).not.toHaveBeenCalled();
+      });
+    });
+
     describe('FORM_CODE_TO_RISK_PHASE mapping (PR #172 review)', () => {
       // Every formCode below is given riskRuleSetId: 'rule-set-1' so
       // triggerRiskAssessment fires, and each assertion checks the actual
@@ -2923,7 +3468,7 @@ describe('FormService', () => {
           'Bearer test-token',
         );
 
-        expect(result).toEqual({ id: 'sub-1' });
+        expect(result).toEqual({ id: 'sub-1', stageEducationContent: [] });
       });
 
       it('derives localClosureUuid deterministically from localSubmissionUuid', async () => {
