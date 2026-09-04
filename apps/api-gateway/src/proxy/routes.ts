@@ -169,6 +169,10 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
   // (not auth-service) since it already owns VisitSchedule/VisitCodeType.
   { prefix: '/visit-masters', target: appConfig.VISIT_FORM_SERVICE_URL, requiresAuth: true },
   { prefix: '/forms', target: appConfig.VISIT_FORM_SERVICE_URL, requiresAuth: true },
+  // Sakhi-facing form-submission edit route (PATCH .../answers) — a distinct
+  // prefix from /forms, so it needs its own gateway entry or it 404s at the
+  // gateway despite existing and being reachable directly against the service.
+  { prefix: '/form-submissions', target: appConfig.VISIT_FORM_SERVICE_URL, requiresAuth: true },
   // Admin form-authoring routes (create/patch/publish draft versions) live
   // under /admin/forms in visit-form-service — a distinct prefix from /forms,
   // so it needs its own gateway entry or those 3 endpoints are unreachable.
