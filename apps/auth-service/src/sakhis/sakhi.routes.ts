@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { TokenSigner } from '@armman/service-commons';
 import type { SakhiService } from './sakhi.service';
 import { createSakhiController } from './sakhi.controller';
+import { byIdsQuerySchema } from './dto/by-ids-query.dto';
 import {
   authenticate,
   errorResponse,
@@ -77,6 +78,39 @@ export function registerSakhiRoutes(
     requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
     validate(projectIdParamsSchema, 'params'),
     controller.listByProject,
+  );
+
+  // Registered before '/sakhis/:sakhiId' — Express matches routes in
+  // registration order, so if this came after, the literal 'by-ids' segment
+  // would be swallowed by :sakhiId's z.string().uuid() validator and always
+  // 400 with "sakhiId: Invalid uuid" for the comma-joined batch value.
+  doc.get(
+    '/sakhis/by-ids',
+    {
+      summary:
+        "Batch lookup of Sakhi profiles by id, for Quick Response's page-level Sakhi name " +
+        'resolution (one call per page instead of one per card). `ids` is a comma-separated ' +
+        "list, further intersected server-side with the caller's own project scope " +
+        '(SUPERVISOR: own project; MANAGER/ADMIN: unscoped) — an id outside that scope, or ' +
+        'simply not found, is absent from the result, not a 404 or 403 (never trust a ' +
+        'caller-supplied id list as pre-scoped).',
+      tags: ['Sakhis'],
+      query: byIdsQuerySchema,
+      responses: {
+        200: {
+          description: 'Matching Sakhis (may be fewer than requested)',
+          schema: envelope(z.array(sakhiSchema)),
+        },
+        400: errorResponse(400, { message: 'ids: String must contain at least 1 character(s)' }),
+        401: errorResponse(401),
+        403: errorResponse(403),
+        500: errorResponse(500),
+      },
+    },
+    authenticate(signer),
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(byIdsQuerySchema, 'query'),
+    controller.getManyByIds,
   );
 
   doc.get(

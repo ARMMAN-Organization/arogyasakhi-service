@@ -5,6 +5,7 @@ describe('SakhiService', () => {
   const repository = {
     findByProject: jest.fn(),
     findById: jest.fn(),
+    findManyByIds: jest.fn(),
   } as unknown as jest.Mocked<SakhiRepository>;
 
   let service: SakhiService;
@@ -212,5 +213,43 @@ describe('SakhiService', () => {
         });
       },
     );
+  });
+
+  describe('getManyByIds', () => {
+    it('returns an empty array (not a repository call) for an empty id list', async () => {
+      await expect(service.getManyByIds([], unscopedCaller)).resolves.toEqual([]);
+      expect(repository.findManyByIds).not.toHaveBeenCalled();
+    });
+
+    it('returns the projected Sakhis for an unscoped caller (MANAGER/ADMIN)', async () => {
+      repository.findManyByIds.mockResolvedValue([rawProfile()] as never);
+
+      const result = await service.getManyByIds(['user-1'], unscopedCaller);
+
+      expect(result).toEqual([expect.objectContaining({ sakhiId: 'user-1' })]);
+      expect(repository.findManyByIds).toHaveBeenCalledWith(['user-1']);
+    });
+
+    it("scopes a SUPERVISOR caller to only Sakhis in the caller's own project", async () => {
+      const ownProjectProfile = { ...rawProfile(), primaryProjectId: 'project-1' };
+      const otherProjectProfile = {
+        ...rawProfile(),
+        primaryProjectId: 'project-2',
+        user: { ...rawProfile().user, id: 'user-2', displayName: 'Other Sakhi' },
+      };
+      repository.findManyByIds.mockResolvedValue([ownProjectProfile, otherProjectProfile] as never);
+
+      const result = await service.getManyByIds(['user-1', 'user-2'], scopedCaller('project-1'));
+
+      expect(result).toEqual([expect.objectContaining({ sakhiId: 'user-1' })]);
+    });
+
+    it('silently omits ids that are not found, rather than erroring', async () => {
+      repository.findManyByIds.mockResolvedValue([rawProfile()] as never);
+
+      const result = await service.getManyByIds(['user-1', 'missing'], unscopedCaller);
+
+      expect(result).toEqual([expect.objectContaining({ sakhiId: 'user-1' })]);
+    });
   });
 });

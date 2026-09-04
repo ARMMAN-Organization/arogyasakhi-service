@@ -55,4 +55,24 @@ describe('SakhiRepository', () => {
       expect(result).toBeNull();
     });
   });
+
+  describe('findManyByIds', () => {
+    it('queries Sakhis matching any of the given user ids, excluding soft-deleted', async () => {
+      findMany.mockResolvedValue([{ id: 'sakhi-1', user: { id: 'user-1', displayName: 'Priya' } }]);
+
+      const result = await repository.findManyByIds(['user-1', 'user-2']);
+
+      expect(findMany).toHaveBeenCalledWith({
+        where: { userId: { in: ['user-1', 'user-2'] }, isDeleted: false },
+        include: { user: true },
+      });
+      expect(result).toEqual([{ id: 'sakhi-1', user: { id: 'user-1', displayName: 'Priya' } }]);
+    });
+
+    it('returns an empty array when none of the ids match', async () => {
+      findMany.mockResolvedValue([]);
+      const result = await repository.findManyByIds(['missing']);
+      expect(result).toEqual([]);
+    });
+  });
 });

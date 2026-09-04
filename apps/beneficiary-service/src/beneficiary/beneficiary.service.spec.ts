@@ -1595,6 +1595,25 @@ describe('BeneficiaryService', () => {
       expect(result.socioDemographics).toBeNull();
     });
 
+    it('degrades to unresolved socioDemographics, without failing the request, when the lookup resolver is unreachable', async () => {
+      const found = {
+        id: 'x',
+        pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
+        socioDemographics: { religionLookupId: 'religion-uuid-1' },
+      };
+      repository.findById.mockResolvedValue(found as never);
+      resolveLookupValuesMock.mockRejectedValue(
+        Object.assign(new Error('bad gateway'), { status: 502 }),
+      );
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+
+      const result = await service.getById('x', caller({ roles: ['ADMIN'] }), AUTH_HEADER);
+
+      expect(result.socioDemographics).toEqual({ religionLookupId: 'religion-uuid-1' });
+      expect(consoleErrorSpy).toHaveBeenCalled();
+      consoleErrorSpy.mockRestore();
+    });
+
     it('returns null socioDemographics for a case with no row yet', async () => {
       const found = {
         id: 'x',

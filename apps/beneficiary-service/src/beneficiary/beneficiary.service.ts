@@ -34,7 +34,11 @@ import {
   resolvePadaUnits,
   resolveVillageNames,
 } from '../geography/geography.client';
-import { resolveLookupIdsByValueCode, resolveLookupValues } from '../lookups/lookup.client';
+import {
+  resolveLookupIdsByValueCode,
+  resolveLookupValues,
+  type ResolvedLookupValue,
+} from '../lookups/lookup.client';
 import {
   getSakhiName,
   listSakhiIdsForSupervisor,
@@ -87,7 +91,16 @@ async function withResolvedSocioDemographics<T extends Record<string, unknown>>(
     requests[field] = { categoryCode, lookupValueId: (socio[field] as string | null) ?? null };
   }
 
-  const resolved = await resolveLookupValues(requests, authorizationHeader);
+  let resolved: Record<string, ResolvedLookupValue | null>;
+  try {
+    resolved = await resolveLookupValues(requests, authorizationHeader);
+  } catch (err) {
+    console.error(
+      'Failed to resolve socio-demographics lookup values — returning socioDemographics unresolved:',
+      err,
+    );
+    return caseDetail;
+  }
 
   const withResolved = { ...socio };
   for (const field of Object.keys(SOCIO_DEMOGRAPHICS_LOOKUP_CATEGORIES)) {
