@@ -321,10 +321,18 @@ export class QuickResponseService {
    * built"). Closure Review's "completion tracker" is likewise omitted —
    * no backing data source was identified for it.
    */
-  async getCardDetail(cardId: string, caller: CallerScope, authorizationHeader: string) {
+  async getCardDetail(
+    cardId: string,
+    caller: CallerScope,
+    authorizationHeader: string,
+    resolvedSakhiIds?: string[] | null,
+  ) {
     const approvalRow = await this.repository.findById(cardId);
     if (approvalRow) {
-      const sakhiIds = await this.resolveOwnSakhiIds(caller, authorizationHeader);
+      const sakhiIds =
+        resolvedSakhiIds !== undefined
+          ? resolvedSakhiIds
+          : await this.resolveOwnSakhiIds(caller, authorizationHeader);
       if (sakhiIds && !sakhiIds.includes(approvalRow.requestedByUserId)) {
         throw forbidden('You do not have access to this Quick Response card.');
       }
@@ -344,26 +352,40 @@ export class QuickResponseService {
    * — the Supervisor app's card-detail screen opens a whole page of Quick
    * Response cards at once and previously issued one getCardDetail() call
    * per card, overloading the gateway with N×4 concurrent downstream fetches
-   * (each card enrichment fans out to ~4 services). This resolves all
-   * requested ids concurrently in one call instead.
+   * (each card enrichment still fans out to ~4 services per id). This
+   * collapses the client→approval-service hop count from N to 1 and resolves
+   * the caller's own Sakhi roster once up front (rather than once per card —
+   * `resolveOwnSakhiIds` depends only on `caller`, never on `cardId`) instead
+   * of re-deriving it per id.
    *
    * Deliberately best-effort per id, mirroring safeResolve()'s "don't fail
    * the page" contract: a card that's not found, inaccessible to this
    * caller, or fails enrichment is silently omitted from the result rather
    * than failing the whole batch — one bad id in a 6-card page shouldn't
-   * blank the other 5.
+   * blank the other 5. Unexpected rejections (as opposed to expected
+   * not-found/forbidden cases) are still logged so an infra failure affecting
+   * one id doesn't silently look like a normal not-found.
    */
   async getCardDetails(cardIds: string[], caller: CallerScope, authorizationHeader: string) {
     const uniqueIds = Array.from(new Set(cardIds));
+    const sakhiIds = await this.resolveOwnSakhiIds(caller, authorizationHeader);
     const settled = await Promise.allSettled(
-      uniqueIds.map((cardId) => this.getCardDetail(cardId, caller, authorizationHeader)),
+      uniqueIds.map((cardId) => this.getCardDetail(cardId, caller, authorizationHeader, sakhiIds)),
     );
     return settled
       .filter(
         (
           result,
-        ): result is PromiseFulfilledResult<Awaited<ReturnType<typeof this.getCardDetail>>> =>
-          result.status === 'fulfilled',
+        ): result is PromiseFulfilledResult<Awaited<ReturnType<typeof this.getCardDetail>>> => {
+          if (result.status === 'fulfilled') return true;
+          if (!(result.reason instanceof HttpError)) {
+            console.error(
+              'Quick Response card detail batch: unexpected failure resolving one card — omitting it from the batch:',
+              result.reason,
+            );
+          }
+          return false;
+        },
       )
       .map((result) => result.value);
   }
