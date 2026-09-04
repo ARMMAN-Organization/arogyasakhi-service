@@ -71,13 +71,13 @@ describe('ApprovalRequestService', () => {
     decisionStatusLookupId: '55555555-5555-5555-5555-555555555555',
     decisionPayloadJson: null,
     decidedAt: null,
+    localRequestUuid: null,
     createdAt: new Date(),
     createdByUserId: null,
     updatedAt: new Date(),
     updatedByUserId: null,
     isDeleted: false,
     deletedAt: null,
-    localRequestUuid: null,
   };
 
   const sakhiRecord: SakhiRecord = {
