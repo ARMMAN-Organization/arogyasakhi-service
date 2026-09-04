@@ -88,8 +88,10 @@ export function createVisitInstanceController(service: VisitInstanceService) {
 
     restoreForSakhi: asyncHandler(async (req, res, next) => {
       if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
       const { sakhiUserId } = req.body as RestoreForSakhiInput;
-      const result = await service.restoreForSakhi(sakhiUserId);
+      const result = await service.restoreForSakhi(sakhiUserId, req.user, authorizationHeader);
       res.json(ok(result));
     }),
   };

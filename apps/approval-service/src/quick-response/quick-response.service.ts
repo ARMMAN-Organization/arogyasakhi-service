@@ -1376,10 +1376,13 @@ export class QuickResponseService {
    * failing the whole request here would leave the account reactivated
    * anyway while telling the caller the decision failed, which is worse
    * than the alternative. Instead, each restore call's own success/failure
-   * is written verbatim into the audit-log entry's afterJson (queryable,
-   * durable — not just a console.error) so a partial failure is visible for
-   * manual follow-up rather than silently lost. Sakhi notification remains
-   * best-effort, matching every other card type's decide path.
+   * is written into the audit-log entry's afterJson for manual follow-up
+   * visibility when that write succeeds — but the audit-log write itself is
+   * also best-effort (its own try/catch, console.error only on failure), so
+   * a restore failure that coincides with an audit-log failure is still
+   * only visible via the console line, not a durable fallback. Sakhi
+   * notification remains best-effort, matching every other card type's
+   * decide path.
    */
   private async decideDataRestoreCard(
     cardId: string,

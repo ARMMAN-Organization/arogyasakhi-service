@@ -1414,14 +1414,20 @@ export class BeneficiaryService {
   }
 
   /**
-   * Server-to-server only — see restore-for-sakhi.dto.ts and the
-   * repository method's own doc comment for the full rationale. No
-   * caller-scoping check here (unlike reactivateCase's
-   * assertCallerCanTouchCase): SYSTEM/ADMIN-only route access is the
-   * authorization boundary, since this restores everything a Sakhi owned
-   * rather than one caller-chosen case.
+   * See restore-for-sakhi.dto.ts and the repository method's own doc
+   * comment for the full rationale. Reachable by a human SUPERVISOR role
+   * (same route gate as reactivateCase), not just server-to-server, so it
+   * needs the same IDOR guard as any other single-Sakhi mutation:
+   * assertCallerCanTouchCase, called with sakhiUserId itself rather than a
+   * case's sakhiId — SUPERVISOR may only restore a Sakhi in their own
+   * roster; SYSTEM/ADMIN are unscoped.
    */
-  async restoreForSakhi(sakhiUserId: string) {
+  async restoreForSakhi(
+    sakhiUserId: string,
+    caller: AuthenticatedUser,
+    authorizationHeader: string,
+  ) {
+    await assertCallerCanTouchCase(sakhiUserId, caller, authorizationHeader);
     return this.repository.restoreForSakhi(sakhiUserId);
   }
 }

@@ -3366,23 +3366,63 @@ describe('BeneficiaryService', () => {
   });
 
   describe('restoreForSakhi', () => {
-    it('delegates to the repository and returns its result', async () => {
+    const targetSakhiId = '77777777-7777-7777-7777-777777777777';
+
+    it('delegates to the repository and returns its result for a privileged (ADMIN) caller', async () => {
       repository.restoreForSakhi.mockResolvedValue({ restoredCaseCount: 3 });
 
-      const result = await service.restoreForSakhi('77777777-7777-7777-7777-777777777777');
-
-      expect(repository.restoreForSakhi).toHaveBeenCalledWith(
-        '77777777-7777-7777-7777-777777777777',
+      const result = await service.restoreForSakhi(
+        targetSakhiId,
+        caller({ roles: ['ADMIN'] }),
+        AUTH_HEADER,
       );
+
+      expect(repository.restoreForSakhi).toHaveBeenCalledWith(targetSakhiId);
+      expect(listSakhiIdsForSupervisorMock).not.toHaveBeenCalled();
       expect(result).toEqual({ restoredCaseCount: 3 });
+    });
+
+    it('403s when a SUPERVISOR targets a Sakhi outside their own roster', async () => {
+      listSakhiIdsForSupervisorMock.mockResolvedValue(['some-other-sakhi']);
+
+      await expect(
+        service.restoreForSakhi(targetSakhiId, caller({ roles: ['SUPERVISOR'] }), AUTH_HEADER),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(repository.restoreForSakhi).not.toHaveBeenCalled();
+    });
+
+    it('allows a SUPERVISOR to restore a Sakhi in their own roster', async () => {
+      repository.restoreForSakhi.mockResolvedValue({ restoredCaseCount: 2 });
+      listSakhiIdsForSupervisorMock.mockResolvedValue([targetSakhiId]);
+
+      const result = await service.restoreForSakhi(
+        targetSakhiId,
+        caller({ roles: ['SUPERVISOR'] }),
+        AUTH_HEADER,
+      );
+
+      expect(repository.restoreForSakhi).toHaveBeenCalledWith(targetSakhiId);
+      expect(result).toEqual({ restoredCaseCount: 2 });
+    });
+
+    it('403s when a SUPERVISOR caller has no project scope', async () => {
+      await expect(
+        service.restoreForSakhi(
+          targetSakhiId,
+          caller({ roles: ['SUPERVISOR'], projectId: null }),
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(repository.restoreForSakhi).not.toHaveBeenCalled();
+      expect(listSakhiIdsForSupervisorMock).not.toHaveBeenCalled();
     });
 
     it('propagates a repository error', async () => {
       repository.restoreForSakhi.mockRejectedValue(new Error('db down'));
 
-      await expect(service.restoreForSakhi('77777777-7777-7777-7777-777777777777')).rejects.toThrow(
-        'db down',
-      );
+      await expect(
+        service.restoreForSakhi(targetSakhiId, caller({ roles: ['ADMIN'] }), AUTH_HEADER),
+      ).rejects.toThrow('db down');
     });
   });
 });
