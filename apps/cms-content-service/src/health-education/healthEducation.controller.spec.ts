@@ -2,6 +2,24 @@ import type { Request, Response } from 'express';
 import { createHealthEducationController } from './healthEducation.controller';
 import type { HealthEducationService } from './healthEducation.service';
 
+// healthEducation.controller.ts imports asyncHandler/ok from ../app.module,
+// which eagerly loads config/app-config.ts — that module calls
+// process.exit(1) at import time when required env vars (e.g. DATABASE_URL)
+// aren't set, which they never are in CI (.env is gitignored, no service
+// actually boots for a unit-test run). Mocked here with the real,
+// trivial re-exported implementations from service-commons so this spec
+// exercises the controller's actual req.query handling without pulling in
+// app.module's config-validation side effect. This is why no other
+// controller-level spec exists elsewhere in this service (or repo) —
+// every other one stops at the service layer for exactly this reason.
+jest.mock('../app.module', () => ({
+  asyncHandler:
+    (handler: (req: Request, res: Response, next: jest.Mock) => Promise<unknown>) =>
+    (req: Request, res: Response, next: jest.Mock) =>
+      handler(req, res, next).catch(next),
+  ok: (data: unknown) => ({ success: true, message: 'OK', data }),
+}));
+
 /**
  * Controller-level coverage for the exact regression a live test caught:
  * conditionLabel was accepted by the route schema and fully supported by
