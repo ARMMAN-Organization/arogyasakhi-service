@@ -475,6 +475,20 @@ export class BeneficiaryRepository {
     return matchedToken?.beneficiaryCase ?? null;
   }
 
+  /**
+   * Next value of the global, never-reset sequence backing the ID(6) segment
+   * of the SRS "Unique ID" field (State-District-Block-ID, see
+   * generateUniqueId.ts). A Postgres SEQUENCE (not a table+row lock) so
+   * concurrent enrollments across stateless service instances never race —
+   * `nextval()` is atomic at the database level.
+   */
+  async nextUniqueIdSequence(): Promise<bigint> {
+    const [row] = await this.prisma.$queryRaw<
+      { nextval: bigint }[]
+    >`SELECT nextval('beneficiary_unique_id_seq')`;
+    return row.nextval;
+  }
+
   async createEnrollment(input: CreateEnrollmentInput) {
     return this.prisma.$transaction(async (tx) => {
       const pii = await tx.beneficiaryPii.create({ data: input.pii });
