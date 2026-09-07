@@ -292,6 +292,14 @@ describe('anc-visit.json', () => {
     // containing its own option value_code instead — vaccination_status
     // itself is gated on met-beneficiary=yes, same one-step-removed pattern
     // as the groups above. See the dedicated test below.
+    //
+    // if_yes_date_of_usg/type_of_usg/usg_finding are excluded here: per the
+    // source doc (Q48-Q52), they gate on have_you_done_usg_since_last_visit
+    // instead — that field is itself gated on met-beneficiary=yes, same
+    // one-step-removed pattern as the groups above. See the dedicated test
+    // below. (These three previously matched MET_BENEFICIARY_YES directly, a
+    // regression from an emergency array-flattening fix that was corrected
+    // in issue #223.)
     for (const field of fields) {
       if (
         [
@@ -309,6 +317,9 @@ describe('anc-visit.json', () => {
           'td1_date',
           'td2_date',
           'booster_date',
+          'if_yes_date_of_usg',
+          'type_of_usg',
+          'usg_finding',
         ].includes(field.question_code)
       ) {
         continue;
@@ -369,6 +380,22 @@ describe('anc-visit.json', () => {
     // The gating field itself is still met-beneficiary-gated, so the chain
     // as a whole reduces to met-beneficiary=yes AND visited-facility=yes.
     expect(byCode.get('have_you_visited_health_facility_since_my_last_visit')?.visibleWhen).toEqual(
+      MET_BENEFICIARY_YES,
+    );
+  });
+
+  it('shows the USG follow-up fields only when have_you_done_usg_since_last_visit=yes (Q48-Q52, issue #223)', () => {
+    const USG_SINCE_LAST_VISIT_YES = {
+      field: 'have_you_done_usg_since_last_visit',
+      operator: 'eq',
+      value: 'yes',
+    };
+    expect(byCode.get('if_yes_date_of_usg')?.visibleWhen).toEqual(USG_SINCE_LAST_VISIT_YES);
+    expect(byCode.get('type_of_usg')?.visibleWhen).toEqual(USG_SINCE_LAST_VISIT_YES);
+    expect(byCode.get('usg_finding')?.visibleWhen).toEqual(USG_SINCE_LAST_VISIT_YES);
+    // The gating field itself is still met-beneficiary-gated, so the chain
+    // as a whole reduces to met-beneficiary=yes AND usg-since-last-visit=yes.
+    expect(byCode.get('have_you_done_usg_since_last_visit')?.visibleWhen).toEqual(
       MET_BENEFICIARY_YES,
     );
   });
