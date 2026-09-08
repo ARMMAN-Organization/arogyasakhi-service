@@ -42,3 +42,57 @@ model AuditLog {
 
   @@map("audit_log")
 }
+
+// Raw Sakhi-app product-analytics events (SRS Section 9 — App Analytics and
+// Product Metrics). One row per client-emitted event; NOT the computed
+// metrics themselves (drop-off rate, completion time, etc.) — those are
+// derived later by the reporting ETL (PostgreSQL -> Airflow -> ClickHouse ->
+// Metabase, per Sec 9.9) reading this table, not by anything in this
+// service. Excluding test-flagged project/user data from metrics
+// calculations (Sec 9.9's exclusion rule) is likewise the ETL/reporting
+// layer's job, not enforced here — this table is a raw, unfiltered log.
+//
+// Append-only, same as audit_log: no updated_at/updated_by_user_id/
+// is_deleted/deleted_at columns.
+model AnalyticsEvent {
+  id String @id @default(uuid()) @map("analytics_event_id")
+
+  // users.user_id / device_registry.device_id — owned by another service, no
+  // cross-service relation (forklift rule).
+  sakhiUserId String? @map("sakhi_user_id")
+  deviceId    String? @map("device_id")
+
+  // Sec 9's own feature-area grouping — ENROLLMENT, HOME_VISIT_FORMS,
+  // HEALTH_EDUCATION_MESSAGES, REFERRAL, VISIT_TRACKER_DASHBOARD,
+  // CLOSURE_REOPEN, DATA_SYNC, LEARN_MORE. Not a DB enum: the reporting ETL
+  // is the sole consumer and new feature areas may be added without a
+  // migration.
+  featureArea String @map("feature_area") @db.VarChar(60)
+  // e.g. FORM_OPEN, FORM_SUBMIT, SECTION_TIME, PAUSE_RESUME — one of the
+  // metric-triggering events named in each Sec 9.x subsection.
+  eventName String @map("event_name") @db.VarChar(120)
+
+  // Client-supplied: when the event actually happened on-device, which may
+  // lag createdAt (server receipt time) by however long the event sat in
+  // the local offline queue before the next sync upload (Sec 9.9). Accepted
+  // as-is, including values in the future relative to server time — device
+  // clock skew is expected and this is non-clinical data, unlike the strict
+  // date-validation rules visit/enrollment forms enforce elsewhere.
+  occurredAt DateTime @map("occurred_at")
+
+  // Event-specific fields (e.g. {"sectionName": "...", "durationMs": 4200}).
+  // Deliberately unstructured — see form_submissions.form_data_json for the
+  // same "raw capture now, normalize downstream" precedent in this codebase.
+  payloadJson Json? @map("payload_json")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Idempotency key for this offline-first, batch-synced caller — a
+  // dropped-connection retry of a batch resubmits the same client-generated
+  // value per event. Same nullable-unique pattern as
+  // audit_log.local_audit_uuid / approval_requests.local_request_uuid.
+  localEventUuid String? @unique @map("local_event_uuid") @db.VarChar(80)
+
+  @@index([featureArea, eventName, occurredAt])
+  @@map("analytics_events")
+}
