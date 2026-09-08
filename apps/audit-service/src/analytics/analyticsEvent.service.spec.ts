@@ -24,6 +24,7 @@ describe('AnalyticsEventService', () => {
   const repository = {
     findByLocalEventUuid: jest.fn(),
     create: jest.fn(),
+    findByFeatureAreaAndWindow: jest.fn(),
   } as unknown as jest.Mocked<AnalyticsEventRepository>;
   let service: AnalyticsEventService;
 
@@ -145,5 +146,49 @@ describe('AnalyticsEventService', () => {
 
     expect(result).toEqual({ created: 1, failed: [] });
     expect(repository.findByLocalEventUuid).not.toHaveBeenCalled();
+  });
+
+  describe('list', () => {
+    it('delegates to the repository with parsed dates', async () => {
+      const page = { items: [], nextCursor: null };
+      repository.findByFeatureAreaAndWindow.mockResolvedValue(page);
+
+      const result = await service.list({
+        featureArea: 'ENROLLMENT',
+        since: '2026-09-01T00:00:00.000Z',
+        until: '2026-09-02T00:00:00.000Z',
+        limit: 200,
+        cursor: undefined,
+      });
+
+      expect(result).toBe(page);
+      expect(repository.findByFeatureAreaAndWindow).toHaveBeenCalledWith(
+        'ENROLLMENT',
+        new Date('2026-09-01T00:00:00.000Z'),
+        new Date('2026-09-02T00:00:00.000Z'),
+        200,
+        undefined,
+      );
+    });
+
+    it('forwards the cursor when provided', async () => {
+      repository.findByFeatureAreaAndWindow.mockResolvedValue({ items: [], nextCursor: null });
+
+      await service.list({
+        featureArea: 'ENROLLMENT',
+        since: '2026-09-01T00:00:00.000Z',
+        until: '2026-09-02T00:00:00.000Z',
+        limit: 50,
+        cursor: 'opaque-cursor',
+      });
+
+      expect(repository.findByFeatureAreaAndWindow).toHaveBeenCalledWith(
+        'ENROLLMENT',
+        expect.any(Date),
+        expect.any(Date),
+        50,
+        'opaque-cursor',
+      );
+    });
   });
 });

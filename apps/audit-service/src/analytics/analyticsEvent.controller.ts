@@ -1,5 +1,7 @@
+import { z } from 'zod';
 import { asyncHandler, ok, unauthorized } from '../app.module';
 import type { AnalyticsEventService } from './analyticsEvent.service';
+import type { listAnalyticsEventsQuerySchema } from './dto/list-analytics-events-query.dto';
 
 /**
  * Analytics-event request handlers. Mounted under the global `api/v1`
@@ -15,6 +17,11 @@ export function createAnalyticsEventController(service: AnalyticsEventService) {
       // per-event failure is reported in the body for the caller to inspect
       // and retry just those, not a reason to fail the whole HTTP response.
       res.status(201).json(ok(result));
+    }),
+
+    list: asyncHandler(async (req, res) => {
+      const query = req.query as unknown as z.infer<typeof listAnalyticsEventsQuerySchema>;
+      res.json(ok(await service.list(query)));
     }),
   };
 }

@@ -3,6 +3,7 @@ import type {
   AnalyticsEventInput,
   CreateAnalyticsEventBatchInput,
 } from './dto/create-analytics-event.dto';
+import type { ListAnalyticsEventsQueryInput } from './dto/list-analytics-events-query.dto';
 
 /** Shape returned by {@link AnalyticsEventRepository.findByLocalEventUuid}. */
 type ExistingAnalyticsEvent = Awaited<ReturnType<AnalyticsEventRepository['findByLocalEventUuid']>>;
@@ -97,6 +98,21 @@ export class AnalyticsEventService {
     }
 
     return result;
+  }
+
+  /**
+   * Cursor-paginated read for reporting-etl-service's metric-aggregation
+   * job — see AnalyticsEventRepository.findByFeatureAreaAndWindow's doc
+   * comment for scoping details.
+   */
+  list(query: ListAnalyticsEventsQueryInput) {
+    return this.repository.findByFeatureAreaAndWindow(
+      query.featureArea,
+      new Date(query.since),
+      new Date(query.until),
+      query.limit,
+      query.cursor,
+    );
   }
 
   private async createOne(sakhiUserId: string, event: AnalyticsEventInput): Promise<void> {

@@ -50,6 +50,49 @@ model EtlRun {
   @@map("etl_runs")
 }
 
+// Reusable DB-backed cron-lock table for this service's own scheduled jobs
+// (see libs/service-commons/src/jobs/job-lock.ts's acquireJobLock) — same
+// per-service pattern as risk-referral-service/visit-form-service's own
+// job_runs tables (not shared, per the forklift rule).
+model JobRun {
+  id          String   @id @default(uuid()) @map("job_run_id")
+  jobName     String   @unique @map("job_name") @db.VarChar(80)
+  lockedUntil DateTime @map("locked_until")
+  lastRunAt   DateTime @map("last_run_at")
+
+  @@map("job_runs")
+}
+
+// INTERIM store for SRS Section 9's computed app-analytics metrics
+// (drop-off rate, form completion time, etc.), aggregated from
+// audit-service's raw analytics_events. This is a stand-in for the
+// ClickHouse warehouse the SRS actually specifies (PostgreSQL -> Airflow ->
+// ClickHouse -> Metabase, per audit-service's own analytics_events comment)
+// — ClickHouse/Airflow/Metabase are not provisioned anywhere in this
+// codebase yet (confirmed: no docker-compose service, no client library, no
+// config, repo-wide). Once that infra exists, this table's data migrates
+// there and this model is retired — it is NOT a permanent addition to this
+// service's Postgres-only mandate (see this file's own header comment).
+model AggregatedMetric {
+  id            String   @id @default(uuid()) @map("aggregated_metric_id")
+  featureArea   String   @map("feature_area") @db.VarChar(60)
+  metricName    String   @map("metric_name") @db.VarChar(120)
+  periodStart   DateTime @map("period_start")
+  periodEnd     DateTime @map("period_end")
+  // Simple scalar metrics (rates, counts, average durations) land here.
+  value         Decimal? @db.Decimal(18, 4)
+  // Metrics that aren't a single scalar (e.g. "Topic-wise message usage" —
+  // a count per topic, not one number) land here instead of `value`.
+  breakdownJson Json?    @map("breakdown_json")
+  computedAt    DateTime @default(now()) @map("computed_at")
+
+  // One row per (featureArea, metricName, periodStart, periodEnd) — a
+  // re-run of the aggregation job for an already-computed period upserts
+  // in place rather than accumulating duplicate rows.
+  @@unique([featureArea, metricName, periodStart, periodEnd])
+  @@map("aggregated_metrics")
+}
+
 // report_exports — report download/export audit (ERD §4.8).
 model ReportExport {
   id                String    @id @default(uuid()) @map("report_export_id")
