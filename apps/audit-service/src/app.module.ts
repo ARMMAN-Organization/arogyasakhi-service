@@ -14,12 +14,14 @@ import { createHealthRouter } from './health/health.controller';
 import { createAuditLogModule } from './audit/auditLog.module';
 import { createAnalyticsEventModule } from './analytics/analyticsEvent.module';
 import { buildAuditServiceOpenApiDocument } from './docs/openapi';
+import { metricsMiddleware, registry } from './metrics/prometheus';
 
 // Re-export shared HTTP helpers so feature routers can import from a single place.
 export {
   asyncHandler,
   ok,
   fail,
+  validate,
   validateBody,
   requireRoles,
   trustGatewayIdentity,
@@ -50,6 +52,16 @@ export function createApp(prisma: PrismaService): Application {
     next();
   });
   app.use(requestId);
+  app.use(metricsMiddleware);
+
+  // Prometheus scrape endpoint — outside the /api/v1 prefix and the JSON
+  // envelope every other route uses, per Prometheus convention. No
+  // Grafana instance/scrape-config exists anywhere in this codebase yet;
+  // this is the app-side foundation only (see prometheus.ts's own comment).
+  app.get('/metrics', async (_req, res) => {
+    res.set('Content-Type', registry.contentType);
+    res.end(await registry.metrics());
+  });
 
   const auditLogModule = createAuditLogModule(prisma);
   const analyticsEventModule = createAnalyticsEventModule(prisma);

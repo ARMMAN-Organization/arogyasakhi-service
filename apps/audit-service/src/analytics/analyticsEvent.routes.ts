@@ -6,9 +6,11 @@ import {
   MAX_BATCH_EVENTS,
   createAnalyticsEventBatchSchema,
 } from './dto/create-analytics-event.dto';
+import { listAnalyticsEventsQuerySchema } from './dto/list-analytics-events-query.dto';
 import {
   requireRoles,
   trustGatewayIdentity,
+  validate,
   validateBody,
   type DocumentedRouter,
 } from '../app.module';
@@ -115,5 +117,44 @@ export function registerAnalyticsEventRoutes(
     requireRoles('SAKHI'),
     validateBody(createAnalyticsEventBatchRequestSchema),
     controller.createBatch,
+  );
+
+  doc.get(
+    '/analytics/events',
+    {
+      summary:
+        'SYSTEM-only: raw analytics events for one feature area within a time window — the ' +
+        "candidate set for reporting-etl-service's metric-aggregation job (SRS Sec 9.9's ETL " +
+        'step). Cursor-paginated via cursor/limit (default 200, max 500). Unscoped — unlike ' +
+        'the batch-ingest endpoint above, there is no Sakhi filter: the only caller is a ' +
+        'background job aggregating across all Sakhis for the period.',
+      tags: ['Analytics'],
+      responses: {
+        200: {
+          description: 'Analytics events for the requested feature area and window',
+          schema: envelope(
+            z.object({
+              items: z.array(
+                z.object({
+                  id: z.string().uuid(),
+                  sakhiUserId: z.string().nullable(),
+                  eventName: z.string(),
+                  occurredAt: z.string().datetime(),
+                  payloadJson: z.unknown().nullable(),
+                }),
+              ),
+              nextCursor: z.string().nullable(),
+            }),
+          ),
+        },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SYSTEM'),
+    validate(listAnalyticsEventsQuerySchema, 'query'),
+    controller.list,
   );
 }
