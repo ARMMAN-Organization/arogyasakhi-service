@@ -115,8 +115,8 @@ describe('mother-registration.json', () => {
 describe('child-registration.json', () => {
   const byCode = new Map(childRegistration.schemaJson.map((f) => [f.question_code, f]));
 
-  it('has exactly 55 fields (51 existing + 4 new per-vaccine date fields)', () => {
-    expect(childRegistration.schemaJson).toHaveLength(55);
+  it('has exactly 56 fields (51 existing + 4 new per-vaccine date fields + 1 birth-complications "other, specify")', () => {
+    expect(childRegistration.schemaJson).toHaveLength(56);
   });
 
   it('applies the DOB-of-infant date rule (Infant Registration form Q6)', () => {
@@ -178,8 +178,26 @@ describe('child-registration.json', () => {
     });
   });
 
-  it('has 3 total validationJson rules (1 ANY_OF_REQUIRED + 1 EXCLUSIVE_OPTION + 1 REQUIRED_IF_SELECTED)', () => {
-    expect(childRegistration.validationJson).toHaveLength(3);
+  it('adds a visibleWhen-gated "other, specify" field for birth complications', () => {
+    expect(byCode.get('did_the_baby_have_any_complications_at_the_time_of_birth_other_specify')?.visibleWhen).toEqual({
+      field: 'did_the_baby_have_any_complications_at_the_time_of_birth',
+      operator: 'contains',
+      value: 'other_please_specify',
+    });
+  });
+
+  it('has a REQUIRED_IF_SELECTED rule so selecting "other" requires the birth-complications specify field', () => {
+    expect(childRegistration.validationJson).toContainEqual({
+      rule: 'REQUIRED_IF_SELECTED',
+      field: 'did_the_baby_have_any_complications_at_the_time_of_birth',
+      optionFieldMap: {
+        other_please_specify: 'did_the_baby_have_any_complications_at_the_time_of_birth_other_specify',
+      },
+    });
+  });
+
+  it('has 4 total validationJson rules (1 ANY_OF_REQUIRED + 1 EXCLUSIVE_OPTION + 2 REQUIRED_IF_SELECTED)', () => {
+    expect(childRegistration.validationJson).toHaveLength(4);
   });
 });
 
@@ -616,8 +634,8 @@ describe('delivery-visit.json', () => {
   const fields = deliveryVisit.schemaJson;
   const byCode = new Map(fields.map((f) => [f.question_code, f]));
 
-  it('has exactly 44 fields (13 mother-level + 3x10 child fields + remarks)', () => {
-    expect(fields).toHaveLength(44);
+  it('has exactly 48 fields (13 mother-level + 3x10 child fields + remarks + 4 "other, specify" fields)', () => {
+    expect(fields).toHaveLength(48);
   });
 
   it('applies numericRange to every field the source doc bounds', () => {
@@ -703,6 +721,33 @@ describe('delivery-visit.json', () => {
       field: 'did_mother_experience_complications',
       exclusiveValues: ['none'],
     });
+  });
+
+  it('adds a visibleWhen-gated "other, specify" field for the mother\'s and each childN\'s complications', () => {
+    const gate = (field: string) => ({ field, operator: 'contains', value: 'other' });
+    expect(byCode.get('did_mother_experience_complications_other_specify')?.visibleWhen).toEqual(
+      gate('did_mother_experience_complications'),
+    );
+    for (const prefix of ['child1', 'child2', 'child3']) {
+      expect(byCode.get(`${prefix}_related_complications_other_specify`)?.visibleWhen).toEqual(
+        gate(`${prefix}_related_complications`),
+      );
+    }
+  });
+
+  it('has a REQUIRED_IF_SELECTED rule so selecting "other" requires each complications specify field', () => {
+    expect(deliveryVisit.validationJson).toContainEqual({
+      rule: 'REQUIRED_IF_SELECTED',
+      field: 'did_mother_experience_complications',
+      optionFieldMap: { other: 'did_mother_experience_complications_other_specify' },
+    });
+    for (const prefix of ['child1', 'child2', 'child3']) {
+      expect(deliveryVisit.validationJson).toContainEqual({
+        rule: 'REQUIRED_IF_SELECTED',
+        field: `${prefix}_related_complications`,
+        optionFieldMap: { other: `${prefix}_related_complications_other_specify` },
+      });
+    }
   });
 });
 
