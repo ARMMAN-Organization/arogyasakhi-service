@@ -12,13 +12,16 @@ import { appConfig } from './config/app-config';
 import { PrismaService } from './prisma/prisma.service';
 import { createHealthRouter } from './health/health.controller';
 import { createAuditLogModule } from './audit/auditLog.module';
+import { createAnalyticsEventModule } from './analytics/analyticsEvent.module';
 import { buildAuditServiceOpenApiDocument } from './docs/openapi';
+import { metricsMiddleware, registry } from './metrics/prometheus';
 
 // Re-export shared HTTP helpers so feature routers can import from a single place.
 export {
   asyncHandler,
   ok,
   fail,
+  validate,
   validateBody,
   requireRoles,
   trustGatewayIdentity,
@@ -49,17 +52,33 @@ export function createApp(prisma: PrismaService): Application {
     next();
   });
   app.use(requestId);
+  app.use(metricsMiddleware);
+
+  // Prometheus scrape endpoint — outside the /api/v1 prefix and the JSON
+  // envelope every other route uses, per Prometheus convention. No
+  // Grafana instance/scrape-config exists anywhere in this codebase yet;
+  // this is the app-side foundation only (see prometheus.ts's own comment).
+  app.get('/metrics', async (_req, res) => {
+    res.set('Content-Type', registry.contentType);
+    res.end(await registry.metrics());
+  });
 
   const auditLogModule = createAuditLogModule(prisma);
+  const analyticsEventModule = createAnalyticsEventModule(prisma);
 
   // All routes live under the global `api/v1` prefix.
   const api = express.Router();
   api.use(createHealthRouter(prisma));
-  // Built from auditLogModule.registry — every route registered via
+  // Built from every feature module's registry — every route registered via
   // createDocumentedRouter() above is already in the spec, so this can never
   // drift from what's actually mounted.
-  api.use(createSwaggerRouter(buildAuditServiceOpenApiDocument(auditLogModule.registry)));
+  api.use(
+    createSwaggerRouter(
+      buildAuditServiceOpenApiDocument(auditLogModule.registry, analyticsEventModule.registry),
+    ),
+  );
   api.use(auditLogModule.router);
+  api.use(analyticsEventModule.router);
   app.use('/api/v1', api);
 
   app.use(notFoundHandler);

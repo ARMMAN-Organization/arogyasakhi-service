@@ -14,6 +14,15 @@ const schema = z.object({
         .filter(Boolean),
     ),
   DATABASE_URL: z.string().url(),
+  // Client-credentials identity (POST /auth/service-token) this service's
+  // analytics-aggregation job authenticates as, to call audit-service's
+  // SYSTEM-only GET /analytics/events. Optional: the job logs and skips its
+  // run when unset, rather than failing to start over a not-yet-provisioned
+  // credential — same convention as risk-referral-service's own job.
+  SERVICE_ACCOUNT_CLIENT_ID: z.string().min(1).optional(),
+  SERVICE_ACCOUNT_CLIENT_SECRET: z.string().min(1).optional(),
+  // node-cron expression for the SRS Sec 9.9 metric-aggregation job.
+  ANALYTICS_AGGREGATION_JOB_CRON: z.string().default('0 2 * * *'),
 });
 
 export type AppConfig = z.infer<typeof schema>;
