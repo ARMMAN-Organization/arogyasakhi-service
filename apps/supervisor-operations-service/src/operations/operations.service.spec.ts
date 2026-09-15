@@ -1182,6 +1182,27 @@ describe('OperationsService', () => {
       );
       expect(result).toBe(inventoryTransactionRow);
     });
+
+    it('passes transactionType through to the repository when included in the update', async () => {
+      repository.findInventoryTransactionById.mockResolvedValue(inventoryTransactionRow);
+      repository.updateInventoryTransaction.mockResolvedValue({
+        ...inventoryTransactionRow,
+        transactionType: 'CONSUMED',
+      });
+
+      const result = await service.updateInventoryTransaction(
+        'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+        { transactionType: 'CONSUMED' },
+        supervisorCaller,
+      );
+
+      expect(repository.updateInventoryTransaction).toHaveBeenCalledWith(
+        'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+        { transactionType: 'CONSUMED' },
+        supervisorCaller.id,
+      );
+      expect(result.transactionType).toBe('CONSUMED');
+    });
   });
 
   describe('deleteInventoryTransaction', () => {

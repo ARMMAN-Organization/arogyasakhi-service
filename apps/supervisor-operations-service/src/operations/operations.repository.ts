@@ -247,8 +247,10 @@ export class OperationsRepository {
 
   /**
    * Only ever writes the fields describing "what happened" (quantity, date,
-   * remarks) — itemId/sakhiId/projectId/supervisorId/transactionType are
-   * immutable, matching this repo's append-only-ledger convention.
+   * remarks, transactionType) — itemId/sakhiId/projectId/supervisorId
+   * remain immutable, matching this repo's append-only-ledger convention.
+   * `data` is a plain subset of `UpdateInventoryTransactionInput`, so
+   * whatever fields the DTO allows flow straight through to Prisma.
    */
   async updateInventoryTransaction(
     id: string,
