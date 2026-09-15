@@ -170,6 +170,12 @@ model InventoryTransaction {
   quantity        Int
   transactionDate DateTime                 @map("transaction_date") @db.Date
   remarks         String?
+  // Durable id shared by every row created from one submission (POST
+  // /inventory-transactions) or appended later (POST
+  // /inventory-transactions/:groupId/items) — replaces grouping by
+  // approximate same-millisecond createdAt. Existing rows are backfilled to
+  // their own inventory_txn_id, so pre-migration data reads as 1-row groups.
+  groupId         String                   @map("group_id")
   createdAt       DateTime                 @default(now()) @map("created_at")
   createdByUserId String?                  @map("created_by_user_id")
   updatedAt       DateTime                 @updatedAt @map("updated_at")
@@ -179,6 +185,7 @@ model InventoryTransaction {
 
   item InventoryItem @relation(fields: [itemId], references: [id])
 
+  @@index([sakhiId, groupId])
   @@map("inventory_transactions")
 }
 

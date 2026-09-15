@@ -1,3 +1,4 @@
+import type { InventoryTransactionType } from '../../../../node_modules/.prisma/client-supervisor-operations-service';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { CreateSupervisorEventInput } from './dto/create-supervisorEvent.dto';
 import type { ListSupervisorEventsQuery } from './dto/list-supervisor-events.dto';
@@ -160,6 +161,8 @@ export class OperationsRepository {
    * Creates one row per item in a single submission (FR-SV-1.1: "one or more
    * items"), atomically — either every row is created or none are, so a
    * partial failure never leaves the ledger half-written for one submit.
+   * Every row is stamped with the same `groupId` so the submission can be
+   * reliably identified later, including for appends.
    */
   createInventoryTransactions(
     rows: Array<
@@ -169,6 +172,7 @@ export class OperationsRepository {
         quantity: number;
       }
     >,
+    groupId: string,
     createdByUserId: string,
   ) {
     return this.prisma.$transaction(
@@ -183,12 +187,58 @@ export class OperationsRepository {
             quantity: row.quantity,
             transactionDate: row.transactionDate,
             remarks: row.remarks ?? null,
+            groupId,
             createdByUserId,
             updatedByUserId: createdByUserId,
           },
         }),
       ),
     );
+  }
+
+  /** The oldest row of a group — used to derive the group's header fields and confirm it exists. */
+  findInventoryTransactionGroupHeader(groupId: string) {
+    return this.prisma.inventoryTransaction.findFirst({
+      where: { groupId, isDeleted: false },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  /**
+   * Appends one new row to an existing group, inheriting the group's header
+   * fields (projectId/sakhiId/supervisorId/transactionType/transactionDate)
+   * — never mutates any existing row, matching the append-only-ledger
+   * convention.
+   */
+  appendInventoryTransactionItem(
+    header: {
+      groupId: string;
+      projectId: string;
+      supervisorId: string;
+      sakhiId: string;
+      transactionType: InventoryTransactionType;
+      transactionDate: Date;
+    },
+    itemId: string,
+    quantity: number,
+    remarks: string | undefined,
+    createdByUserId: string,
+  ) {
+    return this.prisma.inventoryTransaction.create({
+      data: {
+        projectId: header.projectId,
+        supervisorId: header.supervisorId,
+        sakhiId: header.sakhiId,
+        itemId,
+        transactionType: header.transactionType,
+        quantity,
+        transactionDate: header.transactionDate,
+        remarks: remarks ?? null,
+        groupId: header.groupId,
+        createdByUserId,
+        updatedByUserId: createdByUserId,
+      },
+    });
   }
 
   /**
