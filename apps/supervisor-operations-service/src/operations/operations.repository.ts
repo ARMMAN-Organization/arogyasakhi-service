@@ -205,16 +205,19 @@ export class OperationsRepository {
   }
 
   /**
-   * Appends one new row to an existing group, inheriting the group's header
-   * fields (projectId/sakhiId/supervisorId/transactionType/transactionDate)
-   * — never mutates any existing row, matching the append-only-ledger
-   * convention.
+   * Appends one new row to an existing group, inheriting the group's
+   * event-identity fields (projectId/sakhiId/transactionType/
+   * transactionDate) — never mutates any existing row, matching the
+   * append-only-ledger convention. `supervisorId` is NOT inherited from the
+   * header: it always reflects whoever is performing this specific append
+   * (same convention as `createInventoryTransactions`), so a MANAGER/ADMIN
+   * appending to another Supervisor's group — or a Sakhi later reassigned —
+   * doesn't misattribute the new row to the original submitter.
    */
   appendInventoryTransactionItem(
     header: {
       groupId: string;
       projectId: string;
-      supervisorId: string;
       sakhiId: string;
       transactionType: InventoryTransactionType;
       transactionDate: Date;
@@ -222,12 +225,13 @@ export class OperationsRepository {
     itemId: string,
     quantity: number,
     remarks: string | undefined,
+    supervisorId: string,
     createdByUserId: string,
   ) {
     return this.prisma.inventoryTransaction.create({
       data: {
         projectId: header.projectId,
-        supervisorId: header.supervisorId,
+        supervisorId,
         sakhiId: header.sakhiId,
         itemId,
         transactionType: header.transactionType,

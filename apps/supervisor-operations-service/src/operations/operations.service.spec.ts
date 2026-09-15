@@ -963,16 +963,39 @@ describe('OperationsService', () => {
         appendDto.quantity,
         undefined,
         supervisorCaller.id,
+        supervisorCaller.id,
       );
       expect(result).toBe(inventoryTransactionRow);
     });
 
-    it('throws 404 when the group does not exist', async () => {
+    it('stamps supervisorId as the caller performing the append, not the group’s original submitter', async () => {
+      const groupFromAnotherSupervisor: InventoryTransaction = {
+        ...groupHeader,
+        supervisorId: 'original-submitter-id',
+      };
+      repository.findInventoryTransactionGroupHeader.mockResolvedValue(groupFromAnotherSupervisor);
+      repository.findInventoryItemById.mockResolvedValue(activeItem);
+      repository.appendInventoryTransactionItem.mockResolvedValue(inventoryTransactionRow);
+
+      await service.appendInventoryTransactionItem(
+        groupFromAnotherSupervisor.groupId,
+        appendDto,
+        managerCaller,
+        'Bearer token',
+      );
+
+      const [, , , , supervisorIdArg] = repository.appendInventoryTransactionItem.mock.calls[0];
+      expect(supervisorIdArg).toBe(managerCaller.id);
+      expect(supervisorIdArg).not.toBe('original-submitter-id');
+    });
+
+    it('throws 404 when the group does not exist (valid UUID shape, no matching row)', async () => {
       repository.findInventoryTransactionGroupHeader.mockResolvedValue(null);
+      const nonExistentGroupId = '99999999-9999-9999-9999-999999999999';
 
       await expect(
         service.appendInventoryTransactionItem(
-          'missing-group',
+          nonExistentGroupId,
           appendDto,
           supervisorCaller,
           'Bearer token',
@@ -1062,6 +1085,7 @@ describe('OperationsService', () => {
         appendDto.itemId,
         appendDto.quantity,
         'extra unit found',
+        supervisorCaller.id,
         supervisorCaller.id,
       );
     });

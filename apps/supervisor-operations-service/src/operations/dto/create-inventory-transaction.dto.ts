@@ -14,7 +14,7 @@ import { z } from 'zod';
  * client-supplied, so a Supervisor can never record a transaction under
  * another Supervisor's name.
  */
-const transactionItemSchema = z
+export const transactionItemSchema = z
   .object({
     itemId: z.string().uuid(),
     quantity: z.number().int().positive(),

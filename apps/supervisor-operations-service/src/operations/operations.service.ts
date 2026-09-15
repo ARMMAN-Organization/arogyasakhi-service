@@ -302,10 +302,15 @@ export class OperationsService {
    * mutating any existing row (append-only-ledger convention: itemId is
    * immutable per row, so a new item is always a new row, never an edit).
    *
-   * The group's header fields (projectId/sakhiId/supervisorId/
-   * transactionType/transactionDate) are always inherited from its existing
-   * rows — a group represents one transaction event, so the client can't
-   * change those on append, only add another item to the same event.
+   * The group's event-identity fields (projectId/sakhiId/transactionType/
+   * transactionDate) are always inherited from its existing rows — a group
+   * represents one transaction event, so the client can't change those on
+   * append, only add another item to the same event. `supervisorId` is the
+   * one exception: it is NOT inherited from the header, but always the
+   * caller performing this append (same convention as
+   * createInventoryTransactions), so the row's recorded owner is always
+   * whoever actually created it, even when a MANAGER/ADMIN appends on a
+   * Supervisor's behalf or the Sakhi has since been reassigned.
    *
    * Ownership is re-checked exactly like createInventoryTransactions, scoped
    * to the group's sakhiId rather than client input, so a Supervisor can't
@@ -339,6 +344,7 @@ export class OperationsService {
       dto.itemId,
       dto.quantity,
       dto.remarks,
+      caller.id,
       caller.id,
     );
   }
