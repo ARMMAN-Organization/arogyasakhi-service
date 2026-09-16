@@ -26,6 +26,7 @@ function message(overrides: Partial<Record<string, unknown>> = {}) {
     bodyMarathi: '',
     mediaType: 'TEXT',
     mediaFile: null,
+    mediaResolvedUrl: null,
     sortOrder: 1,
     ...overrides,
   };
@@ -115,12 +116,31 @@ describe('resolveStageEducationContent', () => {
 
       expect(result).toEqual([
         {
+          id: 'msg-1',
           topicCode: 'Danger Signs during Pregnancy',
           topicName: 'Danger Signs',
+          bodyEn: 'Some symptoms...',
+          bodyMarathi: '',
           mediaType: 'TEXT',
           contentUrl: null,
+          mediaResolvedUrl: null,
         },
       ]);
+    });
+
+    it('carries non-null bodyEn through for real content', async () => {
+      resolveHealthEducationMessagesByStageMock.mockImplementation(async (stage) =>
+        stage === 'Show this for all the ANC visits' ? [message()] : [],
+      );
+
+      const result = await resolveStageEducationContent(
+        { formCode: 'ANC_VISIT', gestationalWeeks: 12 },
+        AUTH_HEADER,
+      );
+
+      expect(result[0].bodyEn).toBe('Some symptoms...');
+      expect(result[0].bodyEn).not.toBeNull();
+      expect(result[0].mediaResolvedUrl).toBeNull();
     });
 
     it('is included even when gestationalWeeks is undefined (LMP unknown)', async () => {

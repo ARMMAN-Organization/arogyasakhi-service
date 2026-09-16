@@ -76,10 +76,38 @@ export const formSubmissionSchema = z.object({
   stageEducationContent: z
     .array(
       z.object({
+        id: z.string().uuid().openapi({
+          description: 'The originating HealthEducationMessage.id.',
+        }),
         topicCode: z.string(),
         topicName: z.string(),
+        bodyEn: z.string().openapi({
+          description: 'Full English counselling text.',
+        }),
+        bodyMarathi: z.string().openapi({
+          description:
+            'Full Marathi counselling text where ARMMAN has delivered it, else the literal ' +
+            '"Marathi content coming soon" placeholder string.',
+        }),
         mediaType: z.string(),
-        contentUrl: z.string().nullable(),
+        contentUrl: z
+          .string()
+          .nullable()
+          .openapi({
+            description:
+              'Raw HealthEducationMessage.mediaFile label/filename (e.g. "anaemia") — NOT a ' +
+              'resolvable URL. See mediaResolvedUrl.',
+          }),
+        mediaResolvedUrl: z
+          .string()
+          .nullable()
+          .openapi({
+            description:
+              "Absolute, playable URL for contentUrl, resolved via cms-content-service's " +
+              'Strapi-backed media pipeline. Null until an admin-triggered ' +
+              'POST /health-education/media-sync run has matched this message against a ' +
+              'Strapi entry.',
+          }),
       }),
     )
     .optional()

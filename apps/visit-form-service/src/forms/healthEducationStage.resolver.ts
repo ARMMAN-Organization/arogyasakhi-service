@@ -40,10 +40,17 @@ export function ageInMonthsAt(birthDate: string, visitDate: string): number | un
 }
 
 export interface StageEducationContent {
+  id: string;
   topicCode: string;
   topicName: string;
+  bodyEn: string;
+  bodyMarathi: string;
   mediaType: string;
   contentUrl: string | null;
+  // Resolved via cms-content-service's Strapi-backed media pipeline (SRS
+  // §2.1) — null until an admin-triggered POST /health-education/media-sync
+  // run has matched this message's mediaFile against a Strapi entry's slug.
+  mediaResolvedUrl: string | null;
 }
 
 /**
@@ -164,16 +171,24 @@ const POST_LOSS_STAGE =
   "If the delivery outcome is 'Still birth' or 'Miscarriage' and 'Abortion' in Closure form";
 
 function toEducationContent(m: {
+  id: string;
   titleEn: string | null;
   conditionLabel: string;
+  bodyEn: string;
+  bodyMarathi: string;
   mediaType: string;
   mediaFile: string | null;
+  mediaResolvedUrl: string | null;
 }): StageEducationContent {
   return {
+    id: m.id,
     topicCode: m.conditionLabel,
     topicName: m.titleEn ?? m.conditionLabel,
+    bodyEn: m.bodyEn,
+    bodyMarathi: m.bodyMarathi,
     mediaType: m.mediaType,
     contentUrl: m.mediaFile,
+    mediaResolvedUrl: m.mediaResolvedUrl,
   };
 }
 
@@ -198,6 +213,20 @@ async function resolveStages(
  * "gate doesn't apply" when absent or unparseable, matching this service's
  * existing best-effort tolerance for non-critical post-submission content
  * (e.g. triggerRiskAssessment's own stance).
+ *
+ * CLIENT PRECEDENCE RULE (pending product sign-off, NOT enforced server-side):
+ * a single visit can produce both risk-triggered content (Path A —
+ * risk-referral-service's GET /beneficiaries/:id/risk, a separate call) and
+ * this function's stage-triggered content (Path B, embedded in this same
+ * submission's response) for the same visit. No cross-service call exists
+ * here to fetch Path A's results and dedupe against them server-side — that
+ * would require this service to call risk-referral-service mid-request,
+ * out of scope for this fix. Until product decides otherwise, the client
+ * should apply: Path A takes priority over Path B for the same topicCode
+ * (a detected clinical issue outranks general stage guidance) — if a
+ * topicCode appears in both this array and Path A's educationContent, drop
+ * the Path B entry and keep Path A's. This is a default to build against
+ * today, not a settled decision.
  */
 export async function resolveStageEducationContent(
   input: {
