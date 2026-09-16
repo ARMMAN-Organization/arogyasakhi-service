@@ -8,7 +8,14 @@ import { z } from 'zod';
  * to that convention, so an edit-form correction (e.g. HANDOVER meant to be
  * RETURNED) is possible; note the ledger keeps no history of what a row's
  * transactionType previously was, only `updatedAt`/`updatedByUserId` that
- * something changed and who changed it. At least one field must be present.
+ * something changed and who changed it.
+ *
+ * `transactionType` and `transactionDate` describe the whole transaction
+ * group's event (see `appendInventoryTransactionItem`'s header-inheritance
+ * contract), not just this one row — the repository propagates a change to
+ * either across every other row in the same group, so the group can never
+ * silently end up with rows disagreeing on what event they belong to.
+ * `quantity`/`remarks` stay per-row only. At least one field must be present.
  */
 export const updateInventoryTransactionSchema = z
   .object({

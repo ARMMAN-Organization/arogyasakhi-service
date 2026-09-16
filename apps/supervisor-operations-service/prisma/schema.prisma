@@ -188,7 +188,8 @@ model InventoryTransaction {
 
   item InventoryItem @relation(fields: [itemId], references: [id])
 
-  @@index([sakhiId, groupId])
+  @@index([groupId])
+  @@index([sakhiId])
   @@map("inventory_transactions")
 }
 

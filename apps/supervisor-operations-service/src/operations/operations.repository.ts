@@ -249,8 +249,14 @@ export class OperationsRepository {
    * Only ever writes the fields describing "what happened" (quantity, date,
    * remarks, transactionType) — itemId/sakhiId/projectId/supervisorId
    * remain immutable, matching this repo's append-only-ledger convention.
-   * `data` is a plain subset of `UpdateInventoryTransactionInput`, so
-   * whatever fields the DTO allows flow straight through to Prisma.
+   *
+   * `transactionType`/`transactionDate` describe the whole group's event
+   * (per `appendInventoryTransactionItem`'s header-inheritance contract),
+   * not just this one row — so a change to either is propagated to every
+   * other non-deleted row sharing this row's `groupId`, keeping the group
+   * internally consistent. `quantity`/`remarks` remain per-row only, since
+   * those genuinely describe just this one item line. The two updates run
+   * in one `$transaction` so a group is never left half-updated.
    */
   async updateInventoryTransaction(
     id: string,
@@ -260,10 +266,34 @@ export class OperationsRepository {
     const existing = await this.findInventoryTransactionById(id);
     if (!existing) return null;
 
-    return this.prisma.inventoryTransaction.update({
-      where: { id },
-      data: { ...data, updatedByUserId },
-    });
+    const { transactionType, transactionDate, ...perRowData } = data;
+    const groupWideData = {
+      ...(transactionType && { transactionType }),
+      ...(transactionDate && { transactionDate }),
+    };
+
+    if (Object.keys(groupWideData).length === 0) {
+      return this.prisma.inventoryTransaction.update({
+        where: { id },
+        data: { ...perRowData, updatedByUserId },
+      });
+    }
+
+    // transactionType/transactionDate describe the group's event, not just
+    // this one row, so a change to either is applied to every non-deleted
+    // row sharing this group — otherwise the group would silently end up
+    // with rows disagreeing on what event they belong to.
+    const [, updated] = await this.prisma.$transaction([
+      this.prisma.inventoryTransaction.updateMany({
+        where: { groupId: existing.groupId, id: { not: id }, isDeleted: false },
+        data: { ...groupWideData, updatedByUserId },
+      }),
+      this.prisma.inventoryTransaction.update({
+        where: { id },
+        data: { ...perRowData, ...groupWideData, updatedByUserId },
+      }),
+    ]);
+    return updated;
   }
 
   async softDeleteInventoryTransaction(id: string, updatedByUserId: string) {

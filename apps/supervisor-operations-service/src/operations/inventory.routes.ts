@@ -218,7 +218,7 @@ export function registerInventoryRoutes(doc: DocumentedRouter, service: Operatio
       },
     },
     trustGatewayIdentity,
-    requireRoles('SUPERVISOR', 'ADMIN'),
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
     validate(groupIdParamsSchema, 'params'),
     validateBody(appendInventoryTransactionItemSchema),
     controller.appendTransactionItem,
@@ -293,11 +293,18 @@ export function registerInventoryRoutes(doc: DocumentedRouter, service: Operatio
   doc.put(
     '/inventory-transactions/:id',
     {
-      summary: "Edit a transaction's quantity/date/remarks",
+      summary:
+        "Edit a transaction's quantity/date/remarks/type. Changing type or date " +
+        'also updates every other item in the same transaction group, since they ' +
+        "describe the group's shared event, not just this one row.",
       tags: ['Supervisor Operations'],
       params: transactionIdParamsSchema,
       responses: {
-        200: { description: 'Transaction updated', schema: envelope(inventoryTransactionSchema) },
+        200: {
+          description:
+            'Transaction updated (and, if type/date changed, so were its group siblings)',
+          schema: envelope(inventoryTransactionSchema),
+        },
         400: { description: 'Validation error', schema: apiErrorSchema },
         401: { description: 'Unauthenticated', schema: apiErrorSchema },
         403: { description: 'Caller role not permitted', schema: apiErrorSchema },
