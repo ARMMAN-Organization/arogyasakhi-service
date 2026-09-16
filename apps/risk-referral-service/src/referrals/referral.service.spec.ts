@@ -64,6 +64,7 @@ describe('ReferralService', () => {
     countSummary: jest.fn(),
     countPendingFollowupsByBeneficiary: jest.fn(),
     findFollowupsByBeneficiary: jest.fn(),
+    findManyPaginated: jest.fn(),
   } as unknown as jest.Mocked<ReferralRepository>;
   const beneficiaryClient = {
     getById: jest.fn(),
@@ -580,6 +581,57 @@ describe('ReferralService', () => {
       expect(result.status).toBe('PENDING_FOLLOWUP');
       expect(repository.updateStatus).not.toHaveBeenCalled();
       expect(incentiveClient.triggerAccompaniedReferral).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('listBySakhi', () => {
+    const AUTH_HEADER = 'Bearer token';
+    const EMPTY_PAGE = { items: [], nextCursor: null };
+
+    it('resolves beneficiaryIds via beneficiaryClient.getIds, forwarding query.sakhiId', async () => {
+      beneficiaryClient.getIds.mockResolvedValue(['b-1', 'b-2']);
+      repository.findManyPaginated.mockResolvedValue(EMPTY_PAGE as never);
+
+      await service.listBySakhi({ sakhiId: 'sakhi-1', limit: 50 }, AUTH_HEADER);
+
+      expect(beneficiaryClient.getIds).toHaveBeenCalledWith(AUTH_HEADER, 'sakhi-1');
+      expect(repository.findManyPaginated).toHaveBeenCalledWith({
+        beneficiaryIds: ['b-1', 'b-2'],
+        cursor: undefined,
+        limit: 50,
+      });
+    });
+
+    it('passes query.cursor through to the repository', async () => {
+      beneficiaryClient.getIds.mockResolvedValue([]);
+      repository.findManyPaginated.mockResolvedValue(EMPTY_PAGE as never);
+
+      await service.listBySakhi({ cursor: 'some-cursor', limit: 10 }, AUTH_HEADER);
+
+      expect(repository.findManyPaginated).toHaveBeenCalledWith({
+        beneficiaryIds: [],
+        cursor: 'some-cursor',
+        limit: 10,
+      });
+    });
+
+    it('returns the repository page as-is', async () => {
+      beneficiaryClient.getIds.mockResolvedValue(['b-1']);
+      const page = { items: [{ id: 'referral-1' }], nextCursor: 'next-cursor' } as never;
+      repository.findManyPaginated.mockResolvedValue(page);
+
+      const result = await service.listBySakhi({ limit: 50 }, AUTH_HEADER);
+
+      expect(result).toBe(page);
+    });
+
+    it('propagates a 403 thrown by beneficiaryClient.getIds (out-of-roster sakhiId)', async () => {
+      beneficiaryClient.getIds.mockRejectedValue({ status: 403 });
+
+      await expect(
+        service.listBySakhi({ sakhiId: 'sakhi-1', limit: 50 }, AUTH_HEADER),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(repository.findManyPaginated).not.toHaveBeenCalled();
     });
   });
 
