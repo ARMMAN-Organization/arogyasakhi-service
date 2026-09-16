@@ -4,6 +4,7 @@ import type { CreateVisitInstanceInput } from './dto/create-visitInstance.dto';
 import type { UpdateVisitInstanceInput } from './dto/update-visitInstance.dto';
 import type { VisitSummaryQueryInput } from './dto/visit-summary-query.dto';
 import type { VisitHistoryQueryInput } from './dto/visit-history-query.dto';
+import type { ListVisitsQueryInput } from './dto/list-visits.dto';
 import { findSakhiById, listSakhiIdsForSupervisor } from '../sakhis/sakhi.client';
 import { resolveVisitStatusCode, resolveVisitStatusCodes } from '../lookups/lookup.client';
 import { getActiveTransferWindow } from '../escalations/escalation.client';
@@ -49,12 +50,70 @@ async function resolveCallerScoping(
   return { sakhiIds: roster };
 }
 
+/**
+ * Same scoping rule as resolveCallerScoping, but additionally lets a
+ * SUPERVISOR/MANAGER/ADMIN caller narrow to one specific `querySakhiId` —
+ * used by getVisitSummary and list(), both of which accept an optional
+ * `sakhiId` query param a resolveCallerScoping-style caller-only scope
+ * can't express. A SAKHI caller's own id always wins over any
+ * caller-supplied querySakhiId (she cannot widen her own scope by passing
+ * someone else's id).
+ */
+async function resolveCallerScopingWithQuery(
+  caller: CallerIdentity,
+  querySakhiId: string | undefined,
+  authorizationHeader: string,
+): Promise<{ sakhiId?: string; sakhiIds?: string[] }> {
+  if (caller.roles.includes('SAKHI')) {
+    return { sakhiId: caller.id };
+  }
+  if (!isPrivileged(caller)) {
+    // SUPERVISOR
+    if (!caller.projectId) {
+      throw forbidden('Supervisor caller has no project scope.');
+    }
+    if (querySakhiId) {
+      const roster = await listSakhiIdsForSupervisor(
+        caller.projectId,
+        caller.id,
+        authorizationHeader,
+      );
+      if (!roster.includes(querySakhiId)) {
+        throw forbidden("sakhiId is not in this Supervisor's roster.");
+      }
+      return { sakhiId: querySakhiId };
+    }
+    return {
+      sakhiIds: await listSakhiIdsForSupervisor(caller.projectId, caller.id, authorizationHeader),
+    };
+  }
+  // MANAGER/ADMIN
+  return querySakhiId ? { sakhiId: querySakhiId } : {};
+}
+
 /** Visit instance domain logic. Data access is delegated to the repository. */
 export class VisitInstanceService {
   constructor(private readonly repository: VisitInstanceRepository) {}
 
-  list() {
-    return this.repository.findMany();
+  /**
+   * Cursor-paginated visit list, scoped per the caller's own role (SAKHI
+   * own visits, SUPERVISOR roster or one roster sakhiId, MANAGER/ADMIN
+   * unscoped or one sakhiId) — backs FR-SV-4.6's Data Restore flow, where
+   * a Sakhi's device re-downloads everything scoped to her after a
+   * reset/reinstall. Same scoping rule as getVisitSummary.
+   */
+  async list(query: ListVisitsQueryInput, caller: CallerIdentity, authorizationHeader: string) {
+    const { sakhiId, sakhiIds } = await resolveCallerScopingWithQuery(
+      caller,
+      query.sakhiId,
+      authorizationHeader,
+    );
+    return this.repository.findManyPaginated({
+      sakhiId,
+      sakhiIds,
+      cursor: query.cursor,
+      limit: query.limit,
+    });
   }
 
   /**
@@ -215,36 +274,11 @@ export class VisitInstanceService {
       throw badRequest('fromDate must be on or before toDate.');
     }
 
-    let sakhiId: string | undefined;
-    let sakhiIds: string[] | undefined;
-
-    if (caller.roles.includes('SAKHI')) {
-      sakhiId = caller.id;
-    } else if (!isPrivileged(caller)) {
-      // SUPERVISOR
-      if (!caller.projectId) {
-        throw forbidden('Supervisor caller has no project scope.');
-      }
-      if (query.sakhiId) {
-        const roster = await listSakhiIdsForSupervisor(
-          caller.projectId,
-          caller.id,
-          authorizationHeader,
-        );
-        if (!roster.includes(query.sakhiId)) {
-          throw forbidden("sakhiId is not in this Supervisor's roster.");
-        }
-        sakhiId = query.sakhiId;
-      } else {
-        sakhiIds = await listSakhiIdsForSupervisor(
-          caller.projectId,
-          caller.id,
-          authorizationHeader,
-        );
-      }
-    } else if (query.sakhiId) {
-      sakhiId = query.sakhiId;
-    }
+    const { sakhiId, sakhiIds } = await resolveCallerScopingWithQuery(
+      caller,
+      query.sakhiId,
+      authorizationHeader,
+    );
 
     const [grouped, statusCodes] = await Promise.all([
       this.repository.countByStatus({

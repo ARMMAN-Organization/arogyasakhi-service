@@ -14,6 +14,7 @@ jest.mock('../beneficiaries/beneficiary.client');
 describe('VisitInstanceService', () => {
   const repository = {
     findMany: jest.fn(),
+    findManyPaginated: jest.fn(),
     findManyByBeneficiaryId: jest.fn(),
     findById: jest.fn(),
     findByLocalVisitUuid: jest.fn(),
@@ -48,10 +49,129 @@ describe('VisitInstanceService', () => {
     service = new VisitInstanceService(repository);
   });
 
-  it('lists via repository', async () => {
-    repository.findMany.mockResolvedValue([]);
-    await expect(service.list()).resolves.toEqual([]);
-    expect(repository.findMany).toHaveBeenCalledTimes(1);
+  describe('list', () => {
+    const SAKHI_ID = 'sakhi-1';
+    const EMPTY_PAGE = { items: [], nextCursor: null };
+
+    it('forces a SAKHI caller to her own sakhiId regardless of the query param', async () => {
+      repository.findManyPaginated.mockResolvedValue(EMPTY_PAGE);
+
+      await service.list(
+        { sakhiId: 'someone-elses-id', limit: 50 },
+        { id: SAKHI_ID, roles: ['SAKHI'] },
+        AUTH_HEADER,
+      );
+
+      expect(repository.findManyPaginated).toHaveBeenCalledWith(
+        expect.objectContaining({ sakhiId: SAKHI_ID }),
+      );
+    });
+
+    it('scopes a SUPERVISOR caller with no query sakhiId to their whole roster', async () => {
+      listSakhiIdsForSupervisorMock.mockResolvedValue(['sakhi-a', 'sakhi-b']);
+      repository.findManyPaginated.mockResolvedValue(EMPTY_PAGE);
+
+      await service.list(
+        { limit: 50 },
+        { id: 'supervisor-1', roles: ['SUPERVISOR'], projectId: 'p1' },
+        AUTH_HEADER,
+      );
+
+      expect(repository.findManyPaginated).toHaveBeenCalledWith(
+        expect.objectContaining({ sakhiIds: ['sakhi-a', 'sakhi-b'] }),
+      );
+    });
+
+    it('scopes a SUPERVISOR caller with a query sakhiId on their roster to just that sakhi', async () => {
+      listSakhiIdsForSupervisorMock.mockResolvedValue(['sakhi-a', 'sakhi-b']);
+      repository.findManyPaginated.mockResolvedValue(EMPTY_PAGE);
+
+      await service.list(
+        { sakhiId: 'sakhi-a', limit: 50 },
+        { id: 'supervisor-1', roles: ['SUPERVISOR'], projectId: 'p1' },
+        AUTH_HEADER,
+      );
+
+      expect(repository.findManyPaginated).toHaveBeenCalledWith(
+        expect.objectContaining({ sakhiId: 'sakhi-a' }),
+      );
+    });
+
+    it("rejects a SUPERVISOR caller's query sakhiId that is outside their roster", async () => {
+      listSakhiIdsForSupervisorMock.mockResolvedValue(['sakhi-a', 'sakhi-b']);
+
+      await expect(
+        service.list(
+          { sakhiId: 'sakhi-outsider', limit: 50 },
+          { id: 'supervisor-1', roles: ['SUPERVISOR'], projectId: 'p1' },
+          AUTH_HEADER,
+        ),
+      ).rejects.toThrow("sakhiId is not in this Supervisor's roster.");
+    });
+
+    it('rejects a SUPERVISOR caller with no project scope', async () => {
+      await expect(
+        service.list(
+          { limit: 50 },
+          { id: 'supervisor-1', roles: ['SUPERVISOR'], projectId: null },
+          AUTH_HEADER,
+        ),
+      ).rejects.toThrow('Supervisor caller has no project scope.');
+    });
+
+    it('scopes a MANAGER/ADMIN caller with a query sakhiId to just that sakhi', async () => {
+      repository.findManyPaginated.mockResolvedValue(EMPTY_PAGE);
+
+      await service.list(
+        { sakhiId: 'sakhi-a', limit: 50 },
+        { id: 'manager-1', roles: ['MANAGER'] },
+        AUTH_HEADER,
+      );
+
+      expect(repository.findManyPaginated).toHaveBeenCalledWith(
+        expect.objectContaining({ sakhiId: 'sakhi-a' }),
+      );
+    });
+
+    it('leaves a MANAGER/ADMIN caller with no query sakhiId fully unscoped', async () => {
+      repository.findManyPaginated.mockResolvedValue(EMPTY_PAGE);
+
+      await service.list({ limit: 50 }, { id: 'manager-1', roles: ['MANAGER'] }, AUTH_HEADER);
+
+      expect(repository.findManyPaginated).toHaveBeenCalledWith(
+        expect.not.objectContaining({ sakhiId: expect.anything() }),
+      );
+      expect(repository.findManyPaginated).toHaveBeenCalledWith(
+        expect.not.objectContaining({ sakhiIds: expect.anything() }),
+      );
+    });
+
+    it('passes cursor and limit through to the repository unchanged', async () => {
+      repository.findManyPaginated.mockResolvedValue(EMPTY_PAGE);
+
+      await service.list(
+        { cursor: 'opaque-cursor', limit: 25 },
+        { id: 'manager-1', roles: ['MANAGER'] },
+        AUTH_HEADER,
+      );
+
+      expect(repository.findManyPaginated).toHaveBeenCalledWith(
+        expect.objectContaining({ cursor: 'opaque-cursor', limit: 25 }),
+      );
+    });
+
+    it('returns the repository page unchanged', async () => {
+      const page = { items: [{ id: 'visit-1' }], nextCursor: 'next-cursor' };
+      repository.findManyPaginated.mockResolvedValue(page as never);
+
+      const result = await service.list(
+        { limit: 50 },
+        { id: 'manager-1', roles: ['MANAGER'] },
+        AUTH_HEADER,
+      );
+
+      expect(result).toBe(page);
+    });
   });
 
   const sampleRow = {
@@ -77,12 +197,6 @@ describe('VisitInstanceService', () => {
     isDeleted: false,
     deletedAt: null,
   };
-
-  it('returns the repository list unchanged', async () => {
-    const rows = [sampleRow];
-    repository.findMany.mockResolvedValue(rows);
-    await expect(service.list()).resolves.toBe(rows);
-  });
 
   describe('listByBeneficiaryId', () => {
     it('returns the repository result for a beneficiary with visit history', async () => {

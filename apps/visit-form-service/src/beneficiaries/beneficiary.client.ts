@@ -1,4 +1,4 @@
-import { badGateway, forbidden } from '@armman/service-commons';
+import { badGateway, forbidden, HttpError } from '@armman/service-commons';
 
 // Read directly (not via appConfig) so importing this client doesn't pull in
 // app-config's full schema — mirrors geography.client.ts. Despite the name,
@@ -205,5 +205,42 @@ export async function findPostEddPendingBeneficiaries(
   }
 
   const body = (await res.json()) as { data: PostEddPendingPage };
+  return body.data;
+}
+
+/**
+ * Resolves the bare in-scope beneficiary ids for the caller's own
+ * Sakhi/roster scope, via beneficiary-service's `GET /beneficiaries/ids`
+ * (forwards the caller's own token — beneficiary-service applies its own
+ * SAKHI-own-id / SUPERVISOR-roster / MANAGER-ADMIN-unscoped rule, same as
+ * findBeneficiaryById above). `sakhiId` optionally narrows further to one
+ * Sakhi within that scope. Used by visitSchedule.service.ts and
+ * form.service.ts's Data Restore list() methods (FR-SV-4.6) to filter
+ * VisitSchedule/FormSubmission by beneficiaryId, since neither table carries
+ * a sakhiId column of its own.
+ */
+export async function findBeneficiaryIds(
+  authorizationHeader: string,
+  sakhiId?: string,
+): Promise<string[]> {
+  const url = new URL(`${GATEWAY_BASE_URL}/api/v1/beneficiaries/ids`);
+  if (sakhiId) url.searchParams.set('sakhiId', sakhiId);
+
+  let res: Response;
+  try {
+    res = await fetch(url, { headers: { Authorization: authorizationHeader } });
+  } catch {
+    throw badGateway('Unable to resolve beneficiary ids — beneficiary-service is unreachable.');
+  }
+
+  if (!res.ok) {
+    if (res.status >= 400 && res.status < 500) {
+      const body = (await res.json().catch(() => null)) as { message?: string } | null;
+      throw new HttpError(res.status, body?.message ?? 'Unable to resolve beneficiary ids.');
+    }
+    throw badGateway('Unable to resolve beneficiary ids — beneficiary-service returned an error.');
+  }
+
+  const body = (await res.json()) as { data: string[] };
   return body.data;
 }

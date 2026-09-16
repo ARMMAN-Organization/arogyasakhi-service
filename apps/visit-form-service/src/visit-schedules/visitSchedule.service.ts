@@ -9,10 +9,11 @@ import type {
 import type { GenerateVisitScheduleInput } from './dto/generate-visit-schedule.dto';
 import { toBulkScheduleRows } from './scheduleMapper';
 import { ruleSetIdFor } from './scheduleRuleSets';
-import { findBeneficiaryById } from '../beneficiaries/beneficiary.client';
+import { findBeneficiaryById, findBeneficiaryIds } from '../beneficiaries/beneficiary.client';
 import { findRuleVersion } from '../rules/ruleVersion.client';
 import { evaluateSchedulePack } from '../rules/evaluateSchedulePack.client';
 import { findSakhiById } from '../sakhis/sakhi.client';
+import type { ListVisitSchedulesQueryInput } from './dto/list-visit-schedules.dto';
 
 /** The calling principal's own identity, as carried on their trusted-identity headers. */
 export interface CallerIdentity {
@@ -122,6 +123,25 @@ export interface CreateBulkResult {
  */
 export class VisitScheduleService {
   constructor(private readonly repository: VisitScheduleRepository) {}
+
+  /**
+   * Cursor-paginated visit-schedule list, scoped per the caller's own role —
+   * backs FR-SV-4.6's Data Restore flow. VisitSchedule carries no sakhiId
+   * column of its own (only beneficiaryId), so the in-scope beneficiaryIds
+   * are resolved via beneficiary-service's GET /beneficiaries/ids first,
+   * forwarding the caller's own token — that endpoint applies the exact same
+   * SAKHI-own-id / SUPERVISOR-roster / MANAGER-ADMIN-unscoped rule and
+   * 403s on an out-of-roster sakhiId itself, so this service doesn't
+   * duplicate that scoping logic locally.
+   */
+  async list(query: ListVisitSchedulesQueryInput, authorizationHeader: string) {
+    const beneficiaryIds = await findBeneficiaryIds(authorizationHeader, query.sakhiId);
+    return this.repository.findManyPaginated({
+      beneficiaryIds,
+      cursor: query.cursor,
+      limit: query.limit,
+    });
+  }
 
   async createBulk(
     dto: CreateVisitScheduleBulkInput,

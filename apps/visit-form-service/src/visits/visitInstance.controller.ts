@@ -6,6 +6,7 @@ import type { countByBeneficiarySchema } from './dto/count-by-beneficiary.dto';
 import type { byPadaSchema } from './dto/by-pada.dto';
 import type { visitHistoryQuerySchema } from './dto/visit-history-query.dto';
 import type { RestoreForSakhiInput } from './dto/restore-for-sakhi.dto';
+import type { listVisitsQuerySchema } from './dto/list-visits.dto';
 
 /**
  * Visit instance request handlers. Mounted under the global `api/v1`
@@ -13,8 +14,12 @@ import type { RestoreForSakhiInput } from './dto/restore-for-sakhi.dto';
  */
 export function createVisitInstanceController(service: VisitInstanceService) {
   return {
-    list: asyncHandler(async (_req, res) => {
-      res.json(ok(await service.list()));
+    list: asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const query = req.query as unknown as z.infer<typeof listVisitsQuerySchema>;
+      res.json(ok(await service.list(query, req.user, authorizationHeader)));
     }),
 
     listByBeneficiary: asyncHandler(async (req, res) => {

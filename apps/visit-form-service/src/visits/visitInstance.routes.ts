@@ -9,6 +9,7 @@ import { countByBeneficiarySchema } from './dto/count-by-beneficiary.dto';
 import { byPadaSchema } from './dto/by-pada.dto';
 import { visitHistoryQuerySchema } from './dto/visit-history-query.dto';
 import { restoreForSakhiSchema } from './dto/restore-for-sakhi.dto';
+import { listVisitsQuerySchema } from './dto/list-visits.dto';
 import {
   errorResponse,
   requireRoles,
@@ -70,6 +71,13 @@ const visitInstanceSchema = z.object({
   syncedAt: z.string().datetime().nullable().openapi({ example: null }),
   createdAt: z.string().datetime().openapi({ example: '2026-07-20T10:15:00.000Z' }),
   updatedAt: z.string().datetime().openapi({ example: '2026-07-20T10:15:00.000Z' }),
+});
+
+const visitInstanceListPageSchema = z.object({
+  items: z.array(visitInstanceSchema),
+  nextCursor: z.string().nullable().openapi({
+    description: 'Pass back as `cursor` to fetch the next page; null when this is the last page.',
+  }),
 });
 
 const visitSummarySchema = z.object({
@@ -140,17 +148,25 @@ export function registerVisitInstanceRoutes(doc: DocumentedRouter, service: Visi
   doc.get(
     '/visits',
     {
-      summary: 'List recent visit instances',
+      summary:
+        "Cursor-paginated visit list, scoped by sakhiId — backs FR-SV-4.6's Data Restore " +
+        "flow (a Sakhi's device re-downloading everything scoped to her after a " +
+        'reset/reinstall). Same role-scoping as GET /visits/visit-summary: SAKHI always ' +
+        'sees only her own visits regardless of the sakhiId query param; SUPERVISOR sees ' +
+        'one roster sakhiId or, if omitted, her whole roster; MANAGER/ADMIN may pass any ' +
+        'sakhiId or omit it for fully unscoped. Excludes soft-deleted rows.',
       tags: ['Visits'],
+      query: listVisitsQuerySchema,
       responses: {
-        200: { description: 'Visit instances', schema: envelope(z.array(visitInstanceSchema)) },
+        200: { description: 'Visit instances page', schema: envelope(visitInstanceListPageSchema) },
         401: errorResponse(401),
-        403: errorResponse(403),
+        403: errorResponse(403, { message: "sakhiId is not in this Supervisor's roster." }),
         500: errorResponse(500),
       },
     },
     trustGatewayIdentity,
-    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER'),
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(listVisitsQuerySchema, 'query'),
     controller.list,
   );
 
