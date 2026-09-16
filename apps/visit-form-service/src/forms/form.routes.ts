@@ -6,6 +6,8 @@ import { createDraftVersionSchema } from './dto/create-draft-version.dto';
 import { patchFormVersionSchema } from './dto/patch-form-version.dto';
 import { createSubmissionSchema } from './dto/create-submission.dto';
 import { patchFormSubmissionAnswersSchema } from './dto/patch-formSubmissionAnswers.dto';
+import { submissionHistoryQuerySchema } from './dto/submission-history-query.dto';
+import { listFormSubmissionsQuerySchema } from './dto/list-form-submissions.dto';
 import { envelope, formSubmissionSchema, formVersionSchema } from './form.schemas';
 import {
   errorResponse,
@@ -58,6 +60,37 @@ const deliveryOutcomeSchema = z.object({
     description: '1-based child slot (child1/child2/child3) on the DELIVERY_VISIT form.',
   }),
   outcome: z.string().openapi({ example: 'live_birth' }),
+});
+
+const submissionHistoryVisitScheduleSchema = z
+  .object({
+    scheduleId: z.string().uuid().openapi({ example: '3fa85f64-5717-4562-b3fc-2c963f66afa6' }),
+    scheduledDate: z.string().datetime().openapi({ example: '2026-03-01T00:00:00.000Z' }),
+    status: z.string().openapi({ example: 'COMPLETED' }),
+    sequenceNo: z.number().int().nullable().openapi({ example: 3 }),
+  })
+  .nullable();
+
+const submissionHistoryItemSchema = z.object({
+  submissionId: z.string().uuid().openapi({ example: '3fa85f64-5717-4562-b3fc-2c963f66afa6' }),
+  formCode: z.string().openapi({ example: 'ANC_VISIT' }),
+  submittedAt: z.string().datetime().openapi({ example: '2026-03-01T10:00:00.000Z' }),
+  answers: z.record(z.string(), z.unknown()).openapi({
+    example: { blood_pressure_bp_systolic: 120 },
+    description: "The submission's full formDataJson payload, unmodified.",
+  }),
+  visitSchedule: submissionHistoryVisitScheduleSchema.openapi({
+    description:
+      'The linked VisitSchedule context (via FormSubmission.visitId), or null for a ' +
+      'submission not tied to a visit (e.g. MOTHER_REGISTRATION).',
+  }),
+});
+
+const submissionHistoryResponseSchema = z.object({
+  items: z.array(submissionHistoryItemSchema),
+  nextCursor: z.string().nullable().openapi({
+    description: 'Opaque cursor for the next page, or null when there are no more results.',
+  }),
 });
 
 const deliveryOutcomesSchema = z.object({
@@ -133,6 +166,47 @@ export function registerFormRoutes(doc: DocumentedRouter, service: FormService) 
     },
     trustGatewayIdentity,
     controller.getVisitCodeFormMap,
+  );
+
+  doc.get(
+    '/form-submissions',
+    {
+      summary:
+        "Cursor-paginated form-submission list, scoped by sakhiId — backs FR-SV-4.6's Data " +
+        "Restore flow (a Sakhi's device re-downloading everything scoped to her after a " +
+        'reset/reinstall). FormSubmission carries no sakhiId column of its own — the in-scope ' +
+        'beneficiaryIds are resolved via beneficiary-service GET /beneficiaries/ids, which ' +
+        'applies the same role-scoping GET /visits uses: SAKHI always sees only her own ' +
+        'submissions regardless of the sakhiId query param; SUPERVISOR sees one roster ' +
+        'sakhiId or, if omitted, her whole roster; MANAGER/ADMIN may pass any sakhiId or omit ' +
+        'it for fully unscoped. Excludes soft-deleted rows. Each item is the full stored ' +
+        'submission (formData included), same shape as POST /forms/:formCode/submissions ' +
+        'returns.',
+      tags: ['Forms'],
+      query: listFormSubmissionsQuerySchema,
+      responses: {
+        200: {
+          description: 'Form submissions retrieved',
+          schema: envelope(
+            z.object({
+              items: z.array(formSubmissionSchema),
+              nextCursor: z.string().nullable().openapi({
+                description:
+                  'Pass back as `cursor` to fetch the next page; null when this is the last page.',
+              }),
+            }),
+          ),
+        },
+        400: errorResponse(400),
+        401: errorResponse(401),
+        403: errorResponse(403, { message: "sakhiId is not in this Supervisor's roster." }),
+        500: errorResponse(500),
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(listFormSubmissionsQuerySchema, 'query'),
+    controller.list,
   );
 
   doc.get(
@@ -296,6 +370,44 @@ export function registerFormRoutes(doc: DocumentedRouter, service: FormService) 
     requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER'),
     validate(beneficiaryIdParamsSchema, 'params'),
     controller.getLatestVisitVitals,
+  );
+
+  doc.get(
+    '/beneficiaries/:beneficiaryId/submissions',
+    {
+      summary:
+        "A beneficiary's full form submission history — CR-DeviceContinuity-01 (issue #228): " +
+        'when a Sakhi loses her device, visit schedules (generated on-device from submitted ' +
+        'form history) do not reappear on a new one; the mobile client replays this endpoint ' +
+        "to rebuild them. Returns every non-deleted submission's formCode, submittedAt, full " +
+        'answers (formDataJson, unmodified), and the linked VisitSchedule context where the ' +
+        'submission is visit-linked (null for one-time forms like MOTHER_REGISTRATION). ' +
+        'Ordered submittedAt asc, id asc (oldest first) so the client can replay ' +
+        'chronologically. Cursor-paginated, same convention as GET /beneficiaries (opaque ' +
+        'cursor, returned as nextCursor, passed back unchanged for the next page). Same ' +
+        'ownership scoping as GET /beneficiaries/:beneficiaryId/visit-history: SAKHI must own ' +
+        'the beneficiary case herself, SUPERVISOR only via her own roster, MANAGER/ADMIN ' +
+        'unrestricted.',
+      tags: ['Forms'],
+      params: beneficiaryIdParamsSchema,
+      query: submissionHistoryQuerySchema,
+      responses: {
+        200: {
+          description: "The beneficiary's submission history, oldest first",
+          schema: envelope(submissionHistoryResponseSchema),
+        },
+        400: errorResponse(400, { message: 'limit: Number must be less than or equal to 100' }),
+        401: errorResponse(401),
+        403: errorResponse(403, { message: 'This beneficiary case is outside your own roster.' }),
+        404: errorResponse(404, { message: 'Beneficiary case not found.' }),
+        500: errorResponse(500),
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(beneficiaryIdParamsSchema, 'params'),
+    validate(submissionHistoryQuerySchema, 'query'),
+    controller.getSubmissionHistory,
   );
 
   doc.get(

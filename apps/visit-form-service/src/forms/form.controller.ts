@@ -1,6 +1,8 @@
 import { asyncHandler, ok, unauthorized } from '../app.module';
 import type { FormService } from './form.service';
 import type { PatchFormSubmissionAnswersInput } from './dto/patch-formSubmissionAnswers.dto';
+import type { SubmissionHistoryQueryInput } from './dto/submission-history-query.dto';
+import type { ListFormSubmissionsQueryInput } from './dto/list-form-submissions.dto';
 import { VISIT_CODE_TO_FORM_CODE } from './visit-code-form-map';
 
 /**
@@ -11,6 +13,14 @@ export function createFormController(service: FormService) {
   return {
     getVisitCodeFormMap: asyncHandler(async (_req, res) => {
       res.json(ok(VISIT_CODE_TO_FORM_CODE));
+    }),
+
+    list: asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const query = req.query as unknown as ListFormSubmissionsQueryInput;
+      res.json(ok(await service.list(query, authorizationHeader)));
     }),
 
     getActiveVersion: asyncHandler(async (req, res, next) => {
@@ -92,6 +102,21 @@ export function createFormController(service: FormService) {
       const { beneficiaryId } = req.params as unknown as { beneficiaryId: string };
       const outcomes = await service.getDeliveryOutcomes(beneficiaryId);
       res.json(ok(outcomes));
+    }),
+
+    getSubmissionHistory: asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const { beneficiaryId } = req.params as unknown as { beneficiaryId: string };
+      const query = req.query as unknown as SubmissionHistoryQueryInput;
+      const page = await service.getSubmissionHistory(
+        beneficiaryId,
+        query,
+        req.user,
+        authorizationHeader,
+      );
+      res.json(ok(page));
     }),
 
     updateSubmissionAnswers: asyncHandler(async (req, res, next) => {

@@ -16,7 +16,8 @@ import { getEditableFieldCodes } from './form-answer-edit-allowlist';
 import type { AuditClient } from './audit.client';
 import { syncSocioDemographics } from '../beneficiaries/socio-demographics.client';
 import { syncHealthHistory } from '../beneficiaries/health-history.client';
-import { findBeneficiaryById } from '../beneficiaries/beneficiary.client';
+import { findBeneficiaryById, findBeneficiaryIds } from '../beneficiaries/beneficiary.client';
+import type { ListFormSubmissionsQueryInput } from './dto/list-form-submissions.dto';
 import { assertCallerOwnsBeneficiary } from '../beneficiaries/beneficiaryOwnership.guard';
 import { createChildBeneficiary } from '../beneficiaries/create-child.client';
 import { updateBeneficiaryPhase } from '../beneficiaries/update-phase.client';
@@ -94,6 +95,28 @@ export class FormService {
     private readonly visitInstanceRepository: VisitInstanceRepository,
     private readonly auditClient: AuditClient,
   ) {}
+
+  /**
+   * Cursor-paginated form-submission list, scoped per the caller's own
+   * role — backs FR-SV-4.6's Data Restore flow. FormSubmission carries no
+   * sakhiId column of its own (only beneficiaryId), so the in-scope
+   * beneficiaryIds are resolved via beneficiary-service's
+   * GET /beneficiaries/ids first, forwarding the caller's own token — that
+   * endpoint applies the exact same SAKHI-own-id / SUPERVISOR-roster /
+   * MANAGER-ADMIN-unscoped rule and 403s on an out-of-roster sakhiId itself.
+   */
+  async list(query: ListFormSubmissionsQueryInput, authorizationHeader: string) {
+    const beneficiaryIds = await findBeneficiaryIds(authorizationHeader, query.sakhiId);
+    const page = await this.repository.findManyPaginated({
+      beneficiaryIds,
+      cursor: query.cursor,
+      limit: query.limit,
+    });
+    return {
+      items: page.items.map((row) => toApiFormSubmission(row)),
+      nextCursor: page.nextCursor,
+    };
+  }
 
   /**
    * `callerGeographyUnitId`/`authorizationHeader` are the caller's own scope
@@ -1031,6 +1054,26 @@ export class FormService {
         submission.formDataJson as Record<string, unknown>,
       ),
     };
+  }
+
+  /**
+   * A beneficiary's full submission history (device-loss schedule recovery
+   * — CR-DeviceContinuity-01, issue #228): the mobile client replays this
+   * to regenerate visit schedules on a new device after the original one is
+   * lost, since schedules are otherwise only generated on-device from
+   * submitted form history. IDOR guard: same shared check as
+   * getLatestVisitVitals/visitInstance.service.ts#getVisitHistory — SAKHI
+   * own-case only, SUPERVISOR own-roster only, MANAGER/ADMIN unrestricted.
+   */
+  async getSubmissionHistory(
+    beneficiaryId: string,
+    query: { cursor?: string; limit: number },
+    caller: { id: string; roles: readonly string[]; projectId?: string | null },
+    authorizationHeader: string,
+  ) {
+    await assertCallerOwnsBeneficiary(beneficiaryId, caller, authorizationHeader);
+
+    return this.repository.findSubmissionsByBeneficiaryId(beneficiaryId, query.cursor, query.limit);
   }
 
   /**
