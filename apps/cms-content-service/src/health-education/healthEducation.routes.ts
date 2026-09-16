@@ -3,11 +3,13 @@ import { z } from 'zod';
 import type { HealthEducationService } from './healthEducation.service';
 import type { HealthEducationMediaSyncService } from './healthEducationMedia.syncService';
 import { createHealthEducationController } from './healthEducation.controller';
+import { patchHealthEducationMessageSchema } from './dto/patch-health-education-message.dto';
 import {
   errorResponse,
   requireRoles,
   trustGatewayIdentity,
   validate,
+  validateBody,
   type DocumentedRouter,
 } from '../app.module';
 
@@ -57,6 +59,18 @@ const mediaSyncSummarySchema = z.object({
   skipped: z.array(mediaSyncSkippedItemSchema),
 });
 
+const messageIdParamsSchema = z
+  .object({
+    id: z
+      .string()
+      .uuid()
+      .openapi({
+        param: { name: 'id', in: 'path' },
+        example: '5904a7c8-f0a9-4ca6-98ba-318dc44ffb5e',
+      }),
+  })
+  .strict();
+
 function envelope<T extends z.ZodTypeAny>(data: T) {
   return z.object({ success: z.literal(true), message: z.string(), data });
 }
@@ -99,6 +113,37 @@ export function registerHealthEducationRoutes(
     requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
     validate(listMessagesQuerySchema, 'query'),
     controller.listMessages,
+  );
+
+  doc.patch(
+    '/health-education/messages/:id',
+    {
+      summary:
+        "Edit a health education message's content fields (titleEn/bodyEn/bodyMarathi/" +
+        'mediaType/mediaFile) — ADMIN-only. All fields optional (partial update); an empty ' +
+        'body is a no-op. Structural fields (riskConditionId, conditionLabel, stage, ' +
+        'messageOrder, sortOrder) are NOT editable here — conditionLabel+stage+messageOrder ' +
+        'is the unique key prisma/seed.ts upserts on, and risk-referral-service resolves ' +
+        'content by conditionLabel/riskConditionId; changing those via this endpoint could ' +
+        "silently collide with another row's key or detach a message from its condition. " +
+        'For a content fix already seeded onto an environment (e.g. a translation correction), ' +
+        'this is the supported path — re-running the seed script alone will NOT overwrite an ' +
+        "already-existing row (see prisma/seed.ts's own doc comment on its upsert).",
+      tags: ['Health Education'],
+      params: messageIdParamsSchema,
+      responses: {
+        200: { description: 'Updated message', schema: envelope(healthEducationMessageSchema) },
+        400: errorResponse(400),
+        401: errorResponse(401),
+        403: errorResponse(403, { message: 'Forbidden — ADMIN role required' }),
+        404: errorResponse(404, { message: 'Health education message not found.' }),
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('ADMIN'),
+    validate(messageIdParamsSchema, 'params'),
+    validateBody(patchHealthEducationMessageSchema),
+    controller.updateMessage,
   );
 
   doc.post(

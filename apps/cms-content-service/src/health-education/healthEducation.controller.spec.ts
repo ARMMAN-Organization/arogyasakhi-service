@@ -119,3 +119,30 @@ describe('HealthEducation controller — syncMedia', () => {
     expect(json).toHaveBeenCalledWith({ success: true, message: 'OK', data: summary });
   });
 });
+
+describe('HealthEducation controller — updateMessage', () => {
+  function mockMediaSyncService() {
+    return {
+      sync: jest.fn().mockResolvedValue({ entriesResolved: 0, messagesUpdated: 0, skipped: [] }),
+    } as unknown as jest.Mocked<HealthEducationMediaSyncService>;
+  }
+
+  it('passes params.id and the request body through to service.updateMessage', async () => {
+    const updated = { id: 'msg-1', bodyMarathi: 'updated text' };
+    const service = {
+      updateMessage: jest.fn().mockResolvedValue(updated),
+    } as unknown as jest.Mocked<HealthEducationService>;
+    const controller = createHealthEducationController(service, mockMediaSyncService());
+    const req = {
+      params: { id: 'msg-1' },
+      body: { bodyMarathi: 'updated text' },
+    } as unknown as Request;
+    const json = jest.fn();
+    const res = { json } as unknown as Response;
+
+    await controller.updateMessage(req, res, jest.fn());
+
+    expect(service.updateMessage).toHaveBeenCalledWith('msg-1', { bodyMarathi: 'updated text' });
+    expect(json).toHaveBeenCalledWith({ success: true, message: 'OK', data: updated });
+  });
+});

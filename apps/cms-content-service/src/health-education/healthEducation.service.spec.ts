@@ -4,6 +4,8 @@ import type { HealthEducationRepository } from './healthEducation.repository';
 describe('HealthEducationService', () => {
   const repository = {
     findMany: jest.fn(),
+    findById: jest.fn(),
+    update: jest.fn(),
   } as unknown as jest.Mocked<HealthEducationRepository>;
   let service: HealthEducationService;
 
@@ -72,6 +74,28 @@ describe('HealthEducationService', () => {
       riskConditionId: undefined,
       stage: undefined,
       conditionLabel: undefined,
+    });
+  });
+
+  describe('updateMessage', () => {
+    it('updates and returns the row when it exists', async () => {
+      repository.findById.mockResolvedValue({ id: 'msg-1' } as never);
+      const updated = { id: 'msg-1', bodyMarathi: 'new text' };
+      repository.update.mockResolvedValue(updated as never);
+
+      const result = await service.updateMessage('msg-1', { bodyMarathi: 'new text' });
+
+      expect(repository.update).toHaveBeenCalledWith('msg-1', { bodyMarathi: 'new text' });
+      expect(result).toBe(updated);
+    });
+
+    it('throws 404 without calling update when the message does not exist', async () => {
+      repository.findById.mockResolvedValue(null);
+
+      await expect(service.updateMessage('missing-id', { bodyMarathi: 'x' })).rejects.toMatchObject(
+        { status: 404 },
+      );
+      expect(repository.update).not.toHaveBeenCalled();
     });
   });
 });

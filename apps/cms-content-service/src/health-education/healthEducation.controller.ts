@@ -1,6 +1,7 @@
 import { asyncHandler, ok } from '../app.module';
 import type { HealthEducationService } from './healthEducation.service';
 import type { HealthEducationMediaSyncService } from './healthEducationMedia.syncService';
+import type { PatchHealthEducationMessageInput } from './dto/patch-health-education-message.dto';
 
 /**
  * Health education message request handlers. Mounted under the global
@@ -30,6 +31,12 @@ export function createHealthEducationController(
         conditionLabel?: string;
       };
       res.json(ok(await service.listMessages({ riskConditionId, stage, conditionLabel })));
+    }),
+
+    updateMessage: asyncHandler(async (req, res) => {
+      const { id } = req.params as { id: string };
+      const body = req.body as PatchHealthEducationMessageInput;
+      res.json(ok(await service.updateMessage(id, body)));
     }),
   };
 }
