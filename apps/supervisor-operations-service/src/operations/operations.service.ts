@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { HttpError, conflict, forbidden, notFound, unprocessable } from '@armman/service-commons';
 import type { OperationsRepository } from './operations.repository';
 import type { CreateSupervisorEventInput } from './dto/create-supervisorEvent.dto';
@@ -6,6 +7,7 @@ import type { UpdateAttendanceInput } from './dto/update-attendance.dto';
 import type { CreateInventoryItemInput } from './dto/create-inventory-item.dto';
 import type { CreateInventoryTransactionInput } from './dto/create-inventory-transaction.dto';
 import type { UpdateInventoryTransactionInput } from './dto/update-inventory-transaction.dto';
+import type { AppendInventoryTransactionItemInput } from './dto/append-inventory-transaction-item.dto';
 import type { CreateCallLogInput } from './dto/create-call-log.dto';
 import type { UpdateCallLogInput } from './dto/update-call-log.dto';
 import type { CreateTrainingTopicInput } from './dto/create-training-topic.dto';
@@ -290,7 +292,61 @@ export class OperationsService {
       itemId: item.itemId,
       quantity: item.quantity,
     }));
-    return this.repository.createInventoryTransactions(rows, caller.id);
+    const groupId = randomUUID();
+    return this.repository.createInventoryTransactions(rows, groupId, caller.id);
+  }
+
+  /**
+   * Appends one new item line to an existing transaction group — used when a
+   * Supervisor needs to add an item after the original submission, without
+   * mutating any existing row (append-only-ledger convention: itemId is
+   * immutable per row, so a new item is always a new row, never an edit).
+   *
+   * The group's event-identity fields (projectId/sakhiId/transactionType/
+   * transactionDate) are always inherited from its existing rows — a group
+   * represents one transaction event, so the client can't change those on
+   * append, only add another item to the same event. `supervisorId` is the
+   * one exception: it is NOT inherited from the header, but always the
+   * caller performing this append (same convention as
+   * createInventoryTransactions), so the row's recorded owner is always
+   * whoever actually created it, even when a MANAGER/ADMIN appends on a
+   * Supervisor's behalf or the Sakhi has since been reassigned.
+   *
+   * Ownership is re-checked exactly like createInventoryTransactions, scoped
+   * to the group's sakhiId rather than client input, so a Supervisor can't
+   * append to another Supervisor's Sakhi's group.
+   */
+  async appendInventoryTransactionItem(
+    groupId: string,
+    dto: AppendInventoryTransactionItemInput,
+    caller: CallerIdentity,
+    authorizationHeader: string,
+  ) {
+    const header = await this.repository.findInventoryTransactionGroupHeader(groupId);
+    if (!header) throw notFound('Inventory transaction group not found.');
+
+    if (!isPrivileged(caller)) {
+      const sakhi = await this.sakhiClient.findById(header.sakhiId, authorizationHeader);
+      if (!sakhi) throw unprocessable('sakhiId: Sakhi not found.');
+      if (sakhi.supervisorId !== caller.id) {
+        throw forbidden('You do not have access to this Sakhi.');
+      }
+    }
+
+    const item = await this.repository.findInventoryItemById(dto.itemId);
+    if (!item) throw unprocessable(`itemId: item ${dto.itemId} not found.`);
+    if (item.status !== 'ACTIVE') {
+      throw unprocessable(`itemId: item ${dto.itemId} is not active.`);
+    }
+
+    return this.repository.appendInventoryTransactionItem(
+      header,
+      dto.itemId,
+      dto.quantity,
+      dto.remarks,
+      caller.id,
+      caller.id,
+    );
   }
 
   /** A SUPERVISOR may only edit their own transactions. MANAGER and ADMIN are unrestricted. */

@@ -28,6 +28,8 @@ describe('OperationsService', () => {
     findInventoryItemById: jest.fn(),
     findInventoryTransactionById: jest.fn(),
     createInventoryTransactions: jest.fn(),
+    findInventoryTransactionGroupHeader: jest.fn(),
+    appendInventoryTransactionItem: jest.fn(),
     updateInventoryTransaction: jest.fn(),
     softDeleteInventoryTransaction: jest.fn(),
     findCallLogs: jest.fn(),
@@ -636,6 +638,7 @@ describe('OperationsService', () => {
         quantity: 1,
         transactionDate: new Date('2026-07-01'),
         remarks: null,
+        groupId: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
         createdAt: new Date(),
         createdByUserId: null,
         updatedAt: new Date(),
@@ -658,6 +661,7 @@ describe('OperationsService', () => {
     quantity: 1,
     transactionDate: new Date('2026-07-01'),
     remarks: null,
+    groupId: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
     createdAt: new Date(),
     createdByUserId: null,
     updatedAt: new Date(),
@@ -801,9 +805,34 @@ describe('OperationsService', () => {
             quantity: 2,
           },
         ],
+        expect.any(String),
         supervisorCaller.id,
       );
       expect(result).toEqual([inventoryTransactionRow]);
+    });
+
+    it('stamps every row with the same freshly generated groupId, different across calls', async () => {
+      sakhiClient.findById.mockResolvedValue(sakhi);
+      repository.findInventoryItemById.mockResolvedValue(activeItem);
+      repository.createInventoryTransactions.mockResolvedValue([inventoryTransactionRow]);
+
+      const multiItemDto = {
+        ...baseDto,
+        items: [
+          { itemId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', quantity: 2 },
+          { itemId: 'cccccccc-cccc-cccc-cccc-cccccccccccc', quantity: 1 },
+        ],
+      };
+
+      await service.createInventoryTransactions(multiItemDto, supervisorCaller, 'Bearer token');
+      const [firstRows, firstGroupId] = repository.createInventoryTransactions.mock.calls[0];
+      expect(firstRows).toHaveLength(2);
+      expect(typeof firstGroupId).toBe('string');
+      expect(firstGroupId).toMatch(/^[0-9a-f-]{36}$/i);
+
+      await service.createInventoryTransactions(multiItemDto, supervisorCaller, 'Bearer token');
+      const [, secondGroupId] = repository.createInventoryTransactions.mock.calls[1];
+      expect(secondGroupId).not.toBe(firstGroupId);
     });
 
     it('rejects a Supervisor posting for a Sakhi assigned to another Supervisor, without creating anything', async () => {
@@ -844,6 +873,7 @@ describe('OperationsService', () => {
       expect(sakhiClient.findById).not.toHaveBeenCalled();
       expect(repository.createInventoryTransactions).toHaveBeenCalledWith(
         expect.arrayContaining([expect.objectContaining({ supervisorId: adminCaller.id })]),
+        expect.any(String),
         adminCaller.id,
       );
     });
@@ -891,6 +921,171 @@ describe('OperationsService', () => {
           expect.objectContaining({ quantity: 2, supervisorId: supervisorCaller.id }),
           expect.objectContaining({ quantity: 5, supervisorId: supervisorCaller.id }),
         ]),
+        expect.any(String),
+        supervisorCaller.id,
+      );
+    });
+  });
+
+  describe('appendInventoryTransactionItem', () => {
+    const sakhi = {
+      sakhiId: '44444444-4444-4444-4444-444444444444',
+      supervisorId: supervisorCaller.id,
+      primaryProjectId: '22222222-2222-2222-2222-222222222222',
+    };
+
+    const groupHeader: InventoryTransaction = inventoryTransactionRow;
+
+    const appendDto = {
+      itemId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      quantity: 3,
+    };
+
+    it('appends a new row inheriting the group’s header fields', async () => {
+      repository.findInventoryTransactionGroupHeader.mockResolvedValue(groupHeader);
+      sakhiClient.findById.mockResolvedValue(sakhi);
+      repository.findInventoryItemById.mockResolvedValue(activeItem);
+      repository.appendInventoryTransactionItem.mockResolvedValue(inventoryTransactionRow);
+
+      const result = await service.appendInventoryTransactionItem(
+        groupHeader.groupId,
+        appendDto,
+        supervisorCaller,
+        'Bearer token',
+      );
+
+      expect(repository.findInventoryTransactionGroupHeader).toHaveBeenCalledWith(
+        groupHeader.groupId,
+      );
+      expect(repository.appendInventoryTransactionItem).toHaveBeenCalledWith(
+        groupHeader,
+        appendDto.itemId,
+        appendDto.quantity,
+        undefined,
+        supervisorCaller.id,
+        supervisorCaller.id,
+      );
+      expect(result).toBe(inventoryTransactionRow);
+    });
+
+    it('stamps supervisorId as the caller performing the append, not the group’s original submitter', async () => {
+      const groupFromAnotherSupervisor: InventoryTransaction = {
+        ...groupHeader,
+        supervisorId: 'original-submitter-id',
+      };
+      repository.findInventoryTransactionGroupHeader.mockResolvedValue(groupFromAnotherSupervisor);
+      repository.findInventoryItemById.mockResolvedValue(activeItem);
+      repository.appendInventoryTransactionItem.mockResolvedValue(inventoryTransactionRow);
+
+      await service.appendInventoryTransactionItem(
+        groupFromAnotherSupervisor.groupId,
+        appendDto,
+        managerCaller,
+        'Bearer token',
+      );
+
+      const [, , , , supervisorIdArg] = repository.appendInventoryTransactionItem.mock.calls[0];
+      expect(supervisorIdArg).toBe(managerCaller.id);
+      expect(supervisorIdArg).not.toBe('original-submitter-id');
+    });
+
+    it('throws 404 when the group does not exist (valid UUID shape, no matching row)', async () => {
+      repository.findInventoryTransactionGroupHeader.mockResolvedValue(null);
+      const nonExistentGroupId = '99999999-9999-9999-9999-999999999999';
+
+      await expect(
+        service.appendInventoryTransactionItem(
+          nonExistentGroupId,
+          appendDto,
+          supervisorCaller,
+          'Bearer token',
+        ),
+      ).rejects.toMatchObject({ status: 404 });
+      expect(repository.appendInventoryTransactionItem).not.toHaveBeenCalled();
+    });
+
+    it('rejects a Supervisor who is not the group’s Sakhi’s assigned Supervisor', async () => {
+      repository.findInventoryTransactionGroupHeader.mockResolvedValue(groupHeader);
+      sakhiClient.findById.mockResolvedValue(sakhi);
+
+      await expect(
+        service.appendInventoryTransactionItem(
+          groupHeader.groupId,
+          appendDto,
+          otherSupervisorCaller,
+          'Bearer token',
+        ),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(repository.appendInventoryTransactionItem).not.toHaveBeenCalled();
+    });
+
+    it('allows a MANAGER regardless of Sakhi assignment, without calling the Sakhi client', async () => {
+      repository.findInventoryTransactionGroupHeader.mockResolvedValue(groupHeader);
+      repository.findInventoryItemById.mockResolvedValue(activeItem);
+      repository.appendInventoryTransactionItem.mockResolvedValue(inventoryTransactionRow);
+
+      await service.appendInventoryTransactionItem(
+        groupHeader.groupId,
+        appendDto,
+        managerCaller,
+        'Bearer token',
+      );
+
+      expect(sakhiClient.findById).not.toHaveBeenCalled();
+      expect(repository.appendInventoryTransactionItem).toHaveBeenCalled();
+    });
+
+    it('rejects when the referenced item does not exist, without appending anything', async () => {
+      repository.findInventoryTransactionGroupHeader.mockResolvedValue(groupHeader);
+      sakhiClient.findById.mockResolvedValue(sakhi);
+      repository.findInventoryItemById.mockResolvedValue(null);
+
+      await expect(
+        service.appendInventoryTransactionItem(
+          groupHeader.groupId,
+          appendDto,
+          supervisorCaller,
+          'Bearer token',
+        ),
+      ).rejects.toMatchObject({ status: 422 });
+      expect(repository.appendInventoryTransactionItem).not.toHaveBeenCalled();
+    });
+
+    it('rejects when the referenced item is inactive, without appending anything', async () => {
+      repository.findInventoryTransactionGroupHeader.mockResolvedValue(groupHeader);
+      sakhiClient.findById.mockResolvedValue(sakhi);
+      repository.findInventoryItemById.mockResolvedValue({ ...activeItem, status: 'INACTIVE' });
+
+      await expect(
+        service.appendInventoryTransactionItem(
+          groupHeader.groupId,
+          appendDto,
+          supervisorCaller,
+          'Bearer token',
+        ),
+      ).rejects.toMatchObject({ status: 422 });
+      expect(repository.appendInventoryTransactionItem).not.toHaveBeenCalled();
+    });
+
+    it('passes through inherited header fields untouched, ignoring anything on the dto beyond itemId/quantity/remarks', async () => {
+      repository.findInventoryTransactionGroupHeader.mockResolvedValue(groupHeader);
+      sakhiClient.findById.mockResolvedValue(sakhi);
+      repository.findInventoryItemById.mockResolvedValue(activeItem);
+      repository.appendInventoryTransactionItem.mockResolvedValue(inventoryTransactionRow);
+
+      await service.appendInventoryTransactionItem(
+        groupHeader.groupId,
+        { ...appendDto, remarks: 'extra unit found' },
+        supervisorCaller,
+        'Bearer token',
+      );
+
+      expect(repository.appendInventoryTransactionItem).toHaveBeenCalledWith(
+        groupHeader,
+        appendDto.itemId,
+        appendDto.quantity,
+        'extra unit found',
+        supervisorCaller.id,
         supervisorCaller.id,
       );
     });
@@ -986,6 +1181,27 @@ describe('OperationsService', () => {
         adminCaller.id,
       );
       expect(result).toBe(inventoryTransactionRow);
+    });
+
+    it('passes transactionType through to the repository when included in the update', async () => {
+      repository.findInventoryTransactionById.mockResolvedValue(inventoryTransactionRow);
+      repository.updateInventoryTransaction.mockResolvedValue({
+        ...inventoryTransactionRow,
+        transactionType: 'CONSUMED',
+      });
+
+      const result = await service.updateInventoryTransaction(
+        'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+        { transactionType: 'CONSUMED' },
+        supervisorCaller,
+      );
+
+      expect(repository.updateInventoryTransaction).toHaveBeenCalledWith(
+        'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+        { transactionType: 'CONSUMED' },
+        supervisorCaller.id,
+      );
+      expect(result.transactionType).toBe('CONSUMED');
     });
   });
 
