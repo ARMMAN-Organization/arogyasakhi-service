@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { createHealthEducationController } from './healthEducation.controller';
 import type { HealthEducationService } from './healthEducation.service';
+import type { HealthEducationMediaSyncService } from './healthEducationMedia.syncService';
 
 // healthEducation.controller.ts imports asyncHandler/ok from ../app.module,
 // which eagerly loads config/app-config.ts — that module calls
@@ -39,11 +40,17 @@ describe('HealthEducation controller — listMessages', () => {
     return { req, res, json };
   }
 
+  function mockMediaSyncService() {
+    return {
+      sync: jest.fn().mockResolvedValue({ entriesResolved: 0, messagesUpdated: 0, skipped: [] }),
+    } as unknown as jest.Mocked<HealthEducationMediaSyncService>;
+  }
+
   it('extracts conditionLabel from the query string and passes it to the service', async () => {
     const service = {
       listMessages: jest.fn().mockResolvedValue([]),
     } as unknown as jest.Mocked<HealthEducationService>;
-    const controller = createHealthEducationController(service);
+    const controller = createHealthEducationController(service, mockMediaSyncService());
     const { req, res } = mockReqRes({ conditionLabel: 'Anemia' });
 
     await controller.listMessages(req, res, jest.fn());
@@ -59,7 +66,7 @@ describe('HealthEducation controller — listMessages', () => {
     const service = {
       listMessages: jest.fn().mockResolvedValue([]),
     } as unknown as jest.Mocked<HealthEducationService>;
-    const controller = createHealthEducationController(service);
+    const controller = createHealthEducationController(service, mockMediaSyncService());
     const { req, res } = mockReqRes({
       riskConditionId: 'condition-1',
       stage: 'as soon as detected during ANC visit',
@@ -79,7 +86,7 @@ describe('HealthEducation controller — listMessages', () => {
     const service = {
       listMessages: jest.fn().mockResolvedValue([]),
     } as unknown as jest.Mocked<HealthEducationService>;
-    const controller = createHealthEducationController(service);
+    const controller = createHealthEducationController(service, mockMediaSyncService());
     const { req, res } = mockReqRes({});
 
     await controller.listMessages(req, res, jest.fn());
@@ -89,5 +96,26 @@ describe('HealthEducation controller — listMessages', () => {
       stage: undefined,
       conditionLabel: undefined,
     });
+  });
+});
+
+describe('HealthEducation controller — syncMedia', () => {
+  it('delegates to the media sync service and returns its summary', async () => {
+    const service = {
+      listMessages: jest.fn(),
+    } as unknown as jest.Mocked<HealthEducationService>;
+    const summary = { entriesResolved: 2, messagesUpdated: 3, skipped: [] };
+    const mediaSyncService = {
+      sync: jest.fn().mockResolvedValue(summary),
+    } as unknown as jest.Mocked<HealthEducationMediaSyncService>;
+    const controller = createHealthEducationController(service, mediaSyncService);
+    const req = {} as unknown as Request;
+    const json = jest.fn();
+    const res = { json } as unknown as Response;
+
+    await controller.syncMedia(req, res, jest.fn());
+
+    expect(mediaSyncService.sync).toHaveBeenCalledTimes(1);
+    expect(json).toHaveBeenCalledWith({ success: true, message: 'OK', data: summary });
   });
 });

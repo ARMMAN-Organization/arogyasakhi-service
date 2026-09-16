@@ -1,12 +1,20 @@
 import { asyncHandler, ok } from '../app.module';
 import type { HealthEducationService } from './healthEducation.service';
+import type { HealthEducationMediaSyncService } from './healthEducationMedia.syncService';
 
 /**
  * Health education message request handlers. Mounted under the global
  * `api/v1` prefix by `healthEducation.routes.ts`.
  */
-export function createHealthEducationController(service: HealthEducationService) {
+export function createHealthEducationController(
+  service: HealthEducationService,
+  mediaSyncService: HealthEducationMediaSyncService,
+) {
   return {
+    syncMedia: asyncHandler(async (_req, res) => {
+      res.json(ok(await mediaSyncService.sync()));
+    }),
+
     listMessages: asyncHandler(async (req, res) => {
       // conditionLabel was missing here even though the route schema
       // (listMessagesQuerySchema) accepts it and the repository fully
