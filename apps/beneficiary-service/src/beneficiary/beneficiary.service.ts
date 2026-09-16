@@ -30,6 +30,7 @@ import type { CreateBeneficiaryInput } from './dto/create-beneficiary.dto';
 import type { UpsertRiskConditionSummaryInput } from './dto/upsert-risk-condition-summary.dto';
 import type { SummaryQueryInput } from './dto/summary-query.dto';
 import type { UpsertSocioDemographicsInput } from './dto/upsert-socio-demographics.dto';
+import type { ListFullDetailQueryInput } from './dto/list-full-detail.dto';
 import {
   resolveGeographyCodesForBlock,
   resolveHealthBlockIdFromPhc,
@@ -1454,5 +1455,75 @@ export class BeneficiaryService {
   ) {
     await assertCallerCanTouchCase(sakhiUserId, caller, authorizationHeader);
     return this.repository.restoreForSakhi(sakhiUserId);
+  }
+
+  /**
+   * Cursor-paginated, full-case-detail list — backs FR-SV-4.6's Data
+   * Restore flow (a Sakhi's device re-downloading every beneficiary case in
+   * full detail after a reset/reinstall), where GET /beneficiaries' list
+   * projection omits consent/risk/status-history/socio (see
+   * beneficiaryListItemSchema's own doc comment) and GET /beneficiaries/:id
+   * has no bulk form. Same role-scoping rule as list() (SAKHI own cases,
+   * SUPERVISOR one roster sakhiId or her whole roster, MANAGER/ADMIN any
+   * sakhiId or unscoped), deliberately without list()'s supervisorRoster
+   * display-name resolution — that's a list-view enrichment (sakhiName)
+   * this endpoint's response shape doesn't carry.
+   *
+   * Each row gets the identical decrypt/socio/risk-name enrichment
+   * getById's projectCase applies to a single case — same functions, same
+   * degrade-to-null-on-failure behavior per row — run concurrently via
+   * Promise.all rather than sequentially, since each row's enrichment calls
+   * are independent of every other row's.
+   */
+  async listFullDetail(
+    query: ListFullDetailQueryInput,
+    caller: AuthenticatedUser,
+    authorizationHeader: string,
+  ) {
+    let sakhiId: string | undefined;
+    let sakhiIds: string[] | undefined;
+
+    if (caller.roles.includes('SAKHI')) {
+      sakhiId = caller.id;
+    } else if (caller.roles.includes('SUPERVISOR')) {
+      if (!caller.projectId) {
+        throw forbidden('Supervisor caller has no project scope.');
+      }
+      const roster = await listSakhiIdsForSupervisor(
+        caller.projectId,
+        caller.id,
+        authorizationHeader,
+      );
+      if (query.sakhiId) {
+        if (!roster.includes(query.sakhiId)) {
+          throw forbidden("sakhiId is not in this Supervisor's roster.");
+        }
+        sakhiId = query.sakhiId;
+      } else {
+        sakhiIds = roster;
+      }
+    } else if (query.sakhiId) {
+      // MANAGER/ADMIN: unscoped by default, but an explicit sakhiId still
+      // narrows the list — no roster to validate against.
+      sakhiId = query.sakhiId;
+    }
+
+    const page = await this.repository.findManyFullDetail({
+      sakhiId,
+      sakhiIds,
+      cursor: query.cursor,
+      limit: query.limit,
+    });
+
+    const items = await Promise.all(
+      page.items.map(async (row) => {
+        const decrypted = withDecryptedName(row);
+        const withSocio = await withResolvedSocioDemographics(decrypted, authorizationHeader);
+        const withRiskLevel = withOverallRiskLevel(withSocio);
+        return withResolvedRiskConditionNames(withRiskLevel, authorizationHeader);
+      }),
+    );
+
+    return { items, nextCursor: page.nextCursor };
   }
 }

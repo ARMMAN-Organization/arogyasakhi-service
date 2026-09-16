@@ -128,6 +128,59 @@ export class BeneficiaryRepository {
   }
 
   /**
+   * Cursor-paginated, sakhiId-scoped, full-case-detail list — backs
+   * FR-SV-4.6's Data Restore flow (a Sakhi's device re-downloading every
+   * beneficiary case in full detail after a reset/reinstall). Same cursor
+   * codec/ordering as findMany above, but with findById's full `include`
+   * shape (consent/risk/status-history/socio) instead of the list view's
+   * lighter one — the service layer runs each row through the same
+   * decrypt/socio/risk-name enrichment findById's projectCase does, since a
+   * restore needs the identical shape a single-case GET would return, not
+   * a trimmed list-item projection.
+   */
+  async findManyFullDetail(filters: {
+    sakhiId?: string;
+    sakhiIds?: string[];
+    cursor?: string;
+    limit: number;
+  }) {
+    const where: NonNullable<Parameters<typeof this.prisma.beneficiaryCase.findMany>[0]>['where'] =
+      { isDeleted: false };
+    if (filters.sakhiId) where.sakhiId = filters.sakhiId;
+    if (filters.sakhiIds) where.sakhiId = { in: filters.sakhiIds };
+
+    const decodedCursor = filters.cursor ? decodeCursor('createdAt', filters.cursor) : null;
+
+    const rows = await this.prisma.beneficiaryCase.findMany({
+      where: decodedCursor
+        ? {
+            ...where,
+            OR: [
+              { createdAt: { lt: new Date(decodedCursor.createdAt) } },
+              { createdAt: new Date(decodedCursor.createdAt), id: { lt: decodedCursor.id } },
+            ],
+          }
+        : where,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: filters.limit + 1,
+      include: {
+        pii: true,
+        motherCaseDetails: true,
+        childCaseDetails: true,
+        consentRecords: { orderBy: { createdAt: 'desc' }, take: 1 },
+        riskConditionSummaries: true,
+        statusHistory: { orderBy: { changedAt: 'desc' } },
+        socioDemographics: true,
+      },
+    });
+
+    const hasMore = rows.length > filters.limit;
+    const items = hasMore ? rows.slice(0, filters.limit) : rows;
+    const lastItem = items[items.length - 1];
+    return { items, nextCursor: hasMore && lastItem ? encodeCursor('createdAt', lastItem) : null };
+  }
+
+  /**
    * Returns the bare ids of in-scope beneficiary cases — no PII, no
    * pagination — for other services (e.g. risk-referral-service's
    * referral-summary) that need to filter their own tables by beneficiaryId

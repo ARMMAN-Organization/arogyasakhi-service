@@ -35,6 +35,7 @@ describe('BeneficiaryService', () => {
   const originalEnv = { ...process.env };
   const repository = {
     findMany: jest.fn(),
+    findManyFullDetail: jest.fn(),
     findById: jest.fn(),
     findOwnershipById: jest.fn(),
     findByLocalCaseUuid: jest.fn(),
@@ -1634,6 +1635,172 @@ describe('BeneficiaryService', () => {
       const result = await service.getById('x', caller({ roles: ['ADMIN'] }), AUTH_HEADER);
 
       expect(result.socioDemographics).toBeNull();
+    });
+  });
+
+  describe('listFullDetail', () => {
+    const EMPTY_PAGE = { items: [], nextCursor: null };
+
+    it('lists via the repository, with names decrypted and enrichment applied per row', async () => {
+      repository.findManyFullDetail.mockResolvedValue({
+        items: [
+          {
+            id: 'x',
+            pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe'), villageId: null },
+            riskConditionSummaries: [],
+            socioDemographics: null,
+          },
+        ] as never,
+        nextCursor: null,
+      });
+
+      const result = await service.listFullDetail(
+        { limit: 50 },
+        caller({ roles: ['ADMIN'] }),
+        AUTH_HEADER,
+      );
+
+      expect(result.items[0]).toMatchObject({
+        id: 'x',
+        pii: expect.objectContaining({ fullName: 'Jane Doe' }),
+        riskLevel: 'none',
+        riskColor: 'GREEN',
+      });
+      expect(result.nextCursor).toBeNull();
+    });
+
+    it('forces a SAKHI caller to her own sakhiId regardless of the query param', async () => {
+      repository.findManyFullDetail.mockResolvedValue(EMPTY_PAGE);
+
+      await service.listFullDetail(
+        { sakhiId: 'someone-elses-id', limit: 50 },
+        caller({ id: 'sakhi-1', roles: ['SAKHI'] }),
+        AUTH_HEADER,
+      );
+
+      const call = repository.findManyFullDetail.mock.calls[0][0];
+      expect(call.sakhiId).toBe('sakhi-1');
+    });
+
+    it('scopes a SUPERVISOR caller with no query sakhiId to their whole roster', async () => {
+      listSakhiIdsForSupervisorMock.mockResolvedValue(['sakhi-a', 'sakhi-b']);
+      repository.findManyFullDetail.mockResolvedValue(EMPTY_PAGE);
+
+      await service.listFullDetail(
+        { limit: 50 },
+        caller({ id: 'sup-1', roles: ['SUPERVISOR'], projectId: 'p1' }),
+        AUTH_HEADER,
+      );
+
+      const call = repository.findManyFullDetail.mock.calls[0][0];
+      expect(call.sakhiIds).toEqual(['sakhi-a', 'sakhi-b']);
+    });
+
+    it('scopes a SUPERVISOR caller with a query sakhiId on their roster to just that sakhi', async () => {
+      listSakhiIdsForSupervisorMock.mockResolvedValue(['sakhi-a', 'sakhi-b']);
+      repository.findManyFullDetail.mockResolvedValue(EMPTY_PAGE);
+
+      await service.listFullDetail(
+        { sakhiId: 'sakhi-a', limit: 50 },
+        caller({ id: 'sup-1', roles: ['SUPERVISOR'], projectId: 'p1' }),
+        AUTH_HEADER,
+      );
+
+      const call = repository.findManyFullDetail.mock.calls[0][0];
+      expect(call.sakhiId).toBe('sakhi-a');
+    });
+
+    it("rejects a SUPERVISOR caller's query sakhiId that is outside their roster", async () => {
+      listSakhiIdsForSupervisorMock.mockResolvedValue(['sakhi-a', 'sakhi-b']);
+
+      await expect(
+        service.listFullDetail(
+          { sakhiId: 'sakhi-outsider', limit: 50 },
+          caller({ id: 'sup-1', roles: ['SUPERVISOR'], projectId: 'p1' }),
+          AUTH_HEADER,
+        ),
+      ).rejects.toThrow("sakhiId is not in this Supervisor's roster.");
+    });
+
+    it('rejects a SUPERVISOR caller with no project scope', async () => {
+      await expect(
+        service.listFullDetail(
+          { limit: 50 },
+          caller({ id: 'sup-1', roles: ['SUPERVISOR'], projectId: null }),
+          AUTH_HEADER,
+        ),
+      ).rejects.toThrow('Supervisor caller has no project scope.');
+      expect(repository.findManyFullDetail).not.toHaveBeenCalled();
+    });
+
+    it('MANAGER/ADMIN caller with a query sakhiId is scoped to just that sakhi', async () => {
+      repository.findManyFullDetail.mockResolvedValue(EMPTY_PAGE);
+
+      await service.listFullDetail(
+        { sakhiId: 'sakhi-a', limit: 50 },
+        caller({ roles: ['MANAGER'] }),
+        AUTH_HEADER,
+      );
+
+      const call = repository.findManyFullDetail.mock.calls[0][0];
+      expect(call.sakhiId).toBe('sakhi-a');
+      expect(listSakhiIdsForSupervisorMock).not.toHaveBeenCalled();
+    });
+
+    it('MANAGER/ADMIN caller with no query sakhiId is fully unscoped', async () => {
+      repository.findManyFullDetail.mockResolvedValue(EMPTY_PAGE);
+
+      await service.listFullDetail({ limit: 50 }, caller({ roles: ['ADMIN'] }), AUTH_HEADER);
+
+      const call = repository.findManyFullDetail.mock.calls[0][0];
+      expect(call.sakhiId).toBeUndefined();
+      expect(call.sakhiIds).toBeUndefined();
+    });
+
+    it('passes cursor and limit through to the repository unchanged', async () => {
+      repository.findManyFullDetail.mockResolvedValue(EMPTY_PAGE);
+
+      await service.listFullDetail(
+        { cursor: 'opaque-cursor', limit: 25 },
+        caller({ roles: ['ADMIN'] }),
+        AUTH_HEADER,
+      );
+
+      const call = repository.findManyFullDetail.mock.calls[0][0];
+      expect(call.cursor).toBe('opaque-cursor');
+      expect(call.limit).toBe(25);
+    });
+
+    it('resolves risk condition names per row via the batched client, same as getById', async () => {
+      repository.findManyFullDetail.mockResolvedValue({
+        items: [
+          {
+            id: 'x',
+            pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe'), villageId: null },
+            riskConditionSummaries: [{ riskConditionId: 'risk-1', latestGrade: 'MODERATE' }],
+            socioDemographics: null,
+          },
+        ] as never,
+        nextCursor: null,
+      });
+      resolveRiskConditionsMock.mockResolvedValue(
+        new Map([
+          ['risk-1', { conditionCode: 'ANEMIA', conditionName: 'Anemia', gradeScale: 'X' }],
+        ]),
+      );
+
+      const result = await service.listFullDetail(
+        { limit: 50 },
+        caller({ roles: ['ADMIN'] }),
+        AUTH_HEADER,
+      );
+
+      expect(resolveRiskConditionsMock).toHaveBeenCalledWith(['risk-1'], AUTH_HEADER);
+      const item = result.items[0] as { riskConditionSummaries: Record<string, unknown>[] };
+      expect(item.riskConditionSummaries[0]).toMatchObject({
+        conditionCode: 'ANEMIA',
+        conditionName: 'Anemia',
+      });
     });
   });
 
