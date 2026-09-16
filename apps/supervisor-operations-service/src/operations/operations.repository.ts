@@ -1,3 +1,4 @@
+import type { InventoryTransactionType } from '../../../../node_modules/.prisma/client-supervisor-operations-service';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { CreateSupervisorEventInput } from './dto/create-supervisorEvent.dto';
 import type { ListSupervisorEventsQuery } from './dto/list-supervisor-events.dto';
@@ -160,6 +161,8 @@ export class OperationsRepository {
    * Creates one row per item in a single submission (FR-SV-1.1: "one or more
    * items"), atomically — either every row is created or none are, so a
    * partial failure never leaves the ledger half-written for one submit.
+   * Every row is stamped with the same `groupId` so the submission can be
+   * reliably identified later, including for appends.
    */
   createInventoryTransactions(
     rows: Array<
@@ -169,6 +172,7 @@ export class OperationsRepository {
         quantity: number;
       }
     >,
+    groupId: string,
     createdByUserId: string,
   ) {
     return this.prisma.$transaction(
@@ -183,6 +187,7 @@ export class OperationsRepository {
             quantity: row.quantity,
             transactionDate: row.transactionDate,
             remarks: row.remarks ?? null,
+            groupId,
             createdByUserId,
             updatedByUserId: createdByUserId,
           },
@@ -191,10 +196,67 @@ export class OperationsRepository {
     );
   }
 
+  /** The oldest row of a group — used to derive the group's header fields and confirm it exists. */
+  findInventoryTransactionGroupHeader(groupId: string) {
+    return this.prisma.inventoryTransaction.findFirst({
+      where: { groupId, isDeleted: false },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  /**
+   * Appends one new row to an existing group, inheriting the group's
+   * event-identity fields (projectId/sakhiId/transactionType/
+   * transactionDate) — never mutates any existing row, matching the
+   * append-only-ledger convention. `supervisorId` is NOT inherited from the
+   * header: it always reflects whoever is performing this specific append
+   * (same convention as `createInventoryTransactions`), so a MANAGER/ADMIN
+   * appending to another Supervisor's group — or a Sakhi later reassigned —
+   * doesn't misattribute the new row to the original submitter.
+   */
+  appendInventoryTransactionItem(
+    header: {
+      groupId: string;
+      projectId: string;
+      sakhiId: string;
+      transactionType: InventoryTransactionType;
+      transactionDate: Date;
+    },
+    itemId: string,
+    quantity: number,
+    remarks: string | undefined,
+    supervisorId: string,
+    createdByUserId: string,
+  ) {
+    return this.prisma.inventoryTransaction.create({
+      data: {
+        projectId: header.projectId,
+        supervisorId,
+        sakhiId: header.sakhiId,
+        itemId,
+        transactionType: header.transactionType,
+        quantity,
+        transactionDate: header.transactionDate,
+        remarks: remarks ?? null,
+        groupId: header.groupId,
+        createdByUserId,
+        updatedByUserId: createdByUserId,
+      },
+    });
+  }
+
   /**
    * Only ever writes the fields describing "what happened" (quantity, date,
-   * remarks) — itemId/sakhiId/projectId/supervisorId/transactionType are
-   * immutable, matching this repo's append-only-ledger convention.
+   * remarks, transactionType) — itemId/sakhiId/projectId/supervisorId
+   * remain immutable, matching this repo's append-only-ledger convention.
+   *
+   * `transactionType`/`transactionDate` describe the whole group's event
+   * (per `appendInventoryTransactionItem`'s header-inheritance contract),
+   * not just this one row — so a change to either is propagated to every
+   * other non-deleted row sharing this row's `groupId`, keeping the group
+   * internally consistent. `quantity`/`remarks` remain per-row only, since
+   * those genuinely describe just this one item line. The two updates run
+   * in one `$transaction` so a group is never left half-updated.
    */
   async updateInventoryTransaction(
     id: string,
@@ -204,10 +266,34 @@ export class OperationsRepository {
     const existing = await this.findInventoryTransactionById(id);
     if (!existing) return null;
 
-    return this.prisma.inventoryTransaction.update({
-      where: { id },
-      data: { ...data, updatedByUserId },
-    });
+    const { transactionType, transactionDate, ...perRowData } = data;
+    const groupWideData = {
+      ...(transactionType && { transactionType }),
+      ...(transactionDate && { transactionDate }),
+    };
+
+    if (Object.keys(groupWideData).length === 0) {
+      return this.prisma.inventoryTransaction.update({
+        where: { id },
+        data: { ...perRowData, updatedByUserId },
+      });
+    }
+
+    // transactionType/transactionDate describe the group's event, not just
+    // this one row, so a change to either is applied to every non-deleted
+    // row sharing this group — otherwise the group would silently end up
+    // with rows disagreeing on what event they belong to.
+    const [, updated] = await this.prisma.$transaction([
+      this.prisma.inventoryTransaction.updateMany({
+        where: { groupId: existing.groupId, id: { not: id }, isDeleted: false },
+        data: { ...groupWideData, updatedByUserId },
+      }),
+      this.prisma.inventoryTransaction.update({
+        where: { id },
+        data: { ...perRowData, ...groupWideData, updatedByUserId },
+      }),
+    ]);
+    return updated;
   }
 
   async softDeleteInventoryTransaction(id: string, updatedByUserId: string) {

@@ -53,6 +53,19 @@ export function createInventoryController(service: OperationsService) {
       res.status(201).json(ok(created));
     }),
 
+    appendTransactionItem: asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const created = await service.appendInventoryTransactionItem(
+        req.params.groupId,
+        req.body,
+        req.user,
+        authorizationHeader,
+      );
+      res.status(201).json(ok(created));
+    }),
+
     updateTransaction: asyncHandler(async (req, res, next) => {
       if (!req.user) return next(unauthorized());
       const updated = await service.updateInventoryTransaction(req.params.id, req.body, req.user);

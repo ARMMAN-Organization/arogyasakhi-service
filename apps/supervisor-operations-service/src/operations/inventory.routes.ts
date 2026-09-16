@@ -5,6 +5,7 @@ import { createInventoryController } from './inventory.controller';
 import { createInventoryItemSchema } from './dto/create-inventory-item.dto';
 import { createInventoryTransactionSchema } from './dto/create-inventory-transaction.dto';
 import { updateInventoryTransactionSchema } from './dto/update-inventory-transaction.dto';
+import { appendInventoryTransactionItemSchema } from './dto/append-inventory-transaction-item.dto';
 import {
   requireRoles,
   trustGatewayIdentity,
@@ -36,6 +37,7 @@ const inventoryTransactionSchema = z.object({
   quantity: z.number().int(),
   transactionDate: z.string().datetime(),
   remarks: z.string().nullable(),
+  groupId: z.string().uuid(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });
@@ -49,6 +51,12 @@ const sakhiIdParamsSchema = z
 const transactionIdParamsSchema = z
   .object({
     id: z.string().uuid(),
+  })
+  .strict();
+
+const groupIdParamsSchema = z
+  .object({
+    groupId: z.string().uuid(),
   })
   .strict();
 
@@ -191,6 +199,31 @@ export function registerInventoryRoutes(doc: DocumentedRouter, service: Operatio
     controller.createTransactions,
   );
 
+  doc.post(
+    '/inventory-transactions/:groupId/items',
+    {
+      summary: 'Append a new item line to an existing inventory transaction group',
+      tags: ['Supervisor Operations'],
+      params: groupIdParamsSchema,
+      responses: {
+        201: {
+          description: 'Item appended to the group',
+          schema: envelope(inventoryTransactionSchema),
+        },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller does not have access to this Sakhi', schema: apiErrorSchema },
+        404: { description: 'Transaction group not found', schema: apiErrorSchema },
+        422: { description: 'Referenced item not found or inactive', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(groupIdParamsSchema, 'params'),
+    validateBody(appendInventoryTransactionItemSchema),
+    controller.appendTransactionItem,
+  );
+
   doc.get(
     '/inventory-transactions/:id',
     {
@@ -260,11 +293,18 @@ export function registerInventoryRoutes(doc: DocumentedRouter, service: Operatio
   doc.put(
     '/inventory-transactions/:id',
     {
-      summary: "Edit a transaction's quantity/date/remarks",
+      summary:
+        "Edit a transaction's quantity/date/remarks/type. Changing type or date " +
+        'also updates every other item in the same transaction group, since they ' +
+        "describe the group's shared event, not just this one row.",
       tags: ['Supervisor Operations'],
       params: transactionIdParamsSchema,
       responses: {
-        200: { description: 'Transaction updated', schema: envelope(inventoryTransactionSchema) },
+        200: {
+          description:
+            'Transaction updated (and, if type/date changed, so were its group siblings)',
+          schema: envelope(inventoryTransactionSchema),
+        },
         400: { description: 'Validation error', schema: apiErrorSchema },
         401: { description: 'Unauthenticated', schema: apiErrorSchema },
         403: { description: 'Caller role not permitted', schema: apiErrorSchema },
