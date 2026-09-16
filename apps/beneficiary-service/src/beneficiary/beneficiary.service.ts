@@ -24,12 +24,14 @@ import type {
 } from './beneficiary.constants';
 import { buildSearchTokens, evaluateDuplicateMatch } from './beneficiary.duplicate-detection';
 import { computeBmi, withDecryptedName } from './beneficiary.mapper';
+import { generateUniqueId } from './beneficiary.unique-id';
 import type { BeneficiaryListFilters, BeneficiaryRepository } from './beneficiary.repository';
 import type { CreateBeneficiaryInput } from './dto/create-beneficiary.dto';
 import type { UpsertRiskConditionSummaryInput } from './dto/upsert-risk-condition-summary.dto';
 import type { SummaryQueryInput } from './dto/summary-query.dto';
 import type { UpsertSocioDemographicsInput } from './dto/upsert-socio-demographics.dto';
 import {
+  resolveGeographyCodesForBlock,
   resolveHealthBlockIdFromPhc,
   resolvePadaUnits,
   resolveVillageNames,
@@ -1368,6 +1370,15 @@ export class BeneficiaryService {
     // instead of persisting null for every case.
     const healthBlockId = await resolveHealthBlockIdFromPhc(dto.pii.phcId, authorizationHeader);
 
+    // SRS "Unique ID" (docs/Arogya_Sakhi_SRS_v3.0.md:403): State(2)-District(3)-
+    // Block(3)-ID(6). Resolved/generated here — not tolerated (unlike the
+    // best-effort enrichment calls elsewhere in this service) — a beneficiary
+    // is not created at all if its geography codes can't be resolved, since
+    // there is no safe placeholder for a display id used across the app.
+    const geographyCodes = await resolveGeographyCodesForBlock(healthBlockId, authorizationHeader);
+    const uniqueIdSequence = await this.repository.nextUniqueIdSequence();
+    const uniqueId = generateUniqueId(geographyCodes, uniqueIdSequence);
+
     const created = await this.repository.createEnrollment({
       pii: {
         fullNameEnc: encryptPii(fullName),
@@ -1393,6 +1404,7 @@ export class BeneficiaryService {
       },
       case: {
         localCaseUuid: dto.case.localCaseUuid,
+        uniqueId,
         projectId: dto.case.projectId,
         // Always the authenticated caller's own id — dto.case.sakhiId is
         // ignored even if present, so a Sakhi can never enroll a beneficiary

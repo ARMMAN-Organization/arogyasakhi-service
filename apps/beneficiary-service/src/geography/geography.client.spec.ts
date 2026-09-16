@@ -1,4 +1,5 @@
 import {
+  resolveGeographyCodesForBlock,
   resolveHealthBlockIdFromPhc,
   resolvePadaUnits,
   resolveVillageNames,
@@ -147,6 +148,134 @@ describe('resolveHealthBlockIdFromPhc', () => {
     await expect(resolveHealthBlockIdFromPhc('phc-1', 'Bearer test-token')).rejects.toMatchObject({
       status: 422,
     });
+  });
+});
+
+describe('resolveGeographyCodesForBlock', () => {
+  const originalFetch = global.fetch;
+  const fetchMock = jest.fn();
+
+  const activeState = {
+    geographyUnitId: 'state-1',
+    parentId: null,
+    geoType: 'STATE',
+    status: 'ACTIVE',
+    geoCode: 'MH',
+  };
+  const activeDistrict = {
+    geographyUnitId: 'district-1',
+    parentId: 'state-1',
+    geoType: 'DISTRICT',
+    status: 'ACTIVE',
+    geoCode: 'NANDURBAR',
+  };
+  const activeBlockWithCode = {
+    ...activeBlock,
+    geoCode: 'DHADGAON',
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    global.fetch = fetchMock as unknown as typeof fetch;
+  });
+
+  afterAll(() => {
+    global.fetch = originalFetch;
+  });
+
+  it('resolves the State/District/Block geoCode triple, walking parentId up from the Block', async () => {
+    fetchMock
+      .mockResolvedValueOnce(unitResponse(activeBlockWithCode))
+      .mockResolvedValueOnce(unitResponse(activeDistrict))
+      .mockResolvedValueOnce(unitResponse(activeState));
+
+    const result = await resolveGeographyCodesForBlock('block-1', 'Bearer test-token');
+
+    expect(result).toEqual({ stateCode: 'MH', districtCode: 'NANDURBAR', blockCode: 'DHADGAON' });
+  });
+
+  it('throws 422 when the resolved unit is not BLOCK-level', async () => {
+    fetchMock.mockResolvedValue(unitResponse({ ...activeBlockWithCode, geoType: 'PHC' }));
+
+    await expect(
+      resolveGeographyCodesForBlock('block-1', 'Bearer test-token'),
+    ).rejects.toMatchObject({ status: 422 });
+  });
+
+  it('throws 422 when the Block has no geoCode set', async () => {
+    fetchMock.mockResolvedValue(unitResponse({ ...activeBlockWithCode, geoCode: null }));
+
+    await expect(
+      resolveGeographyCodesForBlock('block-1', 'Bearer test-token'),
+    ).rejects.toMatchObject({ status: 422 });
+  });
+
+  it('throws 422 when the District parent is missing', async () => {
+    fetchMock.mockResolvedValue(unitResponse({ ...activeBlockWithCode, parentId: null }));
+
+    await expect(
+      resolveGeographyCodesForBlock('block-1', 'Bearer test-token'),
+    ).rejects.toMatchObject({ status: 422 });
+  });
+
+  it('throws 422 when the District parent is not DISTRICT-level', async () => {
+    fetchMock
+      .mockResolvedValueOnce(unitResponse(activeBlockWithCode))
+      .mockResolvedValueOnce(unitResponse({ ...activeDistrict, geoType: 'BLOCK' }));
+
+    await expect(
+      resolveGeographyCodesForBlock('block-1', 'Bearer test-token'),
+    ).rejects.toMatchObject({ status: 422 });
+  });
+
+  it('throws 422 when the District has no geoCode set', async () => {
+    fetchMock
+      .mockResolvedValueOnce(unitResponse(activeBlockWithCode))
+      .mockResolvedValueOnce(unitResponse({ ...activeDistrict, geoCode: null }));
+
+    await expect(
+      resolveGeographyCodesForBlock('block-1', 'Bearer test-token'),
+    ).rejects.toMatchObject({ status: 422 });
+  });
+
+  it('throws 422 when the State parent is missing', async () => {
+    fetchMock
+      .mockResolvedValueOnce(unitResponse(activeBlockWithCode))
+      .mockResolvedValueOnce(unitResponse({ ...activeDistrict, parentId: null }));
+
+    await expect(
+      resolveGeographyCodesForBlock('block-1', 'Bearer test-token'),
+    ).rejects.toMatchObject({ status: 422 });
+  });
+
+  it('throws 422 when the State parent is not STATE-level', async () => {
+    fetchMock
+      .mockResolvedValueOnce(unitResponse(activeBlockWithCode))
+      .mockResolvedValueOnce(unitResponse(activeDistrict))
+      .mockResolvedValueOnce(unitResponse({ ...activeState, geoType: 'DISTRICT' }));
+
+    await expect(
+      resolveGeographyCodesForBlock('block-1', 'Bearer test-token'),
+    ).rejects.toMatchObject({ status: 422 });
+  });
+
+  it('throws 422 when the State has no geoCode set', async () => {
+    fetchMock
+      .mockResolvedValueOnce(unitResponse(activeBlockWithCode))
+      .mockResolvedValueOnce(unitResponse(activeDistrict))
+      .mockResolvedValueOnce(unitResponse({ ...activeState, geoCode: null }));
+
+    await expect(
+      resolveGeographyCodesForBlock('block-1', 'Bearer test-token'),
+    ).rejects.toMatchObject({ status: 422 });
+  });
+
+  it('throws 502 when the auth-service call fails with a 5xx', async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 500 });
+
+    await expect(
+      resolveGeographyCodesForBlock('block-1', 'Bearer test-token'),
+    ).rejects.toMatchObject({ status: 502 });
   });
 });
 

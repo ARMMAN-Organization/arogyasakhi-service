@@ -11,6 +11,7 @@ interface GeographyUnit {
   geoType: 'STATE' | 'DISTRICT' | 'BLOCK' | 'PHC' | 'SUBCENTRE' | 'VILLAGE' | 'PADA';
   status: 'ACTIVE' | 'INACTIVE';
   name: string;
+  geoCode: string | null;
 }
 
 /** Fetches one geography unit through the gateway, mapping transport/HTTP
@@ -92,6 +93,75 @@ export async function resolveHealthBlockIdFromPhc(
   }
 
   return parent.geographyUnitId;
+}
+
+/**
+ * Resolves the State/District/Block geoCode triple for the SRS "Unique ID"
+ * field (State(2)-District(3)-Block(3)-ID(6), see generateUniqueId.ts), given
+ * a Health Block's geographyUnitId. Walks Block -> District -> State via
+ * parentId, verifying each level's geoType as it goes (same defensive pattern
+ * as resolveHealthBlockIdFromPhc — a geography_units.parent_id data-entry
+ * error surfaces as a 422, not a wrong/silent code).
+ *
+ * A null geoCode at any level throws rather than falling back to a derived
+ * value (e.g. truncating `name`) — a beneficiary's Unique ID must be sourced
+ * from a real geoCode, not a guess, per product decision. The fix for a null
+ * geoCode is an ADMIN setting one on that geography unit, not a client-side
+ * workaround.
+ */
+export async function resolveGeographyCodesForBlock(
+  healthBlockId: string,
+  authorizationHeader: string,
+): Promise<{ stateCode: string; districtCode: string; blockCode: string }> {
+  const block = await fetchGeographyUnit(
+    healthBlockId,
+    authorizationHeader,
+    'The Health Block resolved for this beneficiary does not exist.',
+  );
+  if (block.geoType !== 'BLOCK') {
+    throw unprocessable('The resolved healthBlockId is not a Health Block (BLOCK) unit.');
+  }
+  if (!block.geoCode) {
+    throw unprocessable(
+      `Cannot generate a Unique ID: the Health Block "${block.name}" has no geoCode set.`,
+    );
+  }
+  if (!block.parentId) {
+    throw unprocessable('The Health Block has no parent District on record.');
+  }
+
+  const district = await fetchGeographyUnit(
+    block.parentId,
+    authorizationHeader,
+    'The District referenced by the Health Block does not exist.',
+  );
+  if (district.geoType !== 'DISTRICT') {
+    throw unprocessable('The parent of the Health Block is not a District unit.');
+  }
+  if (!district.geoCode) {
+    throw unprocessable(
+      `Cannot generate a Unique ID: the District "${district.name}" has no geoCode set.`,
+    );
+  }
+  if (!district.parentId) {
+    throw unprocessable('The District has no parent State on record.');
+  }
+
+  const state = await fetchGeographyUnit(
+    district.parentId,
+    authorizationHeader,
+    'The State referenced by the District does not exist.',
+  );
+  if (state.geoType !== 'STATE') {
+    throw unprocessable('The parent of the District is not a State unit.');
+  }
+  if (!state.geoCode) {
+    throw unprocessable(
+      `Cannot generate a Unique ID: the State "${state.name}" has no geoCode set.`,
+    );
+  }
+
+  return { stateCode: state.geoCode, districtCode: district.geoCode, blockCode: block.geoCode };
 }
 
 /**

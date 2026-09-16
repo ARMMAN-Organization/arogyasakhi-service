@@ -4,6 +4,7 @@ import { BeneficiaryService } from './beneficiary.service';
 import type { BeneficiaryRepository } from './beneficiary.repository';
 import type { CreateBeneficiaryInput } from './dto/create-beneficiary.dto';
 import {
+  resolveGeographyCodesForBlock,
   resolveHealthBlockIdFromPhc,
   resolvePadaUnits,
   resolveVillageNames,
@@ -38,6 +39,7 @@ describe('BeneficiaryService', () => {
     findOwnershipById: jest.fn(),
     findByLocalCaseUuid: jest.fn(),
     findDuplicateCandidate: jest.fn(),
+    nextUniqueIdSequence: jest.fn(),
     createEnrollment: jest.fn(),
     updateMotherLmp: jest.fn(),
     updatePhase: jest.fn(),
@@ -58,6 +60,7 @@ describe('BeneficiaryService', () => {
   const CALLER_ID = '99999999-9999-9999-9999-999999999999';
   const AUTH_HEADER = 'Bearer test-token';
   const resolveHealthBlockIdFromPhcMock = jest.mocked(resolveHealthBlockIdFromPhc);
+  const resolveGeographyCodesForBlockMock = jest.mocked(resolveGeographyCodesForBlock);
   const resolveLookupValuesMock = jest.mocked(resolveLookupValues);
   const listSakhiIdsForSupervisorMock = jest.mocked(listSakhiIdsForSupervisor);
   const listSakhiNamesForSupervisorMock = jest.mocked(listSakhiNamesForSupervisor);
@@ -139,6 +142,12 @@ describe('BeneficiaryService', () => {
     process.env.PII_ENCRYPTION_KEY = randomBytes(32).toString('base64');
     process.env.PII_SEARCH_HASH_KEY = randomBytes(32).toString('base64');
     resolveHealthBlockIdFromPhcMock.mockResolvedValue('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+    resolveGeographyCodesForBlockMock.mockResolvedValue({
+      stateCode: 'MH',
+      districtCode: 'NANDURBAR',
+      blockCode: 'DHADGAON',
+    });
+    repository.nextUniqueIdSequence.mockResolvedValue(1n);
     resolveLookupValuesMock.mockResolvedValue({});
     resolveProjectNamesMock.mockResolvedValue(new Map());
     resolveVillageNamesMock.mockResolvedValue(new Map());

@@ -9,6 +9,7 @@ describe('BeneficiaryRepository', () => {
   const childCaseDetailsUpdateMany = jest.fn();
   const consentRecordUpdateMany = jest.fn();
   const $transaction = jest.fn((ops: unknown[]) => Promise.all(ops));
+  const $queryRaw = jest.fn();
   const prisma = {
     beneficiaryCase: { groupBy, findMany, updateMany: beneficiaryCaseUpdateMany },
     beneficiaryPii: { updateMany: beneficiaryPiiUpdateMany },
@@ -16,6 +17,7 @@ describe('BeneficiaryRepository', () => {
     childCaseDetails: { updateMany: childCaseDetailsUpdateMany },
     consentRecord: { updateMany: consentRecordUpdateMany },
     $transaction,
+    $queryRaw,
   } as never;
   let repository: BeneficiaryRepository;
 
@@ -23,6 +25,16 @@ describe('BeneficiaryRepository', () => {
     jest.clearAllMocks();
     $transaction.mockImplementation((ops: unknown[]) => Promise.all(ops));
     repository = new BeneficiaryRepository(prisma);
+  });
+
+  describe('nextUniqueIdSequence', () => {
+    it("returns the sequence's nextval as a bigint", async () => {
+      $queryRaw.mockResolvedValue([{ nextval: 42n }]);
+
+      const result = await repository.nextUniqueIdSequence();
+
+      expect(result).toBe(42n);
+    });
   });
 
   describe('countByCaseType', () => {

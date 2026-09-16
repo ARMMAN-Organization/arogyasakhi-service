@@ -173,6 +173,7 @@ const consentRecordSchema = z.object({
 const beneficiaryCaseSchema = z.object({
   id: z.string().uuid(),
   localCaseUuid: z.string(),
+  uniqueId: z.string(),
   piiId: z.string().uuid(),
   projectId: z.string().uuid(),
   sakhiId: z.string().uuid(),
