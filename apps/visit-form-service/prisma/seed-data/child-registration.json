@@ -765,6 +765,18 @@
       "question_code": "did_the_baby_have_any_complications_at_the_time_of_birth"
     },
     {
+      "label": "If other, specify",
+      "section": "Personal Info",
+      "required": true,
+      "input_type": "text",
+      "question_code": "did_the_baby_have_any_complications_at_the_time_of_birth_other_specify",
+      "visibleWhen": {
+        "field": "did_the_baby_have_any_complications_at_the_time_of_birth",
+        "operator": "contains",
+        "value": "other_please_specify"
+      }
+    },
+    {
       "label": "Is mother alive?",
       "options": [
         {
@@ -1027,6 +1039,13 @@
         "opv_date": "opv_date",
         "hepatitis_b_date": "hepatitis_b_date",
         "vitamin_k_date": "vitamin_k_date"
+      }
+    },
+    {
+      "rule": "REQUIRED_IF_SELECTED",
+      "field": "did_the_baby_have_any_complications_at_the_time_of_birth",
+      "optionFieldMap": {
+        "other_please_specify": "did_the_baby_have_any_complications_at_the_time_of_birth_other_specify"
       }
     }
   ]

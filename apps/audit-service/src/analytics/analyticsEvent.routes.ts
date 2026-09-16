@@ -6,7 +6,10 @@ import {
   MAX_BATCH_EVENTS,
   createAnalyticsEventBatchSchema,
 } from './dto/create-analytics-event.dto';
-import { listAnalyticsEventsQuerySchema } from './dto/list-analytics-events-query.dto';
+import {
+  listAnalyticsEventsQueryObjectSchema,
+  listAnalyticsEventsQuerySchema,
+} from './dto/list-analytics-events-query.dto';
 import {
   requireRoles,
   trustGatewayIdentity,
@@ -151,6 +154,13 @@ export function registerAnalyticsEventRoutes(
         401: { description: 'Unauthenticated', schema: apiErrorSchema },
         403: { description: 'Caller role not permitted', schema: apiErrorSchema },
       },
+      // Explicit override: the real runtime schema (below) is a ZodEffects
+      // (wrapped in `.refine()`), which zod-to-openapi's query-param walker
+      // cannot introspect the same way as a plain object — same pattern as
+      // visit-form-service's visitHistoryQuerySchema doc override in
+      // visitInstance.routes.ts. Documents the same fields; validate() still
+      // enforces the full refined schema at runtime, unaffected by this.
+      query: listAnalyticsEventsQueryObjectSchema,
     },
     trustGatewayIdentity,
     requireRoles('SYSTEM'),

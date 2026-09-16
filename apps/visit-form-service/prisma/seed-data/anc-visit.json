@@ -1283,7 +1283,7 @@
         }
       },
       "visibleWhen": {
-        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "field": "have_you_done_usg_since_last_visit",
         "operator": "eq",
         "value": "yes"
       },
@@ -1317,7 +1317,7 @@
       "required": true,
       "input_type": "select",
       "visibleWhen": {
-        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "field": "have_you_done_usg_since_last_visit",
         "operator": "eq",
         "value": "yes"
       },
@@ -1341,7 +1341,7 @@
       "required": true,
       "input_type": "select",
       "visibleWhen": {
-        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "field": "have_you_done_usg_since_last_visit",
         "operator": "eq",
         "value": "yes"
       },
