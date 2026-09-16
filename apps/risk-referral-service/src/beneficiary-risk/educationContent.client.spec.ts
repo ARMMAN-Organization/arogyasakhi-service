@@ -32,10 +32,14 @@ describe('resolveEducationContent', () => {
     const result = await resolveEducationContent('COMING_SOON', AUTH_HEADER);
 
     expect(result).toEqual({
+      id: null,
       topicCode: 'COMING_SOON',
       topicName: 'Content coming soon',
+      bodyEn: null,
+      bodyMarathi: null,
       mediaType: 'QNA_TEXT',
       contentUrl: null,
+      mediaResolvedUrl: null,
     });
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining('/learn-more/topics/COMING_SOON'),
@@ -43,7 +47,7 @@ describe('resolveEducationContent', () => {
     );
   });
 
-  it('strips undeclared fields (id, sortOrder) from the upstream response', async () => {
+  it("ignores the upstream response's own id/sortOrder — id, bodyEn, and bodyMarathi are always null for this Learn More topic, not sourced from the response", async () => {
     fetchMock.mockResolvedValue({
       ok: true,
       status: 200,
@@ -62,12 +66,15 @@ describe('resolveEducationContent', () => {
     const result = await resolveEducationContent('COMING_SOON', AUTH_HEADER);
 
     expect(result).toEqual({
+      id: null,
       topicCode: 'COMING_SOON',
       topicName: 'Content coming soon',
+      bodyEn: null,
+      bodyMarathi: null,
       mediaType: 'QNA_TEXT',
       contentUrl: null,
+      mediaResolvedUrl: null,
     });
-    expect(result).not.toHaveProperty('id');
     expect(result).not.toHaveProperty('sortOrder');
   });
 

@@ -16,14 +16,17 @@ type AssessmentWithFlagsRow = Awaited<
 
 /**
  * RiskCondition.conditionCode -> HealthEducationMessage.conditionLabel, for
- * the 5 SRS-specified "as soon as detected" risk-graded conditions
- * (docs/Revised_App_Form_Final_20.3.26.xlsx.md, "Health education message"
- * table, rows 1-5) that ARMMAN's delivered content actually covers. A flag
- * whose conditionCode isn't listed here falls back to the COMING_SOON
+ * every conditionCode with a confident, verified match to ARMMAN's
+ * delivered content: the 5 SRS-specified "as soon as detected" risk-graded
+ * conditions (docs/Revised_App_Form_Final_20.3.26.xlsx.md, "Health
+ * education message" table, rows 1-5), plus DANGER_SIGNS and
+ * INFANT_DANGER_SIGNS (see their own comment below for why those two are
+ * suppressed rather than actually returned here). A flag whose
+ * conditionCode isn't listed here falls back to the COMING_SOON
  * placeholder, same as before this map existed — this is additive, not a
- * replacement for every condition. Every other condition in that same SRS
- * table (Danger Signs, Neonatal Care, POSTPARTUM Counselling, etc.) is
- * stage-based rather than risk-graded and is served by visit-form-service's
+ * replacement for every condition. Most other conditions in that same SRS
+ * table (Neonatal Care, POSTPARTUM Counselling, etc.) are stage-based
+ * rather than risk-graded and are served by visit-form-service's
  * health-education stage resolver instead — see that resolver's own doc
  * comment for why those don't belong in this map.
  */
@@ -33,7 +36,35 @@ const CONDITION_CODE_TO_LABEL: Record<string, string> = {
   HYPERGLYCEMIA: 'Gestational Diabetes',
   GESTATIONAL_WEIGHT_GAIN: 'Inadequate Gestational weight gain',
   BAD_OBSTETRIC_HISTORY: 'Previous pregnancy complication',
+  // These two DO have a confident, verified content match (DANGER_SIGNS ->
+  // "Danger Signs during Pregnancy", INFANT_DANGER_SIGNS -> "Infant Care:
+  // Danger Signs" — same clinical checklist the rule pack itself grades
+  // from), unlike every other unmapped conditionCode, where no confident
+  // match exists and none should be guessed. Listed here for
+  // documentation/traceability of that match, but
+  // SUPPRESS_RISK_TRIGGERED_EDUCATION below makes resolveMappedContent
+  // return [] for both rather than their mapped content — see that set's
+  // own comment for why.
+  DANGER_SIGNS: 'Danger Signs during Pregnancy',
+  INFANT_DANGER_SIGNS: 'Infant Care: Danger Signs',
 };
+
+/**
+ * conditionCodes whose HealthEducationMessage content is already shown to
+ * the Sakhi unconditionally via visit-form-service's stage-based resolver
+ * (healthEducationStage.resolver.ts's UNCONDITIONAL_STAGES_BY_FORM —
+ * "Show this for all the ANC visits" / "All INC visit") on every relevant
+ * visit, regardless of whether a risk flag fires. Both entries also grade
+ * away from NORMAL whenever any danger sign is recorded (rules-service's
+ * generic `isEducationTrigger: grade !== 'NORMAL'` default —
+ * anc-risk.rulesJson.ts / infant-risk.rulesJson.ts have no per-condition
+ * override for these two), so a flagged visit would otherwise show the
+ * exact same message twice: once from the stage path, once again here.
+ * Resolving to `[]` (not the COMING_SOON placeholder — real content DOES
+ * exist, it's just already been shown) avoids that duplicate without
+ * losing the underlying condition/content link this map now records.
+ */
+const SUPPRESS_RISK_TRIGGERED_EDUCATION = new Set(['DANGER_SIGNS', 'INFANT_DANGER_SIGNS']);
 
 /**
  * The exact seeded `stage` string that marks the PP-phase message, for each
@@ -134,6 +165,8 @@ export class BeneficiaryRiskService {
       conditionCode: string,
       riskPhase: string | null,
     ): Promise<EducationContent[]> {
+      if (SUPPRESS_RISK_TRIGGERED_EDUCATION.has(conditionCode)) return Promise.resolve([]);
+
       const conditionLabel = CONDITION_CODE_TO_LABEL[conditionCode];
       if (!conditionLabel) return Promise.resolve(comingSoonContent ? [comingSoonContent] : []);
 
@@ -158,10 +191,17 @@ export class BeneficiaryRiskService {
 
         return sorted.length > 0
           ? sorted.map((m) => ({
+              id: m.id,
               topicCode: conditionCode,
               topicName: m.titleEn ?? m.conditionLabel,
+              bodyEn: m.bodyEn,
+              bodyMarathi: m.bodyMarathi,
               mediaType: m.mediaType,
               contentUrl: m.mediaFile,
+              // Resolved via cms-content-service's POST /health-education/media-sync
+              // (Strapi-backed) — null until that admin-triggered sync has run
+              // and found a matching entry for this message's mediaFile.
+              mediaResolvedUrl: m.mediaResolvedUrl,
             }))
           : comingSoonContent
             ? [comingSoonContent]

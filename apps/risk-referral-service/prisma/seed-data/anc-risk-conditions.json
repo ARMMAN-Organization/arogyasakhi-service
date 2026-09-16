@@ -1,6 +1,7 @@
 [
   {
     "conditionCode": "AGE",
+    "id": "57801fcd-7c33-5bc2-ae76-5930ef1e1dbf",
     "conditionName": "Underage/Overage",
     "gradeScale": "BINARY",
     "referralRequiredDefault": true,
@@ -8,6 +9,7 @@
   },
   {
     "conditionCode": "MUAC_BMI",
+    "id": "4f6be5a6-fb68-5755-8027-47c3cc0d1009",
     "conditionName": "MUAC/BMI",
     "gradeScale": "BINARY",
     "referralRequiredDefault": true,
@@ -15,6 +17,7 @@
   },
   {
     "conditionCode": "STUNTING",
+    "id": "40f9862e-44da-581d-8658-56e47db838d5",
     "conditionName": "Stunting (height)",
     "gradeScale": "BINARY",
     "referralRequiredDefault": true,
@@ -22,6 +25,7 @@
   },
   {
     "conditionCode": "BAD_OBSTETRIC_HISTORY",
+    "id": "6c8e7b79-d127-552d-a1d2-12bfde79ce63",
     "conditionName": "Bad Obstetric History",
     "gradeScale": "BINARY",
     "referralRequiredDefault": true,
@@ -29,6 +33,7 @@
   },
   {
     "conditionCode": "ANEMIA",
+    "id": "7c6c845d-19cb-5320-9128-d2e9583b7252",
     "conditionName": "Anemia",
     "gradeScale": "NORMAL_MILD_MODERATE_SEVERE",
     "referralRequiredDefault": true,
@@ -36,6 +41,7 @@
   },
   {
     "conditionCode": "HYPERTENSION",
+    "id": "d5c8b3ff-6f44-5474-9923-75b385b9cb51",
     "conditionName": "Hypertension",
     "gradeScale": "NORMAL_MILD_MODERATE_SEVERE",
     "referralRequiredDefault": true,
@@ -43,6 +49,7 @@
   },
   {
     "conditionCode": "HYPOTENSION",
+    "id": "2adb8f15-3e55-5f8a-a1be-ce9ec957e568",
     "conditionName": "Hypotension",
     "gradeScale": "BINARY",
     "referralRequiredDefault": false,
@@ -50,6 +57,7 @@
   },
   {
     "conditionCode": "HYPERGLYCEMIA",
+    "id": "0aade715-23fe-505d-ab35-51e82373b656",
     "conditionName": "Hyperglycemia",
     "gradeScale": "BINARY",
     "referralRequiredDefault": true,
@@ -57,6 +65,7 @@
   },
   {
     "conditionCode": "HYPOGLYCEMIA",
+    "id": "55e08dd5-7770-53e8-b79b-6dfe934f7499",
     "conditionName": "Hypoglycemia",
     "gradeScale": "BINARY",
     "referralRequiredDefault": false,
@@ -64,6 +73,7 @@
   },
   {
     "conditionCode": "APH",
+    "id": "1b1d39b8-671d-534b-8b57-d87c9551d64b",
     "conditionName": "Antepartum Hemorrhage (APH)",
     "gradeScale": "BINARY",
     "referralRequiredDefault": true,
@@ -71,6 +81,7 @@
   },
   {
     "conditionCode": "PPH",
+    "id": "0f5f21ef-a577-53fc-9c64-6af8e1c97212",
     "conditionName": "Postpartum Hemorrhage (PPH)",
     "gradeScale": "BINARY",
     "referralRequiredDefault": false,
@@ -78,6 +89,7 @@
   },
   {
     "conditionCode": "HYPOTHERMIA",
+    "id": "19be63f9-4057-59ce-82ba-07498419d0f8",
     "conditionName": "Hypothermia",
     "gradeScale": "BINARY",
     "referralRequiredDefault": false,
@@ -85,6 +97,7 @@
   },
   {
     "conditionCode": "HYPERTHERMIA",
+    "id": "61cd41b0-94f7-577f-9336-671b70d5c060",
     "conditionName": "Hyperthermia",
     "gradeScale": "BINARY",
     "referralRequiredDefault": true,
@@ -92,6 +105,7 @@
   },
   {
     "conditionCode": "FETAL_HEART_RATE",
+    "id": "a6d82ba3-8344-599b-be8f-f5fc193c87fc",
     "conditionName": "Fetal Heart Rate (abnormal)",
     "gradeScale": "BINARY",
     "referralRequiredDefault": true,
@@ -99,6 +113,7 @@
   },
   {
     "conditionCode": "FUNDAL_HEIGHT",
+    "id": "35f5b03a-1a97-53bc-89aa-cb80905b5b06",
     "conditionName": "Fundal Height (deviation)",
     "gradeScale": "BINARY",
     "referralRequiredDefault": true,
@@ -106,6 +121,7 @@
   },
   {
     "conditionCode": "GESTATIONAL_WEIGHT_GAIN",
+    "id": "ea63c389-4599-51a7-ada1-d31427aa5388",
     "conditionName": "Poor Gestational Weight Gain",
     "gradeScale": "BINARY",
     "referralRequiredDefault": true,
@@ -113,6 +129,7 @@
   },
   {
     "conditionCode": "JAUNDICE",
+    "id": "f984d66c-5bb1-56d2-8d49-3818dd96012e",
     "conditionName": "Jaundice",
     "gradeScale": "BINARY",
     "referralRequiredDefault": true,
@@ -120,6 +137,7 @@
   },
   {
     "conditionCode": "URINE_ANALYSIS",
+    "id": "ece033e0-893e-5a76-949e-4ae7ffa8faa9",
     "conditionName": "Urine Analysis (abnormal)",
     "gradeScale": "BINARY",
     "referralRequiredDefault": true,
@@ -127,6 +145,7 @@
   },
   {
     "conditionCode": "DANGER_SIGNS",
+    "id": "77f07525-ace0-54f7-a3f1-54e265c72053",
     "conditionName": "Danger Signs",
     "gradeScale": "BINARY",
     "referralRequiredDefault": true,
@@ -134,6 +153,7 @@
   },
   {
     "conditionCode": "SICKLE_CELL_DISEASE",
+    "id": "775ca134-4250-50f7-b47c-99fffacdefa4",
     "conditionName": "Sickle Cell Disease (SCD)",
     "gradeScale": "BINARY",
     "referralRequiredDefault": true,

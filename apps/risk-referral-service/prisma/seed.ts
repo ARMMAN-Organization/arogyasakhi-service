@@ -60,6 +60,17 @@ interface RiskParameterSeed {
 
 interface AncRiskConditionSeed {
   conditionCode: string;
+  // Fixed UUIDv5, deterministic from conditionCode (namespace
+  // a3f7c9e2-8b4d-4e1a-9c6f-2d8e5b1a7f30) — NOT Prisma's random
+  // @default(uuid()). Lets any other service (e.g. cms-content-service's
+  // HealthEducationMessage.riskConditionId) hardcode a real, stable
+  // cross-environment reference to this row instead of resolving it by
+  // conditionCode string-matching in application code. Never change an
+  // existing code's id once any environment has consumed it as a foreign
+  // reference elsewhere — see seedRiskConditions' backfillFixedId step,
+  // which corrects any row seeded before this field existed, but only ever
+  // moves a row's id to the one value in this file, never off it again.
+  id: string;
   conditionName: string;
   gradeScale: 'BINARY' | 'NORMAL_MILD_MODERATE_SEVERE' | 'NORMAL_LOW_MEDIUM_HIGH';
   // Reference/display-only — see schema.prisma's RiskCondition doc comment.
@@ -278,15 +289,36 @@ async function seedRiskConditions(
   stepName: string,
 ): Promise<SeedResult> {
   let createdCount = 0;
+  let backfilledIdCount = 0;
 
   for (const condition of items) {
     const existing = await prisma.riskCondition.findUnique({
       where: { conditionCode: condition.conditionCode },
     });
-    if (existing) continue;
+    if (existing) {
+      // Row predates the fixed-id field being added to this seed data —
+      // correct it in place so every environment converges on the same id,
+      // the same one-time move seedPlaceholderContent() below already makes
+      // for its own row. Safe: conditionCode is the @unique lookup key, not
+      // id, so nothing else in this function depends on id staying put
+      // across this update. Anything outside this repo that already stored
+      // the OLD random id as a foreign reference (there should be none yet —
+      // this is the first release wiring any cross-service consumer to it)
+      // would need its own follow-up backfill; not a concern this seed
+      // script can see or fix from here.
+      if (existing.id !== condition.id) {
+        await prisma.riskCondition.update({
+          where: { conditionCode: condition.conditionCode },
+          data: { id: condition.id },
+        });
+        backfilledIdCount += 1;
+      }
+      continue;
+    }
 
     await prisma.riskCondition.create({
       data: {
+        id: condition.id,
         conditionCode: condition.conditionCode,
         conditionName: condition.conditionName,
         entityType,
@@ -300,11 +332,11 @@ async function seedRiskConditions(
     createdCount += 1;
   }
 
-  if (createdCount === 0) {
+  if (createdCount === 0 && backfilledIdCount === 0) {
     return {
       step: stepName,
       created: false,
-      message: `All ${stepName.replace(/-/g, ' ')} rows already present — skipped.`,
+      message: `All ${stepName.replace(/-/g, ' ')} rows already present with the fixed id — skipped.`,
     };
   }
   return {

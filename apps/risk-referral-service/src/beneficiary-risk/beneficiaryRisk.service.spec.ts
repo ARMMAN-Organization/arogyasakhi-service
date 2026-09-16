@@ -274,10 +274,14 @@ describe('BeneficiaryRiskService', () => {
 
     it('attaches the COMING_SOON placeholder to a flag with isEducationTrigger true whose condition is unmapped', async () => {
       const COMING_SOON = {
+        id: null,
         topicCode: 'COMING_SOON',
         topicName: 'Content coming soon',
+        bodyEn: null,
+        bodyMarathi: null,
         mediaType: 'QNA_TEXT',
         contentUrl: null,
+        mediaResolvedUrl: null,
       };
       resolveEducationContentMock.mockResolvedValue(COMING_SOON);
       repository.findStateSnapshots.mockResolvedValue([]);
@@ -344,10 +348,14 @@ describe('BeneficiaryRiskService', () => {
 
     it('resolves COMING_SOON only once even with multiple triggered flags across assessments, for an unmapped condition', async () => {
       const COMING_SOON = {
+        id: null,
         topicCode: 'COMING_SOON',
         topicName: 'Content coming soon',
+        bodyEn: null,
+        bodyMarathi: null,
         mediaType: 'QNA_TEXT',
         contentUrl: null,
+        mediaResolvedUrl: null,
       };
       resolveEducationContentMock.mockResolvedValue(COMING_SOON);
       repository.findStateSnapshots.mockResolvedValue([]);
@@ -383,9 +391,10 @@ describe('BeneficiaryRiskService', () => {
         messageOrder: 1,
         titleEn: 'Understanding Anemia',
         bodyEn: 'Low Hb...',
-        bodyMarathi: '',
+        bodyMarathi: 'कमी एचबी...',
         mediaType: 'TEXT',
         mediaFile: null,
+        mediaResolvedUrl: null,
         sortOrder: 1,
       };
       const anemiaPpMessage = {
@@ -399,6 +408,7 @@ describe('BeneficiaryRiskService', () => {
         bodyMarathi: '',
         mediaType: 'TEXT',
         mediaFile: null,
+        mediaResolvedUrl: null,
         sortOrder: 1,
       };
 
@@ -430,20 +440,44 @@ describe('BeneficiaryRiskService', () => {
         expect(resolveHealthEducationMessagesMock).toHaveBeenCalledWith(label, AUTH_HEADER);
         expect(result.assessments[0].flags[0].educationContent).toEqual([
           {
+            id: 'msg-1',
             topicCode: conditionCode,
             topicName: 'Understanding Anemia',
+            bodyEn: 'Low Hb...',
+            bodyMarathi: 'कमी एचबी...',
             mediaType: 'TEXT',
             contentUrl: null,
+            mediaResolvedUrl: null,
           },
         ]);
       });
 
-      it('regression: does NOT map DANGER_SIGNS or INFANT_DANGER_SIGNS here (they are Group B, stage-based, not risk-graded)', async () => {
+      it('carries non-null bodyEn/bodyMarathi through for real (non-placeholder) content', async () => {
+        resolveHealthEducationMessagesMock.mockResolvedValue([anemiaAncMessage]);
+        repository.findStateSnapshots.mockResolvedValue([]);
+        repository.findAssessmentsWithFlags.mockResolvedValue([
+          assessment({ riskPhase: 'ANC', riskFlags: [mappedFlag('ANEMIA')] }),
+        ] as never);
+
+        const result = await service.getRiskProfile(BENEFICIARY_ID, caller(), AUTH_HEADER);
+
+        const [content] = result.assessments[0].flags[0].educationContent;
+        expect(content.bodyEn).toBe('Low Hb...');
+        expect(content.bodyMarathi).toBe('कमी एचबी...');
+        expect(content.bodyEn).not.toBeNull();
+        expect(content.bodyMarathi).not.toBeNull();
+      });
+
+      it('suppresses DANGER_SIGNS and INFANT_DANGER_SIGNS here to [] (their content is already shown unconditionally via the stage path — see SUPPRESS_RISK_TRIGGERED_EDUCATION)', async () => {
         const COMING_SOON = {
+          id: null,
           topicCode: 'COMING_SOON',
           topicName: 'Content coming soon',
+          bodyEn: null,
+          bodyMarathi: null,
           mediaType: 'QNA_TEXT',
           contentUrl: null,
+          mediaResolvedUrl: null,
         };
         resolveEducationContentMock.mockResolvedValue(COMING_SOON);
         repository.findStateSnapshots.mockResolvedValue([]);
@@ -457,8 +491,11 @@ describe('BeneficiaryRiskService', () => {
         const result = await service.getRiskProfile(BENEFICIARY_ID, caller(), AUTH_HEADER);
 
         expect(resolveHealthEducationMessagesMock).not.toHaveBeenCalled();
-        expect(result.assessments[0].flags[0].educationContent).toEqual([COMING_SOON]);
-        expect(result.assessments[0].flags[1].educationContent).toEqual([COMING_SOON]);
+        // Not COMING_SOON either — real content exists for both, it's just
+        // already delivered elsewhere (visit-form-service's stage path), so
+        // showing it again here (even as a placeholder) would be wrong.
+        expect(result.assessments[0].flags[0].educationContent).toEqual([]);
+        expect(result.assessments[0].flags[1].educationContent).toEqual([]);
       });
 
       it('on an ANC-phase assessment, returns every non-postpartum message for the condition, ordered', async () => {
@@ -472,10 +509,14 @@ describe('BeneficiaryRiskService', () => {
 
         expect(result.assessments[0].flags[0].educationContent).toEqual([
           {
+            id: anemiaAncMessage.id,
             topicCode: 'ANEMIA',
             topicName: anemiaAncMessage.titleEn,
+            bodyEn: anemiaAncMessage.bodyEn,
+            bodyMarathi: anemiaAncMessage.bodyMarathi,
             mediaType: anemiaAncMessage.mediaType,
             contentUrl: null,
+            mediaResolvedUrl: null,
           },
         ]);
       });
@@ -491,10 +532,14 @@ describe('BeneficiaryRiskService', () => {
 
         expect(result.assessments[0].flags[0].educationContent).toEqual([
           {
+            id: anemiaPpMessage.id,
             topicCode: 'ANEMIA',
             topicName: anemiaPpMessage.titleEn,
+            bodyEn: anemiaPpMessage.bodyEn,
+            bodyMarathi: anemiaPpMessage.bodyMarathi,
             mediaType: anemiaPpMessage.mediaType,
             contentUrl: null,
+            mediaResolvedUrl: null,
           },
         ]);
       });
@@ -516,10 +561,14 @@ describe('BeneficiaryRiskService', () => {
 
       it('falls back to COMING_SOON when a mapped condition has zero seeded content rows', async () => {
         const COMING_SOON = {
+          id: null,
           topicCode: 'COMING_SOON',
           topicName: 'Content coming soon',
+          bodyEn: null,
+          bodyMarathi: null,
           mediaType: 'QNA_TEXT',
           contentUrl: null,
+          mediaResolvedUrl: null,
         };
         resolveEducationContentMock.mockResolvedValue(COMING_SOON);
         resolveHealthEducationMessagesMock.mockResolvedValue([]);

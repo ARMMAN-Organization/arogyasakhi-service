@@ -1,6 +1,7 @@
 [
   {
     "conditionCode": "LOW_BIRTH_WEIGHT",
+    "id": "28d9c7c5-1483-5869-9e14-a8ec11307b00",
     "conditionName": "Low Birth Weight",
     "gradeScale": "BINARY",
     "referralRequiredDefault": false,
@@ -8,6 +9,7 @@
   },
   {
     "conditionCode": "WASTING",
+    "id": "2b5c6954-879f-5066-98fa-466c274bf606",
     "conditionName": "Wasting (MUW/SUW/MAM/SAM)",
     "gradeScale": "NORMAL_MILD_MODERATE_SEVERE",
     "referralRequiredDefault": true,
@@ -15,6 +17,7 @@
   },
   {
     "conditionCode": "STUNTING_STATUS",
+    "id": "b14f398d-1afc-58ed-a973-c45b9f74d106",
     "conditionName": "Stunting",
     "gradeScale": "NORMAL_MILD_MODERATE_SEVERE",
     "referralRequiredDefault": true,
@@ -22,6 +25,7 @@
   },
   {
     "conditionCode": "UNDERWEIGHT",
+    "id": "d1758ac0-3cb6-5251-a3d6-1c6c53b4259a",
     "conditionName": "Underweight (MUW/SUW)",
     "gradeScale": "NORMAL_MILD_MODERATE_SEVERE",
     "referralRequiredDefault": true,
@@ -29,6 +33,7 @@
   },
   {
     "conditionCode": "MUAC_MALNUTRITION",
+    "id": "413b3405-ddc6-58d1-b87a-f29a046de840",
     "conditionName": "MAM/SAM (MUAC)",
     "gradeScale": "NORMAL_MILD_MODERATE_SEVERE",
     "referralRequiredDefault": true,
@@ -36,6 +41,7 @@
   },
   {
     "conditionCode": "INFANT_HYPOTHERMIA",
+    "id": "f32d9784-20a4-54b5-9239-aa71e5560443",
     "conditionName": "Hypothermia (Infant)",
     "gradeScale": "NORMAL_MILD_MODERATE_SEVERE",
     "referralRequiredDefault": true,
@@ -43,6 +49,7 @@
   },
   {
     "conditionCode": "INFANT_HYPERTHERMIA",
+    "id": "f0cf79cc-aa5b-50a7-97da-d78868bafcf0",
     "conditionName": "Hyperthermia (Infant)",
     "gradeScale": "NORMAL_MILD_MODERATE_SEVERE",
     "referralRequiredDefault": true,
@@ -50,6 +57,7 @@
   },
   {
     "conditionCode": "CORD_INFECTION",
+    "id": "81772ae1-ee9a-56b8-b0a0-d09a74f8a578",
     "conditionName": "Cord infection / omphalitis",
     "gradeScale": "BINARY",
     "referralRequiredDefault": true,
@@ -57,6 +65,7 @@
   },
   {
     "conditionCode": "RESPIRATORY_DISTRESS",
+    "id": "43be74e1-6c70-575a-b402-c010ca9a2563",
     "conditionName": "Respiratory distress",
     "gradeScale": "BINARY",
     "referralRequiredDefault": true,
@@ -64,6 +73,7 @@
   },
   {
     "conditionCode": "NEURO_DEVELOPMENTAL_STATUS",
+    "id": "9e385aca-d7a9-5c1b-b386-5d04be379e79",
     "conditionName": "Neuro-developmental status",
     "gradeScale": "BINARY",
     "referralRequiredDefault": true,
@@ -71,6 +81,7 @@
   },
   {
     "conditionCode": "INFANT_DANGER_SIGNS",
+    "id": "f5374708-d182-5402-bf56-24001b3ef163",
     "conditionName": "Danger Signs (Infant)",
     "gradeScale": "BINARY",
     "referralRequiredDefault": true,
@@ -78,6 +89,7 @@
   },
   {
     "conditionCode": "FEEDING_ADEQUACY",
+    "id": "0b362453-bbd7-517a-a6b9-4e2361970883",
     "conditionName": "Feeding adequacy",
     "gradeScale": "BINARY",
     "referralRequiredDefault": true,
@@ -85,6 +97,7 @@
   },
   {
     "conditionCode": "ACTIVITY_LEVEL",
+    "id": "e0186fc7-fc64-5316-a935-6a3bbeab7956",
     "conditionName": "Activity level",
     "gradeScale": "NORMAL_MILD_MODERATE_SEVERE",
     "referralRequiredDefault": true,
