@@ -43,7 +43,13 @@
       "required": true,
       "input_type": "radio",
       "question_code": "beneficiary_willing_for_referral",
-      "visibleWhen": { "field": "referral_needed_new_condition", "operator": "eq", "value": "yes" }
+      "visibleWhen": { "field": "referral_needed_new_condition", "operator": "eq", "value": "yes" },
+      "defaultWhen": {
+        "field": "referral_needed_new_condition",
+        "operator": "eq",
+        "value": "no",
+        "defaultValue": "no"
+      }
     },
     {
       "label": "If No, state reasons",

@@ -121,6 +121,31 @@ export function isVisible(field: FormField, formData: Record<string, unknown>): 
 }
 
 /**
+ * Applies each field's `defaultWhen` (see form-field.dto.ts's own doc
+ * comment) to formData, returning a new object — never mutates the input.
+ * A field's value is set to `defaultValue` only when its defaultWhen
+ * condition matches AND the field is currently empty; a value the Sakhi
+ * answered directly always wins. Independent of visibleWhen/isVisible — a
+ * defaulted field's value still participates in every other field's
+ * visibility/required checks exactly like a direct answer would (run this
+ * before isVisible/validateSubmission, not after).
+ */
+export function applyDefaults(
+  fields: FormField[],
+  formData: Record<string, unknown>,
+): Record<string, unknown> {
+  const result = { ...formData };
+  for (const field of fields) {
+    if (!field.defaultWhen) continue;
+    if (!isEmpty(result[field.question_code])) continue;
+    if (evaluateVisibilityCondition(field.defaultWhen, result)) {
+      result[field.question_code] = field.defaultWhen.defaultValue;
+    }
+  }
+  return result;
+}
+
+/**
  * Checks required fields (SRS line 1150), numeric ranges (SRS Category 2),
  * date rules (SRS Category 1), and cross-field consistency (SRS Category 3)
  * against submitted formData. Fields hidden by skip logic (Category 5) are

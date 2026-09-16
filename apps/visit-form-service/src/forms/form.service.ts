@@ -11,7 +11,7 @@ import {
   toApiFormSubmission,
   toApiFormVersion,
 } from './form.mapper';
-import { validateSubmission } from './form-validation';
+import { applyDefaults, validateSubmission } from './form-validation';
 import { getEditableFieldCodes } from './form-answer-edit-allowlist';
 import type { AuditClient } from './audit.client';
 import { syncSocioDemographics } from '../beneficiaries/socio-demographics.client';
@@ -355,6 +355,15 @@ export class FormService {
 
     const fields = schemaJsonSchema.parse(version.schemaJson);
     const crossFieldRules = validationJsonSchema.parse(version.validationJson ?? []);
+    // Applies each field's defaultWhen (form-field.dto.ts) before anything
+    // else touches dto.formData — every downstream read (validation,
+    // persistence, closure/delivery-outcome resolution) sees the defaulted
+    // value exactly like a direct Sakhi answer. See the defaultWhen design
+    // spec (docs/superpowers/specs/2026-09-16-referral-defaultWhen-design.md)
+    // for why this exists: REFERRAL_VISIT's beneficiary_willing_for_referral
+    // needs a real "no" recorded even when the Sakhi is never shown that
+    // question (referral_needed_new_condition = "no" already implies it).
+    dto.formData = applyDefaults(fields, dto.formData);
     // Same reasoning as getActiveVersion's prefilledContext: is_kmc_practiced's
     // visibility must be revalidated server-side against the same derived
     // flag the client was given at form-load time, not against a raw

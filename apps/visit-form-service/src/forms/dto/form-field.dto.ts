@@ -97,6 +97,25 @@ export const formFieldSchema = z
     // not only the two that already had the incident. Re-allow the array
     // shape only once mobile ships a parser for it, not before.
     visibleWhen: visibleWhenConditionSchema.optional(),
+    // Independent of visibleWhen — see this schema's own visibleWhen
+    // comment for why a field can't be shown via two conditions. Instead, a
+    // field that stays hidden (its own visibleWhen condition never fires)
+    // can still contribute a real, submitted answer: when this condition
+    // matches and the field itself is empty, its value defaults to
+    // defaultValue. Never overwrites a value the Sakhi answered directly.
+    // Added for REFERRAL_VISIT's beneficiary_willing_for_referral, whose
+    // "No" answer needs to be reachable even when the field itself is
+    // skipped (referral_needed_new_condition = "no" implies the beneficiary
+    // was never asked, and never willing) — see the defaultWhen design spec
+    // (docs/superpowers/specs/2026-09-16-referral-defaultWhen-design.md).
+    defaultWhen: visibleWhenConditionSchema
+      .extend({
+        defaultValue: z
+          .any()
+          .openapi({ type: 'object' })
+          .refine((v) => v !== undefined, { message: 'defaultValue is required' }),
+      })
+      .optional(),
     computedFrom: z
       .enum([
         'EDD_FROM_LMP',

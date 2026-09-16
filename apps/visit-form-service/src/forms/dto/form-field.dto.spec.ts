@@ -52,6 +52,60 @@ describe('formFieldSchema — visibleWhen', () => {
   });
 });
 
+describe('formFieldSchema — defaultWhen', () => {
+  it('accepts a valid {field,operator,value,defaultValue} condition', () => {
+    const result = formFieldSchema.safeParse(
+      baseField({
+        defaultWhen: {
+          field: 'referral_needed_new_condition',
+          operator: 'eq',
+          value: 'no',
+          defaultValue: 'no',
+        },
+      }),
+    );
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts a field with no defaultWhen at all', () => {
+    const result = formFieldSchema.safeParse(baseField());
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects a defaultWhen missing defaultValue', () => {
+    const result = formFieldSchema.safeParse(
+      baseField({
+        defaultWhen: { field: 'referral_needed_new_condition', operator: 'eq', value: 'no' },
+      }),
+    );
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a defaultWhen missing field/operator', () => {
+    const result = formFieldSchema.safeParse(
+      baseField({
+        defaultWhen: { defaultValue: 'no' },
+      }),
+    );
+    expect(result.success).toBe(false);
+  });
+
+  it('is independent of visibleWhen — a field may declare both', () => {
+    const result = formFieldSchema.safeParse(
+      baseField({
+        visibleWhen: { field: 'beneficiary_willing_for_referral', operator: 'eq', value: 'no' },
+        defaultWhen: {
+          field: 'referral_needed_new_condition',
+          operator: 'eq',
+          value: 'no',
+          defaultValue: 'no',
+        },
+      }),
+    );
+    expect(result.success).toBe(true);
+  });
+});
+
 describe('formFieldSchema — question_code length', () => {
   it('accepts a question_code at exactly 120 characters (form_answers.field_code is VarChar(120))', () => {
     const result = formFieldSchema.safeParse(baseField({ question_code: 'a'.repeat(120) }));

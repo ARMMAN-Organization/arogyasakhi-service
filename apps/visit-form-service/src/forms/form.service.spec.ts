@@ -782,6 +782,64 @@ describe('FormService', () => {
       expect(repository.createSubmission).toHaveBeenCalled();
     });
 
+    it('applies defaultWhen so a REFERRAL_VISIT submission with referral_needed_new_condition=no persists beneficiary_willing_for_referral=no without it being answered', async () => {
+      repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+      repository.findVersionById.mockResolvedValue({
+        ...publishedVersion,
+        formDefinition: { formCode: 'REFERRAL_VISIT' },
+        schemaJson: [
+          {
+            question_code: 'referral_needed_new_condition',
+            label: 'Referral needed as this is a new condition',
+            input_type: 'radio',
+            required: true,
+          },
+          {
+            question_code: 'beneficiary_willing_for_referral',
+            label: 'Is beneficiary willing to go for the referral?',
+            input_type: 'radio',
+            required: true,
+            visibleWhen: { field: 'referral_needed_new_condition', operator: 'eq', value: 'yes' },
+            defaultWhen: {
+              field: 'referral_needed_new_condition',
+              operator: 'eq',
+              value: 'no',
+              defaultValue: 'no',
+            },
+          },
+          {
+            question_code: 'referral_declined_reason',
+            label: 'If No, state reasons',
+            input_type: 'dropdown',
+            required: true,
+            visibleWhen: { field: 'beneficiary_willing_for_referral', operator: 'eq', value: 'no' },
+          },
+        ],
+      } as never);
+      repository.createSubmission.mockResolvedValue({ id: 'sub-1' } as never);
+
+      await service.createSubmission(
+        'REFERRAL_VISIT',
+        {
+          formVersionId: 'version-1',
+          beneficiaryId: 'b1',
+          localSubmissionUuid: 'uuid-1',
+          formData: {
+            referral_needed_new_condition: 'no',
+            referral_declined_reason: 'condition_not_serious_enough',
+          },
+        },
+        'u1',
+        'Bearer test-token',
+      );
+
+      expect(repository.createSubmission).toHaveBeenCalledWith(
+        expect.objectContaining({
+          formDataJson: expect.objectContaining({ beneficiary_willing_for_referral: 'no' }),
+        }),
+      );
+    });
+
     it('skips the required check for a system-computed field', async () => {
       repository.findSubmissionByLocalUuid.mockResolvedValue(null);
       repository.findVersionById.mockResolvedValue({
