@@ -129,4 +129,40 @@ export class BeneficiaryClient {
     const body = (await res.json()) as { data: BeneficiaryCaseDetail };
     return body.data;
   }
+
+  /**
+   * Resolves the bare in-scope beneficiary ids for the caller's own
+   * Sakhi/roster scope, via beneficiary-service's `GET /beneficiaries/ids`
+   * (forwards the caller's own token — beneficiary-service applies its own
+   * SAKHI-own-id / SUPERVISOR-roster / MANAGER-ADMIN-unscoped rule, same as
+   * getById above). `sakhiId` optionally narrows further to one Sakhi
+   * within that scope. Used by closure.service.ts and
+   * reopen-request.service.ts's Data Restore list() methods (FR-SV-4.6) to
+   * filter Closure/ReopenRequest by beneficiaryId, since neither table
+   * carries a sakhiId column of its own.
+   */
+  async getIds(authorizationHeader: string, sakhiId?: string): Promise<string[]> {
+    const url = new URL(`${API_GATEWAY_BASE_URL}/api/v1/beneficiaries/ids`);
+    if (sakhiId) url.searchParams.set('sakhiId', sakhiId);
+
+    let res: Response;
+    try {
+      res = await fetch(url, { headers: { Authorization: authorizationHeader } });
+    } catch {
+      throw badGateway('Unable to resolve beneficiary ids — beneficiary-service is unreachable.');
+    }
+
+    if (!res.ok) {
+      if (res.status >= 400 && res.status < 500) {
+        const body = (await res.json().catch(() => null)) as { message?: string } | null;
+        throw new HttpError(res.status, body?.message ?? 'Unable to resolve beneficiary ids.');
+      }
+      throw badGateway(
+        'Unable to resolve beneficiary ids — beneficiary-service returned an error.',
+      );
+    }
+
+    const body = (await res.json()) as { data: string[] };
+    return body.data;
+  }
 }

@@ -1,5 +1,6 @@
 import { asyncHandler, ok, unauthorized } from '../app.module';
 import type { ReopenRequestService } from './reopen-request.service';
+import type { ListReopenRequestsQueryInput } from './dto/list-reopen-requests.dto';
 
 /**
  * Reopen request handlers. Mounted under the global `api/v1` prefix by
@@ -14,6 +15,14 @@ export function createReopenRequestController(service: ReopenRequestService) {
         req.headers.authorization ?? '',
       );
       res.json(ok(results));
+    }),
+
+    listBySakhi: asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const query = req.query as unknown as ListReopenRequestsQueryInput;
+      res.json(ok(await service.listBySakhi(query, authorizationHeader)));
     }),
 
     getDecisionStatusBatch: asyncHandler(async (req, res) => {

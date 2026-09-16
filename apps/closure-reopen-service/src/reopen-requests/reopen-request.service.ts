@@ -9,6 +9,7 @@ import type { SakhiClient } from './sakhi.client';
 import { resolveSakhiName, resolveQuickResponseCardId } from './decision-notification.helper';
 import type { CreateReopenRequestInput } from './dto/create-reopen-request.dto';
 import type { DecideReopenRequestInput } from './dto/decide-reopen-request.dto';
+import type { ListReopenRequestsQueryInput } from './dto/list-reopen-requests.dto';
 
 /** Narrows a caught Prisma error to a unique-constraint violation (P2002). */
 function isUniqueConstraintViolation(err: unknown): boolean {
@@ -48,6 +49,26 @@ export class ReopenRequestService {
   async listByBeneficiaryId(beneficiaryId: string, authorizationHeader: string) {
     await this.beneficiaryClient.getById(beneficiaryId, authorizationHeader);
     return this.repository.findByBeneficiaryId(beneficiaryId);
+  }
+
+  /**
+   * Cursor-paginated reopen-request list, scoped per the caller's own role
+   * — backs FR-SV-4.6's Data Restore flow (GET /reopen-requests/by-sakhi).
+   * ReopenRequest carries no sakhiId column of its own (only
+   * beneficiaryId), so the in-scope beneficiaryIds are resolved via
+   * beneficiary-service's GET /beneficiaries/ids first, forwarding the
+   * caller's own token — that endpoint applies the exact same
+   * SAKHI-own-id / SUPERVISOR-roster / MANAGER-ADMIN-unscoped rule and
+   * 403s on an out-of-roster sakhiId itself, so this method doesn't
+   * duplicate that scoping logic locally.
+   */
+  async listBySakhi(query: ListReopenRequestsQueryInput, authorizationHeader: string) {
+    const beneficiaryIds = await this.beneficiaryClient.getIds(authorizationHeader, query.sakhiId);
+    return this.repository.findManyPaginated({
+      beneficiaryIds,
+      cursor: query.cursor,
+      limit: query.limit,
+    });
   }
 
   getDecisionStatusByIds(ids: string[]) {

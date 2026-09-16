@@ -6,6 +6,7 @@ import { createReopenRequestSchema } from './dto/create-reopen-request.dto';
 import { decideReopenRequestSchema } from './dto/decide-reopen-request.dto';
 import { decideReopenRequestAliasSchema } from './dto/decide-reopen-request-alias.dto';
 import { decisionStatusQuerySchema } from './dto/decision-status-query.dto';
+import { listReopenRequestsQuerySchema } from './dto/list-reopen-requests.dto';
 import {
   requireRoles,
   trustGatewayIdentity,
@@ -124,6 +125,49 @@ export function registerReopenRequestRoutes(doc: DocumentedRouter, service: Reop
     requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER'),
     validate(listByBeneficiaryQuerySchema, 'query'),
     controller.listByBeneficiaryId,
+  );
+
+  doc.get(
+    '/reopen-requests/by-sakhi',
+    {
+      summary:
+        "Cursor-paginated reopen-request list, scoped by sakhiId — backs FR-SV-4.6's Data " +
+        "Restore flow (a Sakhi's device re-downloading everything scoped to her after a " +
+        'reset/reinstall). ReopenRequest carries no sakhiId column of its own — the in-scope ' +
+        'beneficiaryIds are resolved via beneficiary-service GET /beneficiaries/ids, which ' +
+        "applies the same role-scoping visit-form-service's GET /visits uses: SAKHI always " +
+        'sees only her own reopen requests regardless of the sakhiId query param; SUPERVISOR ' +
+        'sees one roster sakhiId or, if omitted, her whole roster; MANAGER/ADMIN may pass any ' +
+        'sakhiId or omit it for fully unscoped. Excludes soft-deleted rows. Separate from ' +
+        'GET /reopen-requests above (the per-beneficiary variant, which requires a ' +
+        'beneficiaryId query param instead).',
+      tags: ['Reopen Requests'],
+      query: listReopenRequestsQuerySchema,
+      responses: {
+        200: {
+          description: 'Reopen requests retrieved',
+          schema: envelope(
+            z.object({
+              items: z.array(reopenRequestSchema),
+              nextCursor: z.string().nullable().openapi({
+                description:
+                  'Pass back as `cursor` to fetch the next page; null when this is the last page.',
+              }),
+            }),
+          ),
+        },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: {
+          description: "Caller role not permitted, or sakhiId outside the caller's own roster",
+          schema: apiErrorSchema,
+        },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(listReopenRequestsQuerySchema, 'query'),
+    controller.listBySakhi,
   );
 
   doc.get(
