@@ -89,6 +89,7 @@
       "section": "Tests",
       "required": true,
       "input_type": "date",
+      "dateRule": { "notFuture": true },
       "question_code": "lmp",
       "learnMoreTopicCode": "COMING_SOON",
       "visibleWhen": {
