@@ -124,4 +124,26 @@ export class SakhiService {
     }
     return mapped.filter((s) => s.primaryProjectId === caller.projectId);
   }
+
+  /**
+   * CR-XXX: the Sakhi's own currently-active village/pada assignments —
+   * consumed by visit-form-service's `GET /forms/:formCode/active-version`
+   * to union geography ancestor chains across every pada a Sakhi covers,
+   * instead of the single geographyUnitId the JWT carries. Same
+   * "own record only, unless privileged" rule as `getById` — a Sakhi may
+   * fetch their own assignments; SUPERVISOR/MANAGER/ADMIN may fetch any
+   * Sakhi's for their own downstream tooling.
+   */
+  async getActiveLocationAssignments(sakhiId: string, caller: CallerScope, asOf: Date) {
+    if (!isPrivileged(caller) && caller.roles.includes('SAKHI') && caller.id !== sakhiId) {
+      throw forbidden('A Sakhi may only view their own location assignments.');
+    }
+    const rows = await this.repository.findActiveLocationAssignments(sakhiId, asOf);
+    return rows.map((r) => ({
+      villageId: r.villageId,
+      padaId: r.padaId,
+      effectiveFrom: r.effectiveFrom,
+      effectiveTo: r.effectiveTo,
+    }));
+  }
 }

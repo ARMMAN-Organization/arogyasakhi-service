@@ -23,5 +23,19 @@ export function createSakhiController(service: SakhiService) {
       const ids = parseIdsParam(req.query.ids as string);
       res.json(ok(await service.getManyByIds(ids, req.user)));
     }),
+
+    getActiveLocationAssignments: asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const { asOf } = req.query as unknown as { asOf?: Date };
+      res.json(
+        ok(
+          await service.getActiveLocationAssignments(
+            req.params.sakhiId,
+            req.user,
+            asOf ?? new Date(),
+          ),
+        ),
+      );
+    }),
   };
 }

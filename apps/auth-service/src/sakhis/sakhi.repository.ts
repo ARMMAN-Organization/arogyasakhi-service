@@ -29,4 +29,22 @@ export class SakhiRepository {
       include: { user: true },
     });
   }
+
+  /**
+   * A Sakhi's currently-active village/pada assignments (CR-XXX: a Sakhi
+   * covering multiple padas has one `sakhi_location_assignments` row per
+   * pada — the JWT's single `geographyUnitId` claim only ever reflects one
+   * of them, which is why `GET /forms/:formCode/active-version`'s geography
+   * array previously dropped every pada but that one). "Currently active"
+   * means `effectiveFrom <= asOf` and (`effectiveTo` is null or `>= asOf`).
+   */
+  findActiveLocationAssignments(sakhiId: string, asOf: Date) {
+    return this.prisma.sakhiLocationAssignment.findMany({
+      where: {
+        sakhiId,
+        effectiveFrom: { lte: asOf },
+        OR: [{ effectiveTo: null }, { effectiveTo: { gte: asOf } }],
+      },
+    });
+  }
 }

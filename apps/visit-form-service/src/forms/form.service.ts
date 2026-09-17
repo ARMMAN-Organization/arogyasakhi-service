@@ -22,7 +22,8 @@ import { assertCallerOwnsBeneficiary } from '../beneficiaries/beneficiaryOwnersh
 import { createChildBeneficiary } from '../beneficiaries/create-child.client';
 import { updateBeneficiaryPhase } from '../beneficiaries/update-phase.client';
 import { createClosure, resolveClosureReasonLookupId } from '../closures/closure.client';
-import { getAncestorChain } from '../geography/geography.client';
+import { getActiveLocationAssignments, getAncestorChain } from '../geography/geography.client';
+import type { AuthenticatedUser } from '@armman/service-commons';
 import { triggerRiskAssessment } from '../risk-assessments/riskAssessment.client';
 import type { VisitInstanceRepository } from '../visits/visitInstance.repository';
 import { resolveAndWriteCcvOpeningRiskState } from './ccvOpeningRiskState.resolver';
@@ -119,16 +120,17 @@ export class FormService {
   }
 
   /**
-   * `callerGeographyUnitId`/`authorizationHeader` are the caller's own scope
-   * and bearer token (from `req.user`/the inbound request, see
-   * form.controller.ts) — used only to attach the caller's geography chain to
-   * the response, not to scope which form version is returned. Omitted when
-   * the caller has no geographyUnitId assigned.
+   * `caller`/`authorizationHeader` are the caller's own scope and bearer
+   * token (from `req.user`/the inbound request, see form.controller.ts) —
+   * used only to attach the caller's geography chain(s) to the response,
+   * not to scope which form version is returned. Omitted when the caller
+   * has no geographyUnitId assigned and (for a SAKHI) no active location
+   * assignments either.
    */
   async getActiveVersion(
     formCode: string,
     asOf: Date,
-    callerGeographyUnitId: string | null,
+    caller: AuthenticatedUser,
     authorizationHeader: string,
     beneficiaryId?: string,
   ) {
@@ -143,20 +145,63 @@ export class FormService {
           }
         : undefined;
 
-    if (!callerGeographyUnitId) {
+    const geography = await this.resolveCallerGeography(caller, asOf, authorizationHeader);
+    if (geography.length === 0) {
       return prefilledContext ? { ...apiVersion, prefilledContext } : apiVersion;
     }
+    return { ...apiVersion, geography, ...(prefilledContext ? { prefilledContext } : {}) };
+  }
 
-    const chain = await getAncestorChain(callerGeographyUnitId, authorizationHeader);
-    // Only the fields a client needs to map a level onto pii.<level>Id
-    // (geoType) and show to a user (name) — parentId/geoCode/status are
-    // internal/display-only and dropped here.
-    const geography = chain.map((unit) => ({
+  /**
+   * CR-XXX: a SAKHI can cover more than one pada (`sakhi_location_
+   * assignments` — one row per pada), but `caller.geographyUnitId` (the
+   * JWT claim) only ever reflects a single assignment. Resolving the
+   * geography array from that one claim alone silently dropped every pada
+   * but that one. For a SAKHI, this instead fetches every currently-active
+   * assignment, resolves each one's ancestor chain, and unions them by
+   * geographyUnitId — shared levels (state/district/…) collapse to one
+   * row, levels where the padas diverge (pada, and village/block if the
+   * padas span different villages) return one row per distinct unit. Any
+   * other caller (SUPERVISOR/MANAGER/ADMIN), or a SAKHI with zero active
+   * assignments (data not yet migrated — see the auth-service repository
+   * comment), falls back to the single-chain behavior this replaced.
+   */
+  private async resolveCallerGeography(
+    caller: AuthenticatedUser,
+    asOf: Date,
+    authorizationHeader: string,
+  ) {
+    if (caller.roles.includes('SAKHI')) {
+      const assignments = await getActiveLocationAssignments(caller.id, asOf, authorizationHeader);
+      if (assignments.length > 0) {
+        const leafIds = assignments.map((a) => a.padaId ?? a.villageId);
+        const chains = await Promise.all(
+          leafIds.map((id) => getAncestorChain(id, authorizationHeader)),
+        );
+        const byUnitId = new Map<string, (typeof chains)[number][number]>();
+        for (const chain of chains) {
+          for (const unit of chain) {
+            byUnitId.set(unit.geographyUnitId, unit);
+          }
+        }
+        // Only the fields a client needs to map a level onto pii.<level>Id
+        // (geoType) and show to a user (name) — parentId/geoCode/status are
+        // internal/display-only and dropped here.
+        return [...byUnitId.values()].map((unit) => ({
+          geographyUnitId: unit.geographyUnitId,
+          geoType: unit.geoType,
+          name: unit.name,
+        }));
+      }
+    }
+
+    if (!caller.geographyUnitId) return [];
+    const chain = await getAncestorChain(caller.geographyUnitId, authorizationHeader);
+    return chain.map((unit) => ({
       geographyUnitId: unit.geographyUnitId,
       geoType: unit.geoType,
       name: unit.name,
     }));
-    return { ...apiVersion, geography, ...(prefilledContext ? { prefilledContext } : {}) };
   }
 
   /**

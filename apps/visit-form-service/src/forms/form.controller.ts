@@ -38,7 +38,7 @@ export function createFormController(service: FormService) {
       const version = await service.getActiveVersion(
         formCode,
         asOf ?? new Date(),
-        req.user.geographyUnitId,
+        req.user,
         authorizationHeader,
         beneficiaryId,
       );
