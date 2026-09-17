@@ -50,12 +50,29 @@ describe('requireGeographyScope', () => {
     expect(next).toHaveBeenCalledWith();
   });
 
+  it('allows a SYSTEM caller through unconditionally, even with no geographyUnitId of its own', async () => {
+    const resolveAncestorChain = jest.fn();
+    const req = mockReq({
+      id: 'system-caller',
+      roles: ['SYSTEM'],
+      projectId: null,
+      geographyUnitId: null,
+    });
+    const next = jest.fn();
+
+    requireGeographyScope(resolveAncestorChain, () => targetId)(req, res, next);
+
+    expect(next).toHaveBeenCalledWith();
+    expect(resolveAncestorChain).not.toHaveBeenCalled();
+  });
+
   it('passes through unchecked when resolveTargetGeographyId returns null (route has nothing to scope)', async () => {
     const resolveAncestorChain = jest.fn();
     const req = mockReq({ id: 'u1', roles: ['SAKHI'], projectId: null, geographyUnitId: callerId });
     const next = jest.fn();
 
     requireGeographyScope(resolveAncestorChain, () => null)(req, res, next);
+    await new Promise(process.nextTick);
 
     expect(next).toHaveBeenCalledWith();
     expect(resolveAncestorChain).not.toHaveBeenCalled();
@@ -67,6 +84,7 @@ describe('requireGeographyScope', () => {
     const next = jest.fn();
 
     requireGeographyScope(resolveAncestorChain, () => targetId)(req, res, next);
+    await new Promise(process.nextTick);
 
     expect(next).toHaveBeenCalledWith(expect.objectContaining({ status: 403 }));
     expect(resolveAncestorChain).not.toHaveBeenCalled();
@@ -83,9 +101,27 @@ describe('requireGeographyScope', () => {
     const next = jest.fn();
 
     requireGeographyScope(resolveAncestorChain, () => targetId)(req, res, next);
+    await new Promise(process.nextTick);
 
     expect(next).toHaveBeenCalledWith();
     expect(resolveAncestorChain).not.toHaveBeenCalled();
+  });
+
+  it('supports an async resolveTargetGeographyId (e.g. a DB lookup for the target resource)', async () => {
+    const resolveAncestorChain = jest
+      .fn()
+      .mockResolvedValue(chainOf(targetId, callerId, 'district-1', 'state-1'));
+    const req = mockReq(
+      { id: 'u1', roles: ['SUPERVISOR'], projectId: null, geographyUnitId: callerId },
+      { authorization: 'Bearer test-token' },
+    );
+    const next = jest.fn();
+    const asyncResolveTargetGeographyId = () => Promise.resolve(targetId);
+
+    requireGeographyScope(resolveAncestorChain, asyncResolveTargetGeographyId)(req, res, next);
+    await new Promise(process.nextTick);
+
+    expect(next).toHaveBeenCalledWith();
   });
 
   it("allows through when the caller's unit is an ancestor of the target's chain", async () => {

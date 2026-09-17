@@ -21,6 +21,7 @@ export {
   validate,
   validateBody,
   requireRoles,
+  requireGeographyScope,
   trustGatewayIdentity,
   unauthorized,
   createDocumentedRouter,

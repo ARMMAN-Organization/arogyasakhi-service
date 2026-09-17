@@ -469,6 +469,21 @@ export class BeneficiaryRepository {
   }
 
   /**
+   * Bare villageId for one case — used by requireGeographyScope
+   * (service-commons) as the target-resource lookup for
+   * GET /beneficiaries/:id, run at the middleware layer before the
+   * controller/service's own findById+decrypt+enrichment pipeline. Same
+   * "smallest possible projection" convention as findOwnershipById above —
+   * this middleware only needs one field, not the full case.
+   */
+  findVillageIdById(id: string) {
+    return this.prisma.beneficiaryCase.findFirst({
+      where: { id, isDeleted: false },
+      select: { pii: { select: { villageId: true } } },
+    });
+  }
+
+  /**
    * Finds a case previously created from this exact client-generated
    * `localCaseUuid` — lets `create()` treat a dropped-connection retry of
    * `POST /beneficiaries` as an idempotent replay instead of a new

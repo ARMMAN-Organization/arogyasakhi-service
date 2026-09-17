@@ -16,6 +16,7 @@ export * from './auth/service-token-client';
 export * from './auth/rate-limit';
 export * from './auth/forward-trusted-identity';
 export * from './auth/trust-gateway-identity';
+export * from './auth/internal-identity-signature';
 export * from './config/load-config';
 export * from './crypto/pii-crypto';
 export * from './docs/openapi-registry';

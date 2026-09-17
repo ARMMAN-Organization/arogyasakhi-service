@@ -396,6 +396,22 @@ export class BeneficiaryService {
   ) {}
 
   /**
+   * Bare villageId for one case, or `null` when the case doesn't exist —
+   * used by requireGeographyScope (service-commons) as the
+   * `resolveTargetGeographyId` parameter for GET /beneficiaries/:id, called
+   * from route middleware before this class's own getById runs. Deliberately
+   * returns `null` (not throwing 404) on a missing case: requireGeographyScope
+   * treats a null target as "nothing to scope against," and getById's own
+   * findById will still 404 the request properly moments later — this
+   * method's only job is resolving the field, not re-deciding what a missing
+   * case means for the response.
+   */
+  async resolveVillageId(id: string): Promise<string | null> {
+    const found = await this.repository.findVillageIdById(id);
+    return found?.pii.villageId ?? null;
+  }
+
+  /**
    * Lists beneficiary cases per SRS FR-S-9.2 / HLD's filter set, scoped by
    * the caller's role: a SAKHI only ever sees their own cases (their own id
    * always wins over anything else, so a SAKHI-supplied `sakhiId` is

@@ -1,4 +1,5 @@
 import {
+  getAncestorChain,
   resolveGeographyCodesForBlock,
   resolveHealthBlockIdFromPhc,
   resolvePadaUnits,
@@ -402,5 +403,61 @@ describe('resolvePadaUnits', () => {
       expect.stringContaining('geoType=PADA'),
       expect.objectContaining({ headers: { Authorization: 'Bearer test-token' } }),
     );
+  });
+});
+
+describe('getAncestorChain', () => {
+  const originalFetch = global.fetch;
+  const fetchMock = jest.fn();
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    global.fetch = fetchMock as unknown as typeof fetch;
+  });
+
+  afterAll(() => {
+    global.fetch = originalFetch;
+  });
+
+  it('returns the ancestor chain ordered from the unit up to STATE', async () => {
+    const chain = [
+      { geographyUnitId: 'village-1', parentId: 'block-1', geoType: 'VILLAGE' },
+      { geographyUnitId: 'block-1', parentId: 'district-1', geoType: 'BLOCK' },
+      { geographyUnitId: 'district-1', parentId: 'state-1', geoType: 'DISTRICT' },
+      { geographyUnitId: 'state-1', parentId: null, geoType: 'STATE' },
+    ];
+    fetchMock.mockResolvedValue(listResponse(chain));
+
+    const result = await getAncestorChain('village-1', 'Bearer test-token');
+
+    expect(result).toEqual(chain);
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/geography-units/village-1/ancestors'),
+      expect.objectContaining({ headers: { Authorization: 'Bearer test-token' } }),
+    );
+  });
+
+  it('throws 422 when the target geography unit is not found (404 from auth-service)', async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 404 });
+
+    await expect(getAncestorChain('missing-unit', 'Bearer test-token')).rejects.toMatchObject({
+      status: 422,
+    });
+  });
+
+  it('throws 502 when the auth-service call rejects (network error/timeout)', async () => {
+    fetchMock.mockRejectedValue(new Error('ECONNREFUSED'));
+
+    await expect(getAncestorChain('village-1', 'Bearer test-token')).rejects.toMatchObject({
+      status: 502,
+    });
+  });
+
+  it('throws 502 when the auth-service call fails with a non-404 non-2xx response', async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 500 });
+
+    await expect(getAncestorChain('village-1', 'Bearer test-token')).rejects.toMatchObject({
+      status: 502,
+    });
   });
 });

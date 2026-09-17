@@ -90,7 +90,11 @@ function mountProxy(
   console.log(`Routing ${mountPath}/* -> ${target}`);
 }
 
-export function registerProxies(app: Application, signer: Pick<TokenSigner, 'verify'>): void {
+export function registerProxies(
+  app: Application,
+  signer: Pick<TokenSigner, 'verify'>,
+  internalHeaderSecret: string,
+): void {
   for (const {
     prefix,
     target,
@@ -106,7 +110,7 @@ export function registerProxies(app: Application, signer: Pick<TokenSigner, 'ver
       // Own error middleware right after the auth check (before express.json())
       // so a 401 here gets a proper JSON response instead of falling through
       // to the proxy with no body parser mounted yet.
-      app.use(allMountPaths, verifyAndForwardIdentity(signer), errorHandler);
+      app.use(allMountPaths, verifyAndForwardIdentity(signer, internalHeaderSecret), errorHandler);
     }
 
     // Each mount path gets its own proxy instance (not one shared instance

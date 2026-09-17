@@ -30,11 +30,21 @@ export type ResolveAncestorChain = (
  * assigned at BLOCK level may touch a VILLAGE/PADA beneath that block).
  * MANAGER/ADMIN are unrestricted, matching every other geography-scoped
  * check in this codebase (see beneficiary.service.ts's isPrivileged).
+ * SYSTEM is unrestricted too — a machine caller (e.g. a cron job or
+ * server-to-server call) has no geographyUnitId of its own to compare, and
+ * every existing SYSTEM-accessible route in this codebase already treats
+ * SYSTEM as unscoped at the service layer (e.g. beneficiary.service.ts's
+ * assertCallerCanTouchCase no-ops for any non-SUPERVISOR caller, including
+ * SYSTEM) — this middleware must not introduce a stricter rule for SYSTEM
+ * than the route it's added to already enforces.
  *
- * `resolveTargetGeographyId` returns the target resource's own geography
- * unit id, or `null` if the route has no single target to scope (in which
- * case the caller passes through unchecked — the route has nothing to scope
- * against).
+ * `resolveTargetGeographyId` returns (or resolves to) the target resource's
+ * own geography unit id, or `null` if the route has no single target to
+ * scope (in which case the caller passes through unchecked — the route has
+ * nothing to scope against). May be async (return a Promise) when resolving
+ * it requires a DB lookup (e.g. reading the target beneficiary's own
+ * villageId from req.params.id) — the sync case is also supported directly
+ * for callers with no lookup to do.
  *
  * A caller with no `geographyUnitId` of their own (rare — SAKHI/SUPERVISOR
  * accounts are expected to always carry one) is DENIED, not waved through.
@@ -47,34 +57,43 @@ export type ResolveAncestorChain = (
  */
 export function requireGeographyScope(
   resolveAncestorChain: ResolveAncestorChain,
-  resolveTargetGeographyId: (req: Parameters<RequestHandler>[0]) => string | null | undefined,
+  resolveTargetGeographyId: (
+    req: Parameters<RequestHandler>[0],
+  ) => string | null | undefined | Promise<string | null | undefined>,
 ): RequestHandler {
   return (req, _res, next) => {
     const user = req.user;
     if (!user) return next(unauthorized());
-    if (user.roles.includes('MANAGER') || user.roles.includes('ADMIN')) return next();
-
-    const targetGeographyId = resolveTargetGeographyId(req);
-    if (targetGeographyId === null || targetGeographyId === undefined) return next();
-
-    if (!user.geographyUnitId) {
-      return next(forbidden('Your account has no assigned geography — access denied.'));
+    if (
+      user.roles.includes('MANAGER') ||
+      user.roles.includes('ADMIN') ||
+      user.roles.includes('SYSTEM')
+    ) {
+      return next();
     }
-    if (user.geographyUnitId === targetGeographyId) return next();
 
-    const authorizationHeader = req.header('authorization') ?? '';
-    // Resolves the TARGET's ancestor chain (target unit up to STATE) and
-    // checks whether the caller's own unit appears in it — i.e. the caller
-    // is the target unit itself or one of its ancestors. Resolving the
-    // caller's own chain instead would answer the wrong question (whether
-    // the target is above the caller, not below it).
-    resolveAncestorChain(targetGeographyId, authorizationHeader)
-      .then((chain) => {
-        const inScope = chain.some((unit) => unit.geographyUnitId === user.geographyUnitId);
-        if (!inScope) {
-          return next(forbidden('This resource is outside your assigned geography.'));
+    Promise.resolve(resolveTargetGeographyId(req))
+      .then((targetGeographyId) => {
+        if (targetGeographyId === null || targetGeographyId === undefined) return next();
+
+        if (!user.geographyUnitId) {
+          return next(forbidden('Your account has no assigned geography — access denied.'));
         }
-        next();
+        if (user.geographyUnitId === targetGeographyId) return next();
+
+        const authorizationHeader = req.header('authorization') ?? '';
+        // Resolves the TARGET's ancestor chain (target unit up to STATE) and
+        // checks whether the caller's own unit appears in it — i.e. the
+        // caller is the target unit itself or one of its ancestors.
+        // Resolving the caller's own chain instead would answer the wrong
+        // question (whether the target is above the caller, not below it).
+        return resolveAncestorChain(targetGeographyId, authorizationHeader).then((chain) => {
+          const inScope = chain.some((unit) => unit.geographyUnitId === user.geographyUnitId);
+          if (!inScope) {
+            return next(forbidden('This resource is outside your assigned geography.'));
+          }
+          next();
+        });
       })
       .catch(next);
   };

@@ -51,7 +51,7 @@ export function createApp(signer: Pick<TokenSigner, 'verify'>): Application {
   app.use(buildCorsMiddleware(appConfig.CORS_ORIGINS));
   app.use(requestId);
 
-  registerProxies(app, signer);
+  registerProxies(app, signer, appConfig.INTERNAL_HEADER_SECRET);
 
   const api = express.Router();
   // Aggregated Swagger docs are GET-only and public — mount before

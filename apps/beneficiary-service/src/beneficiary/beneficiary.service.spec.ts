@@ -39,6 +39,7 @@ describe('BeneficiaryService', () => {
     findManyFullDetail: jest.fn(),
     findById: jest.fn(),
     findOwnershipById: jest.fn(),
+    findVillageIdById: jest.fn(),
     findByLocalCaseUuid: jest.fn(),
     findDuplicateCandidate: jest.fn(),
     nextUniqueIdSequence: jest.fn(),
@@ -171,6 +172,26 @@ describe('BeneficiaryService', () => {
 
   afterEach(() => {
     process.env = { ...originalEnv };
+  });
+
+  describe('resolveVillageId', () => {
+    it("returns the case's pii.villageId", async () => {
+      repository.findVillageIdById.mockResolvedValue({ pii: { villageId: 'village-1' } } as never);
+
+      await expect(service.resolveVillageId('ben-1')).resolves.toBe('village-1');
+    });
+
+    it('returns null when villageId itself is null (pii row exists but has no village set)', async () => {
+      repository.findVillageIdById.mockResolvedValue({ pii: { villageId: null } } as never);
+
+      await expect(service.resolveVillageId('ben-1')).resolves.toBeNull();
+    });
+
+    it('returns null when no matching case exists', async () => {
+      repository.findVillageIdById.mockResolvedValue(null);
+
+      await expect(service.resolveVillageId('unknown-id')).resolves.toBeNull();
+    });
   });
 
   describe('applyLmpChange', () => {
