@@ -9,6 +9,7 @@
  */
 process.env.DATABASE_URL ??= 'postgresql://user:pass@localhost:5432/test';
 
+import { notFound } from '@armman/service-commons';
 import { FormService } from './form.service';
 import type { FormRepository } from './form.repository';
 import type { VisitInstanceRepository } from '../visits/visitInstance.repository';
@@ -341,6 +342,130 @@ describe('FormService', () => {
       // Shared level (DISTRICT) collapses to a single row, not duplicated.
       expect(geography.filter((g) => g.geographyUnitId === 'district-1')).toHaveLength(1);
     });
+
+    it(
+      "does not fail the whole request when one pada's ancestor-chain lookup rejects — " +
+        'PR #238 review: Promise.all would previously fail the entire form-load for a ' +
+        "multi-pada Sakhi if even one pada's geography_units row was stale/deleted, or " +
+        'auth-service blipped transiently on one of the parallel calls',
+      async () => {
+        const version = {
+          id: 'v1',
+          versionNo: 'v1',
+          status: 'PUBLISHED',
+          checksum: Buffer.from('x'),
+        };
+        repository.findActiveVersion.mockResolvedValue(version as never);
+        jest.mocked(geographyClient.getActiveLocationAssignments).mockResolvedValue([
+          {
+            villageId: 'village-1',
+            padaId: 'pada-1',
+            effectiveFrom: '2026-01-01T00:00:00.000Z',
+            effectiveTo: null,
+          },
+          {
+            villageId: 'village-2',
+            padaId: 'pada-2',
+            effectiveFrom: '2026-01-01T00:00:00.000Z',
+            effectiveTo: null,
+          },
+        ] as never);
+        jest.spyOn(geographyClient, 'getAncestorChain').mockImplementation(async (id: string) => {
+          if (id === 'pada-1') {
+            throw notFound("The caller's assigned geography unit was not found.");
+          }
+          return [
+            {
+              geographyUnitId: 'pada-2',
+              geoType: 'PADA',
+              parentId: 'village-2',
+              geoCode: null,
+              name: 'Pada Two',
+              status: 'ACTIVE',
+            },
+          ] as never;
+        });
+
+        const sakhiCaller = {
+          id: 'sakhi-1',
+          roles: ['SAKHI'],
+          projectId: null,
+          geographyUnitId: 'pada-1',
+        };
+        const result = await service.getActiveVersion(
+          'CHILD_REGISTRATION',
+          new Date(),
+          sakhiCaller,
+          'Bearer test-token',
+        );
+
+        // The failed pada-1 chain is skipped, not rethrown — pada-2's chain
+        // still resolves and appears in the response.
+        expect(result).toEqual(
+          expect.objectContaining({
+            geography: [{ geographyUnitId: 'pada-2', geoType: 'PADA', name: 'Pada Two' }],
+          }),
+        );
+      },
+    );
+
+    it(
+      'fetches each distinct leaf geography unit only once, even when two active ' +
+        'assignments resolve to the same leaf id — PR #238 review: minor efficiency fix, ' +
+        'avoids a duplicate ancestor-chain network call',
+      async () => {
+        const version = {
+          id: 'v1',
+          versionNo: 'v1',
+          status: 'PUBLISHED',
+          checksum: Buffer.from('x'),
+        };
+        repository.findActiveVersion.mockResolvedValue(version as never);
+        jest.mocked(geographyClient.getActiveLocationAssignments).mockResolvedValue([
+          {
+            villageId: 'village-1',
+            padaId: null,
+            effectiveFrom: '2026-01-01T00:00:00.000Z',
+            effectiveTo: null,
+          },
+          {
+            villageId: 'village-1',
+            padaId: null,
+            effectiveFrom: '2026-02-01T00:00:00.000Z',
+            effectiveTo: null,
+          },
+        ] as never);
+        jest.spyOn(geographyClient, 'getAncestorChain').mockResolvedValue([
+          {
+            geographyUnitId: 'village-1',
+            geoType: 'VILLAGE',
+            parentId: null,
+            geoCode: null,
+            name: 'Shared Village',
+            status: 'ACTIVE',
+          },
+        ] as never);
+
+        const sakhiCaller = {
+          id: 'sakhi-1',
+          roles: ['SAKHI'],
+          projectId: null,
+          geographyUnitId: 'village-1',
+        };
+        await service.getActiveVersion(
+          'CHILD_REGISTRATION',
+          new Date(),
+          sakhiCaller,
+          'Bearer test-token',
+        );
+
+        expect(geographyClient.getAncestorChain).toHaveBeenCalledTimes(1);
+        expect(geographyClient.getAncestorChain).toHaveBeenCalledWith(
+          'village-1',
+          'Bearer test-token',
+        );
+      },
+    );
 
     it('falls back to the single-geographyUnitId chain for a SAKHI with no active location assignments', async () => {
       const version = {

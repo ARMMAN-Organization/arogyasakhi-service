@@ -3,7 +3,11 @@ import { SakhiRepository } from './sakhi.repository';
 describe('SakhiRepository', () => {
   const findMany = jest.fn();
   const findFirst = jest.fn();
-  const prisma = { sakhiProfile: { findMany, findFirst } } as never;
+  const findManyLocationAssignments = jest.fn();
+  const prisma = {
+    sakhiProfile: { findMany, findFirst },
+    sakhiLocationAssignment: { findMany: findManyLocationAssignments },
+  } as never;
   let repository: SakhiRepository;
 
   beforeEach(() => {
@@ -72,6 +76,42 @@ describe('SakhiRepository', () => {
     it('returns an empty array when none of the ids match', async () => {
       findMany.mockResolvedValue([]);
       const result = await repository.findManyByIds(['missing']);
+      expect(result).toEqual([]);
+    });
+  });
+
+  describe('findActiveLocationAssignments', () => {
+    const ASOF = new Date('2026-09-17');
+
+    it(
+      'queries by sakhiId, effectiveFrom <= asOf, (effectiveTo null or >= asOf), and ' +
+        'statusLookupId null — PR #238 review: statusLookupId must be excluded defensively ' +
+        'even though nothing writes a non-null value today, so a future revoked-assignment ' +
+        "write path can't silently leak into the union without this filter already in place",
+      async () => {
+        findManyLocationAssignments.mockResolvedValue([
+          { villageId: 'village-1', padaId: 'pada-1', effectiveFrom: ASOF, effectiveTo: null },
+        ]);
+
+        const result = await repository.findActiveLocationAssignments('sakhi-1', ASOF);
+
+        expect(findManyLocationAssignments).toHaveBeenCalledWith({
+          where: {
+            sakhiId: 'sakhi-1',
+            statusLookupId: null,
+            effectiveFrom: { lte: ASOF },
+            OR: [{ effectiveTo: null }, { effectiveTo: { gte: ASOF } }],
+          },
+        });
+        expect(result).toEqual([
+          { villageId: 'village-1', padaId: 'pada-1', effectiveFrom: ASOF, effectiveTo: null },
+        ]);
+      },
+    );
+
+    it('returns an empty array when the Sakhi has no active assignments', async () => {
+      findManyLocationAssignments.mockResolvedValue([]);
+      const result = await repository.findActiveLocationAssignments('sakhi-1', ASOF);
       expect(result).toEqual([]);
     });
   });

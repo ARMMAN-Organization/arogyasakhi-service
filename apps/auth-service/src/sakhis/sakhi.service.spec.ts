@@ -6,6 +6,7 @@ describe('SakhiService', () => {
     findByProject: jest.fn(),
     findById: jest.fn(),
     findManyByIds: jest.fn(),
+    findActiveLocationAssignments: jest.fn(),
   } as unknown as jest.Mocked<SakhiRepository>;
 
   let service: SakhiService;
@@ -250,6 +251,102 @@ describe('SakhiService', () => {
       const result = await service.getManyByIds(['user-1', 'missing'], unscopedCaller);
 
       expect(result).toEqual([expect.objectContaining({ sakhiId: 'user-1' })]);
+    });
+  });
+
+  describe('getActiveLocationAssignments', () => {
+    const ASOF = new Date('2026-09-17');
+    const rawAssignment = () => ({
+      villageId: 'village-1',
+      padaId: 'pada-1',
+      effectiveFrom: new Date('2026-01-01'),
+      effectiveTo: null,
+    });
+
+    it('returns the projected assignments for an unscoped caller (MANAGER/ADMIN)', async () => {
+      repository.findActiveLocationAssignments.mockResolvedValue([rawAssignment()] as never);
+
+      const result = await service.getActiveLocationAssignments('user-1', unscopedCaller, ASOF);
+
+      expect(result).toEqual([
+        expect.objectContaining({ villageId: 'village-1', padaId: 'pada-1' }),
+      ]);
+      expect(repository.findActiveLocationAssignments).toHaveBeenCalledWith('user-1', ASOF);
+      // MANAGER/ADMIN is unrestricted — no profile lookup needed to check project scope.
+      expect(repository.findById).not.toHaveBeenCalled();
+    });
+
+    it('allows a SAKHI caller to fetch their own assignments', async () => {
+      repository.findActiveLocationAssignments.mockResolvedValue([rawAssignment()] as never);
+      const sakhiCaller = { id: 'user-1', roles: ['SAKHI'], projectId: null };
+
+      await expect(
+        service.getActiveLocationAssignments('user-1', sakhiCaller, ASOF),
+      ).resolves.toEqual([expect.objectContaining({ villageId: 'village-1' })]);
+    });
+
+    it('rejects a SAKHI caller fetching a different Sakhi', async () => {
+      const sakhiCaller = { id: 'user-1', roles: ['SAKHI'], projectId: null };
+
+      await expect(
+        service.getActiveLocationAssignments('user-2', sakhiCaller, ASOF),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(repository.findActiveLocationAssignments).not.toHaveBeenCalled();
+    });
+
+    it('allows a scoped caller (SUPERVISOR) to fetch a Sakhi in their own project', async () => {
+      repository.findById.mockResolvedValue(rawProfile() as never); // primaryProjectId: 'project-1'
+      repository.findActiveLocationAssignments.mockResolvedValue([rawAssignment()] as never);
+
+      await expect(
+        service.getActiveLocationAssignments('user-1', scopedCaller('project-1'), ASOF),
+      ).resolves.toEqual([expect.objectContaining({ villageId: 'village-1' })]);
+    });
+
+    it(
+      'rejects a scoped caller (SUPERVISOR) fetching a Sakhi from a different project — ' +
+        'regression: PR #238 review found this cross-project check missing entirely, so a ' +
+        "project-scoped SUPERVISOR (neither SAKHI nor privileged) could read any Sakhi's " +
+        'location assignments with no scoping at all',
+      async () => {
+        repository.findById.mockResolvedValue(rawProfile() as never); // primaryProjectId: 'project-1'
+
+        await expect(
+          service.getActiveLocationAssignments('user-1', scopedCaller('project-2'), ASOF),
+        ).rejects.toMatchObject({ status: 403 });
+        expect(repository.findActiveLocationAssignments).not.toHaveBeenCalled();
+      },
+    );
+
+    it('throws 404 when a scoped caller looks up a Sakhi that does not exist', async () => {
+      repository.findById.mockResolvedValue(null);
+
+      await expect(
+        service.getActiveLocationAssignments('missing', scopedCaller('project-1'), ASOF),
+      ).rejects.toMatchObject({ status: 404 });
+      expect(repository.findActiveLocationAssignments).not.toHaveBeenCalled();
+    });
+
+    it(
+      "allows a caller holding both MANAGER and SAKHI to fetch any Sakhi's assignments — " +
+        'the SAKHI self-only branch must not run ahead of isPrivileged()',
+      async () => {
+        repository.findActiveLocationAssignments.mockResolvedValue([rawAssignment()] as never);
+        const dualRoleCaller = { id: 'manager-1', roles: ['MANAGER', 'SAKHI'], projectId: null };
+
+        await expect(
+          service.getActiveLocationAssignments('user-1', dualRoleCaller, ASOF),
+        ).resolves.toEqual([expect.objectContaining({ villageId: 'village-1' })]);
+        expect(repository.findById).not.toHaveBeenCalled();
+      },
+    );
+
+    it('returns an empty array (not an error) when the Sakhi has no active assignments', async () => {
+      repository.findActiveLocationAssignments.mockResolvedValue([]);
+
+      await expect(
+        service.getActiveLocationAssignments('user-1', unscopedCaller, ASOF),
+      ).resolves.toEqual([]);
     });
   });
 });

@@ -165,6 +165,16 @@ export class FormService {
    * other caller (SUPERVISOR/MANAGER/ADMIN), or a SAKHI with zero active
    * assignments (data not yet migrated — see the auth-service repository
    * comment), falls back to the single-chain behavior this replaced.
+   *
+   * PR #238 review: chain lookups run via `Promise.allSettled`, not
+   * `Promise.all` — a single stale/unresolvable pada (e.g. its
+   * geography_units row was deleted/merged after the assignment was
+   * created, or a transient auth-service blip) must not fail the whole
+   * form-load for a multi-pada Sakhi the way one failing `getAncestorChain`
+   * call would with `Promise.all`. A failed chain is skipped, matching this
+   * file's other best-effort enrichment paths (resolveKmcEligibility,
+   * toleratePhaseAdvance) which all degrade gracefully instead of
+   * rethrowing.
    */
   private async resolveCallerGeography(
     caller: AuthenticatedUser,
@@ -174,13 +184,21 @@ export class FormService {
     if (caller.roles.includes('SAKHI')) {
       const assignments = await getActiveLocationAssignments(caller.id, asOf, authorizationHeader);
       if (assignments.length > 0) {
-        const leafIds = assignments.map((a) => a.padaId ?? a.villageId);
-        const chains = await Promise.all(
+        // Deduped before fetching — two active assignment rows can share a
+        // leaf id (e.g. both padaId: null for the same village), which would
+        // otherwise fetch the same chain twice for no benefit (the byUnitId
+        // map below already dedupes the final result regardless).
+        const leafIds = [...new Set(assignments.map((a) => a.padaId ?? a.villageId))];
+        const results = await Promise.allSettled(
           leafIds.map((id) => getAncestorChain(id, authorizationHeader)),
         );
-        const byUnitId = new Map<string, (typeof chains)[number][number]>();
-        for (const chain of chains) {
-          for (const unit of chain) {
+        const byUnitId = new Map<
+          string,
+          { geographyUnitId: string; geoType: string; name: string }
+        >();
+        for (const result of results) {
+          if (result.status === 'rejected') continue;
+          for (const unit of result.value) {
             byUnitId.set(unit.geographyUnitId, unit);
           }
         }

@@ -36,12 +36,25 @@ export class SakhiRepository {
    * pada — the JWT's single `geographyUnitId` claim only ever reflects one
    * of them, which is why `GET /forms/:formCode/active-version`'s geography
    * array previously dropped every pada but that one). "Currently active"
-   * means `effectiveFrom <= asOf` and (`effectiveTo` is null or `>= asOf`).
+   * means `effectiveFrom <= asOf` and (`effectiveTo` is null or `>= asOf`),
+   * AND (statusLookupId is null — see below).
+   *
+   * PR #238 review: `statusLookupId` (nullable, no lookup category defined
+   * anywhere yet — no seed/migration/service writes it today) is
+   * excluded defensively here rather than left unchecked. Nothing sets a
+   * non-null value today, so this changes no current behavior, but a
+   * future "revoke this assignment" write path (the column's existence
+   * suggests one is planned) would otherwise silently leak a
+   * revoked/cancelled row into the Sakhi's unioned geography chain if this
+   * method didn't already exclude it. Revisit once an actual lookup
+   * category/values exist for this column, to filter on the real
+   * active/inactive value rather than mere presence.
    */
   findActiveLocationAssignments(sakhiId: string, asOf: Date) {
     return this.prisma.sakhiLocationAssignment.findMany({
       where: {
         sakhiId,
+        statusLookupId: null,
         effectiveFrom: { lte: asOf },
         OR: [{ effectiveTo: null }, { effectiveTo: { gte: asOf } }],
       },
