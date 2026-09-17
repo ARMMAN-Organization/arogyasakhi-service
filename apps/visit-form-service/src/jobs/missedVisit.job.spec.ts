@@ -7,6 +7,7 @@ import { findBeneficiaryById, findBeneficiaryOwnership } from '../beneficiaries/
 import { findSakhiById } from '../sakhis/sakhi.client';
 import { evaluateEscalation } from '../rules/evaluateEscalation.client';
 import { createEscalationEvent, createNotification } from '../escalations/systemEscalation.client';
+import { AuditClient } from '../forms/audit.client';
 
 jest.mock('@armman/service-commons', () => ({
   acquireJobLock: jest.fn(),
@@ -19,6 +20,7 @@ jest.mock('../beneficiaries/beneficiary.client');
 jest.mock('../sakhis/sakhi.client');
 jest.mock('../rules/evaluateEscalation.client');
 jest.mock('../escalations/systemEscalation.client');
+jest.mock('../forms/audit.client');
 
 describe('countConsecutiveMissed', () => {
   it('counts the unbroken trailing run of MISSED', () => {
@@ -42,6 +44,7 @@ describe('runMissedVisitJob', () => {
   const revertToOpen = jest.fn();
   const findRecentByBeneficiaryAndVisitType = jest.fn();
   const markMissedByScheduleId = jest.fn();
+  const auditClientLog = jest.fn();
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -55,6 +58,7 @@ describe('runMissedVisitJob', () => {
     (VisitInstanceRepository as jest.Mock).mockImplementation(() => ({
       markMissedByScheduleId,
     }));
+    (AuditClient as jest.Mock).mockImplementation(() => ({ log: auditClientLog }));
     (acquireJobLock as jest.Mock).mockResolvedValue(true);
     (resolveVisitStatusIdByCode as jest.Mock).mockResolvedValue('missed-lookup-id');
     (findBeneficiaryOwnership as jest.Mock).mockResolvedValue({ sakhiId: 'sakhi-1' });
@@ -62,6 +66,10 @@ describe('runMissedVisitJob', () => {
     (findSakhiById as jest.Mock).mockResolvedValue({ supervisorId: 'supervisor-1' });
     (createEscalationEvent as jest.Mock).mockResolvedValue({ id: 'event-1', status: 'OPEN' });
     (createNotification as jest.Mock).mockResolvedValue(undefined);
+    markMissedByScheduleId.mockResolvedValue([
+      { visitId: 'vi-1', fromStatusLookupValueId: 'pending-id' },
+    ]);
+    auditClientLog.mockResolvedValue(undefined);
   });
 
   const baseDeps = () => ({
@@ -124,6 +132,53 @@ describe('runMissedVisitJob', () => {
       },
       'system-token',
     );
+  });
+
+  it('writes a VISIT_STATUS_MISSED audit entry per transitioned visit instance', async () => {
+    findOverdueOpenSchedules.mockResolvedValue([
+      { id: 'schedule-1', beneficiaryId: 'ben-1', visitType: 'ANC' },
+    ]);
+    markMissed.mockResolvedValue(true);
+    findRecentByBeneficiaryAndVisitType.mockResolvedValue([{ status: 'MISSED' }]);
+    (evaluateEscalation as jest.Mock).mockResolvedValue({ shouldEscalate: false });
+    markMissedByScheduleId.mockResolvedValue([
+      { visitId: 'vi-1', fromStatusLookupValueId: 'pending-id' },
+      { visitId: 'vi-2', fromStatusLookupValueId: 'pending-id' },
+    ]);
+
+    await runMissedVisitJob(baseDeps());
+
+    expect(auditClientLog).toHaveBeenCalledWith(
+      'missed-visit-escalation-job',
+      'VISIT_STATUS_MISSED',
+      'VisitInstance',
+      'vi-1',
+      { statusLookupValueId: 'pending-id' },
+      { statusLookupValueId: 'missed-lookup-id' },
+      'Bearer system-token',
+    );
+    expect(auditClientLog).toHaveBeenCalledWith(
+      'missed-visit-escalation-job',
+      'VISIT_STATUS_MISSED',
+      'VisitInstance',
+      'vi-2',
+      { statusLookupValueId: 'pending-id' },
+      { statusLookupValueId: 'missed-lookup-id' },
+      'Bearer system-token',
+    );
+  });
+
+  it('continues processing when writing the audit entry fails for a transitioned instance', async () => {
+    findOverdueOpenSchedules.mockResolvedValue([
+      { id: 'schedule-1', beneficiaryId: 'ben-1', visitType: 'ANC' },
+    ]);
+    markMissed.mockResolvedValue(true);
+    findRecentByBeneficiaryAndVisitType.mockResolvedValue([{ status: 'MISSED' }]);
+    (evaluateEscalation as jest.Mock).mockResolvedValue({ shouldEscalate: false });
+    auditClientLog.mockRejectedValueOnce(new Error('audit-service unreachable'));
+
+    await expect(runMissedVisitJob(baseDeps())).resolves.toBeUndefined();
+    expect(revertToOpen).not.toHaveBeenCalled();
   });
 
   it.each([

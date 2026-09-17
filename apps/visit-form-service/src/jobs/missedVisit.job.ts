@@ -8,6 +8,7 @@ import { findBeneficiaryById, findBeneficiaryOwnership } from '../beneficiaries/
 import { findSakhiById } from '../sakhis/sakhi.client';
 import { evaluateEscalation } from '../rules/evaluateEscalation.client';
 import { createEscalationEvent, createNotification } from '../escalations/systemEscalation.client';
+import { AuditClient } from '../forms/audit.client';
 import type { VisitCodeType } from '../../../../node_modules/.prisma/client-visit-form-service';
 
 const JOB_NAME = 'missed-visit-escalation';
@@ -84,6 +85,7 @@ export async function runMissedVisitJob(deps: MissedVisitJobDeps): Promise<void>
 
   const scheduleRepo = new VisitScheduleRepository(deps.prisma);
   const instanceRepo = new VisitInstanceRepository(deps.prisma);
+  const auditClient = new AuditClient();
 
   const now = new Date();
   const overdue = await scheduleRepo.findOverdueOpenSchedules(now, MAX_SCHEDULES_PER_TICK);
@@ -122,11 +124,32 @@ export async function runMissedVisitJob(deps: MissedVisitJobDeps): Promise<void>
       transitioned = await scheduleRepo.markMissed(schedule.id);
       if (!transitioned) continue; // raced with another run/manual PATCH — already handled
 
-      await instanceRepo.markMissedByScheduleId(
+      const transitionedInstances = await instanceRepo.markMissedByScheduleId(
         schedule.id,
         missedStatusLookupValueId,
         SYSTEM_CALLER_ID,
       );
+
+      for (const instance of transitionedInstances) {
+        try {
+          await auditClient.log(
+            SYSTEM_CALLER_ID,
+            'VISIT_STATUS_MISSED',
+            'VisitInstance',
+            instance.visitId,
+            { statusLookupValueId: instance.fromStatusLookupValueId },
+            { statusLookupValueId: missedStatusLookupValueId },
+            authorizationHeader,
+          );
+        } catch (auditErr) {
+          console.error(
+            `[${JOB_NAME}] Visit ${instance.visitId} was marked MISSED but writing the audit ` +
+              'entry failed:',
+            auditErr,
+          );
+        }
+      }
+
       await evaluateAndEscalate(schedule, scheduleRepo, deps, now, authorizationHeader);
     } catch (err) {
       // One beneficiary's bad data (e.g. an unmapped visitFamily, or

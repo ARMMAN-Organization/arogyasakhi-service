@@ -10,6 +10,7 @@ export * from './logging/logger';
 export * from './auth/roles.decorator';
 export * from './auth/rbac.guard';
 export * from './auth/authenticate';
+export * from './auth/geography-scope.guard';
 export * from './auth/token-signer';
 export * from './auth/service-token-client';
 export * from './auth/rate-limit';

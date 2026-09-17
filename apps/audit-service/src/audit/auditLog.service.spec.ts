@@ -17,6 +17,7 @@ describe('AuditLogService', () => {
   const admin = { id: 'admin-1', roles: ['ADMIN'] };
   const supervisor = { id: 'supervisor-1', roles: ['SUPERVISOR'] };
   const sakhi = { id: 'sakhi-1', roles: ['SAKHI'] };
+  const system = { id: 'missed-visit-escalation-job', roles: ['SYSTEM'] };
 
   beforeEach(() => {
     jest.resetAllMocks();
@@ -143,6 +144,46 @@ describe('AuditLogService', () => {
     expect(repository.create).not.toHaveBeenCalled();
   });
 
+  it.each(['BENEFICIARY_STATUS_CLOSED', 'BENEFICIARY_STATUS_PENDING_TRANSFER'])(
+    'SUPERVISOR logging %s (a beneficiary status change) has actorUserId forced to their own id',
+    async (action) => {
+      const dto: CreateAuditLogInput = {
+        actorUserId: 'someone-else',
+        action,
+        entityType: 'BeneficiaryCase',
+        entityId: 'ben-1',
+      };
+      repository.create.mockResolvedValue({ id: '1' } as never);
+      await service.create(dto, supervisor);
+      expect(repository.create).toHaveBeenCalledWith({ ...dto, actorUserId: 'supervisor-1' });
+    },
+  );
+
+  it('SUPERVISOR logging a BENEFICIARY_STATUS_ action with the wrong entityType is forbidden', async () => {
+    const dto: CreateAuditLogInput = {
+      actorUserId: 'supervisor-1',
+      action: 'BENEFICIARY_STATUS_CLOSED',
+      entityType: 'ApprovalRequest',
+      entityId: 'ben-1',
+    };
+    await expect(service.create(dto, supervisor)).rejects.toThrow(
+      expect.objectContaining({ status: 403 }),
+    );
+    expect(repository.create).not.toHaveBeenCalled();
+  });
+
+  it('SUPERVISOR logging a VISIT_STATUS_ action has actorUserId forced to their own id', async () => {
+    const dto: CreateAuditLogInput = {
+      actorUserId: 'someone-else',
+      action: 'VISIT_STATUS_COMPLETED',
+      entityType: 'VisitInstance',
+      entityId: 'visit-1',
+    };
+    repository.create.mockResolvedValue({ id: '1' } as never);
+    await service.create(dto, supervisor);
+    expect(repository.create).toHaveBeenCalledWith({ ...dto, actorUserId: 'supervisor-1' });
+  });
+
   it('SUPERVISOR logging a non-QUICK_RESPONSE_/non-LMP_CHANGE_/non-DATA_RESTORE_ action is forbidden', async () => {
     const dto: CreateAuditLogInput = {
       action: 'DELETE_EVERYTHING',
@@ -176,6 +217,43 @@ describe('AuditLogService', () => {
         expect(repository.create).toHaveBeenCalledWith({ ...dto, actorUserId: 'sakhi-1' });
       },
     );
+
+    it('SAKHI logging BENEFICIARY_STATUS_CLOSED with their own actorUserId succeeds', async () => {
+      const dto: CreateAuditLogInput = {
+        actorUserId: 'sakhi-1',
+        action: 'BENEFICIARY_STATUS_CLOSED',
+        entityType: 'BeneficiaryCase',
+        entityId: 'ben-1',
+      };
+      repository.create.mockResolvedValue({ id: '1' } as never);
+      await service.create(dto, sakhi);
+      expect(repository.create).toHaveBeenCalledWith({ ...dto, actorUserId: 'sakhi-1' });
+    });
+
+    it('SAKHI logging BENEFICIARY_STATUS_ with the wrong entityType is forbidden', async () => {
+      const dto: CreateAuditLogInput = {
+        actorUserId: 'sakhi-1',
+        action: 'BENEFICIARY_STATUS_CLOSED',
+        entityType: 'ApprovalRequest',
+        entityId: 'ben-1',
+      };
+      await expect(service.create(dto, sakhi)).rejects.toThrow(
+        expect.objectContaining({ status: 403 }),
+      );
+      expect(repository.create).not.toHaveBeenCalled();
+    });
+
+    it('SAKHI logging VISIT_STATUS_ with their own actorUserId succeeds', async () => {
+      const dto: CreateAuditLogInput = {
+        actorUserId: 'sakhi-1',
+        action: 'VISIT_STATUS_COMPLETED',
+        entityType: 'VisitInstance',
+        entityId: 'visit-1',
+      };
+      repository.create.mockResolvedValue({ id: '1' } as never);
+      await service.create(dto, sakhi);
+      expect(repository.create).toHaveBeenCalledWith({ ...dto, actorUserId: 'sakhi-1' });
+    });
 
     it('SAKHI logging FORM_ANSWER_EDIT with the wrong entityType is forbidden', async () => {
       const dto: CreateAuditLogInput = {
@@ -254,6 +332,59 @@ describe('AuditLogService', () => {
       repository.create.mockResolvedValue({ id: '1' } as never);
       await service.create(dto, sakhi);
       expect(repository.create).toHaveBeenCalledWith({ ...dto, actorUserId: 'sakhi-1' });
+    });
+  });
+
+  describe('SYSTEM allowlist (missed-visit cron job)', () => {
+    it('SYSTEM logging VISIT_STATUS_MISSED with its own actorUserId succeeds', async () => {
+      const dto: CreateAuditLogInput = {
+        actorUserId: 'missed-visit-escalation-job',
+        action: 'VISIT_STATUS_MISSED',
+        entityType: 'VisitInstance',
+        entityId: 'vi-1',
+      };
+      repository.create.mockResolvedValue({ id: '1' } as never);
+      await service.create(dto, system);
+      expect(repository.create).toHaveBeenCalledWith({
+        ...dto,
+        actorUserId: 'missed-visit-escalation-job',
+      });
+    });
+
+    it('SYSTEM logging VISIT_STATUS_MISSED with the wrong entityType is forbidden', async () => {
+      const dto: CreateAuditLogInput = {
+        actorUserId: 'missed-visit-escalation-job',
+        action: 'VISIT_STATUS_MISSED',
+        entityType: 'Beneficiary',
+        entityId: 'vi-1',
+      };
+      await expect(service.create(dto, system)).rejects.toThrow(
+        expect.objectContaining({ status: 403 }),
+      );
+      expect(repository.create).not.toHaveBeenCalled();
+    });
+
+    it('SYSTEM logging any other VISIT_STATUS_ action is forbidden (only the literal MISSED action is allowlisted)', async () => {
+      const dto: CreateAuditLogInput = {
+        action: 'VISIT_STATUS_COMPLETED',
+        entityType: 'VisitInstance',
+        entityId: 'vi-1',
+      };
+      await expect(service.create(dto, system)).rejects.toThrow(
+        expect.objectContaining({ status: 403 }),
+      );
+      expect(repository.create).not.toHaveBeenCalled();
+    });
+
+    it('SYSTEM logging a non-allowlisted action is forbidden', async () => {
+      const dto: CreateAuditLogInput = {
+        action: 'BENEFICIARY_STATUS_CLOSED',
+        entityType: 'BeneficiaryCase',
+      };
+      await expect(service.create(dto, system)).rejects.toThrow(
+        expect.objectContaining({ status: 403 }),
+      );
+      expect(repository.create).not.toHaveBeenCalled();
     });
   });
 

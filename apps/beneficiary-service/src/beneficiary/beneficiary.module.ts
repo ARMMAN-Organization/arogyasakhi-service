@@ -1,5 +1,6 @@
 import { createDocumentedRouter, type DocumentedRouter } from '../app.module';
 import type { PrismaService } from '../prisma/prisma.service';
+import { AuditClient } from './audit.client';
 import { BeneficiaryRepository } from './beneficiary.repository';
 import { BeneficiaryService } from './beneficiary.service';
 import { registerBeneficiaryRoutes } from './beneficiary.routes';
@@ -10,7 +11,7 @@ import { registerBeneficiaryRoutes } from './beneficiary.routes';
  */
 export function createBeneficiaryModule(prisma: PrismaService): DocumentedRouter {
   const repository = new BeneficiaryRepository(prisma);
-  const service = new BeneficiaryService(repository);
+  const service = new BeneficiaryService(repository, new AuditClient());
   const doc = createDocumentedRouter();
   registerBeneficiaryRoutes(doc, service);
   return doc;

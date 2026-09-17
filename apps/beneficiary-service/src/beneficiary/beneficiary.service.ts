@@ -37,6 +37,7 @@ import {
   resolvePadaUnits,
   resolveVillageNames,
 } from '../geography/geography.client';
+import { AuditClient } from './audit.client';
 import {
   resolveLookupIdsByValueCode,
   resolveLookupValues,
@@ -389,7 +390,10 @@ async function resolveSakhiScoping(
 
 /** Business logic for the beneficiary enrollment lifecycle. */
 export class BeneficiaryService {
-  constructor(private readonly repository: BeneficiaryRepository) {}
+  constructor(
+    private readonly repository: BeneficiaryRepository,
+    private readonly auditClient: AuditClient,
+  ) {}
 
   /**
    * Lists beneficiary cases per SRS FR-S-9.2 / HLD's filter set, scoped by
@@ -1168,6 +1172,23 @@ export class BeneficiaryService {
       throw conflict('Unable to close this beneficiary case.');
     }
 
+    try {
+      await this.auditClient.log(
+        caller.id,
+        'BENEFICIARY_STATUS_CLOSED',
+        'BeneficiaryCase',
+        beneficiaryId,
+        { currentStatus: existing.currentStatus, reasonCode: null },
+        { currentStatus: 'CLOSED', reasonCode },
+        authorizationHeader,
+      );
+    } catch (err) {
+      console.error(
+        `Beneficiary case ${beneficiaryId} was closed but writing the audit entry failed:`,
+        err,
+      );
+    }
+
     return this.projectCase(beneficiaryId, authorizationHeader);
   }
 
@@ -1198,6 +1219,23 @@ export class BeneficiaryService {
       // conditional update — same outcome as the check above, just caught a
       // beat later instead of trusting a stale read (mirrors reactivateCase).
       throw conflict('Cannot transfer a CLOSED beneficiary case.');
+    }
+
+    try {
+      await this.auditClient.log(
+        caller.id,
+        'BENEFICIARY_STATUS_PENDING_TRANSFER',
+        'BeneficiaryCase',
+        beneficiaryId,
+        { currentStatus: existing.currentStatus },
+        { currentStatus: 'PENDING_TRANSFER' },
+        authorizationHeader,
+      );
+    } catch (err) {
+      console.error(
+        `Beneficiary case ${beneficiaryId} was marked PENDING_TRANSFER but writing the audit entry failed:`,
+        err,
+      );
     }
 
     return this.projectCase(beneficiaryId, authorizationHeader);
@@ -1233,6 +1271,23 @@ export class BeneficiaryService {
       // conditional update — same outcome as the check above, just caught a
       // beat later instead of trusting a stale read.
       throw conflict(`Cannot reactivate a case with status ${existing.currentStatus}.`);
+    }
+
+    try {
+      await this.auditClient.log(
+        caller.id,
+        'BENEFICIARY_STATUS_REACTIVATED',
+        'BeneficiaryCase',
+        beneficiaryId,
+        { currentStatus: 'CLOSED' },
+        { currentStatus: 'ACTIVE' },
+        authorizationHeader,
+      );
+    } catch (err) {
+      console.error(
+        `Beneficiary case ${beneficiaryId} was reactivated but writing the audit entry failed:`,
+        err,
+      );
     }
 
     return this.projectCase(beneficiaryId, authorizationHeader);
