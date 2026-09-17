@@ -184,6 +184,14 @@
       "question_code": "did_mother_experience_complications"
     },
     {
+      "label": "If other, specify",
+      "section": "Delivery Details",
+      "required": true,
+      "input_type": "text",
+      "question_code": "did_mother_experience_complications_other_specify",
+      "visibleWhen": { "field": "did_mother_experience_complications", "operator": "contains", "value": "other" }
+    },
+    {
       "label": "Was this a case of multiple gestation?",
       "options": [
         { "label": "Yes", "sort_order": 0, "value_code": "yes" },
@@ -242,6 +250,14 @@
       "required": true,
       "input_type": "multiselect",
       "question_code": "child1_related_complications"
+    },
+    {
+      "label": "Child1: If other, specify",
+      "section": "Child 1",
+      "required": true,
+      "input_type": "text",
+      "question_code": "child1_related_complications_other_specify",
+      "visibleWhen": { "field": "child1_related_complications", "operator": "contains", "value": "other" }
     },
     {
       "label": "Child1: Immediate crying after birth",
@@ -397,6 +413,14 @@
       "input_type": "multiselect",
       "question_code": "child2_related_complications",
       "visibleWhen": { "field": "number_of_babies_born", "operator": "gte", "value": 2 }
+    },
+    {
+      "label": "Child2: If other, specify",
+      "section": "Child 2",
+      "required": true,
+      "input_type": "text",
+      "question_code": "child2_related_complications_other_specify",
+      "visibleWhen": { "field": "child2_related_complications", "operator": "contains", "value": "other" }
     },
     {
       "label": "Child2: Immediate crying after birth",
@@ -559,6 +583,14 @@
       "visibleWhen": { "field": "number_of_babies_born", "operator": "gte", "value": 3 }
     },
     {
+      "label": "Child3: If other, specify",
+      "section": "Child 3",
+      "required": true,
+      "input_type": "text",
+      "question_code": "child3_related_complications_other_specify",
+      "visibleWhen": { "field": "child3_related_complications", "operator": "contains", "value": "other" }
+    },
+    {
       "label": "Child3: Immediate crying after birth",
       "options": [
         {
@@ -690,6 +722,26 @@
       "rule": "EXCLUSIVE_OPTION",
       "field": "did_mother_experience_complications",
       "exclusiveValues": ["none"]
+    },
+    {
+      "rule": "REQUIRED_IF_SELECTED",
+      "field": "did_mother_experience_complications",
+      "optionFieldMap": { "other": "did_mother_experience_complications_other_specify" }
+    },
+    {
+      "rule": "REQUIRED_IF_SELECTED",
+      "field": "child1_related_complications",
+      "optionFieldMap": { "other": "child1_related_complications_other_specify" }
+    },
+    {
+      "rule": "REQUIRED_IF_SELECTED",
+      "field": "child2_related_complications",
+      "optionFieldMap": { "other": "child2_related_complications_other_specify" }
+    },
+    {
+      "rule": "REQUIRED_IF_SELECTED",
+      "field": "child3_related_complications",
+      "optionFieldMap": { "other": "child3_related_complications_other_specify" }
     }
   ]
 }

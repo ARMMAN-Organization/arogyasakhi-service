@@ -254,6 +254,10 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
   { prefix: '/sync', target: appConfig.SYNC_SERVICE_URL, requiresAuth: true },
   { prefix: '/media', target: appConfig.MEDIA_SERVICE_URL, requiresAuth: true },
   { prefix: '/audit', target: appConfig.AUDIT_SERVICE_URL, requiresAuth: true },
+  // SRS Section 9 App Analytics and Product Metrics — Sakhi-app event
+  // ingestion, owned by audit-service (same append-only-event pattern as
+  // /audit) — a distinct prefix, so it needs its own gateway entry.
+  { prefix: '/analytics', target: appConfig.AUDIT_SERVICE_URL, requiresAuth: true },
   // SRS FR-S-13.1-13.4 "Learn More" knowledge base — currently the "Content
   // coming soon" placeholder shell (see cms-content-service's own comments).
   { prefix: '/learn-more', target: appConfig.CMS_CONTENT_SERVICE_URL, requiresAuth: true },

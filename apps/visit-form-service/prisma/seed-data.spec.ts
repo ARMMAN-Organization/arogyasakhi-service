@@ -115,8 +115,8 @@ describe('mother-registration.json', () => {
 describe('child-registration.json', () => {
   const byCode = new Map(childRegistration.schemaJson.map((f) => [f.question_code, f]));
 
-  it('has exactly 55 fields (51 existing + 4 new per-vaccine date fields)', () => {
-    expect(childRegistration.schemaJson).toHaveLength(55);
+  it('has exactly 56 fields (51 existing + 4 new per-vaccine date fields + 1 birth-complications "other, specify")', () => {
+    expect(childRegistration.schemaJson).toHaveLength(56);
   });
 
   it('applies the DOB-of-infant date rule (Infant Registration form Q6)', () => {
@@ -178,8 +178,26 @@ describe('child-registration.json', () => {
     });
   });
 
-  it('has 3 total validationJson rules (1 ANY_OF_REQUIRED + 1 EXCLUSIVE_OPTION + 1 REQUIRED_IF_SELECTED)', () => {
-    expect(childRegistration.validationJson).toHaveLength(3);
+  it('adds a visibleWhen-gated "other, specify" field for birth complications', () => {
+    expect(byCode.get('did_the_baby_have_any_complications_at_the_time_of_birth_other_specify')?.visibleWhen).toEqual({
+      field: 'did_the_baby_have_any_complications_at_the_time_of_birth',
+      operator: 'contains',
+      value: 'other_please_specify',
+    });
+  });
+
+  it('has a REQUIRED_IF_SELECTED rule so selecting "other" requires the birth-complications specify field', () => {
+    expect(childRegistration.validationJson).toContainEqual({
+      rule: 'REQUIRED_IF_SELECTED',
+      field: 'did_the_baby_have_any_complications_at_the_time_of_birth',
+      optionFieldMap: {
+        other_please_specify: 'did_the_baby_have_any_complications_at_the_time_of_birth_other_specify',
+      },
+    });
+  });
+
+  it('has 4 total validationJson rules (1 ANY_OF_REQUIRED + 1 EXCLUSIVE_OPTION + 2 REQUIRED_IF_SELECTED)', () => {
+    expect(childRegistration.validationJson).toHaveLength(4);
   });
 });
 
@@ -292,6 +310,14 @@ describe('anc-visit.json', () => {
     // containing its own option value_code instead — vaccination_status
     // itself is gated on met-beneficiary=yes, same one-step-removed pattern
     // as the groups above. See the dedicated test below.
+    //
+    // if_yes_date_of_usg/type_of_usg/usg_finding are excluded here: per the
+    // source doc (Q48-Q52), they gate on have_you_done_usg_since_last_visit
+    // instead — that field is itself gated on met-beneficiary=yes, same
+    // one-step-removed pattern as the groups above. See the dedicated test
+    // below. (These three previously matched MET_BENEFICIARY_YES directly, a
+    // regression from an emergency array-flattening fix that was corrected
+    // in issue #223.)
     for (const field of fields) {
       if (
         [
@@ -309,6 +335,9 @@ describe('anc-visit.json', () => {
           'td1_date',
           'td2_date',
           'booster_date',
+          'if_yes_date_of_usg',
+          'type_of_usg',
+          'usg_finding',
         ].includes(field.question_code)
       ) {
         continue;
@@ -369,6 +398,22 @@ describe('anc-visit.json', () => {
     // The gating field itself is still met-beneficiary-gated, so the chain
     // as a whole reduces to met-beneficiary=yes AND visited-facility=yes.
     expect(byCode.get('have_you_visited_health_facility_since_my_last_visit')?.visibleWhen).toEqual(
+      MET_BENEFICIARY_YES,
+    );
+  });
+
+  it('shows the USG follow-up fields only when have_you_done_usg_since_last_visit=yes (Q48-Q52, issue #223)', () => {
+    const USG_SINCE_LAST_VISIT_YES = {
+      field: 'have_you_done_usg_since_last_visit',
+      operator: 'eq',
+      value: 'yes',
+    };
+    expect(byCode.get('if_yes_date_of_usg')?.visibleWhen).toEqual(USG_SINCE_LAST_VISIT_YES);
+    expect(byCode.get('type_of_usg')?.visibleWhen).toEqual(USG_SINCE_LAST_VISIT_YES);
+    expect(byCode.get('usg_finding')?.visibleWhen).toEqual(USG_SINCE_LAST_VISIT_YES);
+    // The gating field itself is still met-beneficiary-gated, so the chain
+    // as a whole reduces to met-beneficiary=yes AND usg-since-last-visit=yes.
+    expect(byCode.get('have_you_done_usg_since_last_visit')?.visibleWhen).toEqual(
       MET_BENEFICIARY_YES,
     );
   });
@@ -589,8 +634,8 @@ describe('delivery-visit.json', () => {
   const fields = deliveryVisit.schemaJson;
   const byCode = new Map(fields.map((f) => [f.question_code, f]));
 
-  it('has exactly 44 fields (13 mother-level + 3x10 child fields + remarks)', () => {
-    expect(fields).toHaveLength(44);
+  it('has exactly 48 fields (13 mother-level + 3x10 child fields + remarks + 4 "other, specify" fields)', () => {
+    expect(fields).toHaveLength(48);
   });
 
   it('applies numericRange to every field the source doc bounds', () => {
@@ -676,6 +721,33 @@ describe('delivery-visit.json', () => {
       field: 'did_mother_experience_complications',
       exclusiveValues: ['none'],
     });
+  });
+
+  it('adds a visibleWhen-gated "other, specify" field for the mother\'s and each childN\'s complications', () => {
+    const gate = (field: string) => ({ field, operator: 'contains', value: 'other' });
+    expect(byCode.get('did_mother_experience_complications_other_specify')?.visibleWhen).toEqual(
+      gate('did_mother_experience_complications'),
+    );
+    for (const prefix of ['child1', 'child2', 'child3']) {
+      expect(byCode.get(`${prefix}_related_complications_other_specify`)?.visibleWhen).toEqual(
+        gate(`${prefix}_related_complications`),
+      );
+    }
+  });
+
+  it('has a REQUIRED_IF_SELECTED rule so selecting "other" requires each complications specify field', () => {
+    expect(deliveryVisit.validationJson).toContainEqual({
+      rule: 'REQUIRED_IF_SELECTED',
+      field: 'did_mother_experience_complications',
+      optionFieldMap: { other: 'did_mother_experience_complications_other_specify' },
+    });
+    for (const prefix of ['child1', 'child2', 'child3']) {
+      expect(deliveryVisit.validationJson).toContainEqual({
+        rule: 'REQUIRED_IF_SELECTED',
+        field: `${prefix}_related_complications`,
+        optionFieldMap: { other: `${prefix}_related_complications_other_specify` },
+      });
+    }
   });
 });
 
