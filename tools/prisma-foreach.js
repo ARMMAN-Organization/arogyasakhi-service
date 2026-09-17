@@ -25,9 +25,32 @@
  *   node tools/prisma-foreach.js migrate status                 # status for all services
  *   node tools/prisma-foreach.js migrate status --service=audit-service   # just one service
  *   node tools/prisma-foreach.js db push --yes                  # push each schema (needs explicit --yes)
+ *
+ * Post-migrate hooks (two-phase migrations):
+ *   A migration folder may include a `post-migrate.ts` file (e.g.
+ *   apps/beneficiary-service/prisma/migrations/20260907000000_add_beneficiary_unique_id/
+ *   post-migrate.ts) — for a migration that adds a column as nullable so a
+ *   later migration can enforce NOT NULL only once every row has a value
+ *   (see beneficiary-service's uniqueId field for the motivating case).
+ *
+ *   For `migrate deploy` only, this script detects any pending migration
+ *   with a post-migrate.ts, and runs `prisma migrate deploy` in segments: up
+ *   to and including the hook migration, then the hook script (via
+ *   ts-node), then the remaining pending migrations. Every migration folder
+ *   AFTER a hook point is temporarily moved aside (to a sibling
+ *   `.prisma-foreach-pending/` directory) so Prisma's own `migrate deploy`
+ *   — which always applies everything pending on disk, with no "stop after
+ *   one migration" flag — cannot see or apply them until the hook has run.
+ *   Folders are restored in a `finally` so a crash mid-run never leaves a
+ *   migration permanently hidden from Prisma.
+ *
+ *   The hook script's own exit code gates the next segment: a non-zero
+ *   exit (e.g. the uniqueId backfill leaving rows unresolved) stops before
+ *   the next migration is even attempted, since applying a NOT NULL
+ *   migration over still-incomplete data would just fail anyway.
  */
 const { execFileSync } = require('node:child_process');
-const { readdirSync, existsSync, readFileSync } = require('node:fs');
+const { readdirSync, existsSync, readFileSync, renameSync, mkdirSync, rmdirSync } = require('node:fs');
 const { join } = require('node:path');
 
 const appsDir = join(__dirname, '..', 'apps');
@@ -54,6 +77,120 @@ function withSchema(url, schema) {
   const cleaned = url.replace(/([?&])schema=[^&]*/g, '$1').replace(/[?&]$/, '');
   const sep = cleaned.includes('?') ? '&' : '?';
   return `${cleaned}${sep}schema=${schema}`;
+}
+
+/**
+ * Migration folder names for a service, in the same chronological order
+ * Prisma itself applies them (folder names are timestamp-prefixed, so a
+ * plain sort matches Prisma's own ordering). Excludes migration_lock.toml
+ * and any non-directory entry.
+ */
+function listMigrationDirs(migrationsDir) {
+  if (!existsSync(migrationsDir)) return [];
+  return readdirSync(migrationsDir, { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => d.name)
+    .sort();
+}
+
+/**
+ * Runs `prisma migrate deploy` for one service, pausing at each migration
+ * that has a post-migrate.ts hook to run it before continuing — see this
+ * file's header comment. Falls back to a single plain `migrate deploy` call
+ * when the service has no hooks at all (the common case), so this adds no
+ * extra prisma invocations for every other service.
+ */
+function migrateDeployWithHooks(service, schemaFile, migrationsDir, env) {
+  const allMigrations = listMigrationDirs(migrationsDir);
+  const hookMigrations = allMigrations.filter((name) =>
+    existsSync(join(migrationsDir, name, 'post-migrate.ts')),
+  );
+
+  if (hookMigrations.length === 0) {
+    execFileSync('npx', ['prisma', 'migrate', 'deploy', '--schema', schemaFile], {
+      stdio: 'inherit',
+      env,
+    });
+    return;
+  }
+
+  // Held OUTSIDE migrationsDir entirely (a sibling of prisma/), not just a
+  // subdirectory of it — Prisma's schema engine scans every directory
+  // directly under migrations/ as a candidate migration folder, so even an
+  // empty `.prisma-foreach-pending/` living inside migrations/ itself was
+  // enough to make `migrate deploy` fail looking for a migration.sql that
+  // was never meant to be one (confirmed live).
+  const pendingHoldDir = join(migrationsDir, '..', '.prisma-foreach-pending');
+  // Migrations still hidden away from a previous run that crashed before
+  // restoring them — put them back before this run touches anything, so a
+  // retry doesn't compound on top of an already-broken hide/restore state.
+  if (existsSync(pendingHoldDir)) {
+    for (const name of readdirSync(pendingHoldDir)) {
+      renameSync(join(pendingHoldDir, name), join(migrationsDir, name));
+    }
+    rmdirSync(pendingHoldDir);
+  }
+
+  let hiddenNames = [];
+  try {
+    for (const hookMigration of hookMigrations) {
+      const hookIndex = allMigrations.indexOf(hookMigration);
+      const laterMigrations = allMigrations.slice(hookIndex + 1);
+
+      hiddenNames = laterMigrations.filter((name) => existsSync(join(migrationsDir, name)));
+      if (hiddenNames.length > 0) {
+        mkdirSync(pendingHoldDir, { recursive: true });
+        for (const name of hiddenNames) {
+          renameSync(join(migrationsDir, name), join(pendingHoldDir, name));
+        }
+      }
+
+      console.log(
+        `  → applying migrations up to and including "${hookMigration}" for ${service}…`,
+      );
+      execFileSync('npx', ['prisma', 'migrate', 'deploy', '--schema', schemaFile], {
+        stdio: 'inherit',
+        env,
+      });
+
+      if (hiddenNames.length > 0) {
+        for (const name of hiddenNames) {
+          renameSync(join(pendingHoldDir, name), join(migrationsDir, name));
+        }
+        rmdirSync(pendingHoldDir);
+        hiddenNames = [];
+      }
+
+      const hookScript = join(migrationsDir, hookMigration, 'post-migrate.ts');
+      console.log(`  → running post-migrate hook for "${hookMigration}"…`);
+      execFileSync(
+        'npx',
+        ['ts-node', '-r', 'tsconfig-paths/register', hookScript],
+        {
+          stdio: 'inherit',
+          env: { ...env, TS_NODE_PROJECT: join(join(migrationsDir, '..', '..'), 'tsconfig.app.json') },
+        },
+      );
+    }
+
+    // Every remaining migration after the last hook (or the whole set, if
+    // somehow nothing was pending above) still needs to be applied.
+    console.log(`  → applying remaining migrations for ${service}…`);
+    execFileSync('npx', ['prisma', 'migrate', 'deploy', '--schema', schemaFile], {
+      stdio: 'inherit',
+      env,
+    });
+  } finally {
+    // Restore anything still hidden (e.g. the hook script itself threw) so
+    // a failed run never leaves migrations invisible to Prisma.
+    if (hiddenNames.length > 0 && existsSync(pendingHoldDir)) {
+      for (const name of hiddenNames) {
+        const from = join(pendingHoldDir, name);
+        if (existsSync(from)) renameSync(from, join(migrationsDir, name));
+      }
+      if (readdirSync(pendingHoldDir).length === 0) rmdirSync(pendingHoldDir);
+    }
+  }
 }
 
 // --service=<name> restricts the run to one service instead of all of
@@ -89,6 +226,7 @@ const baseDb = readEnvVar(rootEnv, 'DATABASE_URL');
 const baseDirect = readEnvVar(rootEnv, 'DIRECT_URL') || baseDb;
 
 const isDbPush = args[0] === 'db' && args[1] === 'push';
+const isMigrateDeploy = args[0] === 'migrate' && args[1] === 'deploy';
 // `--yes`/`--force`/`--service=<name>` are wrapper-only flags (checked once,
 // up front, above/below) — strip them before the args are forwarded to the
 // real `prisma` CLI, which doesn't recognize any of them.
@@ -148,7 +286,12 @@ for (const service of services) {
   }
 
   try {
-    execFileSync('npx', ['prisma', ...prismaArgs, '--schema', schemaFile], { stdio: 'inherit', env });
+    if (isMigrateDeploy) {
+      const migrationsDir = join(dir, 'prisma', 'migrations');
+      migrateDeployWithHooks(service, schemaFile, migrationsDir, env);
+    } else {
+      execFileSync('npx', ['prisma', ...prismaArgs, '--schema', schemaFile], { stdio: 'inherit', env });
+    }
   } catch {
     console.error(`✗ ${service}: prisma ${prismaArgs.join(' ')} failed`);
     failed++;

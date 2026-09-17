@@ -96,10 +96,22 @@ enum HealthEducationMediaType {
 // riskConditionId is nullable and a plain scalar with NO Prisma @relation —
 // cross-service reference to risk-referral-service's risk_conditions table,
 // same pattern beneficiary-service's own riskConditionId column already
-// established (forklift rule: no cross-service joins). NULL for
-// general/stage-triggered messages with no specific risk condition (e.g.
-// Primigravida, Breastfeeding, Birth preparedness) — about a third of the
-// source CSV's rows are this kind, confirmed during ingestion (Task 2).
+// established (forklift rule: no cross-service joins). NULL on every row
+// today, for two different reasons: (a) general/stage-triggered messages
+// with no specific risk condition at all (e.g. Primigravida, Breastfeeding,
+// Birth preparedness — about a third of the source CSV's rows), and (b) a
+// structural one — risk_conditions.id is a random @default(uuid()) with no
+// fixed value in that service's own seed data, so there is no stable value
+// to hardcode here even for a message (e.g. "Danger Signs during
+// Pregnancy") that DOES have a confirmed, real risk-condition match. The
+// actual condition<->message linkage for those confirmed matches lives in
+// risk-referral-service's beneficiaryRisk.service.ts CONDITION_CODE_TO_LABEL
+// map, keyed by conditionCode (the one identifier stable across both
+// services' independently-seeded databases) — not this column. Populating
+// this column for real would need a cross-service ID-sharing scheme (e.g.
+// risk_conditions seeded with fixed ids, or a lookup-by-code endpoint) that
+// does not exist yet; until then, conditionCode-keyed application logic is
+// the correct mechanism, not a stopgap for this column.
 //
 // stage is free text, copied verbatim from the CSV's Stage column — NOT an
 // enum. The source data's ~15 distinct phrases ("as soon as detected during
@@ -109,10 +121,15 @@ enum HealthEducationMediaType {
 // ARMMAN/product later confirms the real set (explicit product decision,
 // 2026-08-28).
 //
-// bodyMarathi is a literal "Marathi coming soon" placeholder string on
-// every row, not a translated value — ARMMAN's Marathi translation for
-// this specific content is still undelivered (confirmed: the source CSV's
-// own "Marathi translation" column is entirely empty across all 32 rows).
+// bodyMarathi is real translated content for 30 of 32 rows, ingested from
+// ARMMAN's "Health education messages_Developer's copy.xlsx" (the "Message
+// without media_Marathi" column) — a separate, later CSV delivery than the
+// one this model's English content first came from (confirmed: that
+// earlier CSV's Marathi column was empty, but this one is not). The
+// remaining 2 rows (Post miscarriage/abortion/still birth, Dehydration)
+// have no ARMMAN Marathi in either CSV delivery — their bodyMarathi is an
+// AI-generated translation of bodyEn, not ARMMAN-sourced/reviewed content,
+// pending replacement once ARMMAN delivers real translations for these two.
 model HealthEducationMessage {
   id              String                   @id @default(uuid()) @map("health_education_message_id")
   // risk_conditions.risk_condition_id (risk-referral-service) — no
@@ -131,15 +148,23 @@ model HealthEducationMessage {
   messageOrder    Int                      @map("message_order")
   titleEn         String?                  @map("title_en") @db.VarChar(200)
   bodyEn          String                   @map("body_en")
-  // Literal placeholder text, not a real translation — see model doc
-  // comment. Never null; every row gets this same placeholder until a real
-  // Marathi ingestion pass replaces it.
+  // Real translated content on 30 of 32 seeded rows — see model doc
+  // comment. The column default below is only a fallback for the 2 rows
+  // (and any future row) ARMMAN's Marathi source itself left blank; it is
+  // not the steady-state value for this column.
   bodyMarathi     String                   @default("Marathi content coming soon") @map("body_marathi")
   mediaType       HealthEducationMediaType @default(TEXT) @map("media_type")
-  // CSV's Media file column — a bare filename/label today (e.g.
-  // "marathi_immunization.mp4"), NOT a resolvable URL. Stored as-is; no
-  // CDN/hosting has been set up (confirmed unresolved, out of scope here).
+  // CSV's Media file column — a bare filename/label (e.g.
+  // "marathi_immunization.mp4"), not itself a resolvable URL. Treated as
+  // the Strapi entry's `slug` by healthEducationMedia.syncService.ts — see
+  // mediaResolvedUrl below for the actual playable URL.
   mediaFile       String?                  @map("media_file") @db.VarChar(200)
+  // Absolute, playable URL for mediaFile, resolved via Strapi and stored
+  // by POST /health-education/media-sync (admin-triggered, no automatic
+  // schedule/webhook — same pattern as learnMore.syncService.ts). Null
+  // until a sync run finds a Strapi entry whose slug matches mediaFile;
+  // never guessed at or derived from mediaFile itself.
+  mediaResolvedUrl String?                @map("media_resolved_url")
   sortOrder       Int                      @default(0) @map("sort_order")
   createdAt       DateTime                 @default(now()) @map("created_at")
   createdByUserId String?                  @map("created_by_user_id")

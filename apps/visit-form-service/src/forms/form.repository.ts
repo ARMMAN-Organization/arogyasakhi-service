@@ -1,6 +1,49 @@
 import type { PrismaService } from '../prisma/prisma.service';
 import type { FormAnswerRow } from './form.mapper';
 
+export interface SubmissionHistoryItem {
+  submissionId: string;
+  formCode: string;
+  submittedAt: Date;
+  answers: Record<string, unknown>;
+  visitSchedule: {
+    scheduleId: string;
+    scheduledDate: Date;
+    status: string;
+    sequenceNo: number | null;
+  } | null;
+}
+
+export interface SubmissionHistoryPage {
+  items: SubmissionHistoryItem[];
+  nextCursor: string | null;
+}
+
+/** Encodes a submission row's (submittedAt, id) pair as an opaque pagination cursor. */
+function encodeSubmissionCursor(row: { submittedAt: Date; id: string }): string {
+  const cursor = { submittedAt: row.submittedAt.toISOString(), id: row.id };
+  return Buffer.from(JSON.stringify(cursor)).toString('base64url');
+}
+
+/** Decodes a cursor produced by encodeSubmissionCursor; returns null on any malformed input. */
+function decodeSubmissionCursor(cursor: string): { submittedAt: string; id: string } | null {
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
+    if (typeof parsed?.submittedAt === 'string' && typeof parsed?.id === 'string') {
+      return parsed as { submittedAt: string; id: string };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export interface ListFormSubmissionsFilters {
+  beneficiaryIds: string[];
+  cursor?: string;
+  limit: number;
+}
+
 export interface CreateVersionData {
   formDefinitionId: string;
   versionNo: string;
@@ -38,6 +81,57 @@ export interface CreateSubmissionData {
  */
 export class FormRepository {
   constructor(private readonly prisma: PrismaService) {}
+
+  /**
+   * Cursor-paginated form-submission list, scoped to a resolved set of
+   * beneficiaryIds — backs FR-SV-4.6's Data Restore flow. FormSubmission
+   * carries no sakhiId column of its own, so the caller (form.service.ts)
+   * resolves the in-scope beneficiaryIds via beneficiary-service's
+   * GET /beneficiaries/ids first. Sorts by (submittedAt desc, id desc) and
+   * fetches limit+1 rows — descending, unlike findSubmissionsByBeneficiaryId
+   * above (oldest-first device-loss replay), since a restore's most useful
+   * page is the most recent activity, same convention GET /visits and
+   * GET /visit-schedules already use. Returns raw rows (including full
+   * formDataJson) rather than that method's reshaped/decomposed item, since
+   * a restore's client wants the exact stored submission, not a history
+   * projection. An empty `beneficiaryIds` returns an empty page without
+   * querying the DB.
+   */
+  async findManyPaginated(filters: ListFormSubmissionsFilters): Promise<{
+    items: Awaited<ReturnType<PrismaService['formSubmission']['findMany']>>;
+    nextCursor: string | null;
+  }> {
+    if (filters.beneficiaryIds.length === 0) return { items: [], nextCursor: null };
+
+    const where: NonNullable<Parameters<typeof this.prisma.formSubmission.findMany>[0]>['where'] = {
+      isDeleted: false,
+      beneficiaryId: { in: filters.beneficiaryIds },
+    };
+
+    const decodedCursor = filters.cursor ? decodeSubmissionCursor(filters.cursor) : null;
+
+    const rows = await this.prisma.formSubmission.findMany({
+      where: decodedCursor
+        ? {
+            ...where,
+            OR: [
+              { submittedAt: { lt: new Date(decodedCursor.submittedAt) } },
+              { submittedAt: new Date(decodedCursor.submittedAt), id: { lt: decodedCursor.id } },
+            ],
+          }
+        : where,
+      orderBy: [{ submittedAt: 'desc' }, { id: 'desc' }],
+      take: filters.limit + 1,
+    });
+
+    const hasMore = rows.length > filters.limit;
+    const items = hasMore ? rows.slice(0, filters.limit) : rows;
+    const lastItem = items[items.length - 1];
+    return {
+      items,
+      nextCursor: hasMore && lastItem ? encodeSubmissionCursor(lastItem) : null,
+    };
+  }
 
   findDefinitionByCode(formCode: string) {
     return this.prisma.formDefinition.findUnique({ where: { formCode } });
@@ -319,6 +413,78 @@ export class FormRepository {
    */
   findVisitById(id: string, beneficiaryId: string) {
     return this.prisma.visitInstance.findFirst({ where: { id, beneficiaryId, isDeleted: false } });
+  }
+
+  /**
+   * A beneficiary's full submission history (device-loss schedule recovery
+   * — CR-DeviceContinuity-01, issue #228): every non-deleted FormSubmission
+   * for the beneficiary, oldest first, with each submission's raw
+   * formDataJson and — where visitId is set — the linked VisitSchedule
+   * context (scheduleId/scheduledDate/status/sequenceNo) so a mobile client
+   * can replay history and rebuild schedules on a new device. visitSchedule
+   * is null for one-time forms not tied to a visit (e.g.
+   * MOTHER_REGISTRATION).
+   *
+   * Cursor-paginated on (submittedAt, id) ascending — same keyset-pagination
+   * shape as beneficiary.repository.ts's encode/decodeCursor, but a local
+   * copy rather than a shared import: that codec is generic over field name
+   * but still assumes a single sort key name at the call site, and this
+   * table's natural sort key (submittedAt) already differs from every
+   * existing caller there — not worth a shared abstraction for one field.
+   */
+  async findSubmissionsByBeneficiaryId(
+    beneficiaryId: string,
+    cursor: string | undefined,
+    limit: number,
+  ): Promise<SubmissionHistoryPage> {
+    const decodedCursor = cursor ? decodeSubmissionCursor(cursor) : null;
+
+    const rows = await this.prisma.formSubmission.findMany({
+      where: {
+        beneficiaryId,
+        isDeleted: false,
+        ...(decodedCursor
+          ? {
+              OR: [
+                { submittedAt: { gt: new Date(decodedCursor.submittedAt) } },
+                {
+                  submittedAt: new Date(decodedCursor.submittedAt),
+                  id: { gt: decodedCursor.id },
+                },
+              ],
+            }
+          : {}),
+      },
+      orderBy: [{ submittedAt: 'asc' }, { id: 'asc' }],
+      take: limit + 1,
+      include: {
+        formVersion: { include: { formDefinition: true } },
+        visit: { include: { schedule: true } },
+      },
+    });
+
+    const hasMore = rows.length > limit;
+    const trimmedRows = hasMore ? rows.slice(0, limit) : rows;
+    const items = trimmedRows.map((row) => ({
+      submissionId: row.id,
+      formCode: row.formVersion.formDefinition.formCode,
+      submittedAt: row.submittedAt,
+      answers: row.formDataJson as Record<string, unknown>,
+      visitSchedule: row.visit
+        ? {
+            scheduleId: row.visit.schedule.id,
+            scheduledDate: row.visit.schedule.scheduledDate,
+            status: row.visit.schedule.status,
+            sequenceNo: row.visit.schedule.sequenceNo,
+          }
+        : null,
+    }));
+    const lastRow = trimmedRows[trimmedRows.length - 1];
+
+    return {
+      items,
+      nextCursor: hasMore && lastRow ? encodeSubmissionCursor(lastRow) : null,
+    };
   }
 
   /**

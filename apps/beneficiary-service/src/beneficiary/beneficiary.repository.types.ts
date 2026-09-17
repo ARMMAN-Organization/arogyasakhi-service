@@ -74,6 +74,7 @@ export interface PiiCreateData {
 
 export interface CaseCreateData {
   localCaseUuid: string;
+  uniqueId: string;
   projectId: string;
   sakhiId: string;
   caseType: CaseType;

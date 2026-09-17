@@ -42,6 +42,7 @@ export function withDecryptedName<T extends { pii: PiiRow; [k: string]: unknown 
   const projected: Record<string, unknown> = {
     id: c.id,
     localCaseUuid: c.localCaseUuid,
+    uniqueId: c.uniqueId,
     piiId: c.piiId,
     projectId: c.projectId,
     sakhiId: c.sakhiId,

@@ -9,6 +9,7 @@ describe('BeneficiaryRepository', () => {
   const childCaseDetailsUpdateMany = jest.fn();
   const consentRecordUpdateMany = jest.fn();
   const $transaction = jest.fn((ops: unknown[]) => Promise.all(ops));
+  const $queryRaw = jest.fn();
   const prisma = {
     beneficiaryCase: { groupBy, findMany, updateMany: beneficiaryCaseUpdateMany },
     beneficiaryPii: { updateMany: beneficiaryPiiUpdateMany },
@@ -16,6 +17,7 @@ describe('BeneficiaryRepository', () => {
     childCaseDetails: { updateMany: childCaseDetailsUpdateMany },
     consentRecord: { updateMany: consentRecordUpdateMany },
     $transaction,
+    $queryRaw,
   } as never;
   let repository: BeneficiaryRepository;
 
@@ -23,6 +25,16 @@ describe('BeneficiaryRepository', () => {
     jest.clearAllMocks();
     $transaction.mockImplementation((ops: unknown[]) => Promise.all(ops));
     repository = new BeneficiaryRepository(prisma);
+  });
+
+  describe('nextUniqueIdSequence', () => {
+    it("returns the sequence's nextval as a bigint", async () => {
+      $queryRaw.mockResolvedValue([{ nextval: 42n }]);
+
+      const result = await repository.nextUniqueIdSequence();
+
+      expect(result).toBe(42n);
+    });
   });
 
   describe('countByCaseType', () => {
@@ -541,6 +553,95 @@ describe('BeneficiaryRepository', () => {
 
       expect($transaction).not.toHaveBeenCalled();
       expect(result).toEqual({ restoredCaseCount: 0 });
+    });
+  });
+
+  describe('findManyFullDetail', () => {
+    const row = (n: number, createdAt: string) => ({
+      id: `case-${n}`,
+      createdAt: new Date(createdAt),
+    });
+
+    it('filters by a single sakhiId when provided', async () => {
+      findMany.mockResolvedValue([]);
+
+      await repository.findManyFullDetail({ sakhiId: 'sakhi-1', limit: 50 });
+
+      expect(findMany.mock.calls[0][0].where).toEqual({ isDeleted: false, sakhiId: 'sakhi-1' });
+    });
+
+    it('filters by sakhiId: { in: [...] } when a sakhiIds array is provided', async () => {
+      findMany.mockResolvedValue([]);
+
+      await repository.findManyFullDetail({ sakhiIds: ['sakhi-1', 'sakhi-2'], limit: 50 });
+
+      expect(findMany.mock.calls[0][0].where).toEqual({
+        isDeleted: false,
+        sakhiId: { in: ['sakhi-1', 'sakhi-2'] },
+      });
+    });
+
+    it('includes the full-detail relations (consent/risk/status-history/socio)', async () => {
+      findMany.mockResolvedValue([]);
+
+      await repository.findManyFullDetail({ limit: 50 });
+
+      expect(findMany.mock.calls[0][0].include).toEqual({
+        pii: true,
+        motherCaseDetails: true,
+        childCaseDetails: true,
+        consentRecords: { orderBy: { createdAt: 'desc' }, take: 1 },
+        riskConditionSummaries: true,
+        statusHistory: { orderBy: { changedAt: 'desc' } },
+        socioDemographics: true,
+      });
+    });
+
+    it('returns nextCursor: null when fewer than limit+1 rows exist', async () => {
+      findMany.mockResolvedValue([row(1, '2026-08-01T00:00:00.000Z')]);
+
+      const result = await repository.findManyFullDetail({ limit: 50 });
+
+      expect(result.items).toHaveLength(1);
+      expect(result.nextCursor).toBeNull();
+    });
+
+    it('returns a nextCursor and trims the extra row when more results exist beyond the limit', async () => {
+      findMany.mockResolvedValue([
+        row(1, '2026-08-03T00:00:00.000Z'),
+        row(2, '2026-08-02T00:00:00.000Z'),
+      ]);
+
+      const result = await repository.findManyFullDetail({ limit: 1 });
+
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0].id).toBe('case-1');
+      expect(result.nextCursor).not.toBeNull();
+    });
+
+    it('decodes a supplied cursor into a createdAt/id keyset filter', async () => {
+      findMany.mockResolvedValue([]);
+      const cursor = Buffer.from(
+        JSON.stringify({ createdAt: '2026-08-05T00:00:00.000Z', id: 'case-5' }),
+      ).toString('base64url');
+
+      await repository.findManyFullDetail({ limit: 50, cursor });
+
+      const call = findMany.mock.calls[0][0];
+      expect(call.where.OR).toEqual([
+        { createdAt: { lt: new Date('2026-08-05T00:00:00.000Z') } },
+        { createdAt: new Date('2026-08-05T00:00:00.000Z'), id: { lt: 'case-5' } },
+      ]);
+    });
+
+    it('treats a malformed cursor as "start from the beginning" rather than throwing', async () => {
+      findMany.mockResolvedValue([]);
+
+      await expect(
+        repository.findManyFullDetail({ limit: 50, cursor: 'not-a-valid-cursor' }),
+      ).resolves.toEqual({ items: [], nextCursor: null });
+
+      expect(findMany.mock.calls[0][0].where.OR).toBeUndefined();
     });
   });
 });

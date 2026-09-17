@@ -1,8 +1,27 @@
 import type { PrismaService } from '../prisma/prisma.service';
+import type { PatchHealthEducationMessageInput } from './dto/patch-health-education-message.dto';
 
-/** Data access for health_education_messages. Read-only from this feature. */
+/** Data access for health_education_messages. */
 export class HealthEducationRepository {
   constructor(private readonly prisma: PrismaService) {}
+
+  findById(id: string) {
+    return this.prisma.healthEducationMessage.findFirst({ where: { id, isDeleted: false } });
+  }
+
+  /**
+   * Updates only the content-authoring fields (see
+   * patch-health-education-message.dto.ts's doc comment for why the
+   * structural/matching fields are excluded). `where: isDeleted: false`
+   * mirrors findById's own convention — a soft-deleted row can't be edited
+   * back to life through this endpoint.
+   */
+  update(id: string, data: PatchHealthEducationMessageInput) {
+    return this.prisma.healthEducationMessage.update({
+      where: { id },
+      data,
+    });
+  }
 
   /**
    * Filters independently — both, either, or neither may be given.

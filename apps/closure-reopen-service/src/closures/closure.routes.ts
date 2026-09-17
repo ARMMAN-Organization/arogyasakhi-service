@@ -6,6 +6,7 @@ import { createClosureSchema } from './dto/create-closure.dto';
 import { decideClosureSchema } from './dto/decide-closure.dto';
 import { decideClosureAliasSchema } from './dto/decide-closure-alias.dto';
 import { decisionStatusQuerySchema } from './dto/decision-status-query.dto';
+import { listClosuresQuerySchema } from './dto/list-closures.dto';
 import {
   requireRoles,
   trustGatewayIdentity,
@@ -116,6 +117,48 @@ export function registerClosureRoutes(doc: DocumentedRouter, service: ClosureSer
     trustGatewayIdentity,
     requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER'),
     controller.list,
+  );
+
+  doc.get(
+    '/closures/by-sakhi',
+    {
+      summary:
+        "Cursor-paginated closure list, scoped by sakhiId — backs FR-SV-4.6's Data Restore " +
+        "flow (a Sakhi's device re-downloading everything scoped to her after a " +
+        'reset/reinstall). Closure carries no sakhiId column of its own — the in-scope ' +
+        'beneficiaryIds are resolved via beneficiary-service GET /beneficiaries/ids, which ' +
+        "applies the same role-scoping visit-form-service's GET /visits uses: SAKHI always " +
+        'sees only her own closures regardless of the sakhiId query param; SUPERVISOR sees ' +
+        'one roster sakhiId or, if omitted, her whole roster; MANAGER/ADMIN may pass any ' +
+        'sakhiId or omit it for fully unscoped. Excludes soft-deleted rows. Separate from ' +
+        'GET /closures above (an unrelated, unscoped Quick Response widget listing).',
+      tags: ['Closures'],
+      query: listClosuresQuerySchema,
+      responses: {
+        200: {
+          description: 'Closures retrieved',
+          schema: envelope(
+            z.object({
+              items: z.array(closureSchema),
+              nextCursor: z.string().nullable().openapi({
+                description:
+                  'Pass back as `cursor` to fetch the next page; null when this is the last page.',
+              }),
+            }),
+          ),
+        },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: {
+          description: "Caller role not permitted, or sakhiId outside the caller's own roster",
+          schema: apiErrorSchema,
+        },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(listClosuresQuerySchema, 'query'),
+    controller.listBySakhi,
   );
 
   doc.get(

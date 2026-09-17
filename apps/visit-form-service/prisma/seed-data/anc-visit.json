@@ -89,6 +89,7 @@
       "section": "Tests",
       "required": true,
       "input_type": "date",
+      "dateRule": { "notFuture": true },
       "question_code": "lmp",
       "learnMoreTopicCode": "COMING_SOON",
       "visibleWhen": {
@@ -944,9 +945,9 @@
       "required": true,
       "input_type": "multiselect",
       "visibleWhen": {
-        "field": "have_you_been_able_to_meet_the_beneficiary_for_the_visit",
+        "field": "are_you_taking_ifa_tablets",
         "operator": "eq",
-        "value": "yes"
+        "value": "no"
       },
       "question_code": "if_no_what_is_the_reasons_for_non_consumption_of_ifa_tablets"
     },

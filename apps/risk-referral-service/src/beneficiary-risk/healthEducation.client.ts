@@ -20,6 +20,7 @@ export interface HealthEducationMessage {
   bodyMarathi: string;
   mediaType: string;
   mediaFile: string | null;
+  mediaResolvedUrl: string | null;
   sortOrder: number;
 }
 

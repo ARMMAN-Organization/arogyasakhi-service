@@ -504,4 +504,85 @@ describe('VisitInstanceRepository', () => {
       expect(result).toEqual({ restoredVisitCount: 0 });
     });
   });
+
+  describe('findManyPaginated', () => {
+    const row = (n: number, createdAt: string) => ({
+      id: `visit-${n}`,
+      createdAt: new Date(createdAt),
+    });
+
+    it('filters by a single sakhiId when provided', async () => {
+      findMany.mockResolvedValue([]);
+
+      await repository.findManyPaginated({ sakhiId: 'sakhi-1', limit: 50 });
+
+      expect(findMany.mock.calls[0][0].where).toEqual({ isDeleted: false, sakhiId: 'sakhi-1' });
+    });
+
+    it('filters by sakhiId: { in: [...] } when a sakhiIds array is provided', async () => {
+      findMany.mockResolvedValue([]);
+
+      await repository.findManyPaginated({ sakhiIds: ['sakhi-1', 'sakhi-2'], limit: 50 });
+
+      expect(findMany.mock.calls[0][0].where).toEqual({
+        isDeleted: false,
+        sakhiId: { in: ['sakhi-1', 'sakhi-2'] },
+      });
+    });
+
+    it('excludes soft-deleted rows even with no sakhi scoping', async () => {
+      findMany.mockResolvedValue([]);
+
+      await repository.findManyPaginated({ limit: 50 });
+
+      expect(findMany.mock.calls[0][0].where).toEqual({ isDeleted: false });
+    });
+
+    it('returns nextCursor: null when fewer than limit+1 rows exist', async () => {
+      findMany.mockResolvedValue([row(1, '2026-08-01T00:00:00.000Z')]);
+
+      const result = await repository.findManyPaginated({ limit: 50 });
+
+      expect(result.items).toHaveLength(1);
+      expect(result.nextCursor).toBeNull();
+    });
+
+    it('returns a nextCursor and trims the extra row when more results exist beyond the limit', async () => {
+      findMany.mockResolvedValue([
+        row(1, '2026-08-03T00:00:00.000Z'),
+        row(2, '2026-08-02T00:00:00.000Z'),
+      ]);
+
+      const result = await repository.findManyPaginated({ limit: 1 });
+
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0].id).toBe('visit-1');
+      expect(result.nextCursor).not.toBeNull();
+    });
+
+    it('decodes a supplied cursor into a createdAt/id keyset filter', async () => {
+      findMany.mockResolvedValue([]);
+      const cursor = Buffer.from(
+        JSON.stringify({ createdAt: '2026-08-05T00:00:00.000Z', id: 'visit-5' }),
+      ).toString('base64url');
+
+      await repository.findManyPaginated({ limit: 50, cursor });
+
+      const call = findMany.mock.calls[0][0];
+      expect(call.where.OR).toEqual([
+        { createdAt: { lt: new Date('2026-08-05T00:00:00.000Z') } },
+        { createdAt: new Date('2026-08-05T00:00:00.000Z'), id: { lt: 'visit-5' } },
+      ]);
+    });
+
+    it('treats a malformed cursor as "start from the beginning" rather than throwing', async () => {
+      findMany.mockResolvedValue([]);
+
+      await expect(
+        repository.findManyPaginated({ limit: 50, cursor: 'not-a-valid-cursor' }),
+      ).resolves.toEqual({ items: [], nextCursor: null });
+
+      expect(findMany.mock.calls[0][0].where.OR).toBeUndefined();
+    });
+  });
 });

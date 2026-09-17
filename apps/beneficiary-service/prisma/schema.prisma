@@ -230,6 +230,12 @@ model BeneficiaryCase {
   // instead of creating a duplicate, matching the pattern form_submissions
   // (local_submission_uuid) and visit_instances (local_visit_uuid) already use.
   localCaseUuid           String            @unique @map("local_case_uuid") @db.VarChar(80)
+  // Server-generated, human-readable display id per SRS's "Unique ID" field
+  // (docs/Arogya_Sakhi_SRS_v3.0.md:403): State(2)-District(3)-Block(3)-ID(6),
+  // e.g. "MH-NAN-DHA-000123". Distinct from `id`/`localCaseUuid` (the SRS's
+  // "Beneficiary ID") — this is a separate, additive identifier. See
+  // generateUniqueId.ts for the truncation/padding/sequence rules.
+  uniqueId                String            @unique @map("unique_id") @db.VarChar(20)
   piiId                   String            @map("pii_id")
   // projects.project_id — owned by another service.
   projectId               String            @map("project_id")

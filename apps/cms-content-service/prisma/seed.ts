@@ -83,6 +83,7 @@ async function seedHealthEducationMessages(): Promise<void> {
         messageOrder: message.messageOrder,
         titleEn: message.titleEn,
         bodyEn: message.bodyEn,
+        bodyMarathi: message.bodyMarathi,
         mediaType: message.mediaType as 'TEXT' | 'IMAGE' | 'AUDIO' | 'VIDEO',
         mediaFile: message.mediaFile,
         sortOrder: message.sortOrder,

@@ -37,6 +37,7 @@ describe('VisitScheduleService', () => {
     createAllOrNothing: jest.fn(),
     updateGeneratedByRuleVersionId: jest.fn(),
     countByBeneficiaryAndVisitType: jest.fn(),
+    findManyPaginated: jest.fn(),
   } as unknown as jest.Mocked<VisitScheduleRepository>;
   let service: VisitScheduleService;
 
@@ -471,6 +472,56 @@ describe('VisitScheduleService', () => {
       status: 400,
     });
     expect(repository.createAllOrNothing).not.toHaveBeenCalled();
+  });
+
+  describe('list', () => {
+    beforeEach(() => {
+      repository.findManyPaginated.mockResolvedValue({ items: [], nextCursor: null });
+    });
+
+    it('resolves beneficiaryIds via findBeneficiaryIds, forwarding query.sakhiId', async () => {
+      (beneficiaryClient.findBeneficiaryIds as jest.Mock).mockResolvedValue(['b-1', 'b-2']);
+
+      await service.list({ sakhiId, limit: 50 }, authHeader);
+
+      expect(beneficiaryClient.findBeneficiaryIds).toHaveBeenCalledWith(authHeader, sakhiId);
+      expect(repository.findManyPaginated).toHaveBeenCalledWith({
+        beneficiaryIds: ['b-1', 'b-2'],
+        cursor: undefined,
+        limit: 50,
+      });
+    });
+
+    it('passes query.cursor through to the repository', async () => {
+      (beneficiaryClient.findBeneficiaryIds as jest.Mock).mockResolvedValue([]);
+
+      await service.list({ cursor: 'some-cursor', limit: 10 }, authHeader);
+
+      expect(repository.findManyPaginated).toHaveBeenCalledWith({
+        beneficiaryIds: [],
+        cursor: 'some-cursor',
+        limit: 10,
+      });
+    });
+
+    it('returns the repository page as-is', async () => {
+      (beneficiaryClient.findBeneficiaryIds as jest.Mock).mockResolvedValue(['b-1']);
+      const page = { items: [{ id: 'schedule-1' }], nextCursor: 'next-cursor' } as never;
+      repository.findManyPaginated.mockResolvedValue(page);
+
+      const result = await service.list({ limit: 50 }, authHeader);
+
+      expect(result).toBe(page);
+    });
+
+    it('propagates a 403 thrown by findBeneficiaryIds (out-of-roster sakhiId)', async () => {
+      (beneficiaryClient.findBeneficiaryIds as jest.Mock).mockRejectedValue({ status: 403 });
+
+      await expect(service.list({ sakhiId, limit: 50 }, authHeader)).rejects.toMatchObject({
+        status: 403,
+      });
+      expect(repository.findManyPaginated).not.toHaveBeenCalled();
+    });
   });
 
   describe('ownership', () => {

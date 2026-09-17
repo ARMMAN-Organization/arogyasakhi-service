@@ -4,6 +4,35 @@ import type {
   AnchorType,
 } from '../../../../node_modules/.prisma/client-visit-form-service';
 
+/**
+ * Encodes a row's (createdAt, id) pair as an opaque pagination cursor — same
+ * codec as visitInstance.repository.ts's encodeCursor/decodeCursor, kept
+ * per-service per the forklift rule rather than a shared lib import.
+ */
+function encodeCursor(row: { createdAt: Date; id: string }): string {
+  const cursor = { createdAt: row.createdAt.toISOString(), id: row.id };
+  return Buffer.from(JSON.stringify(cursor)).toString('base64url');
+}
+
+/** Decodes a cursor produced by encodeCursor; returns null on any malformed input (treated as "start from the beginning"). */
+function decodeCursor(cursor: string): { createdAt: string; id: string } | null {
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
+    if (typeof parsed?.createdAt === 'string' && typeof parsed?.id === 'string') {
+      return parsed as { createdAt: string; id: string };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export interface ListVisitSchedulesFilters {
+  beneficiaryIds: string[];
+  cursor?: string;
+  limit: number;
+}
+
 export interface NewScheduleRow {
   localScheduleUuid: string;
   visitCode: string;
@@ -56,6 +85,50 @@ export class VisitScheduleRepository {
 
   findById(id: string) {
     return this.prisma.visitSchedule.findFirst({ where: { id, isDeleted: false } });
+  }
+
+  /**
+   * Cursor-paginated visit-schedule list, scoped to a resolved set of
+   * beneficiaryIds — backs FR-SV-4.6's Data Restore flow. VisitSchedule
+   * carries no sakhiId column of its own, so the caller
+   * (visitSchedule.service.ts) resolves the in-scope beneficiaryIds via
+   * beneficiary-service's GET /beneficiaries/ids first. Sorts by
+   * (createdAt desc, id desc) and fetches limit+1 rows, same convention as
+   * visitInstance.repository.ts's findManyPaginated. An empty
+   * `beneficiaryIds` returns an empty page without querying the DB — the
+   * caller's own scope resolved to zero beneficiaries.
+   */
+  async findManyPaginated(filters: ListVisitSchedulesFilters): Promise<{
+    items: Awaited<ReturnType<PrismaService['visitSchedule']['findMany']>>;
+    nextCursor: string | null;
+  }> {
+    if (filters.beneficiaryIds.length === 0) return { items: [], nextCursor: null };
+
+    const where: NonNullable<Parameters<typeof this.prisma.visitSchedule.findMany>[0]>['where'] = {
+      isDeleted: false,
+      beneficiaryId: { in: filters.beneficiaryIds },
+    };
+
+    const decodedCursor = filters.cursor ? decodeCursor(filters.cursor) : null;
+
+    const rows = await this.prisma.visitSchedule.findMany({
+      where: decodedCursor
+        ? {
+            ...where,
+            OR: [
+              { createdAt: { lt: new Date(decodedCursor.createdAt) } },
+              { createdAt: new Date(decodedCursor.createdAt), id: { lt: decodedCursor.id } },
+            ],
+          }
+        : where,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: filters.limit + 1,
+    });
+
+    const hasMore = rows.length > filters.limit;
+    const items = hasMore ? rows.slice(0, filters.limit) : rows;
+    const lastItem = items[items.length - 1];
+    return { items, nextCursor: hasMore && lastItem ? encodeCursor(lastItem) : null };
   }
 
   /**

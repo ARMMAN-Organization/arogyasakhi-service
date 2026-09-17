@@ -25,10 +25,54 @@ const riskStateSnapshotSchema = z.object({
 });
 
 const educationContentSchema = z.object({
+  id: z
+    .string()
+    .uuid()
+    .nullable()
+    .openapi({
+      description:
+        'The originating HealthEducationMessage.id — null for the COMING_SOON Learn More ' +
+        'placeholder, which has no corresponding message row.',
+    }),
   topicCode: z.string(),
   topicName: z.string(),
+  bodyEn: z
+    .string()
+    .nullable()
+    .openapi({
+      description:
+        'Full English counselling text. null on the COMING_SOON placeholder (no message row ' +
+        'exists to source it from) — the client should key off topicCode === "COMING_SOON" ' +
+        'to render its own placeholder UI rather than expect a server-supplied string here.',
+    }),
+  bodyMarathi: z
+    .string()
+    .nullable()
+    .openapi({
+      description:
+        'Full Marathi counselling text where ARMMAN has delivered it, else the literal ' +
+        '"Marathi content coming soon" placeholder string on the message row itself. null on ' +
+        'the COMING_SOON placeholder, same as bodyEn.',
+    }),
   mediaType: z.string(),
-  contentUrl: z.string().nullable(),
+  contentUrl: z
+    .string()
+    .nullable()
+    .openapi({
+      description:
+        'Raw HealthEducationMessage.mediaFile label/filename (e.g. "anaemia") — NOT a ' +
+        'resolvable URL. See mediaResolvedUrl.',
+    }),
+  mediaResolvedUrl: z
+    .string()
+    .nullable()
+    .openapi({
+      description:
+        "Absolute, playable URL for contentUrl, resolved via cms-content-service's " +
+        'Strapi-backed media pipeline. Null until an admin-triggered ' +
+        'POST /health-education/media-sync run has matched this message against a Strapi ' +
+        'entry, or always null on the COMING_SOON placeholder (no message row to resolve).',
+    }),
 });
 
 const riskFlagViewSchema = z.object({

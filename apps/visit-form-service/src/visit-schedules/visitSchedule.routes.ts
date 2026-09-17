@@ -8,11 +8,13 @@ import {
   MAX_BULK_SCHEDULE_ROWS,
 } from './dto/create-visit-schedule-bulk.dto';
 import { generateVisitScheduleSchema } from './dto/generate-visit-schedule.dto';
+import { listVisitSchedulesQuerySchema } from './dto/list-visit-schedules.dto';
 import {
   errorResponse,
   payloadTooLarge,
   requireRoles,
   trustGatewayIdentity,
+  validate,
   validateBody,
   type DocumentedRouter,
 } from '../app.module';
@@ -44,6 +46,33 @@ function envelope<T extends z.ZodTypeAny>(data: T) {
   return z.object({ success: z.literal(true), message: z.string(), data });
 }
 
+// Fields mirror `model VisitSchedule` in prisma/schema.prisma exactly — no
+// invented fields — for accurate Swagger documentation only.
+const visitScheduleSchema = z.object({
+  id: z.string().uuid(),
+  localScheduleUuid: z.string(),
+  beneficiaryId: z.string().uuid(),
+  visitCode: z.string(),
+  visitType: z.string(),
+  sequenceNo: z.number().int().nullable(),
+  scheduledDate: z.string(),
+  windowStartDate: z.string(),
+  windowEndDate: z.string(),
+  anchorType: z.string(),
+  anchorVisitId: z.string().uuid().nullable(),
+  generatedByRuleVersionId: z.string().uuid(),
+  status: z.string(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+
+const visitScheduleListPageSchema = z.object({
+  items: z.array(visitScheduleSchema),
+  nextCursor: z.string().nullable().openapi({
+    description: 'Pass back as `cursor` to fetch the next page; null when this is the last page.',
+  }),
+});
+
 /**
  * Rejects an oversized batch with 413 before it ever reaches validateBody's
  * Zod parse — a >100-row array.max() failure would otherwise surface as 400
@@ -71,6 +100,37 @@ const rejectOversizedBatch: RequestHandler = (req, _res, next) => {
  */
 export function registerVisitScheduleRoutes(doc: DocumentedRouter, service: VisitScheduleService) {
   const controller = createVisitScheduleController(service);
+
+  doc.get(
+    '/visit-schedules',
+    {
+      summary:
+        "Cursor-paginated visit-schedule list, scoped by sakhiId — backs FR-SV-4.6's Data " +
+        "Restore flow (a Sakhi's device re-downloading everything scoped to her after a " +
+        'reset/reinstall). VisitSchedule carries no sakhiId column of its own — the in-scope ' +
+        'beneficiaryIds are resolved via beneficiary-service GET /beneficiaries/ids, which ' +
+        'applies the same role-scoping GET /visits uses: SAKHI always sees only her own ' +
+        'schedules regardless of the sakhiId query param; SUPERVISOR sees one roster sakhiId ' +
+        'or, if omitted, her whole roster; MANAGER/ADMIN may pass any sakhiId or omit it for ' +
+        'fully unscoped. Excludes soft-deleted rows.',
+      tags: ['Visit Schedules'],
+      query: listVisitSchedulesQuerySchema,
+      responses: {
+        200: {
+          description: 'Visit schedules retrieved',
+          schema: envelope(visitScheduleListPageSchema),
+        },
+        400: errorResponse(400),
+        401: errorResponse(401),
+        403: errorResponse(403, { message: "sakhiId is not in this Supervisor's roster." }),
+        500: errorResponse(500),
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(listVisitSchedulesQuerySchema, 'query'),
+    controller.list,
+  );
 
   doc.post(
     '/visit-schedules/bulk',

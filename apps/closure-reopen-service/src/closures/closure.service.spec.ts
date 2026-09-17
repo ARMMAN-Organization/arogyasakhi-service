@@ -40,6 +40,7 @@ describe('ClosureService', () => {
     findManyByIds: jest.fn(),
     create: jest.fn(),
     decide: jest.fn(),
+    findManyPaginated: jest.fn(),
   } as unknown as jest.Mocked<ClosureRepository>;
   const approvalClient = {
     create: jest.fn(),
@@ -53,6 +54,7 @@ describe('ClosureService', () => {
   const beneficiaryClient = {
     closeCase: jest.fn(),
     getById: jest.fn(),
+    getIds: jest.fn(),
   } as unknown as jest.Mocked<BeneficiaryClient>;
   const sakhiClient = { getById: jest.fn() } as unknown as jest.Mocked<SakhiClient>;
   let service: ClosureService;
@@ -100,6 +102,56 @@ describe('ClosureService', () => {
     const rows = [closureRow()];
     repository.findMany.mockResolvedValue(rows);
     await expect(service.list()).resolves.toBe(rows);
+  });
+
+  describe('listBySakhi', () => {
+    const EMPTY_PAGE = { items: [], nextCursor: null };
+
+    it('resolves beneficiaryIds via beneficiaryClient.getIds, forwarding query.sakhiId', async () => {
+      beneficiaryClient.getIds.mockResolvedValue(['b-1', 'b-2']);
+      repository.findManyPaginated.mockResolvedValue(EMPTY_PAGE as never);
+
+      await service.listBySakhi({ sakhiId: 'sakhi-1', limit: 50 }, authHeader);
+
+      expect(beneficiaryClient.getIds).toHaveBeenCalledWith(authHeader, 'sakhi-1');
+      expect(repository.findManyPaginated).toHaveBeenCalledWith({
+        beneficiaryIds: ['b-1', 'b-2'],
+        cursor: undefined,
+        limit: 50,
+      });
+    });
+
+    it('passes query.cursor through to the repository', async () => {
+      beneficiaryClient.getIds.mockResolvedValue([]);
+      repository.findManyPaginated.mockResolvedValue(EMPTY_PAGE as never);
+
+      await service.listBySakhi({ cursor: 'some-cursor', limit: 10 }, authHeader);
+
+      expect(repository.findManyPaginated).toHaveBeenCalledWith({
+        beneficiaryIds: [],
+        cursor: 'some-cursor',
+        limit: 10,
+      });
+    });
+
+    it('returns the repository page as-is', async () => {
+      beneficiaryClient.getIds.mockResolvedValue(['b-1']);
+      const page = { items: [{ id: 'closure-1' }], nextCursor: 'next-cursor' } as never;
+      repository.findManyPaginated.mockResolvedValue(page);
+
+      const result = await service.listBySakhi({ limit: 50 }, authHeader);
+
+      expect(result).toBe(page);
+    });
+
+    it('propagates a 403 thrown by beneficiaryClient.getIds (out-of-roster sakhiId)', async () => {
+      beneficiaryClient.getIds.mockRejectedValue({ status: 403 });
+
+      await expect(
+        service.listBySakhi({ sakhiId: 'sakhi-1', limit: 50 }, authHeader),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(repository.findManyPaginated).not.toHaveBeenCalled();
+    });
   });
 
   describe('getDecisionStatusByIds', () => {

@@ -2,12 +2,87 @@ import type { PrismaService } from '../prisma/prisma.service';
 import type { CreateVisitInstanceInput } from './dto/create-visitInstance.dto';
 import type { UpdateVisitInstanceInput } from './dto/update-visitInstance.dto';
 
+/**
+ * Encodes a row's (createdAt, id) pair as an opaque pagination cursor —
+ * same codec as beneficiary.repository.ts's encodeCursor/decodeCursor, kept
+ * per-service per the forklift rule rather than a shared lib import.
+ */
+function encodeCursor(row: { createdAt: Date; id: string }): string {
+  const cursor = { createdAt: row.createdAt.toISOString(), id: row.id };
+  return Buffer.from(JSON.stringify(cursor)).toString('base64url');
+}
+
+/** Decodes a cursor produced by encodeCursor; returns null on any malformed input (treated as "start from the beginning"). */
+function decodeCursor(cursor: string): { createdAt: string; id: string } | null {
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
+    if (typeof parsed?.createdAt === 'string' && typeof parsed?.id === 'string') {
+      return parsed as { createdAt: string; id: string };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export interface ListVisitsFilters {
+  sakhiId?: string;
+  sakhiIds?: string[];
+  cursor?: string;
+  limit: number;
+}
+
 /** Data access for visit instances. Owns only this service's `visit_instances` table. */
 export class VisitInstanceRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   findMany() {
     return this.prisma.visitInstance.findMany({ orderBy: { createdAt: 'desc' }, take: 50 });
+  }
+
+  /**
+   * Cursor-paginated, optionally Sakhi-scoped visit list — backs
+   * FR-SV-4.6's Data Restore flow (a Sakhi's device re-downloading
+   * everything scoped to her after a reset/reinstall), where GET /visits'
+   * previous unscoped/unpaginated 50-row cap made a full re-sync
+   * impossible. Sorts by (createdAt desc, id desc) — createdAt alone isn't
+   * guaranteed unique, so id tiebreaks it into a stable order, same
+   * convention as beneficiary.repository.ts's findMany. Fetches limit+1
+   * rows to detect a next page without a separate count query. Excludes
+   * soft-deleted rows — unlike the legacy findMany() above (a "recent
+   * activity" feed that never added this filter), a restore must not
+   * re-download data the Sakhi's own client already knows was deleted.
+   */
+  async findManyPaginated(filters: ListVisitsFilters): Promise<{
+    items: Awaited<ReturnType<PrismaService['visitInstance']['findMany']>>;
+    nextCursor: string | null;
+  }> {
+    const where: NonNullable<Parameters<typeof this.prisma.visitInstance.findMany>[0]>['where'] = {
+      isDeleted: false,
+    };
+    if (filters.sakhiId) where.sakhiId = filters.sakhiId;
+    if (filters.sakhiIds) where.sakhiId = { in: filters.sakhiIds };
+
+    const decodedCursor = filters.cursor ? decodeCursor(filters.cursor) : null;
+
+    const rows = await this.prisma.visitInstance.findMany({
+      where: decodedCursor
+        ? {
+            ...where,
+            OR: [
+              { createdAt: { lt: new Date(decodedCursor.createdAt) } },
+              { createdAt: new Date(decodedCursor.createdAt), id: { lt: decodedCursor.id } },
+            ],
+          }
+        : where,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: filters.limit + 1,
+    });
+
+    const hasMore = rows.length > filters.limit;
+    const items = hasMore ? rows.slice(0, filters.limit) : rows;
+    const lastItem = items[items.length - 1];
+    return { items, nextCursor: hasMore && lastItem ? encodeCursor(lastItem) : null };
   }
 
   findByLocalVisitUuid(localVisitUuid: string) {

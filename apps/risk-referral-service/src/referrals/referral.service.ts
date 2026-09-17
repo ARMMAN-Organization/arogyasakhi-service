@@ -12,6 +12,7 @@ import type { Referral } from '../../../../node_modules/.prisma/client-risk-refe
 import type { ReferralRepository } from './referral.repository';
 import type { CreateReferralInput } from './dto/create-referral.dto';
 import type { DecideReferralInput } from './dto/decide-referral.dto';
+import type { ListRiskReferralsQueryInput } from './dto/list-risk-referrals.dto';
 import { BeneficiaryClient } from './beneficiary.client';
 import { listSakhiIdsForSupervisor } from './sakhi.client';
 import { resolveReferralTypeLookupId } from './lookup.client';
@@ -26,6 +27,25 @@ export class ReferralService {
     private readonly beneficiaryClient: BeneficiaryClient = new BeneficiaryClient(),
     private readonly incentiveClient: IncentiveClient = new IncentiveClient(),
   ) {}
+
+  /**
+   * Cursor-paginated referral list, scoped per the caller's own role — backs
+   * FR-SV-4.6's Data Restore flow (GET /risk-referrals). Referral carries
+   * no sakhiId column of its own (only beneficiaryId), so the in-scope
+   * beneficiaryIds are resolved via beneficiary-service's
+   * GET /beneficiaries/ids first, forwarding the caller's own token — that
+   * endpoint applies the exact same SAKHI-own-id / SUPERVISOR-roster /
+   * MANAGER-ADMIN-unscoped rule and 403s on an out-of-roster sakhiId
+   * itself, so this method doesn't duplicate that scoping logic locally.
+   */
+  async listBySakhi(query: ListRiskReferralsQueryInput, authorizationHeader: string) {
+    const beneficiaryIds = await this.beneficiaryClient.getIds(authorizationHeader, query.sakhiId);
+    return this.repository.findManyPaginated({
+      beneficiaryIds,
+      cursor: query.cursor,
+      limit: query.limit,
+    });
+  }
 
   /**
    * `beneficiaryId` given: SAKHI must own that beneficiary

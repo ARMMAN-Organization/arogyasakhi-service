@@ -14,6 +14,7 @@ import {
 } from './beneficiary.constants';
 import { createBeneficiarySchema } from './dto/create-beneficiary.dto';
 import { listBeneficiariesQuerySchema } from './dto/list-beneficiaries.dto';
+import { listFullDetailQuerySchema } from './dto/list-full-detail.dto';
 import { summaryQuerySchema } from './dto/summary-query.dto';
 import { idsQuerySchema } from './dto/ids-query.dto';
 import { byIdsWithRiskQuerySchema } from './dto/by-ids-with-risk-query.dto';
@@ -173,6 +174,7 @@ const consentRecordSchema = z.object({
 const beneficiaryCaseSchema = z.object({
   id: z.string().uuid(),
   localCaseUuid: z.string(),
+  uniqueId: z.string(),
   piiId: z.string().uuid(),
   projectId: z.string().uuid(),
   sakhiId: z.string().uuid(),
@@ -255,6 +257,13 @@ const beneficiaryListPageSchema = z.object({
   }),
 });
 
+const beneficiaryFullDetailPageSchema = z.object({
+  items: z.array(beneficiaryCaseDetailSchema),
+  nextCursor: z.string().nullable().openapi({
+    description: 'Pass back as `cursor` to fetch the next page; null when this is the last page.',
+  }),
+});
+
 const registrationSummarySchema = z.object({
   total: z.number().int(),
   motherCount: z.number().int(),
@@ -325,6 +334,37 @@ export function registerBeneficiaryRoutes(doc: DocumentedRouter, service: Benefi
     requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
     validate(listBeneficiariesQuerySchema, 'query'),
     controller.list,
+  );
+
+  doc.get(
+    '/beneficiaries/full-detail',
+    {
+      summary:
+        "Cursor-paginated, full-case-detail beneficiary list — backs FR-SV-4.6's Data " +
+        "Restore flow (a Sakhi's device re-downloading every beneficiary case in full " +
+        'detail after a reset/reinstall). Each item has the identical shape ' +
+        'GET /beneficiaries/:id returns (consent, risk state, status history, socio-' +
+        'demographics) — unlike GET /beneficiaries, whose list items omit those fields. ' +
+        'Cursor-paginated via cursor/limit (default 50, max 100). Same role-scoping as ' +
+        'GET /beneficiaries: SAKHI always sees only her own cases regardless of sakhiId; ' +
+        'SUPERVISOR sees one roster sakhiId or, if omitted, her whole roster; MANAGER/ADMIN ' +
+        'may pass any sakhiId or omit it for fully unscoped.',
+      tags: ['Beneficiaries'],
+      query: listFullDetailQuerySchema,
+      responses: {
+        200: {
+          description: 'Beneficiary cases with full detail retrieved',
+          schema: envelope(beneficiaryFullDetailPageSchema),
+        },
+        401: errorResponse(401),
+        403: errorResponse(403, { message: "sakhiId is not in this Supervisor's roster." }),
+        500: errorResponse(500),
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(listFullDetailQuerySchema, 'query'),
+    controller.listFullDetail,
   );
 
   doc.get(

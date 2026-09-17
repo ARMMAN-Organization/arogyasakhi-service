@@ -179,7 +179,10 @@ describe('child-registration.json', () => {
   });
 
   it('adds a visibleWhen-gated "other, specify" field for birth complications', () => {
-    expect(byCode.get('did_the_baby_have_any_complications_at_the_time_of_birth_other_specify')?.visibleWhen).toEqual({
+    expect(
+      byCode.get('did_the_baby_have_any_complications_at_the_time_of_birth_other_specify')
+        ?.visibleWhen,
+    ).toEqual({
       field: 'did_the_baby_have_any_complications_at_the_time_of_birth',
       operator: 'contains',
       value: 'other_please_specify',
@@ -191,7 +194,8 @@ describe('child-registration.json', () => {
       rule: 'REQUIRED_IF_SELECTED',
       field: 'did_the_baby_have_any_complications_at_the_time_of_birth',
       optionFieldMap: {
-        other_please_specify: 'did_the_baby_have_any_complications_at_the_time_of_birth_other_specify',
+        other_please_specify:
+          'did_the_baby_have_any_complications_at_the_time_of_birth_other_specify',
       },
     });
   });
@@ -292,11 +296,12 @@ describe('anc-visit.json', () => {
     // met-beneficiary condition still applies, one step removed. See the
     // dedicated test below.
     //
-    // how_many_ifa_tablets_did_you_consume_since_last_visit is excluded
-    // here: per the source doc (row 36-37), it gates on
-    // are_you_taking_ifa_tablets=yes instead — that field is itself gated
-    // on met-beneficiary=yes, same one-step-removed pattern as the
-    // sonography-report group above. See the dedicated test below.
+    // how_many_ifa_tablets_did_you_consume_since_last_visit and
+    // if_no_what_is_the_reasons_for_non_consumption_of_ifa_tablets are
+    // excluded here: per the source doc (row 36-38), they gate on
+    // are_you_taking_ifa_tablets=yes/no respectively instead — that field is
+    // itself gated on met-beneficiary=yes, same one-step-removed pattern as
+    // the sonography-report group above. See the dedicated test below.
     //
     // if_yes_enter_date_of_latest_anc_visit_at_the_health_facility is
     // excluded here: per the source doc (Q40/Q41), it gates on
@@ -331,6 +336,7 @@ describe('anc-visit.json', () => {
           'lmp_date_edit',
           'upload_sonography_report_image',
           'how_many_ifa_tablets_did_you_consume_since_last_visit',
+          'if_no_what_is_the_reasons_for_non_consumption_of_ifa_tablets',
           'if_yes_enter_date_of_latest_anc_visit_at_the_health_facility',
           'td1_date',
           'td2_date',
@@ -367,6 +373,19 @@ describe('anc-visit.json', () => {
     });
     // The gating field itself is still met-beneficiary-gated, so the chain
     // as a whole reduces to met-beneficiary=yes AND are-taking-ifa=yes.
+    expect(byCode.get('are_you_taking_ifa_tablets')?.visibleWhen).toEqual(MET_BENEFICIARY_YES);
+  });
+
+  it('shows the IFA non-consumption reason only when are_you_taking_ifa_tablets=no (row 38)', () => {
+    expect(
+      byCode.get('if_no_what_is_the_reasons_for_non_consumption_of_ifa_tablets')?.visibleWhen,
+    ).toEqual({
+      field: 'are_you_taking_ifa_tablets',
+      operator: 'eq',
+      value: 'no',
+    });
+    // The gating field itself is still met-beneficiary-gated, so the chain
+    // as a whole reduces to met-beneficiary=yes AND are-taking-ifa=no.
     expect(byCode.get('are_you_taking_ifa_tablets')?.visibleWhen).toEqual(MET_BENEFICIARY_YES);
   });
 

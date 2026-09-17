@@ -1,6 +1,7 @@
 import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
 import { z } from 'zod';
 import type { LearnMoreService } from './learnMore.service';
+import type { LearnMoreSyncService } from './learnMore.syncService';
 import { createLearnMoreController } from './learnMore.controller';
 import { requireRoles, trustGatewayIdentity, validate, type DocumentedRouter } from '../app.module';
 
@@ -37,6 +38,18 @@ const apiErrorSchema = z.object({
   details: z.record(z.unknown()).optional(),
 });
 
+const syncSkippedItemSchema = z.object({
+  type: z.enum(['section', 'topic']),
+  name: z.string(),
+  reason: z.string(),
+});
+
+const syncSummarySchema = z.object({
+  sectionsSynced: z.number().int(),
+  topicsSynced: z.number().int(),
+  skipped: z.array(syncSkippedItemSchema),
+});
+
 function envelope<T extends z.ZodTypeAny>(data: T) {
   return z.object({ success: z.literal(true), message: z.string(), data });
 }
@@ -48,8 +61,12 @@ function envelope<T extends z.ZodTypeAny>(data: T) {
  * authenticated app role (read-only reference content, same posture as
  * risk-conditions/risk-parameters in risk-referral-service).
  */
-export function registerLearnMoreRoutes(doc: DocumentedRouter, service: LearnMoreService) {
-  const controller = createLearnMoreController(service);
+export function registerLearnMoreRoutes(
+  doc: DocumentedRouter,
+  service: LearnMoreService,
+  syncService: LearnMoreSyncService,
+) {
+  const controller = createLearnMoreController(service, syncService);
 
   doc.get(
     '/learn-more/sections',
@@ -102,5 +119,24 @@ export function registerLearnMoreRoutes(doc: DocumentedRouter, service: LearnMor
     requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
     validate(topicCodeParamsSchema, 'params'),
     controller.getTopic,
+  );
+
+  doc.post(
+    '/learn-more/sync',
+    {
+      summary:
+        'Manually pull current Learn More content from Strapi into this service. ' +
+        'Admin-triggered only — no automatic schedule/webhook exists yet.',
+      tags: ['Learn More'],
+      responses: {
+        200: { description: 'Sync summary', schema: envelope(syncSummarySchema) },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Forbidden — ADMIN role required', schema: apiErrorSchema },
+        502: { description: 'Strapi unreachable or returned an error', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('ADMIN'),
+    controller.syncContent,
   );
 }

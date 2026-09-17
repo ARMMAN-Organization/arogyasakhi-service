@@ -238,6 +238,14 @@ export function toApiFormSubmission<T extends FormSubmissionRow>(
     // stageEducationContent is a normal, expected outcome for most
     // submissions (e.g. any form/visit with no matching stage content),
     // not something worth hiding from the response shape.
+    //
+    // CLIENT PRECEDENCE RULE (pending product sign-off, not enforced here):
+    // this response's stageEducationContent (Path B) and the separate
+    // GET /beneficiaries/:id/risk call's educationContent (Path A) can both
+    // return content for the same visit. Path A takes priority for a
+    // shared topicCode — see resolveStageEducationContent's own doc
+    // comment in healthEducationStage.resolver.ts for the full rule and why
+    // it isn't deduped server-side.
     ...(stageEducationContent !== undefined ? { stageEducationContent } : {}),
   };
 }

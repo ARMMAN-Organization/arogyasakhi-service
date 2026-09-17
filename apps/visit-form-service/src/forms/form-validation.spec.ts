@@ -1,4 +1,4 @@
-import { isVisible, validateSubmission } from './form-validation';
+import { applyDefaults, isVisible, validateSubmission } from './form-validation';
 import type { FormField, CrossFieldRule } from './dto/form-field.dto';
 
 const gravidaField: FormField = {
@@ -249,6 +249,66 @@ describe('isVisible — contains operator', () => {
     });
 
     expect(visible).toBe(false);
+  });
+});
+
+describe('applyDefaults — REFERRAL_VISIT beneficiary_willing_for_referral', () => {
+  const referralNeededField: FormField = {
+    question_code: 'referral_needed_new_condition',
+    label: 'Referral needed as this is a new condition',
+    input_type: 'radio',
+    required: true,
+  };
+
+  const willingField: FormField = {
+    question_code: 'beneficiary_willing_for_referral',
+    label: 'Is beneficiary willing to go for the referral?',
+    input_type: 'radio',
+    required: true,
+    visibleWhen: { field: 'referral_needed_new_condition', operator: 'eq', value: 'yes' },
+    defaultWhen: {
+      field: 'referral_needed_new_condition',
+      operator: 'eq',
+      value: 'no',
+      defaultValue: 'no',
+    },
+  };
+
+  const referralFields: FormField[] = [referralNeededField, willingField];
+
+  it('defaults beneficiary_willing_for_referral to "no" when referral_needed_new_condition is "no" and it was not answered', () => {
+    const result = applyDefaults(referralFields, { referral_needed_new_condition: 'no' });
+
+    expect(result.beneficiary_willing_for_referral).toBe('no');
+  });
+
+  it('does not overwrite a direct answer', () => {
+    const result = applyDefaults(referralFields, {
+      referral_needed_new_condition: 'yes',
+      beneficiary_willing_for_referral: 'yes',
+    });
+
+    expect(result.beneficiary_willing_for_referral).toBe('yes');
+  });
+
+  it('does not default when the trigger condition is false', () => {
+    const result = applyDefaults(referralFields, { referral_needed_new_condition: 'yes' });
+
+    expect(result.beneficiary_willing_for_referral).toBeUndefined();
+  });
+
+  it('is a no-op for a field with no defaultWhen', () => {
+    const result = applyDefaults(referralFields, {});
+
+    expect(result.referral_needed_new_condition).toBeUndefined();
+  });
+
+  it('does not mutate the input formData object', () => {
+    const input = { referral_needed_new_condition: 'no' };
+
+    applyDefaults(referralFields, input);
+
+    expect(input).toEqual({ referral_needed_new_condition: 'no' });
   });
 });
 

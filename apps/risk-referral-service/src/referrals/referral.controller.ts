@@ -7,6 +7,7 @@ import { decideReferralAliasSchema } from './dto/decide-referral-alias.dto';
 import { countByBeneficiarySchema } from './dto/count-by-beneficiary.dto';
 import { followupsByBeneficiarySchema } from './dto/followups-by-beneficiary.dto';
 import { decisionStatusQuerySchema } from './dto/decision-status-query.dto';
+import { listRiskReferralsQuerySchema } from './dto/list-risk-referrals.dto';
 import {
   asyncHandler,
   createDocumentedRouter,
@@ -159,6 +160,55 @@ export function createReferralRouter(service: ReferralService) {
       if (!authorizationHeader) return next(unauthorized());
       const { beneficiaryId } = req.query as unknown as z.infer<typeof listReferralsQuerySchema>;
       res.json(ok(await service.list(beneficiaryId, req.user, authorizationHeader)));
+    }),
+  );
+
+  doc.get(
+    '/risk-referrals',
+    {
+      summary:
+        "Cursor-paginated referral list, scoped by sakhiId — backs FR-SV-4.6's Data Restore " +
+        "flow (a Sakhi's device re-downloading everything scoped to her after a " +
+        'reset/reinstall). Referral carries no sakhiId column of its own — the in-scope ' +
+        'beneficiaryIds are resolved via beneficiary-service GET /beneficiaries/ids, which ' +
+        "applies the same role-scoping visit-form-service's GET /visits uses: SAKHI always " +
+        'sees only her own referrals regardless of the sakhiId query param; SUPERVISOR sees ' +
+        'one roster sakhiId or, if omitted, her whole roster; MANAGER/ADMIN may pass any ' +
+        'sakhiId or omit it for fully unscoped. Excludes soft-deleted rows. Returns referral ' +
+        'headers only (no followups/triggerSources — see ' +
+        'GET /beneficiaries/:beneficiaryId/risk-referrals/:referralId/details for those).',
+      tags: ['Referrals'],
+      query: listRiskReferralsQuerySchema,
+      responses: {
+        200: {
+          description: 'Referrals retrieved',
+          schema: envelope(
+            z.object({
+              items: z.array(referralSchema),
+              nextCursor: z.string().nullable().openapi({
+                description:
+                  'Pass back as `cursor` to fetch the next page; null when this is the last page.',
+              }),
+            }),
+          ),
+        },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: {
+          description: "Caller role not permitted, or sakhiId outside the caller's own roster",
+          schema: apiErrorSchema,
+        },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(listRiskReferralsQuerySchema, 'query'),
+    asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const query = req.query as unknown as z.infer<typeof listRiskReferralsQuerySchema>;
+      res.json(ok(await service.listBySakhi(query, authorizationHeader)));
     }),
   );
 

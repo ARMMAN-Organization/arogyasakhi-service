@@ -16,11 +16,16 @@ import type { AuditClient } from './audit.client';
 import * as geographyClient from '../geography/geography.client';
 import { syncSocioDemographics } from '../beneficiaries/socio-demographics.client';
 import { syncHealthHistory } from '../beneficiaries/health-history.client';
-import { findBeneficiaryById, findBeneficiaryOwnership } from '../beneficiaries/beneficiary.client';
+import {
+  findBeneficiaryById,
+  findBeneficiaryOwnership,
+  findBeneficiaryIds,
+} from '../beneficiaries/beneficiary.client';
 import { createChildBeneficiary } from '../beneficiaries/create-child.client';
 import { updateBeneficiaryPhase } from '../beneficiaries/update-phase.client';
 import { createClosure, resolveClosureReasonLookupId } from '../closures/closure.client';
 import { triggerRiskAssessment } from '../risk-assessments/riskAssessment.client';
+import { listSakhiIdsForSupervisor } from '../sakhis/sakhi.client';
 import { resolveAndWriteCcvOpeningRiskState } from './ccvOpeningRiskState.resolver';
 import { resolveVisitCompletion } from './visitCompletion.resolver';
 import { resolveHealthEducationMessagesByStage } from './healthEducation.client';
@@ -33,6 +38,7 @@ jest.mock('../beneficiaries/create-child.client');
 jest.mock('../beneficiaries/update-phase.client');
 jest.mock('../closures/closure.client');
 jest.mock('../risk-assessments/riskAssessment.client');
+jest.mock('../sakhis/sakhi.client');
 jest.mock('./ccvOpeningRiskState.resolver');
 jest.mock('./visitCompletion.resolver');
 jest.mock('./healthEducation.client');
@@ -56,6 +62,8 @@ describe('FormService', () => {
     findLatestDeliverySubmission: jest.fn(),
     findSubmissionById: jest.fn(),
     updateSubmissionAnswers: jest.fn(),
+    findSubmissionsByBeneficiaryId: jest.fn(),
+    findManyPaginated: jest.fn(),
   } as unknown as jest.Mocked<FormRepository>;
   const visitInstanceRepository = {
     findRecentCompletedIncVisits: jest.fn(),
@@ -74,6 +82,75 @@ describe('FormService', () => {
     jest.mocked(resolveHealthEducationMessagesByStage).mockResolvedValue([]);
     repository.countSubmissionsByBeneficiaryAndFormCode.mockResolvedValue(1);
     service = new FormService(repository, visitInstanceRepository, auditClient);
+  });
+
+  describe('list', () => {
+    const AUTH_HEADER = 'Bearer token';
+    const EMPTY_PAGE = { items: [], nextCursor: null };
+
+    it('resolves beneficiaryIds via findBeneficiaryIds, forwarding query.sakhiId', async () => {
+      jest.mocked(findBeneficiaryIds).mockResolvedValue(['b-1', 'b-2']);
+      repository.findManyPaginated.mockResolvedValue(EMPTY_PAGE);
+
+      await service.list({ sakhiId: 'sakhi-1', limit: 50 }, AUTH_HEADER);
+
+      expect(findBeneficiaryIds).toHaveBeenCalledWith(AUTH_HEADER, 'sakhi-1');
+      expect(repository.findManyPaginated).toHaveBeenCalledWith({
+        beneficiaryIds: ['b-1', 'b-2'],
+        cursor: undefined,
+        limit: 50,
+      });
+    });
+
+    it('passes query.cursor through to the repository', async () => {
+      jest.mocked(findBeneficiaryIds).mockResolvedValue([]);
+      repository.findManyPaginated.mockResolvedValue(EMPTY_PAGE);
+
+      await service.list({ cursor: 'some-cursor', limit: 10 }, AUTH_HEADER);
+
+      expect(repository.findManyPaginated).toHaveBeenCalledWith({
+        beneficiaryIds: [],
+        cursor: 'some-cursor',
+        limit: 10,
+      });
+    });
+
+    it('maps each repository row through toApiFormSubmission (formData, not formDataJson)', async () => {
+      jest.mocked(findBeneficiaryIds).mockResolvedValue(['b-1']);
+      repository.findManyPaginated.mockResolvedValue({
+        items: [
+          {
+            id: 'submission-1',
+            formVersionId: 'fv-1',
+            beneficiaryId: 'b-1',
+            visitId: null,
+            submittedByUserId: 'user-1',
+            submittedAt: new Date('2026-08-01T00:00:00.000Z'),
+            localSubmissionUuid: 'device-1',
+            formDataJson: { weightKg: 60 },
+            validationStatus: 'VALID',
+            createdAt: new Date('2026-08-01T00:00:00.000Z'),
+            updatedAt: new Date('2026-08-01T00:00:00.000Z'),
+          },
+        ],
+        nextCursor: null,
+      } as never);
+
+      const result = await service.list({ limit: 50 }, AUTH_HEADER);
+
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0]).toMatchObject({ id: 'submission-1', formData: { weightKg: 60 } });
+      expect(result.nextCursor).toBeNull();
+    });
+
+    it('propagates a 403 thrown by findBeneficiaryIds (out-of-roster sakhiId)', async () => {
+      jest.mocked(findBeneficiaryIds).mockRejectedValue({ status: 403 });
+
+      await expect(
+        service.list({ sakhiId: 'sakhi-1', limit: 50 }, AUTH_HEADER),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(repository.findManyPaginated).not.toHaveBeenCalled();
+    });
   });
 
   describe('getActiveVersion', () => {
@@ -705,6 +782,64 @@ describe('FormService', () => {
       expect(repository.createSubmission).toHaveBeenCalled();
     });
 
+    it('applies defaultWhen so a REFERRAL_VISIT submission with referral_needed_new_condition=no persists beneficiary_willing_for_referral=no without it being answered', async () => {
+      repository.findSubmissionByLocalUuid.mockResolvedValue(null);
+      repository.findVersionById.mockResolvedValue({
+        ...publishedVersion,
+        formDefinition: { formCode: 'REFERRAL_VISIT' },
+        schemaJson: [
+          {
+            question_code: 'referral_needed_new_condition',
+            label: 'Referral needed as this is a new condition',
+            input_type: 'radio',
+            required: true,
+          },
+          {
+            question_code: 'beneficiary_willing_for_referral',
+            label: 'Is beneficiary willing to go for the referral?',
+            input_type: 'radio',
+            required: true,
+            visibleWhen: { field: 'referral_needed_new_condition', operator: 'eq', value: 'yes' },
+            defaultWhen: {
+              field: 'referral_needed_new_condition',
+              operator: 'eq',
+              value: 'no',
+              defaultValue: 'no',
+            },
+          },
+          {
+            question_code: 'referral_declined_reason',
+            label: 'If No, state reasons',
+            input_type: 'dropdown',
+            required: true,
+            visibleWhen: { field: 'beneficiary_willing_for_referral', operator: 'eq', value: 'no' },
+          },
+        ],
+      } as never);
+      repository.createSubmission.mockResolvedValue({ id: 'sub-1' } as never);
+
+      await service.createSubmission(
+        'REFERRAL_VISIT',
+        {
+          formVersionId: 'version-1',
+          beneficiaryId: 'b1',
+          localSubmissionUuid: 'uuid-1',
+          formData: {
+            referral_needed_new_condition: 'no',
+            referral_declined_reason: 'condition_not_serious_enough',
+          },
+        },
+        'u1',
+        'Bearer test-token',
+      );
+
+      expect(repository.createSubmission).toHaveBeenCalledWith(
+        expect.objectContaining({
+          formDataJson: expect.objectContaining({ beneficiary_willing_for_referral: 'no' }),
+        }),
+      );
+    });
+
     it('skips the required check for a system-computed field', async () => {
       repository.findSubmissionByLocalUuid.mockResolvedValue(null);
       repository.findVersionById.mockResolvedValue({
@@ -1163,6 +1298,7 @@ describe('FormService', () => {
                   bodyMarathi: '',
                   mediaType: 'TEXT',
                   mediaFile: null,
+                  mediaResolvedUrl: null,
                   sortOrder: 1,
                 },
               ]
@@ -2388,6 +2524,7 @@ describe('FormService', () => {
                   bodyMarathi: '',
                   mediaType: 'TEXT',
                   mediaFile: null,
+                  mediaResolvedUrl: null,
                   sortOrder: 1,
                 },
               ]
@@ -2408,10 +2545,14 @@ describe('FormService', () => {
 
         expect(result.stageEducationContent).toEqual([
           {
+            id: 'm1',
             topicCode: 'Danger Signs during Pregnancy',
             topicName: 'Danger Signs',
+            bodyEn: 'x',
+            bodyMarathi: '',
             mediaType: 'TEXT',
             contentUrl: null,
+            mediaResolvedUrl: null,
           },
         ]);
       });
@@ -2485,6 +2626,7 @@ describe('FormService', () => {
                   bodyMarathi: '',
                   mediaType: 'TEXT',
                   mediaFile: null,
+                  mediaResolvedUrl: null,
                   sortOrder: 1,
                 },
               ]
@@ -2540,6 +2682,7 @@ describe('FormService', () => {
                   bodyMarathi: '',
                   mediaType: 'TEXT',
                   mediaFile: null,
+                  mediaResolvedUrl: null,
                   sortOrder: 1,
                 },
               ]
@@ -2593,6 +2736,7 @@ describe('FormService', () => {
                   bodyMarathi: '',
                   mediaType: 'TEXT',
                   mediaFile: null,
+                  mediaResolvedUrl: null,
                   sortOrder: 1,
                 },
               ]
@@ -2644,6 +2788,7 @@ describe('FormService', () => {
                   bodyMarathi: '',
                   mediaType: 'TEXT',
                   mediaFile: null,
+                  mediaResolvedUrl: null,
                   sortOrder: 1,
                 },
               ]
@@ -2699,6 +2844,7 @@ describe('FormService', () => {
             bodyMarathi: '',
             mediaType: 'TEXT',
             mediaFile: null,
+            mediaResolvedUrl: null,
             sortOrder: 1,
           },
         ]);
@@ -2806,6 +2952,7 @@ describe('FormService', () => {
                   bodyMarathi: '',
                   mediaType: 'TEXT',
                   mediaFile: null,
+                  mediaResolvedUrl: null,
                   sortOrder: 1,
                 },
               ]
@@ -3656,6 +3803,97 @@ describe('FormService', () => {
         'Bearer test-token',
       );
       expect(jest.mocked(findBeneficiaryById)).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getSubmissionHistory', () => {
+    const sakhiCaller = { id: 'sakhi-1', roles: ['SAKHI'] as const };
+    const page = { items: [], nextCursor: null };
+
+    beforeEach(() => {
+      jest.mocked(findBeneficiaryOwnership).mockResolvedValue({ sakhiId: 'sakhi-1' } as never);
+      repository.findSubmissionsByBeneficiaryId.mockResolvedValue(page);
+    });
+
+    it('calls assertCallerOwnsBeneficiary before querying', async () => {
+      await service.getSubmissionHistory('ben-1', { limit: 50 }, sakhiCaller, 'Bearer test-token');
+
+      expect(jest.mocked(findBeneficiaryOwnership)).toHaveBeenCalledWith(
+        'ben-1',
+        'Bearer test-token',
+      );
+    });
+
+    it('allows a SAKHI who owns the beneficiary', async () => {
+      await expect(
+        service.getSubmissionHistory('ben-1', { limit: 50 }, sakhiCaller, 'Bearer test-token'),
+      ).resolves.toEqual(page);
+    });
+
+    it('rejects a SAKHI who does not own the beneficiary, without querying the repository', async () => {
+      jest.mocked(findBeneficiaryOwnership).mockResolvedValue({ sakhiId: 'someone-else' } as never);
+
+      await expect(
+        service.getSubmissionHistory('ben-1', { limit: 50 }, sakhiCaller, 'Bearer test-token'),
+      ).rejects.toThrow(/outside your own roster/);
+      expect(repository.findSubmissionsByBeneficiaryId).not.toHaveBeenCalled();
+    });
+
+    it('allows a SUPERVISOR whose roster includes the beneficiary', async () => {
+      jest.mocked(listSakhiIdsForSupervisor).mockResolvedValue(['sakhi-1']);
+      const supervisorCaller = { id: 'supervisor-1', roles: ['SUPERVISOR'], projectId: 'proj-1' };
+
+      await expect(
+        service.getSubmissionHistory('ben-1', { limit: 50 }, supervisorCaller, 'Bearer test-token'),
+      ).resolves.toEqual(page);
+    });
+
+    it("rejects a SUPERVISOR whose roster excludes the beneficiary's Sakhi", async () => {
+      jest.mocked(listSakhiIdsForSupervisor).mockResolvedValue(['someone-else']);
+      const supervisorCaller = { id: 'supervisor-1', roles: ['SUPERVISOR'], projectId: 'proj-1' };
+
+      await expect(
+        service.getSubmissionHistory('ben-1', { limit: 50 }, supervisorCaller, 'Bearer test-token'),
+      ).rejects.toThrow(/outside this Supervisor's roster/);
+    });
+
+    it('leaves a MANAGER/ADMIN caller unrestricted', async () => {
+      const managerCaller = { id: 'manager-1', roles: ['MANAGER'] };
+
+      await expect(
+        service.getSubmissionHistory('ben-1', { limit: 50 }, managerCaller, 'Bearer test-token'),
+      ).resolves.toEqual(page);
+      expect(jest.mocked(listSakhiIdsForSupervisor)).not.toHaveBeenCalled();
+    });
+
+    it('passes cursor/limit through to the repository and returns its page unchanged', async () => {
+      const repoPage = {
+        items: [
+          {
+            submissionId: 'sub-1',
+            formCode: 'ANC_VISIT',
+            submittedAt: new Date('2026-01-01T00:00:00.000Z'),
+            answers: { some_field: 'value' },
+            visitSchedule: null,
+          },
+        ],
+        nextCursor: 'next-cursor-token',
+      };
+      repository.findSubmissionsByBeneficiaryId.mockResolvedValue(repoPage);
+
+      const result = await service.getSubmissionHistory(
+        'ben-1',
+        { cursor: 'cursor-1', limit: 10 },
+        sakhiCaller,
+        'Bearer test-token',
+      );
+
+      expect(repository.findSubmissionsByBeneficiaryId).toHaveBeenCalledWith(
+        'ben-1',
+        'cursor-1',
+        10,
+      );
+      expect(result).toEqual(repoPage);
     });
   });
 

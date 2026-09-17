@@ -1,5 +1,6 @@
 import { asyncHandler, ok, unauthorized } from '../app.module';
 import type { ClosureService } from './closure.service';
+import type { ListClosuresQueryInput } from './dto/list-closures.dto';
 
 /**
  * Closure request handlers. Mounted under the global `api/v1` prefix by
@@ -9,6 +10,14 @@ export function createClosureController(service: ClosureService) {
   return {
     list: asyncHandler(async (_req, res) => {
       res.json(ok(await service.list()));
+    }),
+
+    listBySakhi: asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const query = req.query as unknown as ListClosuresQueryInput;
+      res.json(ok(await service.listBySakhi(query, authorizationHeader)));
     }),
 
     getDecisionStatusBatch: asyncHandler(async (req, res) => {

@@ -1,12 +1,15 @@
 import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
 import { z } from 'zod';
 import type { HealthEducationService } from './healthEducation.service';
+import type { HealthEducationMediaSyncService } from './healthEducationMedia.syncService';
 import { createHealthEducationController } from './healthEducation.controller';
+import { patchHealthEducationMessageSchema } from './dto/patch-health-education-message.dto';
 import {
   errorResponse,
   requireRoles,
   trustGatewayIdentity,
   validate,
+  validateBody,
   type DocumentedRouter,
 } from '../app.module';
 
@@ -34,8 +37,39 @@ const healthEducationMessageSchema = z.object({
   bodyMarathi: z.string(),
   mediaType: z.enum(['TEXT', 'IMAGE', 'AUDIO', 'VIDEO']),
   mediaFile: z.string().nullable(),
+  mediaResolvedUrl: z
+    .string()
+    .nullable()
+    .openapi({
+      description:
+        'Absolute, playable URL for mediaFile, resolved via Strapi. Null until ' +
+        'POST /health-education/media-sync has run and found a matching Strapi entry.',
+    }),
   sortOrder: z.number().int(),
 });
+
+const mediaSyncSkippedItemSchema = z.object({
+  slug: z.string().nullable(),
+  reason: z.string(),
+});
+
+const mediaSyncSummarySchema = z.object({
+  entriesResolved: z.number().int(),
+  messagesUpdated: z.number().int(),
+  skipped: z.array(mediaSyncSkippedItemSchema),
+});
+
+const messageIdParamsSchema = z
+  .object({
+    id: z
+      .string()
+      .uuid()
+      .openapi({
+        param: { name: 'id', in: 'path' },
+        example: '5904a7c8-f0a9-4ca6-98ba-318dc44ffb5e',
+      }),
+  })
+  .strict();
 
 function envelope<T extends z.ZodTypeAny>(data: T) {
   return z.object({ success: z.literal(true), message: z.string(), data });
@@ -43,10 +77,12 @@ function envelope<T extends z.ZodTypeAny>(data: T) {
 
 /**
  * Health education message routes (SRS FR-S-5.2(c)). Mounted under the
- * global `api/v1` prefix. Currently serves ARMMAN's delivered English
- * content with a placeholder bodyMarathi on every row — see
- * prisma/seed-data/health-education-messages.json and this feature's
- * implementation plan doc. riskConditionId is null on every seeded row
+ * global `api/v1` prefix. Serves ARMMAN's delivered English and Marathi
+ * content — bodyMarathi is ARMMAN-sourced translated text on 30 of 32 rows;
+ * the remaining 2 (Post miscarriage/abortion/still birth, Dehydration) have
+ * an AI-generated Marathi translation standing in for content ARMMAN has
+ * not yet delivered — see prisma/seed-data/health-education-messages.json
+ * and this feature's implementation plan doc. riskConditionId is null on every seeded row
  * today (no confident condition mapping yet); filtering by stage is the
  * only way to retrieve general/non-risk-linked messages until that
  * mapping exists.
@@ -54,8 +90,9 @@ function envelope<T extends z.ZodTypeAny>(data: T) {
 export function registerHealthEducationRoutes(
   doc: DocumentedRouter,
   service: HealthEducationService,
+  mediaSyncService: HealthEducationMediaSyncService,
 ) {
-  const controller = createHealthEducationController(service);
+  const controller = createHealthEducationController(service, mediaSyncService);
 
   doc.get(
     '/health-education/messages',
@@ -76,5 +113,57 @@ export function registerHealthEducationRoutes(
     requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
     validate(listMessagesQuerySchema, 'query'),
     controller.listMessages,
+  );
+
+  doc.patch(
+    '/health-education/messages/:id',
+    {
+      summary:
+        "Edit a health education message's content fields (titleEn/bodyEn/bodyMarathi/" +
+        'mediaType/mediaFile) — ADMIN-only. All fields optional (partial update); an empty ' +
+        'body is a no-op. Structural fields (riskConditionId, conditionLabel, stage, ' +
+        'messageOrder, sortOrder) are NOT editable here — conditionLabel+stage+messageOrder ' +
+        'is the unique key prisma/seed.ts upserts on, and risk-referral-service resolves ' +
+        'content by conditionLabel/riskConditionId; changing those via this endpoint could ' +
+        "silently collide with another row's key or detach a message from its condition. " +
+        'For a content fix already seeded onto an environment (e.g. a translation correction), ' +
+        'this is the supported path — re-running the seed script alone will NOT overwrite an ' +
+        "already-existing row (see prisma/seed.ts's own doc comment on its upsert).",
+      tags: ['Health Education'],
+      params: messageIdParamsSchema,
+      responses: {
+        200: { description: 'Updated message', schema: envelope(healthEducationMessageSchema) },
+        400: errorResponse(400),
+        401: errorResponse(401),
+        403: errorResponse(403, { message: 'Forbidden — ADMIN role required' }),
+        404: errorResponse(404, { message: 'Health education message not found.' }),
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('ADMIN'),
+    validate(messageIdParamsSchema, 'params'),
+    validateBody(patchHealthEducationMessageSchema),
+    controller.updateMessage,
+  );
+
+  doc.post(
+    '/health-education/media-sync',
+    {
+      summary:
+        'Manually pull current health-education media from Strapi and resolve ' +
+        "HealthEducationMessage.mediaResolvedUrl by matching each Strapi entry's slug " +
+        'against mediaFile. Admin-triggered only — no automatic schedule/webhook exists ' +
+        'yet, same pattern as POST /learn-more/sync.',
+      tags: ['Health Education'],
+      responses: {
+        200: { description: 'Sync summary', schema: envelope(mediaSyncSummarySchema) },
+        401: errorResponse(401),
+        403: errorResponse(403, { message: 'Forbidden — ADMIN role required' }),
+        502: errorResponse(502, { message: 'Strapi unreachable or returned an error' }),
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('ADMIN'),
+    controller.syncMedia,
   );
 }
