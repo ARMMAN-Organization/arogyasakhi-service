@@ -372,7 +372,6 @@ describe('SakhiService', () => {
       status: 'ACTIVE',
     });
     const input = (overrides = {}) => ({
-      projectId: 'project-1',
       villageId: 'village-1',
       padaId: 'pada-1',
       effectiveFrom: new Date('2026-01-01'),
@@ -388,6 +387,7 @@ describe('SakhiService', () => {
     });
 
     it('creates the assignment when the caller is unscoped (MANAGER/ADMIN)', async () => {
+      repository.findById.mockResolvedValue(rawProfile() as never); // primaryProjectId: 'project-1'
       (geographyRepository.findById as jest.Mock).mockImplementation(async (id: string) =>
         id === 'village-1' ? village() : (pada() as never),
       );
@@ -405,6 +405,33 @@ describe('SakhiService', () => {
       });
       expect(result).toEqual(expect.objectContaining({ id: 'assignment-1', padaId: 'pada-1' }));
     });
+
+    it(
+      "derives projectId from the Sakhi's own primaryProjectId, never from client input — " +
+        'security review finding: the create DTO has no projectId field at all now, but this ' +
+        "also guards against a stale/malicious caller somehow supplying one, since it's " +
+        'never read from `input`',
+      async () => {
+        repository.findById.mockResolvedValue({
+          ...rawProfile(),
+          primaryProjectId: 'the-sakhis-real-project',
+        } as never);
+        (geographyRepository.findById as jest.Mock).mockImplementation(async (id: string) =>
+          id === 'village-1' ? village() : (pada() as never),
+        );
+        repository.createLocationAssignment.mockResolvedValue(createdRow() as never);
+
+        await service.createLocationAssignment(
+          'user-1',
+          { ...input(), projectId: 'attacker-supplied-project' } as never,
+          unscopedCaller,
+        );
+
+        expect(repository.createLocationAssignment).toHaveBeenCalledWith(
+          expect.objectContaining({ projectId: 'the-sakhis-real-project' }),
+        );
+      },
+    );
 
     it('allows a scoped caller (SUPERVISOR) to create an assignment for a Sakhi in their own project', async () => {
       repository.findById.mockResolvedValue(rawProfile() as never); // primaryProjectId: 'project-1'

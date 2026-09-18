@@ -193,17 +193,29 @@ export class SakhiService {
    * their own assignments via getActiveLocationAssignments above). Shared by
    * create/update/end since all three need the same "may this caller manage
    * this Sakhi's assignments at all" check before touching the row.
+   *
+   * Always fetches and returns the Sakhi's own profile (even for a
+   * privileged caller who needs no project check) — createLocationAssignment
+   * uses `primaryProjectId` from it to derive the assignment's projectId
+   * server-side, rather than trusting a client-supplied projectId that could
+   * name a project the Sakhi doesn't actually belong to (security review
+   * finding: an unvalidated input.projectId let a caller create a location
+   * assignment misattributed to an arbitrary project).
    */
   private async assertCallerCanManageAssignments(sakhiId: string, caller: CallerScope) {
-    if (isPrivileged(caller)) return;
-    if (caller.roles.includes('SAKHI')) {
+    if (caller.roles.includes('SAKHI') && !isPrivileged(caller)) {
       throw forbidden('A Sakhi cannot manage location assignments.');
     }
     const profile = await this.repository.findById(sakhiId);
     if (!profile) throw notFound('Sakhi not found.');
-    if (caller.projectId && caller.projectId !== profile.primaryProjectId) {
+    if (
+      !isPrivileged(caller) &&
+      caller.projectId &&
+      caller.projectId !== profile.primaryProjectId
+    ) {
       throw forbidden('You do not have access to this Sakhi.');
     }
+    return profile;
   }
 
   /**
@@ -236,20 +248,25 @@ export class SakhiService {
    * districts or states (this is the whole point of CR-237's multi-pada
    * union fix); layering date ranges for the same village/pada is likewise
    * left unrestricted, per explicit product decision.
+   *
+   * `projectId` is derived from the Sakhi's own `sakhi_profiles.primaryProjectId`
+   * (via assertCallerCanManageAssignments's profile fetch), not accepted as
+   * client input — a caller-supplied projectId could otherwise name a
+   * project the Sakhi doesn't actually belong to (security review finding).
    */
   async createLocationAssignment(
     sakhiId: string,
     input: CreateLocationAssignmentInput,
     caller: CallerScope,
   ) {
-    await this.assertCallerCanManageAssignments(sakhiId, caller);
+    const profile = await this.assertCallerCanManageAssignments(sakhiId, caller);
     await this.assertValidVillageAndPada(input.villageId, input.padaId);
     if (input.effectiveTo && input.effectiveTo < input.effectiveFrom) {
       throw badRequest('effectiveTo: Must not be before effectiveFrom.');
     }
     const created = await this.repository.createLocationAssignment({
       sakhiId,
-      projectId: input.projectId,
+      projectId: profile.primaryProjectId,
       villageId: input.villageId,
       padaId: input.padaId ?? null,
       effectiveFrom: input.effectiveFrom,
