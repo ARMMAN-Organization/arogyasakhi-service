@@ -86,6 +86,7 @@
       "section": "Consent",
       "required": false,
       "input_type": "date",
+      "computedFrom": "DOB_PLUS_365",
       "question_code": "date_of_last_visit_12months"
     },
     {

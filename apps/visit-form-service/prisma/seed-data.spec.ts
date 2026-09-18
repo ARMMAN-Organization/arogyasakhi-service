@@ -136,6 +136,14 @@ describe('child-registration.json', () => {
     );
   });
 
+  // CH-09 / SRS FR-S-4.7 Category 4 — must be system-calculated (DOB + 365
+  // days) and reject manual entry, same treatment as EDD/BMI/etc. Was
+  // previously declared with no computedFrom marker, rendering as a plain
+  // editable date field on the mobile app.
+  it('marks date_of_last_visit_12months as computed (CH-09, Q8.0)', () => {
+    expect(byCode.get('date_of_last_visit_12months')?.computedFrom).toBe('DOB_PLUS_365');
+  });
+
   it('applies exactLength 10 to mobile_number (Q22)', () => {
     expect(byCode.get('mobile_number')?.exactLength).toBe(10);
   });
