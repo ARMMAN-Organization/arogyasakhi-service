@@ -148,6 +148,15 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
     target: appConfig.VISIT_FORM_SERVICE_URL,
     requiresAuth: true,
   },
+  // GET /beneficiaries/:beneficiaryId/mis-summary (SRS 3C.4.1 completed4PlusAnc)
+  // — same ownership reasoning as visit-history/delivery-outcomes above:
+  // owned by visit-form-service (it owns visit_instances/visit_schedules),
+  // not beneficiary-service.
+  {
+    prefix: '/beneficiaries/:beneficiaryId/mis-summary',
+    target: appConfig.VISIT_FORM_SERVICE_URL,
+    requiresAuth: true,
+  },
   { prefix: '/beneficiaries', target: appConfig.BENEFICIARY_SERVICE_URL, requiresAuth: true },
   // UNCONFIRMED alias for GET /beneficiaries/risk-summary — see the route's
   // own doc comment in beneficiary.routes.ts for why this is a best guess.
