@@ -1,5 +1,7 @@
+import { badRequest } from '@armman/service-commons';
 import { SakhiService } from './sakhi.service';
 import type { SakhiRepository } from './sakhi.repository';
+import type { GeographyService } from '../geography/geography.service';
 
 describe('SakhiService', () => {
   const repository = {
@@ -7,7 +9,14 @@ describe('SakhiService', () => {
     findById: jest.fn(),
     findManyByIds: jest.fn(),
     findActiveLocationAssignments: jest.fn(),
+    findLocationAssignmentById: jest.fn(),
+    createLocationAssignment: jest.fn(),
+    updateLocationAssignment: jest.fn(),
+    endLocationAssignment: jest.fn(),
   } as unknown as jest.Mocked<SakhiRepository>;
+  const geographyService = {
+    assertActiveUnitOfType: jest.fn(),
+  } as unknown as jest.Mocked<GeographyService>;
 
   let service: SakhiService;
 
@@ -20,7 +29,7 @@ describe('SakhiService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    service = new SakhiService(repository);
+    service = new SakhiService(repository, geographyService);
   });
 
   const rawProfile = () => ({
@@ -347,6 +356,418 @@ describe('SakhiService', () => {
       await expect(
         service.getActiveLocationAssignments('user-1', unscopedCaller, ASOF),
       ).resolves.toEqual([]);
+    });
+  });
+
+  describe('createLocationAssignment', () => {
+    const village = () => ({
+      geographyUnitId: 'village-1',
+      parentId: 'district-1',
+      geoType: 'VILLAGE',
+      status: 'ACTIVE',
+    });
+    const pada = (parentId = 'village-1') => ({
+      geographyUnitId: 'pada-1',
+      parentId,
+      geoType: 'PADA',
+      status: 'ACTIVE',
+    });
+    const input = (overrides = {}) => ({
+      villageId: 'village-1',
+      padaId: 'pada-1',
+      effectiveFrom: new Date('2026-01-01'),
+      effectiveTo: undefined,
+      ...overrides,
+    });
+    const createdRow = () => ({
+      id: 'assignment-1',
+      villageId: 'village-1',
+      padaId: 'pada-1',
+      effectiveFrom: new Date('2026-01-01'),
+      effectiveTo: null,
+    });
+
+    it('creates the assignment when the caller is unscoped (MANAGER/ADMIN)', async () => {
+      repository.findById.mockResolvedValue(rawProfile() as never); // primaryProjectId: 'project-1'
+      geographyService.assertActiveUnitOfType.mockImplementation(async (id: string) =>
+        id === 'village-1' ? (village() as never) : (pada() as never),
+      );
+      repository.createLocationAssignment.mockResolvedValue(createdRow() as never);
+
+      const result = await service.createLocationAssignment('user-1', input(), unscopedCaller);
+
+      expect(repository.createLocationAssignment).toHaveBeenCalledWith({
+        sakhiId: 'user-1',
+        projectId: 'project-1',
+        villageId: 'village-1',
+        padaId: 'pada-1',
+        effectiveFrom: new Date('2026-01-01'),
+        effectiveTo: null,
+      });
+      expect(result).toEqual(expect.objectContaining({ id: 'assignment-1', padaId: 'pada-1' }));
+    });
+
+    it(
+      "derives projectId from the Sakhi's own primaryProjectId, never from client input — " +
+        'security review finding: the create DTO has no projectId field at all now, but this ' +
+        "also guards against a stale/malicious caller somehow supplying one, since it's " +
+        'never read from `input`',
+      async () => {
+        repository.findById.mockResolvedValue({
+          ...rawProfile(),
+          primaryProjectId: 'the-sakhis-real-project',
+        } as never);
+        geographyService.assertActiveUnitOfType.mockImplementation(async (id: string) =>
+          id === 'village-1' ? (village() as never) : (pada() as never),
+        );
+        repository.createLocationAssignment.mockResolvedValue(createdRow() as never);
+
+        await service.createLocationAssignment(
+          'user-1',
+          { ...input(), projectId: 'attacker-supplied-project' } as never,
+          unscopedCaller,
+        );
+
+        expect(repository.createLocationAssignment).toHaveBeenCalledWith(
+          expect.objectContaining({ projectId: 'the-sakhis-real-project' }),
+        );
+      },
+    );
+
+    it('allows a scoped caller (SUPERVISOR) to create an assignment for a Sakhi in their own project', async () => {
+      repository.findById.mockResolvedValue(rawProfile() as never); // primaryProjectId: 'project-1'
+      geographyService.assertActiveUnitOfType.mockImplementation(async (id: string) =>
+        id === 'village-1' ? (village() as never) : (pada() as never),
+      );
+      repository.createLocationAssignment.mockResolvedValue(createdRow() as never);
+
+      await expect(
+        service.createLocationAssignment('user-1', input(), scopedCaller('project-1')),
+      ).resolves.toEqual(expect.objectContaining({ id: 'assignment-1' }));
+    });
+
+    it('rejects a scoped caller (SUPERVISOR) creating for a Sakhi in a different project', async () => {
+      repository.findById.mockResolvedValue(rawProfile() as never); // primaryProjectId: 'project-1'
+
+      await expect(
+        service.createLocationAssignment('user-1', input(), scopedCaller('project-2')),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(repository.createLocationAssignment).not.toHaveBeenCalled();
+    });
+
+    it('rejects a SAKHI caller outright — write access is never granted to SAKHI', async () => {
+      const sakhiCaller = { id: 'user-1', roles: ['SAKHI'], projectId: null };
+
+      await expect(
+        service.createLocationAssignment('user-1', input(), sakhiCaller),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(repository.createLocationAssignment).not.toHaveBeenCalled();
+    });
+
+    it('rejects when villageId does not reference an ACTIVE VILLAGE geography unit', async () => {
+      geographyService.assertActiveUnitOfType.mockRejectedValue(
+        badRequest('Must reference an active VILLAGE geography unit.'),
+      );
+
+      await expect(
+        service.createLocationAssignment('user-1', input(), unscopedCaller),
+      ).rejects.toMatchObject({ status: 400 });
+      expect(repository.createLocationAssignment).not.toHaveBeenCalled();
+    });
+
+    it('rejects when padaId does not reference an ACTIVE PADA geography unit', async () => {
+      geographyService.assertActiveUnitOfType.mockImplementation(async (id: string) => {
+        if (id === 'village-1') return village() as never;
+        throw badRequest('Must reference an active PADA geography unit.');
+      });
+
+      await expect(
+        service.createLocationAssignment('user-1', input(), unscopedCaller),
+      ).rejects.toMatchObject({ status: 400 });
+      expect(repository.createLocationAssignment).not.toHaveBeenCalled();
+    });
+
+    it("rejects when padaId's parentId does not match the given villageId", async () => {
+      geographyService.assertActiveUnitOfType.mockImplementation(async (id: string) =>
+        id === 'village-1' ? (village() as never) : (pada('some-other-village') as never),
+      );
+
+      await expect(
+        service.createLocationAssignment('user-1', input(), unscopedCaller),
+      ).rejects.toMatchObject({ status: 400 });
+      expect(repository.createLocationAssignment).not.toHaveBeenCalled();
+    });
+
+    it('rejects when effectiveTo is before effectiveFrom', async () => {
+      geographyService.assertActiveUnitOfType.mockImplementation(async (id: string) =>
+        id === 'village-1' ? (village() as never) : (pada() as never),
+      );
+
+      await expect(
+        service.createLocationAssignment(
+          'user-1',
+          input({ effectiveTo: new Date('2025-12-31') }),
+          unscopedCaller,
+        ),
+      ).rejects.toMatchObject({ status: 400 });
+      expect(repository.createLocationAssignment).not.toHaveBeenCalled();
+    });
+
+    it('allows creating without a padaId (village-only assignment)', async () => {
+      geographyService.assertActiveUnitOfType.mockResolvedValue(village() as never);
+      repository.createLocationAssignment.mockResolvedValue({
+        ...createdRow(),
+        padaId: null,
+      } as never);
+
+      await service.createLocationAssignment(
+        'user-1',
+        input({ padaId: undefined }),
+        unscopedCaller,
+      );
+
+      expect(repository.createLocationAssignment).toHaveBeenCalledWith(
+        expect.objectContaining({ padaId: null }),
+      );
+    });
+  });
+
+  describe('updateLocationAssignment', () => {
+    const existingRow = () => ({
+      id: 'assignment-1',
+      sakhiId: 'user-1',
+      villageId: 'village-1',
+      padaId: 'pada-1',
+      effectiveFrom: new Date('2026-01-01'),
+      effectiveTo: null,
+    });
+    const pada = (parentId = 'village-1') => ({
+      geographyUnitId: 'pada-2',
+      parentId,
+      geoType: 'PADA',
+      status: 'ACTIVE',
+    });
+
+    it('updates the assignment when the caller is unscoped (MANAGER/ADMIN)', async () => {
+      repository.findLocationAssignmentById.mockResolvedValue(existingRow() as never);
+      repository.updateLocationAssignment.mockResolvedValue({
+        ...existingRow(),
+        effectiveTo: new Date('2026-06-01'),
+      } as never);
+
+      const result = await service.updateLocationAssignment(
+        'user-1',
+        'assignment-1',
+        { effectiveTo: new Date('2026-06-01') },
+        unscopedCaller,
+      );
+
+      expect(repository.updateLocationAssignment).toHaveBeenCalledWith('assignment-1', {
+        villageId: undefined,
+        padaId: undefined,
+        effectiveFrom: undefined,
+        effectiveTo: new Date('2026-06-01'),
+      });
+      expect(result).toEqual(expect.objectContaining({ id: 'assignment-1' }));
+    });
+
+    it('throws 404 when the assignment does not exist', async () => {
+      repository.findLocationAssignmentById.mockResolvedValue(null);
+
+      await expect(
+        service.updateLocationAssignment('user-1', 'missing', {}, unscopedCaller),
+      ).rejects.toMatchObject({ status: 404 });
+    });
+
+    it(
+      'throws 404 when the assignment exists but belongs to a different Sakhi — a caller ' +
+        "cannot edit another Sakhi's assignment by supplying an unrelated sakhiId in the URL",
+      async () => {
+        repository.findLocationAssignmentById.mockResolvedValue({
+          ...existingRow(),
+          sakhiId: 'other-sakhi',
+        } as never);
+
+        await expect(
+          service.updateLocationAssignment('user-1', 'assignment-1', {}, unscopedCaller),
+        ).rejects.toMatchObject({ status: 404 });
+        expect(repository.updateLocationAssignment).not.toHaveBeenCalled();
+      },
+    );
+
+    it('rejects a SAKHI caller outright', async () => {
+      const sakhiCaller = { id: 'user-1', roles: ['SAKHI'], projectId: null };
+
+      await expect(
+        service.updateLocationAssignment('user-1', 'assignment-1', {}, sakhiCaller),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(repository.findLocationAssignmentById).not.toHaveBeenCalled();
+    });
+
+    it('rejects a scoped caller (SUPERVISOR) editing a Sakhi from a different project', async () => {
+      repository.findById.mockResolvedValue(rawProfile() as never); // primaryProjectId: 'project-1'
+
+      await expect(
+        service.updateLocationAssignment('user-1', 'assignment-1', {}, scopedCaller('project-2')),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(repository.findLocationAssignmentById).not.toHaveBeenCalled();
+    });
+
+    it('re-validates villageId/padaId when either is being changed', async () => {
+      repository.findLocationAssignmentById.mockResolvedValue(existingRow() as never);
+      geographyService.assertActiveUnitOfType.mockRejectedValue(
+        badRequest('Must reference an active VILLAGE geography unit.'),
+      );
+
+      await expect(
+        service.updateLocationAssignment(
+          'user-1',
+          'assignment-1',
+          { villageId: 'new-village' },
+          unscopedCaller,
+        ),
+      ).rejects.toMatchObject({ status: 400 });
+      expect(repository.updateLocationAssignment).not.toHaveBeenCalled();
+    });
+
+    it('does not re-validate geography when neither villageId nor padaId is being changed', async () => {
+      repository.findLocationAssignmentById.mockResolvedValue(existingRow() as never);
+      repository.updateLocationAssignment.mockResolvedValue(existingRow() as never);
+
+      await service.updateLocationAssignment(
+        'user-1',
+        'assignment-1',
+        { effectiveFrom: new Date('2026-02-01') },
+        unscopedCaller,
+      );
+
+      expect(geographyService.assertActiveUnitOfType).not.toHaveBeenCalled();
+    });
+
+    it(
+      'validates only padaId (not villageId) when an edit changes padaId but leaves the ' +
+        'existing, unchanged villageId alone — regression: previously re-checking the ' +
+        'unchanged villageId could wrongly 400 an edit that never touched it if that ' +
+        'village was deactivated after the assignment was created',
+      async () => {
+        repository.findLocationAssignmentById.mockResolvedValue(existingRow() as never);
+        geographyService.assertActiveUnitOfType.mockResolvedValue(pada() as never);
+        repository.updateLocationAssignment.mockResolvedValue({
+          ...existingRow(),
+          padaId: 'pada-2',
+        } as never);
+
+        await service.updateLocationAssignment(
+          'user-1',
+          'assignment-1',
+          { padaId: 'pada-2' },
+          unscopedCaller,
+        );
+
+        expect(geographyService.assertActiveUnitOfType).toHaveBeenCalledWith('pada-2', 'PADA');
+        expect(geographyService.assertActiveUnitOfType).not.toHaveBeenCalledWith(
+          'village-1',
+          'VILLAGE',
+        );
+      },
+    );
+
+    it('rejects when the resulting effectiveTo would be before the resulting effectiveFrom', async () => {
+      repository.findLocationAssignmentById.mockResolvedValue(existingRow() as never);
+
+      await expect(
+        service.updateLocationAssignment(
+          'user-1',
+          'assignment-1',
+          { effectiveFrom: new Date('2026-12-01'), effectiveTo: new Date('2026-01-01') },
+          unscopedCaller,
+        ),
+      ).rejects.toMatchObject({ status: 400 });
+      expect(repository.updateLocationAssignment).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('endLocationAssignment', () => {
+    const existingRow = () => ({
+      id: 'assignment-1',
+      sakhiId: 'user-1',
+      villageId: 'village-1',
+      padaId: 'pada-1',
+      effectiveFrom: new Date('2026-01-01'),
+      effectiveTo: null,
+    });
+
+    it('ends the assignment with the given effectiveTo', async () => {
+      repository.findLocationAssignmentById.mockResolvedValue(existingRow() as never);
+      repository.endLocationAssignment.mockResolvedValue({
+        ...existingRow(),
+        effectiveTo: new Date('2026-06-01'),
+      } as never);
+
+      const result = await service.endLocationAssignment(
+        'user-1',
+        'assignment-1',
+        new Date('2026-06-01'),
+        unscopedCaller,
+      );
+
+      expect(repository.endLocationAssignment).toHaveBeenCalledWith(
+        'assignment-1',
+        new Date('2026-06-01'),
+      );
+      expect(result).toEqual(expect.objectContaining({ effectiveTo: new Date('2026-06-01') }));
+    });
+
+    it('defaults effectiveTo to today when omitted', async () => {
+      repository.findLocationAssignmentById.mockResolvedValue(existingRow() as never);
+      repository.endLocationAssignment.mockResolvedValue(existingRow() as never);
+
+      await service.endLocationAssignment('user-1', 'assignment-1', undefined, unscopedCaller);
+
+      const calledWith = repository.endLocationAssignment.mock.calls[0][1] as Date;
+      expect(calledWith.getTime()).toBeGreaterThan(Date.now() - 5000);
+    });
+
+    it('throws 404 when the assignment does not exist', async () => {
+      repository.findLocationAssignmentById.mockResolvedValue(null);
+
+      await expect(
+        service.endLocationAssignment('user-1', 'missing', undefined, unscopedCaller),
+      ).rejects.toMatchObject({ status: 404 });
+    });
+
+    it('throws 404 when the assignment belongs to a different Sakhi than the one in the URL', async () => {
+      repository.findLocationAssignmentById.mockResolvedValue({
+        ...existingRow(),
+        sakhiId: 'other-sakhi',
+      } as never);
+
+      await expect(
+        service.endLocationAssignment('user-1', 'assignment-1', undefined, unscopedCaller),
+      ).rejects.toMatchObject({ status: 404 });
+    });
+
+    it('rejects a SAKHI caller outright', async () => {
+      const sakhiCaller = { id: 'user-1', roles: ['SAKHI'], projectId: null };
+
+      await expect(
+        service.endLocationAssignment('user-1', 'assignment-1', undefined, sakhiCaller),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(repository.findLocationAssignmentById).not.toHaveBeenCalled();
+    });
+
+    it("rejects when the given effectiveTo is before the assignment's own effectiveFrom", async () => {
+      repository.findLocationAssignmentById.mockResolvedValue(existingRow() as never);
+
+      await expect(
+        service.endLocationAssignment(
+          'user-1',
+          'assignment-1',
+          new Date('2025-01-01'),
+          unscopedCaller,
+        ),
+      ).rejects.toMatchObject({ status: 400 });
+      expect(repository.endLocationAssignment).not.toHaveBeenCalled();
     });
   });
 });

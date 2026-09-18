@@ -4,11 +4,15 @@ import type { TokenSigner } from '@armman/service-commons';
 import type { SakhiService } from './sakhi.service';
 import { createSakhiController } from './sakhi.controller';
 import { byIdsQuerySchema } from './dto/by-ids-query.dto';
+import { createLocationAssignmentSchema } from './dto/create-location-assignment.dto';
+import { updateLocationAssignmentSchema } from './dto/update-location-assignment.dto';
+import { endLocationAssignmentSchema } from './dto/end-location-assignment.dto';
 import {
   authenticate,
   errorResponse,
   requireRoles,
   validate,
+  validateBody,
   type DocumentedRouter,
 } from '../app.module';
 
@@ -38,6 +42,20 @@ const locationAssignmentSchema = z.object({
   effectiveFrom: z.string().datetime().openapi({ example: '2026-04-01T00:00:00.000Z' }),
   effectiveTo: z.string().datetime().nullable(),
 });
+
+// A created/edited/ended assignment additionally carries its own id, so the
+// write endpoints' response schema extends the read-only shape above rather
+// than reusing it verbatim.
+const locationAssignmentWithIdSchema = locationAssignmentSchema.extend({
+  id: z.string().uuid().openapi({ example: 'c81c3536-d352-4745-8d94-0d9552ad2af6' }),
+});
+
+const locationAssignmentParamsSchema = z
+  .object({
+    sakhiId: z.string().uuid().openapi({ example: 'c9f8e2b1-6a3d-4f0e-9b1a-2d4e5f6a7b8c' }),
+    assignmentId: z.string().uuid().openapi({ example: 'c81c3536-d352-4745-8d94-0d9552ad2af6' }),
+  })
+  .strict();
 
 const sakhiSchema = z.object({
   sakhiId: z.string().uuid().openapi({ example: 'c9f8e2b1-6a3d-4f0e-9b1a-2d4e5f6a7b8c' }),
@@ -177,5 +195,98 @@ export function registerSakhiRoutes(
     validate(sakhiIdParamsSchema, 'params'),
     validate(asOfQuerySchema, 'query'),
     controller.getActiveLocationAssignments,
+  );
+
+  doc.post(
+    '/sakhis/:sakhiId/location-assignments',
+    {
+      summary:
+        'Create a new village/pada assignment for a Sakhi. Write access is ' +
+        'SUPERVISOR-own-project-only or MANAGER/ADMIN-unrestricted — never SAKHI. No overlap ' +
+        "check against the Sakhi's existing assignments: a Sakhi may hold multiple concurrent " +
+        'assignments spanning any geography, including different districts or states.',
+      tags: ['Sakhis'],
+      params: sakhiIdParamsSchema,
+      body: createLocationAssignmentSchema,
+      responses: {
+        201: {
+          description: 'Assignment created',
+          schema: envelope(locationAssignmentWithIdSchema),
+        },
+        400: errorResponse(400, {
+          message: 'villageId: Must reference an active VILLAGE geography unit.',
+        }),
+        401: errorResponse(401),
+        403: errorResponse(403),
+        404: errorResponse(404, { message: 'Sakhi not found.' }),
+        500: errorResponse(500),
+      },
+    },
+    authenticate(signer),
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(sakhiIdParamsSchema, 'params'),
+    validateBody(createLocationAssignmentSchema),
+    controller.createLocationAssignment,
+  );
+
+  doc.patch(
+    '/sakhis/:sakhiId/location-assignments/:assignmentId',
+    {
+      summary:
+        "Edit an existing assignment's villageId/padaId/effectiveFrom/effectiveTo. Same write " +
+        'access rule as create.',
+      tags: ['Sakhis'],
+      params: locationAssignmentParamsSchema,
+      body: updateLocationAssignmentSchema,
+      responses: {
+        200: {
+          description: 'Assignment updated',
+          schema: envelope(locationAssignmentWithIdSchema),
+        },
+        400: errorResponse(400, {
+          message: 'villageId: Must reference an active VILLAGE geography unit.',
+        }),
+        401: errorResponse(401),
+        403: errorResponse(403),
+        404: errorResponse(404, { message: 'Location assignment not found.' }),
+        500: errorResponse(500),
+      },
+    },
+    authenticate(signer),
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(locationAssignmentParamsSchema, 'params'),
+    validateBody(updateLocationAssignmentSchema),
+    controller.updateLocationAssignment,
+  );
+
+  doc.patch(
+    '/sakhis/:sakhiId/location-assignments/:assignmentId/end',
+    {
+      summary:
+        'Ends an assignment by setting effectiveTo (defaults to today when omitted). This ' +
+        'table has no delete/deactivate flag — a closed date range is the only "inactive" ' +
+        'signal, consistent with how getActiveLocationAssignments already determines currency.',
+      tags: ['Sakhis'],
+      params: locationAssignmentParamsSchema,
+      body: endLocationAssignmentSchema,
+      responses: {
+        200: {
+          description: 'Assignment ended',
+          schema: envelope(locationAssignmentWithIdSchema),
+        },
+        400: errorResponse(400, {
+          message: "effectiveTo: Must not be before the assignment's effectiveFrom.",
+        }),
+        401: errorResponse(401),
+        403: errorResponse(403),
+        404: errorResponse(404, { message: 'Location assignment not found.' }),
+        500: errorResponse(500),
+      },
+    },
+    authenticate(signer),
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(locationAssignmentParamsSchema, 'params'),
+    validateBody(endLocationAssignmentSchema),
+    controller.endLocationAssignment,
   );
 }

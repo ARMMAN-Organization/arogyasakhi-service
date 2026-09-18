@@ -55,6 +55,47 @@ describe('GeographyService', () => {
     });
   });
 
+  describe('assertActiveUnitOfType', () => {
+    it('returns the unit when it is ACTIVE and matches the given geoType', async () => {
+      const unit = { geographyUnitId: 'village-1', geoType: 'VILLAGE', status: 'ACTIVE' };
+      repository.findById.mockResolvedValue(unit as never);
+
+      await expect(service.assertActiveUnitOfType('village-1', 'VILLAGE')).resolves.toEqual(unit);
+    });
+
+    it('rejects when the unit does not exist', async () => {
+      repository.findById.mockResolvedValue(null);
+
+      await expect(service.assertActiveUnitOfType('missing', 'VILLAGE')).rejects.toMatchObject({
+        status: 400,
+      });
+    });
+
+    it('rejects when the unit is a different geoType than expected', async () => {
+      repository.findById.mockResolvedValue({
+        geographyUnitId: 'district-1',
+        geoType: 'DISTRICT',
+        status: 'ACTIVE',
+      } as never);
+
+      await expect(service.assertActiveUnitOfType('district-1', 'VILLAGE')).rejects.toMatchObject({
+        status: 400,
+      });
+    });
+
+    it('rejects when the unit is not ACTIVE', async () => {
+      repository.findById.mockResolvedValue({
+        geographyUnitId: 'village-1',
+        geoType: 'VILLAGE',
+        status: 'INACTIVE',
+      } as never);
+
+      await expect(service.assertActiveUnitOfType('village-1', 'VILLAGE')).rejects.toMatchObject({
+        status: 400,
+      });
+    });
+  });
+
   describe('getAncestors', () => {
     it('returns the chain (projected), ordered from the unit up to STATE', async () => {
       repository.findAncestors.mockResolvedValue([

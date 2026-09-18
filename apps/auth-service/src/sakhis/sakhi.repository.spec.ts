@@ -4,9 +4,17 @@ describe('SakhiRepository', () => {
   const findMany = jest.fn();
   const findFirst = jest.fn();
   const findManyLocationAssignments = jest.fn();
+  const findUniqueLocationAssignment = jest.fn();
+  const createLocationAssignment = jest.fn();
+  const updateLocationAssignment = jest.fn();
   const prisma = {
     sakhiProfile: { findMany, findFirst },
-    sakhiLocationAssignment: { findMany: findManyLocationAssignments },
+    sakhiLocationAssignment: {
+      findMany: findManyLocationAssignments,
+      findUnique: findUniqueLocationAssignment,
+      create: createLocationAssignment,
+      update: updateLocationAssignment,
+    },
   } as never;
   let repository: SakhiRepository;
 
@@ -113,6 +121,74 @@ describe('SakhiRepository', () => {
       findManyLocationAssignments.mockResolvedValue([]);
       const result = await repository.findActiveLocationAssignments('sakhi-1', ASOF);
       expect(result).toEqual([]);
+    });
+  });
+
+  describe('findLocationAssignmentById', () => {
+    it('queries a single assignment by its own id', async () => {
+      findUniqueLocationAssignment.mockResolvedValue({ id: 'assignment-1', sakhiId: 'sakhi-1' });
+
+      const result = await repository.findLocationAssignmentById('assignment-1');
+
+      expect(findUniqueLocationAssignment).toHaveBeenCalledWith({
+        where: { id: 'assignment-1' },
+      });
+      expect(result).toEqual({ id: 'assignment-1', sakhiId: 'sakhi-1' });
+    });
+
+    it('returns null when the assignment does not exist', async () => {
+      findUniqueLocationAssignment.mockResolvedValue(null);
+      const result = await repository.findLocationAssignmentById('missing');
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('createLocationAssignment', () => {
+    it('creates a row with the given fields', async () => {
+      const data = {
+        sakhiId: 'sakhi-1',
+        projectId: 'project-1',
+        villageId: 'village-1',
+        padaId: 'pada-1',
+        effectiveFrom: new Date('2026-01-01'),
+        effectiveTo: null,
+      };
+      createLocationAssignment.mockResolvedValue({ id: 'assignment-1', ...data });
+
+      const result = await repository.createLocationAssignment(data);
+
+      expect(createLocationAssignment).toHaveBeenCalledWith({ data });
+      expect(result).toEqual({ id: 'assignment-1', ...data });
+    });
+  });
+
+  describe('updateLocationAssignment', () => {
+    it('updates the given assignment id with the given partial fields', async () => {
+      const data = { effectiveTo: new Date('2026-06-01') };
+      updateLocationAssignment.mockResolvedValue({ id: 'assignment-1', ...data });
+
+      const result = await repository.updateLocationAssignment('assignment-1', data);
+
+      expect(updateLocationAssignment).toHaveBeenCalledWith({
+        where: { id: 'assignment-1' },
+        data,
+      });
+      expect(result).toEqual({ id: 'assignment-1', ...data });
+    });
+  });
+
+  describe('endLocationAssignment', () => {
+    it('sets effectiveTo on the given assignment id', async () => {
+      const effectiveTo = new Date('2026-06-01');
+      updateLocationAssignment.mockResolvedValue({ id: 'assignment-1', effectiveTo });
+
+      const result = await repository.endLocationAssignment('assignment-1', effectiveTo);
+
+      expect(updateLocationAssignment).toHaveBeenCalledWith({
+        where: { id: 'assignment-1' },
+        data: { effectiveTo },
+      });
+      expect(result).toEqual({ id: 'assignment-1', effectiveTo });
     });
   });
 });

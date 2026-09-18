@@ -1,5 +1,9 @@
-import { forbidden, notFound } from '@armman/service-commons';
+import { badRequest, forbidden, notFound } from '@armman/service-commons';
+import { startOfUTCDay } from '@armman/core';
 import type { SakhiRepository } from './sakhi.repository';
+import type { GeographyService } from '../geography/geography.service';
+import type { CreateLocationAssignmentInput } from './dto/create-location-assignment.dto';
+import type { UpdateLocationAssignmentInput } from './dto/update-location-assignment.dto';
 
 /** The calling principal's own scope, as carried on their JWT/trusted-identity headers. */
 export interface CallerScope {
@@ -49,9 +53,33 @@ function isPrivileged(caller: CallerScope): boolean {
   return caller.roles.includes('MANAGER') || caller.roles.includes('ADMIN');
 }
 
+/**
+ * Projects a `SakhiLocationAssignment` row to its API shape — same
+ * villageId/padaId/effectiveFrom/effectiveTo subset `getActiveLocationAssignments`
+ * already returns, plus `id` for the write endpoints (edit/end) to address it by.
+ */
+function toApiLocationAssignment(row: {
+  id: string;
+  villageId: string;
+  padaId: string | null;
+  effectiveFrom: Date;
+  effectiveTo: Date | null;
+}) {
+  return {
+    id: row.id,
+    villageId: row.villageId,
+    padaId: row.padaId,
+    effectiveFrom: row.effectiveFrom,
+    effectiveTo: row.effectiveTo,
+  };
+}
+
 /** Business logic for Sakhi profile reads. */
 export class SakhiService {
-  constructor(private readonly repository: SakhiRepository) {}
+  constructor(
+    private readonly repository: SakhiRepository,
+    private readonly geographyService: GeographyService,
+  ) {}
 
   /**
    * A caller with a project scope on their JWT (typically SUPERVISOR — one
@@ -158,5 +186,208 @@ export class SakhiService {
       effectiveFrom: r.effectiveFrom,
       effectiveTo: r.effectiveTo,
     }));
+  }
+
+  /**
+   * Write access to a Sakhi's location assignments is ADMIN-unrestricted or
+   * SUPERVISOR-own-project-only — never SAKHI (they have read-only access to
+   * their own assignments via getActiveLocationAssignments above). Shared by
+   * create/update/end since all three need the same "may this caller manage
+   * this Sakhi's assignments at all" check before touching the row.
+   *
+   * Fetches and returns the Sakhi's own profile — needed regardless of
+   * caller privilege, since the check itself requires `primaryProjectId` to
+   * compare against, and createLocationAssignment separately reuses this
+   * same profile to derive the assignment's projectId server-side (rather
+   * than trusting a client-supplied projectId that could name a project the
+   * Sakhi doesn't actually belong to — security review finding).
+   *
+   * Unlike getById/getActiveLocationAssignments's read-side project check
+   * (`caller.projectId && caller.projectId !== profile.primaryProjectId`),
+   * this write-side check does NOT treat a null caller.projectId as
+   * unrestricted. Nothing prevents a SUPERVISOR-role user from being
+   * created/left with `projectId: null` (auth.service.ts only requires a
+   * projectId for SAKHI), so `caller.projectId &&` short-circuiting to false
+   * would let such a SUPERVISOR mutate any Sakhi's assignments in any
+   * project — a read-scope leak on the GET routes, but an unrestricted
+   * cross-project write here (PR #240 review).
+   */
+  private async assertCallerCanManageAssignments(sakhiId: string, caller: CallerScope) {
+    if (caller.roles.includes('SAKHI') && !isPrivileged(caller)) {
+      throw forbidden('A Sakhi cannot manage location assignments.');
+    }
+    const profile = await this.repository.findById(sakhiId);
+    if (!profile) throw notFound('Sakhi not found.');
+    if (!isPrivileged(caller) && caller.projectId !== profile.primaryProjectId) {
+      throw forbidden('You do not have access to this Sakhi.');
+    }
+    return profile;
+  }
+
+  /**
+   * Same authorization rule as assertCallerCanManageAssignments, for
+   * update/end, which only need to know "may this caller touch this row" and
+   * never use the profile's primaryProjectId — fetching and discarding it on
+   * every MANAGER/ADMIN edit/end was a wasted DB round-trip (PR #240 review).
+   * Non-privileged callers still need the profile to compare projectId
+   * against, so there's no round-trip to save in that path.
+   */
+  private async assertCallerCanManageAssignmentsLight(sakhiId: string, caller: CallerScope) {
+    if (caller.roles.includes('SAKHI') && !isPrivileged(caller)) {
+      throw forbidden('A Sakhi cannot manage location assignments.');
+    }
+    if (isPrivileged(caller)) {
+      return;
+    }
+    const profile = await this.repository.findById(sakhiId);
+    if (!profile) throw notFound('Sakhi not found.');
+    if (caller.projectId !== profile.primaryProjectId) {
+      throw forbidden('You do not have access to this Sakhi.');
+    }
+  }
+
+  /**
+   * Validates villageId (must be an ACTIVE geography_units row with geoType
+   * VILLAGE) and, if given, padaId (ACTIVE, geoType PADA, and its own
+   * parentId must equal villageId — a pada belonging to a different village
+   * than the one supplied would silently produce a geographically
+   * inconsistent assignment otherwise). The "active unit of a given geoType"
+   * check itself is GeographyService.assertActiveUnitOfType, shared with any
+   * other caller needing the same "usable geography unit" rule (PR #240
+   * review: this used to re-derive that check from scratch).
+   */
+  private async assertValidVillageAndPada(villageId: string, padaId: string | undefined | null) {
+    // The village and pada lookups don't depend on each other, so they run
+    // concurrently rather than sequentially (PR #240 review: halves the
+    // added latency on every create and every geography-changing update).
+    const [, pada] = await Promise.all([
+      this.geographyService.assertActiveUnitOfType(villageId, 'VILLAGE'),
+      padaId ? this.geographyService.assertActiveUnitOfType(padaId, 'PADA') : Promise.resolve(null),
+    ]);
+    if (padaId && pada && pada.parentId !== villageId) {
+      throw badRequest('padaId: Must be a child of the given villageId.');
+    }
+  }
+
+  /**
+   * Validates a new padaId against an already-known-valid villageId, without
+   * re-checking the village itself — used when an update only touches padaId
+   * (village unchanged), so an unrelated village deactivation after the
+   * assignment was created doesn't retroactively 400 an edit that never
+   * touched villageId (PR #240 review).
+   */
+  private async assertValidPadaForExistingVillage(villageId: string, padaId: string) {
+    const pada = await this.geographyService.assertActiveUnitOfType(padaId, 'PADA');
+    if (pada.parentId !== villageId) {
+      throw badRequest('padaId: Must be a child of the given villageId.');
+    }
+  }
+
+  /**
+   * Creates a new village/pada assignment for a Sakhi. No overlap check
+   * against the Sakhi's existing assignments — a Sakhi may hold multiple
+   * concurrent assignments spanning any geography, including different
+   * districts or states (this is the whole point of CR-237's multi-pada
+   * union fix); layering date ranges for the same village/pada is likewise
+   * left unrestricted, per explicit product decision.
+   *
+   * `projectId` is derived from the Sakhi's own `sakhi_profiles.primaryProjectId`
+   * (via assertCallerCanManageAssignments's profile fetch), not accepted as
+   * client input — a caller-supplied projectId could otherwise name a
+   * project the Sakhi doesn't actually belong to (security review finding).
+   */
+  async createLocationAssignment(
+    sakhiId: string,
+    input: CreateLocationAssignmentInput,
+    caller: CallerScope,
+  ) {
+    const profile = await this.assertCallerCanManageAssignments(sakhiId, caller);
+    await this.assertValidVillageAndPada(input.villageId, input.padaId);
+    if (input.effectiveTo && input.effectiveTo < input.effectiveFrom) {
+      throw badRequest('effectiveTo: Must not be before effectiveFrom.');
+    }
+    const created = await this.repository.createLocationAssignment({
+      sakhiId,
+      projectId: profile.primaryProjectId,
+      villageId: input.villageId,
+      padaId: input.padaId ?? null,
+      effectiveFrom: input.effectiveFrom,
+      effectiveTo: input.effectiveTo ?? null,
+    });
+    return toApiLocationAssignment(created);
+  }
+
+  /**
+   * Edits an existing assignment's villageId/padaId/effectiveFrom/effectiveTo.
+   * `assignmentId` must belong to `sakhiId` — checked here (not left to the
+   * database) so a caller cannot edit another Sakhi's assignment by guessing
+   * an id and supplying an unrelated sakhiId in the URL; a mismatch 404s
+   * rather than leaking whether the assignmentId exists at all.
+   */
+  async updateLocationAssignment(
+    sakhiId: string,
+    assignmentId: string,
+    input: UpdateLocationAssignmentInput,
+    caller: CallerScope,
+  ) {
+    await this.assertCallerCanManageAssignmentsLight(sakhiId, caller);
+    const existing = await this.repository.findLocationAssignmentById(assignmentId);
+    if (!existing || existing.sakhiId !== sakhiId) {
+      throw notFound('Location assignment not found.');
+    }
+    const nextVillageId = input.villageId ?? existing.villageId;
+    const nextPadaId = input.padaId === undefined ? existing.padaId : input.padaId;
+    // Only re-validate villageId when it's actually being changed — otherwise
+    // an edit that touches only padaId (village unchanged) re-checks the
+    // Sakhi's existing, already-valid villageId too, and wrongly 400s if that
+    // village was deactivated after the assignment was created (PR #240
+    // review). padaId is still (re)validated whenever either field changes,
+    // since a new villageId can invalidate an unchanged padaId's parentage.
+    if (input.villageId && input.villageId !== existing.villageId) {
+      await this.assertValidVillageAndPada(nextVillageId, nextPadaId);
+    } else if (input.padaId !== undefined && nextPadaId) {
+      await this.assertValidPadaForExistingVillage(nextVillageId, nextPadaId);
+    }
+    const nextFrom = input.effectiveFrom ?? existing.effectiveFrom;
+    const nextTo = input.effectiveTo === undefined ? existing.effectiveTo : input.effectiveTo;
+    if (nextTo && nextTo < nextFrom) {
+      throw badRequest('effectiveTo: Must not be before effectiveFrom.');
+    }
+    const updated = await this.repository.updateLocationAssignment(assignmentId, {
+      villageId: input.villageId,
+      padaId: input.padaId,
+      effectiveFrom: input.effectiveFrom,
+      effectiveTo: input.effectiveTo,
+    });
+    return toApiLocationAssignment(updated);
+  }
+
+  /**
+   * "Ends" an assignment by setting effectiveTo (defaulting to today) —
+   * see sakhi.repository.ts's endLocationAssignment doc comment for why this
+   * table has no delete/deactivate flag to use instead.
+   */
+  async endLocationAssignment(
+    sakhiId: string,
+    assignmentId: string,
+    effectiveTo: Date | null | undefined,
+    caller: CallerScope,
+  ) {
+    await this.assertCallerCanManageAssignmentsLight(sakhiId, caller);
+    const existing = await this.repository.findLocationAssignmentById(assignmentId);
+    if (!existing || existing.sakhiId !== sakhiId) {
+      throw notFound('Location assignment not found.');
+    }
+    const resolvedEffectiveTo = effectiveTo ?? new Date();
+    // effectiveTo/effectiveFrom are `@db.Date` columns — Postgres truncates
+    // the write to a plain date under the session timezone, which can
+    // disagree with an in-memory full-timestamp comparison near a UTC day
+    // boundary (PR #240 review). Truncate both sides to UTC midnight first
+    // so this guard matches what's actually persisted.
+    if (startOfUTCDay(resolvedEffectiveTo) < startOfUTCDay(existing.effectiveFrom)) {
+      throw badRequest("effectiveTo: Must not be before the assignment's effectiveFrom.");
+    }
+    const updated = await this.repository.endLocationAssignment(assignmentId, resolvedEffectiveTo);
+    return toApiLocationAssignment(updated);
   }
 }
