@@ -497,7 +497,7 @@ describe('createBeneficiarySchema', () => {
     expect(result.success).toBe(true);
   });
 
-  it('accepts a mother-linked child within the 0-183-day window (CH6)', () => {
+  it('accepts a mother-linked child within the 0-365-day window (CH6)', () => {
     const dob = new Date();
     dob.setDate(dob.getDate() - 100);
     const result = createBeneficiarySchema.safeParse({
@@ -513,9 +513,46 @@ describe('createBeneficiarySchema', () => {
     expect(result.success).toBe(true);
   });
 
-  it('rejects a mother-linked child past the 183-day window even though it is within 365 days (CH7)', () => {
+  // Product/ARMMAN confirmed a deliberate deviation from FR-S-2.3: the
+  // mother-linked path no longer has a tighter 183-day ceiling — it now
+  // shares independent's 0-365-day window (see CHILD_AGE_CEILING_DAYS's own
+  // doc comment in create-beneficiary.dto.ts). A day-183 mother-linked
+  // registration, which used to fail (CH7's old assertion), now passes.
+  it('accepts a mother-linked child at exactly 183 days — no longer a tighter ceiling than independent (CH7)', () => {
     const dob = new Date();
-    dob.setDate(dob.getDate() - 200);
+    dob.setDate(dob.getDate() - 183);
+    const result = createBeneficiarySchema.safeParse({
+      pii: { ...basePii, fullName: 'Baby Doe', dateOfBirth: dob.toISOString() },
+      case: {
+        ...baseCase,
+        caseType: 'CHILD',
+        motherBeneficiaryId: '66666666-6666-6666-6666-666666666666',
+      },
+      childDetails: { dateOfBirth: dob.toISOString() },
+      consent,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts a mother-linked child at exactly 365 days (boundary) (CH7a)', () => {
+    const dob = new Date();
+    dob.setDate(dob.getDate() - 365);
+    const result = createBeneficiarySchema.safeParse({
+      pii: { ...basePii, fullName: 'Baby Doe', dateOfBirth: dob.toISOString() },
+      case: {
+        ...baseCase,
+        caseType: 'CHILD',
+        motherBeneficiaryId: '66666666-6666-6666-6666-666666666666',
+      },
+      childDetails: { dateOfBirth: dob.toISOString() },
+      consent,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects a mother-linked child at 366 days — past the shared 365-day ceiling (CH7b)', () => {
+    const dob = new Date();
+    dob.setDate(dob.getDate() - 366);
     const result = createBeneficiarySchema.safeParse({
       pii: { ...basePii, fullName: 'Baby Doe', dateOfBirth: dob.toISOString() },
       case: {

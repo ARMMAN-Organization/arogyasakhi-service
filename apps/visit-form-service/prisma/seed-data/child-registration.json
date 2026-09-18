@@ -69,7 +69,7 @@
       "input_type": "date",
       "dateRule": {
         "notFuture": true,
-        "maxDaysFrom": { "field": "registrtion_date", "days": 183 }
+        "maxDaysFrom": { "field": "registrtion_date", "days": 365 }
       },
       "question_code": "date_of_birth_of_infant"
     },

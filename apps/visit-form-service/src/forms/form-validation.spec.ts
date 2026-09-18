@@ -880,7 +880,7 @@ describe('validateSubmission — dateRule (DOB of infant: notFuture, maxDaysFrom
     required: true,
     dateRule: {
       notFuture: true,
-      maxDaysFrom: { field: 'registrtion_date', days: 183 },
+      maxDaysFrom: { field: 'registrtion_date', days: 365 },
     },
   };
 
@@ -896,7 +896,12 @@ describe('validateSubmission — dateRule (DOB of infant: notFuture, maxDaysFrom
     expect(violations).toContain('date_of_birth_of_infant must not be in the future');
   });
 
-  it('accepts a date of birth exactly 183 days before registration (boundary)', () => {
+  // 365 days, matching beneficiary-service's CHILD_AGE_CEILING_DAYS — both
+  // mother-linked and independent registrations share the same 0-12-month
+  // window (deliberate FR-S-2.3 deviation, confirmed with product/ARMMAN).
+  // A day-183 registration, which used to fail under the old tighter
+  // mother-linked ceiling, now passes.
+  it('accepts a date of birth 183 days before registration — no longer a tighter ceiling', () => {
     const violations = validateSubmission(dateFields, [], {
       registrtion_date: '2026-07-03',
       date_of_birth_of_infant: '2026-01-01',
@@ -905,16 +910,25 @@ describe('validateSubmission — dateRule (DOB of infant: notFuture, maxDaysFrom
     expect(violations).toEqual([]);
   });
 
-  it('rejects a date of birth 184 days before registration', () => {
+  it('accepts a date of birth exactly 365 days before registration (boundary)', () => {
     const violations = validateSubmission(dateFields, [], {
-      registrtion_date: '2026-07-04',
+      registrtion_date: '2027-01-01',
       date_of_birth_of_infant: '2026-01-01',
     });
 
-    expect(violations.some((v) => v.includes('at most 183 days'))).toBe(true);
+    expect(violations).toEqual([]);
   });
 
-  it('accepts a date of birth within the 0-183 day window', () => {
+  it('rejects a date of birth 366 days before registration', () => {
+    const violations = validateSubmission(dateFields, [], {
+      registrtion_date: '2027-01-02',
+      date_of_birth_of_infant: '2026-01-01',
+    });
+
+    expect(violations.some((v) => v.includes('at most 365 days'))).toBe(true);
+  });
+
+  it('accepts a date of birth within the 0-365 day window', () => {
     const violations = validateSubmission(dateFields, [], {
       registrtion_date: '2026-03-01',
       date_of_birth_of_infant: '2026-01-01',
