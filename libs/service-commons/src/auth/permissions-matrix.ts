@@ -90,6 +90,12 @@ export const PERMISSIONS_MATRIX: readonly RoutePermission[] = [
   {
     service: 'visit-form-service',
     method: 'GET',
+    path: '/beneficiaries/:beneficiaryId/mis-summary',
+    roles: ['SUPERVISOR', 'MANAGER', 'ADMIN'],
+  },
+  {
+    service: 'visit-form-service',
+    method: 'GET',
     path: '/beneficiaries/:beneficiaryId/visit-history',
     roles: ['SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'],
   },
@@ -116,6 +122,12 @@ export const PERMISSIONS_MATRIX: readonly RoutePermission[] = [
     service: 'visit-form-service',
     method: 'GET',
     path: '/visits/:id',
+    roles: ['SUPERVISOR', 'MANAGER', 'ADMIN'],
+  },
+  {
+    service: 'visit-form-service',
+    method: 'GET',
+    path: '/visits/:id/mis-summary',
     roles: ['SUPERVISOR', 'MANAGER', 'ADMIN'],
   },
   {
