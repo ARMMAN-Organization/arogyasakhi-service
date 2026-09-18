@@ -1,7 +1,12 @@
 import type { CrossFieldRule, FormField, VisibleWhenCondition } from './dto/form-field.dto';
 
 export function isEmpty(value: unknown): boolean {
-  return value === undefined || value === null || value === '';
+  return (
+    value === undefined ||
+    value === null ||
+    value === '' ||
+    (Array.isArray(value) && value.length === 0)
+  );
 }
 
 /** Named character-class checks for FormField.pattern — never a raw regex in JSON. */
