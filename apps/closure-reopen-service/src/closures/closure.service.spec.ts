@@ -76,6 +76,8 @@ describe('ClosureService', () => {
       id: '22222222-2222-2222-2222-222222222222',
       currentStatus: 'ACTIVE',
       pii: { fullName: 'Asha Devi' },
+      caseType: 'MOTHER',
+      childCaseDetails: null,
     });
     lookupClient.resolveClosureReasonCode.mockResolvedValue('WITHDRAWAL');
     service = new ClosureService(
@@ -180,6 +182,52 @@ describe('ClosureService', () => {
       repository.findById.mockResolvedValue(null);
 
       await expect(service.getById('unknown-id')).rejects.toMatchObject({ status: 404 });
+    });
+  });
+
+  describe('getMisSummary', () => {
+    const AUTH_HEADER = 'Bearer test-token';
+
+    it('returns ageAtClosure derived from closureDate and the child beneficiary dateOfBirth', async () => {
+      const closure = closureRow({ closureDate: new Date('2026-06-01') });
+      repository.findById.mockResolvedValue(closure);
+      beneficiaryClient.getById.mockResolvedValue({
+        id: closure.beneficiaryId,
+        currentStatus: 'CLOSED',
+        pii: { fullName: 'Test Child' },
+        caseType: 'CHILD',
+        childCaseDetails: { dateOfBirth: '2026-01-01' },
+      } as never);
+
+      const result = await service.getMisSummary(closure.id, AUTH_HEADER);
+
+      // 2026-01-01 -> 2026-06-01 = 151 days.
+      expect(result).toEqual({ ageAtClosureDays: 151 });
+    });
+
+    it('returns null ageAtClosureDays for a MOTHER-case closure', async () => {
+      const closure = closureRow();
+      repository.findById.mockResolvedValue(closure);
+      beneficiaryClient.getById.mockResolvedValue({
+        id: closure.beneficiaryId,
+        currentStatus: 'CLOSED',
+        pii: { fullName: 'Test Mother' },
+        caseType: 'MOTHER',
+        childCaseDetails: null,
+      } as never);
+
+      await expect(service.getMisSummary(closure.id, AUTH_HEADER)).resolves.toEqual({
+        ageAtClosureDays: null,
+      });
+    });
+
+    it('404s on an unknown closure id before calling beneficiary-service', async () => {
+      repository.findById.mockResolvedValue(null);
+
+      await expect(service.getMisSummary('unknown-id', AUTH_HEADER)).rejects.toMatchObject({
+        status: 404,
+      });
+      expect(beneficiaryClient.getById).not.toHaveBeenCalled();
     });
   });
 
@@ -408,6 +456,8 @@ describe('ClosureService', () => {
         id: pending.beneficiaryId,
         currentStatus: 'ACTIVE',
         pii: { fullName: 'Asha Devi' },
+        caseType: 'MOTHER',
+        childCaseDetails: null,
       });
       sakhiClient.getById.mockResolvedValue({
         sakhiId: pending.submittedByUserId,
@@ -436,6 +486,8 @@ describe('ClosureService', () => {
         id: pending.beneficiaryId,
         currentStatus: 'ACTIVE',
         pii: { fullName: 'Asha Devi' },
+        caseType: 'MOTHER',
+        childCaseDetails: null,
       });
       sakhiClient.getById.mockRejectedValue(new Error('auth-service down'));
 
@@ -559,6 +611,8 @@ describe('ClosureService', () => {
           id: pending.beneficiaryId,
           currentStatus: 'ACTIVE',
           pii: { fullName: 'Asha Devi' },
+          caseType: 'MOTHER',
+          childCaseDetails: null,
         });
 
         await expect(

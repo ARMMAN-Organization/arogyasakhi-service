@@ -41,4 +41,18 @@ describe('SERVICE_ROUTES ordering', () => {
     expect(beneficiariesIndex).toBeGreaterThanOrEqual(0);
     expect(deliveryOutcomesIndex).toBeLessThan(beneficiariesIndex);
   });
+
+  it('registers /beneficiaries/:beneficiaryId/mis-summary before the generic /beneficiaries prefix, routed to visit-form-service', () => {
+    const misSummaryRoute = SERVICE_ROUTES.find(
+      (r) => r.prefix === '/beneficiaries/:beneficiaryId/mis-summary',
+    );
+    const misSummaryIndex = SERVICE_ROUTES.findIndex(
+      (r) => r.prefix === '/beneficiaries/:beneficiaryId/mis-summary',
+    );
+    const beneficiariesIndex = SERVICE_ROUTES.findIndex((r) => r.prefix === '/beneficiaries');
+
+    expect(misSummaryRoute?.target).toBe(appConfig.VISIT_FORM_SERVICE_URL);
+    expect(misSummaryIndex).toBeGreaterThanOrEqual(0);
+    expect(misSummaryIndex).toBeLessThan(beneficiariesIndex);
+  });
 });

@@ -2,9 +2,13 @@ import { VisitInstanceService } from './visitInstance.service';
 import type { VisitInstanceRepository } from './visitInstance.repository';
 import type { CreateVisitInstanceInput } from './dto/create-visitInstance.dto';
 import { findSakhiById, listSakhiIdsForSupervisor } from '../sakhis/sakhi.client';
-import { resolveVisitStatusCode, resolveVisitStatusCodes } from '../lookups/lookup.client';
+import {
+  resolveVisitStatusCode,
+  resolveVisitStatusCodes,
+  resolveVisitStatusIdByCode,
+} from '../lookups/lookup.client';
 import { getActiveTransferWindow } from '../escalations/escalation.client';
-import { findBeneficiaryOwnership } from '../beneficiaries/beneficiary.client';
+import { findBeneficiaryOwnership, findBeneficiaryById } from '../beneficiaries/beneficiary.client';
 
 jest.mock('../sakhis/sakhi.client');
 jest.mock('../lookups/lookup.client');
@@ -28,6 +32,8 @@ describe('VisitInstanceService', () => {
     countByBeneficiary: jest.fn(),
     findRecentCompletedVisits: jest.fn(),
     restoreForSakhi: jest.fn(),
+    findDeliveryVisit: jest.fn(),
+    countCompletedAncVisits: jest.fn(),
   } as unknown as jest.Mocked<VisitInstanceRepository>;
   let service: VisitInstanceService;
 
@@ -35,9 +41,11 @@ describe('VisitInstanceService', () => {
   const findSakhiByIdMock = jest.mocked(findSakhiById);
   const listSakhiIdsForSupervisorMock = jest.mocked(listSakhiIdsForSupervisor);
   const resolveVisitStatusCodeMock = jest.mocked(resolveVisitStatusCode);
+  const resolveVisitStatusIdByCodeMock = jest.mocked(resolveVisitStatusIdByCode);
   const resolveVisitStatusCodesMock = jest.mocked(resolveVisitStatusCodes);
   const getActiveTransferWindowMock = jest.mocked(getActiveTransferWindow);
   const findBeneficiaryOwnershipMock = jest.mocked(findBeneficiaryOwnership);
+  const findBeneficiaryByIdMock = jest.mocked(findBeneficiaryById);
 
   // Distinct from sampleRow.statusLookupValueId ('aaaaaaaa-...') below, so
   // "transitioning to COMPLETED" tests aren't accidentally a no-op re-completion.
@@ -216,6 +224,35 @@ describe('VisitInstanceService', () => {
     });
   });
 
+  describe('getBeneficiaryMisSummary', () => {
+    const COMPLETED_STATUS_ID = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
+
+    beforeEach(() => {
+      resolveVisitStatusIdByCodeMock.mockResolvedValue(COMPLETED_STATUS_ID);
+    });
+
+    it('returns completed4PlusAnc: true when the beneficiary has 4 or more COMPLETED ANC-family visits', async () => {
+      repository.countCompletedAncVisits.mockResolvedValue(4);
+
+      const result = await service.getBeneficiaryMisSummary(sampleRow.beneficiaryId, AUTH_HEADER);
+
+      expect(resolveVisitStatusIdByCodeMock).toHaveBeenCalledWith('COMPLETED', AUTH_HEADER);
+      expect(repository.countCompletedAncVisits).toHaveBeenCalledWith(
+        sampleRow.beneficiaryId,
+        COMPLETED_STATUS_ID,
+      );
+      expect(result).toEqual({ completed4PlusAnc: true });
+    });
+
+    it('returns completed4PlusAnc: false when the beneficiary has fewer than 4', async () => {
+      repository.countCompletedAncVisits.mockResolvedValue(3);
+
+      const result = await service.getBeneficiaryMisSummary(sampleRow.beneficiaryId, AUTH_HEADER);
+
+      expect(result).toEqual({ completed4PlusAnc: false });
+    });
+  });
+
   describe('getById', () => {
     it('returns the visit via repository', async () => {
       repository.findById.mockResolvedValue(sampleRow);
@@ -228,6 +265,134 @@ describe('VisitInstanceService', () => {
       repository.findById.mockResolvedValue(null);
 
       await expect(service.getById('unknown-id')).rejects.toMatchObject({ status: 404 });
+    });
+  });
+
+  describe('getMisSummary', () => {
+    const CHILD_VISIT = { ...sampleRow, actualVisitDate: new Date('2026-06-01') };
+
+    beforeEach(() => {
+      repository.findDeliveryVisit.mockResolvedValue(null);
+    });
+
+    it('returns ageInDays/ageInMonths derived from actualVisitDate and the beneficiary childDateOfBirth', async () => {
+      repository.findById.mockResolvedValue(CHILD_VISIT);
+      findBeneficiaryByIdMock.mockResolvedValue({
+        id: CHILD_VISIT.beneficiaryId,
+        childDateOfBirth: '2026-01-01',
+      } as never);
+
+      const result = await service.getMisSummary(CHILD_VISIT.id, AUTH_HEADER);
+
+      // 2026-01-01 -> 2026-06-01 = 151 days = 5 months (floored)
+      expect(result).toEqual({ ageInDays: 151, ageInMonths: 5, daysPostDelivery: null });
+    });
+
+    it('floors partial months rather than rounding', async () => {
+      repository.findById.mockResolvedValue({
+        ...sampleRow,
+        actualVisitDate: new Date('2026-02-15'),
+      });
+      findBeneficiaryByIdMock.mockResolvedValue({
+        id: sampleRow.beneficiaryId,
+        childDateOfBirth: '2026-01-01',
+      } as never);
+
+      // 45 days = 1 month 15 days -> floors to 1, not 1.5.
+      const result = await service.getMisSummary(sampleRow.id, AUTH_HEADER);
+
+      expect(result.ageInMonths).toBe(1);
+    });
+
+    it('returns null for age fields and daysPostDelivery when actualVisitDate is null (visit not yet completed)', async () => {
+      repository.findById.mockResolvedValue({ ...sampleRow, actualVisitDate: null });
+      findBeneficiaryByIdMock.mockResolvedValue({
+        id: sampleRow.beneficiaryId,
+        childDateOfBirth: '2026-01-01',
+      } as never);
+
+      await expect(service.getMisSummary(sampleRow.id, AUTH_HEADER)).resolves.toEqual({
+        ageInDays: null,
+        ageInMonths: null,
+        daysPostDelivery: null,
+      });
+      expect(findBeneficiaryByIdMock).not.toHaveBeenCalled();
+      expect(repository.findDeliveryVisit).not.toHaveBeenCalled();
+    });
+
+    it('returns null age fields for a MOTHER-case visit (no childDateOfBirth)', async () => {
+      repository.findById.mockResolvedValue(CHILD_VISIT);
+      findBeneficiaryByIdMock.mockResolvedValue({
+        id: CHILD_VISIT.beneficiaryId,
+        childDateOfBirth: null,
+      } as never);
+
+      await expect(service.getMisSummary(CHILD_VISIT.id, AUTH_HEADER)).resolves.toEqual({
+        ageInDays: null,
+        ageInMonths: null,
+        daysPostDelivery: null,
+      });
+    });
+
+    it('returns null age fields when the beneficiary cannot be resolved, rather than throwing', async () => {
+      repository.findById.mockResolvedValue(CHILD_VISIT);
+      findBeneficiaryByIdMock.mockResolvedValue(null);
+
+      await expect(service.getMisSummary(CHILD_VISIT.id, AUTH_HEADER)).resolves.toEqual({
+        ageInDays: null,
+        ageInMonths: null,
+        daysPostDelivery: null,
+      });
+    });
+
+    it('404s on an unknown visit id before calling beneficiary-service at all', async () => {
+      repository.findById.mockResolvedValue(null);
+
+      await expect(service.getMisSummary('unknown-id', AUTH_HEADER)).rejects.toMatchObject({
+        status: 404,
+      });
+      expect(findBeneficiaryByIdMock).not.toHaveBeenCalled();
+    });
+
+    it('propagates a beneficiary-service failure (e.g. 502) rather than swallowing it', async () => {
+      repository.findById.mockResolvedValue(CHILD_VISIT);
+      findBeneficiaryByIdMock.mockRejectedValue(
+        Object.assign(new Error('unreachable'), { status: 502 }),
+      );
+
+      await expect(service.getMisSummary(CHILD_VISIT.id, AUTH_HEADER)).rejects.toMatchObject({
+        status: 502,
+      });
+    });
+
+    it('returns daysPostDelivery derived from this visit and the beneficiary completed DELIVERY visit', async () => {
+      repository.findById.mockResolvedValue(CHILD_VISIT);
+      findBeneficiaryByIdMock.mockResolvedValue({
+        id: CHILD_VISIT.beneficiaryId,
+        childDateOfBirth: null,
+      } as never);
+      repository.findDeliveryVisit.mockResolvedValue({
+        actualVisitDate: new Date('2026-05-01'),
+      } as never);
+
+      const result = await service.getMisSummary(CHILD_VISIT.id, AUTH_HEADER);
+
+      // 2026-05-01 -> 2026-06-01 = 31 days.
+      expect(result.daysPostDelivery).toBe(31);
+      expect(repository.findDeliveryVisit).toHaveBeenCalledWith(CHILD_VISIT.beneficiaryId);
+    });
+
+    it('returns null daysPostDelivery when the beneficiary has no completed DELIVERY visit yet', async () => {
+      repository.findById.mockResolvedValue(CHILD_VISIT);
+      findBeneficiaryByIdMock.mockResolvedValue({
+        id: CHILD_VISIT.beneficiaryId,
+        childDateOfBirth: null,
+      } as never);
+      repository.findDeliveryVisit.mockResolvedValue(null);
+
+      const result = await service.getMisSummary(CHILD_VISIT.id, AUTH_HEADER);
+
+      expect(result.daysPostDelivery).toBeNull();
     });
   });
 

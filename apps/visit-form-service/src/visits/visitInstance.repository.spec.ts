@@ -3,6 +3,7 @@ import { VisitInstanceRepository } from './visitInstance.repository';
 describe('VisitInstanceRepository', () => {
   const count = jest.fn();
   const findMany = jest.fn();
+  const findFirst = jest.fn();
   const groupBy = jest.fn();
   const visitInstanceUpdateMany = jest.fn();
   const visitScheduleUpdateMany = jest.fn();
@@ -12,7 +13,7 @@ describe('VisitInstanceRepository', () => {
   const formAnswerUpdateMany = jest.fn();
   const $transaction = jest.fn((ops: unknown[]) => Promise.all(ops));
   const prisma = {
-    visitInstance: { count, findMany, groupBy, updateMany: visitInstanceUpdateMany },
+    visitInstance: { count, findMany, findFirst, groupBy, updateMany: visitInstanceUpdateMany },
     visitSchedule: { updateMany: visitScheduleUpdateMany },
     visitStatusHistory: { updateMany: visitStatusHistoryUpdateMany },
     formSubmission: { findMany: formSubmissionFindMany, updateMany: formSubmissionUpdateMany },
@@ -150,6 +151,53 @@ describe('VisitInstanceRepository', () => {
 
       expect(groupBy).not.toHaveBeenCalled();
       expect(result).toEqual([]);
+    });
+  });
+
+  describe('findDeliveryVisit', () => {
+    it('returns the most recent completed DELIVERY visit for the beneficiary', async () => {
+      const visit = { actualVisitDate: new Date('2026-05-01') };
+      findFirst.mockResolvedValue(visit);
+
+      const result = await repository.findDeliveryVisit('ben-1');
+
+      expect(findFirst).toHaveBeenCalledWith({
+        where: {
+          beneficiaryId: 'ben-1',
+          isDeleted: false,
+          actualVisitDate: { not: null },
+          schedule: { visitType: 'DELIVERY' },
+        },
+        orderBy: { actualVisitDate: 'desc' },
+        select: { actualVisitDate: true },
+      });
+      expect(result).toBe(visit);
+    });
+
+    it('returns null when there is no completed DELIVERY visit yet', async () => {
+      findFirst.mockResolvedValue(null);
+
+      await expect(repository.findDeliveryVisit('ben-1')).resolves.toBeNull();
+    });
+  });
+
+  describe('countCompletedAncVisits', () => {
+    const COMPLETED_ID = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
+
+    it('counts visits for the beneficiary whose schedule is an ANC-family type and are COMPLETED', async () => {
+      count.mockResolvedValue(4);
+
+      const result = await repository.countCompletedAncVisits('ben-1', COMPLETED_ID);
+
+      expect(count).toHaveBeenCalledWith({
+        where: {
+          isDeleted: false,
+          beneficiaryId: 'ben-1',
+          statusLookupValueId: COMPLETED_ID,
+          schedule: { visitType: { in: ['ANC', 'ANC_HR', 'ANC_POST_EDD'] } },
+        },
+      });
+      expect(result).toBe(4);
     });
   });
 

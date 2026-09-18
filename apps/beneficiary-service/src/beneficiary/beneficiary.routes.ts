@@ -108,6 +108,9 @@ const motherCaseDetailsSchema = z.object({
   parity: z.number().int().nullable(),
   heightCm: z.number().nullable(),
   bmiAtRegistration: z.number().nullable(),
+  // SRS 3C.4.1 linelist fields — derived at response time, never persisted.
+  regFy: z.string().openapi({ example: 'FY2026-27' }),
+  gestationalAgeAtRegWeeks: z.number().int().nullable(),
 });
 
 const childCaseDetailsSchema = z.object({

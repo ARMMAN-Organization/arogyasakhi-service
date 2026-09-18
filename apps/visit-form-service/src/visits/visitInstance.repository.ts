@@ -285,6 +285,48 @@ export class VisitInstanceRepository {
   }
 
   /**
+   * SRS 3C.4.1 linelist field (PP Visit) — the beneficiary's own completed
+   * DELIVERY visit, whose actualVisitDate serves as "the delivery date"
+   * (there is no dedicated typed delivery-date column yet; AnchorType has a
+   * DELIVERY_DATE value precisely because schedules already anchor off this
+   * same visit). Null if the beneficiary has no completed DELIVERY visit
+   * yet — the days_post_delivery derivation is then null too, not an error.
+   * Most recent first in case more than one exists (should not happen in
+   * practice, but mirrors findRecentCompletedIncVisits's own defensive
+   * ordering rather than assuming exactly one row).
+   */
+  findDeliveryVisit(beneficiaryId: string) {
+    return this.prisma.visitInstance.findFirst({
+      where: {
+        beneficiaryId,
+        isDeleted: false,
+        actualVisitDate: { not: null },
+        schedule: { visitType: 'DELIVERY' },
+      },
+      orderBy: { actualVisitDate: 'desc' },
+      select: { actualVisitDate: true },
+    });
+  }
+
+  /**
+   * SRS 3C.4.1 linelist field (Delivery Form) — count of a beneficiary's
+   * COMPLETED ANC-family visits (ANC/ANC_HR/ANC_POST_EDD), for the
+   * completed_4plus_anc derivation (>= 4 in the service layer). Filtered by
+   * VisitSchedule.visitType (schedule-level, not VisitInstance's own
+   * scheduleId) since visit type isn't duplicated onto VisitInstance.
+   */
+  countCompletedAncVisits(beneficiaryId: string, completedStatusLookupValueId: string) {
+    return this.prisma.visitInstance.count({
+      where: {
+        isDeleted: false,
+        beneficiaryId,
+        statusLookupValueId: completedStatusLookupValueId,
+        schedule: { visitType: { in: ['ANC', 'ANC_HR', 'ANC_POST_EDD'] } },
+      },
+    });
+  }
+
+  /**
    * Counts in-scope visits per beneficiaryId, grouped also by
    * statusLookupValueId — for the pada-breakdown widget, which needs
    * due/overdue counts per beneficiary (then summed per pada by the

@@ -76,6 +76,8 @@ describe('ReopenRequestService', () => {
       id: '22222222-2222-2222-2222-222222222222',
       currentStatus: 'CLOSED',
       pii: { fullName: 'Asha Devi' },
+      caseType: 'MOTHER',
+      childCaseDetails: null,
     });
     service = new ReopenRequestService(
       repository,
@@ -100,6 +102,8 @@ describe('ReopenRequestService', () => {
         id: beneficiaryId,
         currentStatus: 'CLOSED',
         pii: { fullName: 'Asha Devi' },
+        caseType: 'MOTHER',
+        childCaseDetails: null,
       });
       const rows = [reopenRequest()];
       repository.findByBeneficiaryId.mockResolvedValue(rows);
@@ -113,6 +117,8 @@ describe('ReopenRequestService', () => {
         id: beneficiaryId,
         currentStatus: 'CLOSED',
         pii: { fullName: 'Asha Devi' },
+        caseType: 'MOTHER',
+        childCaseDetails: null,
       });
       repository.findByBeneficiaryId.mockResolvedValue([]);
 
@@ -374,6 +380,8 @@ describe('ReopenRequestService', () => {
       id: pending.beneficiaryId,
       currentStatus: 'CLOSED',
       pii: { fullName: 'Asha Devi' },
+      caseType: 'MOTHER',
+      childCaseDetails: null,
     });
     sakhiClient.getById.mockResolvedValue({
       sakhiId: pending.requestedByUserId,
@@ -402,6 +410,8 @@ describe('ReopenRequestService', () => {
       id: pending.beneficiaryId,
       currentStatus: 'CLOSED',
       pii: { fullName: 'Asha Devi' },
+      caseType: 'MOTHER',
+      childCaseDetails: null,
     });
     sakhiClient.getById.mockRejectedValue(new Error('auth-service down'));
 
@@ -488,6 +498,8 @@ describe('ReopenRequestService', () => {
         id: pending.beneficiaryId,
         currentStatus: 'CLOSED',
         pii: { fullName: 'Asha Devi' },
+        caseType: 'MOTHER',
+        childCaseDetails: null,
       });
 
       await expect(

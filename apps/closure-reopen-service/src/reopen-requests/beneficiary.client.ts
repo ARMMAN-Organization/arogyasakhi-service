@@ -14,6 +14,10 @@ export interface BeneficiaryCaseRecord {
 
 export interface BeneficiaryCaseDetail extends BeneficiaryCaseRecord {
   pii: { fullName: string };
+  caseType: 'MOTHER' | 'CHILD';
+  /** childCaseDetails.dateOfBirth — null for a MOTHER case. Used by
+   * closure.service.ts's getMisSummary (SRS 3C.4.1 age_at_closure). */
+  childCaseDetails: { dateOfBirth: string } | null;
 }
 
 /**

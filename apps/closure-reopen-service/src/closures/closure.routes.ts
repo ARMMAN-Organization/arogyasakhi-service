@@ -212,6 +212,37 @@ export function registerClosureRoutes(doc: DocumentedRouter, service: ClosureSer
     controller.getById,
   );
 
+  doc.get(
+    '/closures/:id/mis-summary',
+    {
+      summary:
+        'SRS 3C.4.1 MIS linelist field for one closure: ageAtClosureDays, derived from ' +
+        "closureDate and the beneficiary's own date of birth (resolved via " +
+        'beneficiary-service). Null for a MOTHER-case closure, not an error. Separate from ' +
+        "GET /closures/:id (an existing internal contract for Quick Response's card " +
+        "enrichment) so that endpoint doesn't grow a mandatory beneficiary-service round " +
+        'trip it does not need.',
+      tags: ['Closures'],
+      params: closureIdParamsSchema,
+      responses: {
+        200: {
+          description: 'MIS-linelist derived field for this closure',
+          schema: envelope(
+            z.object({ ageAtClosureDays: z.number().int().nullable().openapi({ example: 151 }) }),
+          ),
+        },
+        400: { description: 'Validation error', schema: apiErrorSchema },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: { description: 'Caller role not permitted', schema: apiErrorSchema },
+        404: { description: 'Closure not found', schema: apiErrorSchema },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(closureIdParamsSchema, 'params'),
+    controller.getMisSummary,
+  );
+
   doc.post(
     '/closures',
     {
