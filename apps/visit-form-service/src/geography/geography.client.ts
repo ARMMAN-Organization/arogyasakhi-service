@@ -37,3 +37,34 @@ export async function getAncestorChain(
   const body = (await res.json()) as { data: GeographyUnit[] };
   return body.data;
 }
+
+export interface SakhiLocationAssignment {
+  villageId: string;
+  padaId: string | null;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+}
+
+/**
+ * CR-XXX: a Sakhi's currently-active village/pada assignments, via
+ * auth-service's `GET /sakhis/:sakhiId/location-assignments`. A Sakhi
+ * covering multiple padas has one row per pada — `req.user.geographyUnitId`
+ * (the JWT claim `FormService.getActiveVersion` used before this fix) only
+ * ever reflects one of them, silently dropping every other pada from the
+ * active-version response's geography array.
+ */
+export async function getActiveLocationAssignments(
+  sakhiId: string,
+  asOf: Date,
+  authorizationHeader: string,
+): Promise<SakhiLocationAssignment[]> {
+  const url = `${AUTH_SERVICE_BASE_URL}/api/v1/sakhis/${sakhiId}/location-assignments?asOf=${asOf.toISOString()}`;
+  const res = await fetch(url, { headers: { Authorization: authorizationHeader } });
+
+  if (!res.ok) {
+    throw notFound("Unable to resolve the caller's location assignments — lookup failed.");
+  }
+
+  const body = (await res.json()) as { data: SakhiLocationAssignment[] };
+  return body.data;
+}

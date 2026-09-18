@@ -28,6 +28,17 @@ const sakhiIdParamsSchema = z
   })
   .strict();
 
+const asOfQuerySchema = z
+  .object({ asOf: z.coerce.date().optional().openapi({ example: '2026-09-17T00:00:00.000Z' }) })
+  .strict();
+
+const locationAssignmentSchema = z.object({
+  villageId: z.string().uuid().openapi({ example: 'bd5c3383-b5ad-4e5f-8ab1-7451303f32cb' }),
+  padaId: z.string().uuid().nullable().openapi({ example: '348a9f1d-314f-43db-878a-0e1388d1ea99' }),
+  effectiveFrom: z.string().datetime().openapi({ example: '2026-04-01T00:00:00.000Z' }),
+  effectiveTo: z.string().datetime().nullable(),
+});
+
 const sakhiSchema = z.object({
   sakhiId: z.string().uuid().openapi({ example: 'c9f8e2b1-6a3d-4f0e-9b1a-2d4e5f6a7b8c' }),
   displayName: z.string().openapi({ example: 'Priya Sharma' }),
@@ -136,5 +147,35 @@ export function registerSakhiRoutes(
     requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN', 'SYSTEM'),
     validate(sakhiIdParamsSchema, 'params'),
     controller.getById,
+  );
+
+  doc.get(
+    '/sakhis/:sakhiId/location-assignments',
+    {
+      summary:
+        "A Sakhi's currently-active village/pada assignments (CR-XXX). A Sakhi covering " +
+        'multiple padas has one row per pada — the JWT geographyUnitId claim only ever ' +
+        'reflects one of them, so visit-form-service calls this to union geography ancestor ' +
+        'chains across every pada instead. A SAKHI caller may only fetch their own; ' +
+        'SUPERVISOR/MANAGER/ADMIN/SYSTEM may fetch any.',
+      tags: ['Sakhis'],
+      params: sakhiIdParamsSchema,
+      query: asOfQuerySchema,
+      responses: {
+        200: {
+          description: "Sakhi's active location assignments",
+          schema: envelope(z.array(locationAssignmentSchema)),
+        },
+        400: errorResponse(400, { message: 'asOf: Invalid date' }),
+        401: errorResponse(401),
+        403: errorResponse(403),
+        500: errorResponse(500),
+      },
+    },
+    authenticate(signer),
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN', 'SYSTEM'),
+    validate(sakhiIdParamsSchema, 'params'),
+    validate(asOfQuerySchema, 'query'),
+    controller.getActiveLocationAssignments,
   );
 }

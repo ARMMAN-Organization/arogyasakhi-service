@@ -124,4 +124,39 @@ export class SakhiService {
     }
     return mapped.filter((s) => s.primaryProjectId === caller.projectId);
   }
+
+  /**
+   * CR-XXX: the Sakhi's own currently-active village/pada assignments —
+   * consumed by visit-form-service's `GET /forms/:formCode/active-version`
+   * to union geography ancestor chains across every pada a Sakhi covers,
+   * instead of the single geographyUnitId the JWT carries. Same
+   * ownership rule as `getById`: a SAKHI caller may only fetch their own
+   * assignments; a project-scoped caller (SUPERVISOR) may only fetch a
+   * Sakhi within their own project; MANAGER/ADMIN/SYSTEM are unrestricted.
+   * PR #238 review: the SAKHI self-check alone left a project-scoped
+   * SUPERVISOR (neither SAKHI nor privileged) able to read any Sakhi's
+   * assignments with no project check at all — this now fetches the
+   * target Sakhi's profile first to enforce the same project-scope rule
+   * `getById` already applies, rather than skipping straight to the query.
+   */
+  async getActiveLocationAssignments(sakhiId: string, caller: CallerScope, asOf: Date) {
+    if (!isPrivileged(caller) && caller.roles.includes('SAKHI')) {
+      if (caller.id !== sakhiId) {
+        throw forbidden('A Sakhi may only view their own location assignments.');
+      }
+    } else if (!isPrivileged(caller)) {
+      const profile = await this.repository.findById(sakhiId);
+      if (!profile) throw notFound('Sakhi not found.');
+      if (caller.projectId && caller.projectId !== profile.primaryProjectId) {
+        throw forbidden('You do not have access to this Sakhi.');
+      }
+    }
+    const rows = await this.repository.findActiveLocationAssignments(sakhiId, asOf);
+    return rows.map((r) => ({
+      villageId: r.villageId,
+      padaId: r.padaId,
+      effectiveFrom: r.effectiveFrom,
+      effectiveTo: r.effectiveTo,
+    }));
+  }
 }

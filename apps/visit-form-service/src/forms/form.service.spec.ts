@@ -9,6 +9,7 @@
  */
 process.env.DATABASE_URL ??= 'postgresql://user:pass@localhost:5432/test';
 
+import { notFound } from '@armman/service-commons';
 import { FormService } from './form.service';
 import type { FormRepository } from './form.repository';
 import type { VisitInstanceRepository } from '../visits/visitInstance.repository';
@@ -154,6 +155,13 @@ describe('FormService', () => {
   });
 
   describe('getActiveVersion', () => {
+    // A SUPERVISOR (or MANAGER/ADMIN) caller — no SAKHI role, so
+    // resolveCallerGeography always takes the single-geographyUnitId path
+    // (CR-XXX's multi-pada union only applies to a SAKHI caller).
+    function nonSakhiCaller(geographyUnitId: string | null = null) {
+      return { id: 'caller-1', roles: ['SUPERVISOR'], projectId: null, geographyUnitId };
+    }
+
     it('returns the active version (API-projected) for a form code', async () => {
       const version = {
         id: 'v1',
@@ -166,7 +174,7 @@ describe('FormService', () => {
       const result = await service.getActiveVersion(
         'MOTHER_REGISTRATION',
         new Date(),
-        null,
+        nonSakhiCaller(),
         'Bearer test-token',
       );
 
@@ -180,7 +188,12 @@ describe('FormService', () => {
     it('throws not-found when no published version exists', async () => {
       repository.findActiveVersion.mockResolvedValue(null);
       await expect(
-        service.getActiveVersion('MOTHER_REGISTRATION', new Date(), null, 'Bearer test-token'),
+        service.getActiveVersion(
+          'MOTHER_REGISTRATION',
+          new Date(),
+          nonSakhiCaller(),
+          'Bearer test-token',
+        ),
       ).rejects.toThrow(/No published form version/);
     });
 
@@ -207,12 +220,287 @@ describe('FormService', () => {
       const result = await service.getActiveVersion(
         'MOTHER_REGISTRATION',
         new Date(),
-        'pada-1',
+        nonSakhiCaller('pada-1'),
         'Bearer test-token',
       );
 
       expect(geographyClient.getAncestorChain).toHaveBeenCalledWith('pada-1', 'Bearer test-token');
       // Only geographyUnitId/geoType/name are exposed — parentId/geoCode/status dropped.
+      expect(result).toEqual(
+        expect.objectContaining({
+          geography: [{ geographyUnitId: 'pada-1', geoType: 'PADA', name: 'Sample Pada' }],
+        }),
+      );
+    });
+
+    it('unions geography ancestor chains across every active pada assignment for a SAKHI caller', async () => {
+      const version = {
+        id: 'v1',
+        versionNo: 'v1',
+        status: 'PUBLISHED',
+        checksum: Buffer.from('x'),
+      };
+      repository.findActiveVersion.mockResolvedValue(version as never);
+      jest.mocked(geographyClient.getActiveLocationAssignments).mockResolvedValue([
+        {
+          villageId: 'village-1',
+          padaId: 'pada-1',
+          effectiveFrom: '2026-01-01T00:00:00.000Z',
+          effectiveTo: null,
+        },
+        {
+          villageId: 'village-2',
+          padaId: 'pada-2',
+          effectiveFrom: '2026-01-01T00:00:00.000Z',
+          effectiveTo: null,
+        },
+      ] as never);
+      jest.spyOn(geographyClient, 'getAncestorChain').mockImplementation(async (id: string) => {
+        const shared = [
+          {
+            geographyUnitId: 'district-1',
+            geoType: 'DISTRICT',
+            parentId: null,
+            geoCode: null,
+            name: 'Shared District',
+            status: 'ACTIVE',
+          },
+        ];
+        if (id === 'pada-1') {
+          return [
+            {
+              geographyUnitId: 'pada-1',
+              geoType: 'PADA',
+              parentId: 'village-1',
+              geoCode: null,
+              name: 'Pada One',
+              status: 'ACTIVE',
+            },
+            {
+              geographyUnitId: 'village-1',
+              geoType: 'VILLAGE',
+              parentId: 'district-1',
+              geoCode: null,
+              name: 'Village One',
+              status: 'ACTIVE',
+            },
+            ...shared,
+          ] as never;
+        }
+        return [
+          {
+            geographyUnitId: 'pada-2',
+            geoType: 'PADA',
+            parentId: 'village-2',
+            geoCode: null,
+            name: 'Pada Two',
+            status: 'ACTIVE',
+          },
+          {
+            geographyUnitId: 'village-2',
+            geoType: 'VILLAGE',
+            parentId: 'district-1',
+            geoCode: null,
+            name: 'Village Two',
+            status: 'ACTIVE',
+          },
+          ...shared,
+        ] as never;
+      });
+
+      const sakhiCaller = {
+        id: 'sakhi-1',
+        roles: ['SAKHI'],
+        projectId: null,
+        geographyUnitId: 'pada-1',
+      };
+      const result = await service.getActiveVersion(
+        'CHILD_REGISTRATION',
+        new Date(),
+        sakhiCaller,
+        'Bearer test-token',
+      );
+
+      expect(geographyClient.getActiveLocationAssignments).toHaveBeenCalledWith(
+        'sakhi-1',
+        expect.any(Date),
+        'Bearer test-token',
+      );
+      expect(geographyClient.getAncestorChain).toHaveBeenCalledWith('pada-1', 'Bearer test-token');
+      expect(geographyClient.getAncestorChain).toHaveBeenCalledWith('pada-2', 'Bearer test-token');
+
+      const geography = (result as { geography: { geographyUnitId: string }[] }).geography;
+      // Divergent levels (PADA, VILLAGE) return one row per distinct unit.
+      expect(geography).toEqual(
+        expect.arrayContaining([
+          { geographyUnitId: 'pada-1', geoType: 'PADA', name: 'Pada One' },
+          { geographyUnitId: 'pada-2', geoType: 'PADA', name: 'Pada Two' },
+          { geographyUnitId: 'village-1', geoType: 'VILLAGE', name: 'Village One' },
+          { geographyUnitId: 'village-2', geoType: 'VILLAGE', name: 'Village Two' },
+        ]),
+      );
+      // Shared level (DISTRICT) collapses to a single row, not duplicated.
+      expect(geography.filter((g) => g.geographyUnitId === 'district-1')).toHaveLength(1);
+    });
+
+    it(
+      "does not fail the whole request when one pada's ancestor-chain lookup rejects — " +
+        'PR #238 review: Promise.all would previously fail the entire form-load for a ' +
+        "multi-pada Sakhi if even one pada's geography_units row was stale/deleted, or " +
+        'auth-service blipped transiently on one of the parallel calls',
+      async () => {
+        const version = {
+          id: 'v1',
+          versionNo: 'v1',
+          status: 'PUBLISHED',
+          checksum: Buffer.from('x'),
+        };
+        repository.findActiveVersion.mockResolvedValue(version as never);
+        jest.mocked(geographyClient.getActiveLocationAssignments).mockResolvedValue([
+          {
+            villageId: 'village-1',
+            padaId: 'pada-1',
+            effectiveFrom: '2026-01-01T00:00:00.000Z',
+            effectiveTo: null,
+          },
+          {
+            villageId: 'village-2',
+            padaId: 'pada-2',
+            effectiveFrom: '2026-01-01T00:00:00.000Z',
+            effectiveTo: null,
+          },
+        ] as never);
+        jest.spyOn(geographyClient, 'getAncestorChain').mockImplementation(async (id: string) => {
+          if (id === 'pada-1') {
+            throw notFound("The caller's assigned geography unit was not found.");
+          }
+          return [
+            {
+              geographyUnitId: 'pada-2',
+              geoType: 'PADA',
+              parentId: 'village-2',
+              geoCode: null,
+              name: 'Pada Two',
+              status: 'ACTIVE',
+            },
+          ] as never;
+        });
+
+        const sakhiCaller = {
+          id: 'sakhi-1',
+          roles: ['SAKHI'],
+          projectId: null,
+          geographyUnitId: 'pada-1',
+        };
+        const result = await service.getActiveVersion(
+          'CHILD_REGISTRATION',
+          new Date(),
+          sakhiCaller,
+          'Bearer test-token',
+        );
+
+        // The failed pada-1 chain is skipped, not rethrown — pada-2's chain
+        // still resolves and appears in the response.
+        expect(result).toEqual(
+          expect.objectContaining({
+            geography: [{ geographyUnitId: 'pada-2', geoType: 'PADA', name: 'Pada Two' }],
+          }),
+        );
+      },
+    );
+
+    it(
+      'fetches each distinct leaf geography unit only once, even when two active ' +
+        'assignments resolve to the same leaf id — PR #238 review: minor efficiency fix, ' +
+        'avoids a duplicate ancestor-chain network call',
+      async () => {
+        const version = {
+          id: 'v1',
+          versionNo: 'v1',
+          status: 'PUBLISHED',
+          checksum: Buffer.from('x'),
+        };
+        repository.findActiveVersion.mockResolvedValue(version as never);
+        jest.mocked(geographyClient.getActiveLocationAssignments).mockResolvedValue([
+          {
+            villageId: 'village-1',
+            padaId: null,
+            effectiveFrom: '2026-01-01T00:00:00.000Z',
+            effectiveTo: null,
+          },
+          {
+            villageId: 'village-1',
+            padaId: null,
+            effectiveFrom: '2026-02-01T00:00:00.000Z',
+            effectiveTo: null,
+          },
+        ] as never);
+        jest.spyOn(geographyClient, 'getAncestorChain').mockResolvedValue([
+          {
+            geographyUnitId: 'village-1',
+            geoType: 'VILLAGE',
+            parentId: null,
+            geoCode: null,
+            name: 'Shared Village',
+            status: 'ACTIVE',
+          },
+        ] as never);
+
+        const sakhiCaller = {
+          id: 'sakhi-1',
+          roles: ['SAKHI'],
+          projectId: null,
+          geographyUnitId: 'village-1',
+        };
+        await service.getActiveVersion(
+          'CHILD_REGISTRATION',
+          new Date(),
+          sakhiCaller,
+          'Bearer test-token',
+        );
+
+        expect(geographyClient.getAncestorChain).toHaveBeenCalledTimes(1);
+        expect(geographyClient.getAncestorChain).toHaveBeenCalledWith(
+          'village-1',
+          'Bearer test-token',
+        );
+      },
+    );
+
+    it('falls back to the single-geographyUnitId chain for a SAKHI with no active location assignments', async () => {
+      const version = {
+        id: 'v1',
+        versionNo: 'v1',
+        status: 'PUBLISHED',
+        checksum: Buffer.from('x'),
+      };
+      repository.findActiveVersion.mockResolvedValue(version as never);
+      jest.mocked(geographyClient.getActiveLocationAssignments).mockResolvedValue([]);
+      jest.spyOn(geographyClient, 'getAncestorChain').mockResolvedValue([
+        {
+          geographyUnitId: 'pada-1',
+          geoType: 'PADA',
+          parentId: 'village-1',
+          geoCode: null,
+          name: 'Sample Pada',
+          status: 'ACTIVE',
+        },
+      ] as never);
+
+      const sakhiCaller = {
+        id: 'sakhi-1',
+        roles: ['SAKHI'],
+        projectId: null,
+        geographyUnitId: 'pada-1',
+      };
+      const result = await service.getActiveVersion(
+        'CHILD_REGISTRATION',
+        new Date(),
+        sakhiCaller,
+        'Bearer test-token',
+      );
+
+      expect(geographyClient.getAncestorChain).toHaveBeenCalledWith('pada-1', 'Bearer test-token');
       expect(result).toEqual(
         expect.objectContaining({
           geography: [{ geographyUnitId: 'pada-1', geoType: 'PADA', name: 'Sample Pada' }],
@@ -234,7 +522,7 @@ describe('FormService', () => {
         const result = await service.getActiveVersion(
           'NEONATAL_VISIT',
           new Date(),
-          null,
+          nonSakhiCaller(),
           'Bearer test-token',
         );
 
@@ -248,7 +536,7 @@ describe('FormService', () => {
         const result = await service.getActiveVersion(
           'ANC_VISIT',
           new Date(),
-          null,
+          nonSakhiCaller(),
           'Bearer test-token',
           'ben-1',
         );
@@ -264,7 +552,7 @@ describe('FormService', () => {
         const result = await service.getActiveVersion(
           'NEONATAL_VISIT',
           new Date(),
-          null,
+          nonSakhiCaller(),
           'Bearer test-token',
           'ben-1',
         );
@@ -288,7 +576,7 @@ describe('FormService', () => {
         const result = await service.getActiveVersion(
           'NEONATAL_VISIT',
           new Date(),
-          null,
+          nonSakhiCaller(),
           'Bearer test-token',
           'ben-1',
         );
@@ -311,7 +599,7 @@ describe('FormService', () => {
         const result = await service.getActiveVersion(
           'NEONATAL_VISIT',
           new Date('2026-08-01T00:00:00.000Z'),
-          null,
+          nonSakhiCaller(),
           'Bearer test-token',
           'ben-1',
         );
@@ -333,7 +621,7 @@ describe('FormService', () => {
         const result = await service.getActiveVersion(
           'NEONATAL_VISIT',
           new Date('2026-08-01T00:00:00.000Z'),
-          null,
+          nonSakhiCaller(),
           'Bearer test-token',
           'ben-1',
         );
@@ -355,7 +643,7 @@ describe('FormService', () => {
         const result = await service.getActiveVersion(
           'NEONATAL_VISIT',
           new Date('2026-08-01T00:00:00.000Z'),
-          null,
+          nonSakhiCaller(),
           'Bearer test-token',
           'ben-1',
         );
@@ -375,7 +663,7 @@ describe('FormService', () => {
         const result = await service.getActiveVersion(
           'NEONATAL_VISIT',
           new Date('2026-08-01T00:00:00.000Z'),
-          null,
+          nonSakhiCaller(),
           'Bearer test-token',
           'ben-1',
         );
