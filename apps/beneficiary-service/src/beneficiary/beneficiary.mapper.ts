@@ -87,6 +87,14 @@ export function withDecryptedName<T extends { pii: PiiRow; [k: string]: unknown 
           parity: mother.parity,
           heightCm: mother.heightCm,
           bmiAtRegistration: mother.bmiAtRegistration,
+          // SRS 3C.4.1 linelist fields — derived at response time from
+          // registrationDate/lmpDate, never persisted, so there's no
+          // migration and no staleness risk if either source date is edited.
+          regFy: computeRegistrationFiscalYear(c.registrationDate as Date),
+          gestationalAgeAtRegWeeks: computeGestationalAgeAtRegWeeks(
+            c.registrationDate as Date,
+            mother.lmpDate as Date | null,
+          ),
         }
       : null;
   }
@@ -180,4 +188,35 @@ export function computeBmi(
   if (!heightCm || !weightKg) return null;
   const heightM = heightCm / 100;
   return Math.round((weightKg / (heightM * heightM)) * 100) / 100;
+}
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * India's Apr-Mar fiscal year for a registration date, as `FY<start>-<end>`
+ * (e.g. `FY2026-27`). A date in Jan-Mar belongs to the fiscal year that
+ * started the previous April.
+ */
+export function computeRegistrationFiscalYear(registrationDate: Date): string {
+  const year = registrationDate.getUTCFullYear();
+  const month = registrationDate.getUTCMonth(); // 0 = Jan
+  const startYear = month >= 3 ? year : year - 1; // April is month index 3
+  return `FY${startYear}-${String((startYear + 1) % 100).padStart(2, '0')}`;
+}
+
+/**
+ * Gestational age in whole weeks at registration, floored (not rounded) to
+ * match the ANC visit's own gestational_age_weeks convention. Returns null
+ * — rather than a negative number — when lmpDate is missing or falls after
+ * registrationDate, since that combination is a data-entry error, not a
+ * valid gestational age.
+ */
+export function computeGestationalAgeAtRegWeeks(
+  registrationDate: Date,
+  lmpDate: Date | null | undefined,
+): number | null {
+  if (!lmpDate) return null;
+  const days = Math.floor((registrationDate.getTime() - lmpDate.getTime()) / MS_PER_DAY);
+  if (days < 0) return null;
+  return Math.floor(days / 7);
 }

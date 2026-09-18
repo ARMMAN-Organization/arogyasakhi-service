@@ -1,6 +1,10 @@
 import { randomBytes } from 'node:crypto';
 import { encryptPii } from '@armman/service-commons';
-import { withDecryptedName } from './beneficiary.mapper';
+import {
+  withDecryptedName,
+  computeRegistrationFiscalYear,
+  computeGestationalAgeAtRegWeeks,
+} from './beneficiary.mapper';
 
 describe('withDecryptedName', () => {
   const originalEnv = { ...process.env };
@@ -195,5 +199,79 @@ describe('withDecryptedName', () => {
         gradeScale: null,
       }),
     ]);
+  });
+
+  it('projects regFy and gestationalAgeAtRegWeeks on motherCaseDetails', () => {
+    const result = withDecryptedName({
+      id: 'x',
+      registrationDate: new Date('2026-07-10'),
+      pii: basePii(),
+      motherCaseDetails: {
+        lmpDate: new Date('2026-04-01'),
+        eddDate: new Date('2027-01-05'),
+        gravida: 1,
+        parity: 0,
+        heightCm: 158,
+        bmiAtRegistration: null,
+      },
+    } as never);
+
+    expect(result.motherCaseDetails).toMatchObject({
+      regFy: 'FY2026-27',
+      gestationalAgeAtRegWeeks: 14,
+    });
+  });
+
+  it('leaves regFy/gestationalAgeAtRegWeeks null when motherCaseDetails is null (child case)', () => {
+    const result = withDecryptedName({
+      id: 'x',
+      registrationDate: new Date('2026-07-10'),
+      pii: basePii(),
+      motherCaseDetails: null,
+    } as never);
+
+    expect(result.motherCaseDetails).toBeNull();
+  });
+});
+
+describe('computeRegistrationFiscalYear', () => {
+  it('returns the Apr-Mar Indian fiscal year for a date in the first half (Jan-Mar)', () => {
+    expect(computeRegistrationFiscalYear(new Date('2026-02-15'))).toBe('FY2025-26');
+  });
+
+  it('returns the Apr-Mar Indian fiscal year for a date in the second half (Apr-Dec)', () => {
+    expect(computeRegistrationFiscalYear(new Date('2026-04-15'))).toBe('FY2026-27');
+  });
+
+  it('treats April 1st itself as the start of the new fiscal year', () => {
+    expect(computeRegistrationFiscalYear(new Date('2026-04-01'))).toBe('FY2026-27');
+  });
+
+  it('treats March 31st itself as the end of the prior fiscal year', () => {
+    expect(computeRegistrationFiscalYear(new Date('2026-03-31'))).toBe('FY2025-26');
+  });
+});
+
+describe('computeGestationalAgeAtRegWeeks', () => {
+  it('floors partial weeks rather than rounding', () => {
+    // 139 days = 19 weeks 6 days -> floors to 19, not 20.
+    const lmpDate = new Date('2026-01-01');
+    const registrationDate = new Date('2026-05-20'); // 139 days later
+    expect(computeGestationalAgeAtRegWeeks(registrationDate, lmpDate)).toBe(19);
+  });
+
+  it('returns 0 when registrationDate equals lmpDate', () => {
+    const date = new Date('2026-01-01');
+    expect(computeGestationalAgeAtRegWeeks(date, date)).toBe(0);
+  });
+
+  it('returns null when registrationDate is before lmpDate (bad data) rather than a negative number', () => {
+    const lmpDate = new Date('2026-06-01');
+    const registrationDate = new Date('2026-01-01');
+    expect(computeGestationalAgeAtRegWeeks(registrationDate, lmpDate)).toBeNull();
+  });
+
+  it('returns null when lmpDate is missing', () => {
+    expect(computeGestationalAgeAtRegWeeks(new Date('2026-06-01'), null)).toBeNull();
   });
 });
