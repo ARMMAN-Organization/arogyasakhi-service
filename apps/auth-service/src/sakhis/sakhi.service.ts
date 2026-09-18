@@ -1,5 +1,8 @@
-import { forbidden, notFound } from '@armman/service-commons';
+import { badRequest, forbidden, notFound } from '@armman/service-commons';
 import type { SakhiRepository } from './sakhi.repository';
+import type { GeographyRepository } from '../geography/geography.repository';
+import type { CreateLocationAssignmentInput } from './dto/create-location-assignment.dto';
+import type { UpdateLocationAssignmentInput } from './dto/update-location-assignment.dto';
 
 /** The calling principal's own scope, as carried on their JWT/trusted-identity headers. */
 export interface CallerScope {
@@ -49,9 +52,33 @@ function isPrivileged(caller: CallerScope): boolean {
   return caller.roles.includes('MANAGER') || caller.roles.includes('ADMIN');
 }
 
+/**
+ * Projects a `SakhiLocationAssignment` row to its API shape — same
+ * villageId/padaId/effectiveFrom/effectiveTo subset `getActiveLocationAssignments`
+ * already returns, plus `id` for the write endpoints (edit/end) to address it by.
+ */
+function toApiLocationAssignment(row: {
+  id: string;
+  villageId: string;
+  padaId: string | null;
+  effectiveFrom: Date;
+  effectiveTo: Date | null;
+}) {
+  return {
+    id: row.id,
+    villageId: row.villageId,
+    padaId: row.padaId,
+    effectiveFrom: row.effectiveFrom,
+    effectiveTo: row.effectiveTo,
+  };
+}
+
 /** Business logic for Sakhi profile reads. */
 export class SakhiService {
-  constructor(private readonly repository: SakhiRepository) {}
+  constructor(
+    private readonly repository: SakhiRepository,
+    private readonly geographyRepository: GeographyRepository,
+  ) {}
 
   /**
    * A caller with a project scope on their JWT (typically SUPERVISOR — one
@@ -158,5 +185,137 @@ export class SakhiService {
       effectiveFrom: r.effectiveFrom,
       effectiveTo: r.effectiveTo,
     }));
+  }
+
+  /**
+   * Write access to a Sakhi's location assignments is ADMIN-unrestricted or
+   * SUPERVISOR-own-project-only — never SAKHI (they have read-only access to
+   * their own assignments via getActiveLocationAssignments above). Shared by
+   * create/update/end since all three need the same "may this caller manage
+   * this Sakhi's assignments at all" check before touching the row.
+   */
+  private async assertCallerCanManageAssignments(sakhiId: string, caller: CallerScope) {
+    if (isPrivileged(caller)) return;
+    if (caller.roles.includes('SAKHI')) {
+      throw forbidden('A Sakhi cannot manage location assignments.');
+    }
+    const profile = await this.repository.findById(sakhiId);
+    if (!profile) throw notFound('Sakhi not found.');
+    if (caller.projectId && caller.projectId !== profile.primaryProjectId) {
+      throw forbidden('You do not have access to this Sakhi.');
+    }
+  }
+
+  /**
+   * Validates villageId (must be an ACTIVE geography_units row with geoType
+   * VILLAGE) and, if given, padaId (ACTIVE, geoType PADA, and its own
+   * parentId must equal villageId — a pada belonging to a different village
+   * than the one supplied would silently produce a geographically
+   * inconsistent assignment otherwise).
+   */
+  private async assertValidVillageAndPada(villageId: string, padaId: string | undefined | null) {
+    const village = await this.geographyRepository.findById(villageId);
+    if (!village || village.geoType !== 'VILLAGE' || village.status !== 'ACTIVE') {
+      throw badRequest('villageId: Must reference an active VILLAGE geography unit.');
+    }
+    if (padaId) {
+      const pada = await this.geographyRepository.findById(padaId);
+      if (!pada || pada.geoType !== 'PADA' || pada.status !== 'ACTIVE') {
+        throw badRequest('padaId: Must reference an active PADA geography unit.');
+      }
+      if (pada.parentId !== villageId) {
+        throw badRequest('padaId: Must be a child of the given villageId.');
+      }
+    }
+  }
+
+  /**
+   * Creates a new village/pada assignment for a Sakhi. No overlap check
+   * against the Sakhi's existing assignments — a Sakhi may hold multiple
+   * concurrent assignments spanning any geography, including different
+   * districts or states (this is the whole point of CR-237's multi-pada
+   * union fix); layering date ranges for the same village/pada is likewise
+   * left unrestricted, per explicit product decision.
+   */
+  async createLocationAssignment(
+    sakhiId: string,
+    input: CreateLocationAssignmentInput,
+    caller: CallerScope,
+  ) {
+    await this.assertCallerCanManageAssignments(sakhiId, caller);
+    await this.assertValidVillageAndPada(input.villageId, input.padaId);
+    if (input.effectiveTo && input.effectiveTo < input.effectiveFrom) {
+      throw badRequest('effectiveTo: Must not be before effectiveFrom.');
+    }
+    const created = await this.repository.createLocationAssignment({
+      sakhiId,
+      projectId: input.projectId,
+      villageId: input.villageId,
+      padaId: input.padaId ?? null,
+      effectiveFrom: input.effectiveFrom,
+      effectiveTo: input.effectiveTo ?? null,
+    });
+    return toApiLocationAssignment(created);
+  }
+
+  /**
+   * Edits an existing assignment's villageId/padaId/effectiveFrom/effectiveTo.
+   * `assignmentId` must belong to `sakhiId` — checked here (not left to the
+   * database) so a caller cannot edit another Sakhi's assignment by guessing
+   * an id and supplying an unrelated sakhiId in the URL; a mismatch 404s
+   * rather than leaking whether the assignmentId exists at all.
+   */
+  async updateLocationAssignment(
+    sakhiId: string,
+    assignmentId: string,
+    input: UpdateLocationAssignmentInput,
+    caller: CallerScope,
+  ) {
+    await this.assertCallerCanManageAssignments(sakhiId, caller);
+    const existing = await this.repository.findLocationAssignmentById(assignmentId);
+    if (!existing || existing.sakhiId !== sakhiId) {
+      throw notFound('Location assignment not found.');
+    }
+    const nextVillageId = input.villageId ?? existing.villageId;
+    const nextPadaId = input.padaId === undefined ? existing.padaId : input.padaId;
+    if (input.villageId || input.padaId !== undefined) {
+      await this.assertValidVillageAndPada(nextVillageId, nextPadaId);
+    }
+    const nextFrom = input.effectiveFrom ?? existing.effectiveFrom;
+    const nextTo = input.effectiveTo === undefined ? existing.effectiveTo : input.effectiveTo;
+    if (nextTo && nextTo < nextFrom) {
+      throw badRequest('effectiveTo: Must not be before effectiveFrom.');
+    }
+    const updated = await this.repository.updateLocationAssignment(assignmentId, {
+      villageId: input.villageId,
+      padaId: input.padaId,
+      effectiveFrom: input.effectiveFrom,
+      effectiveTo: input.effectiveTo,
+    });
+    return toApiLocationAssignment(updated);
+  }
+
+  /**
+   * "Ends" an assignment by setting effectiveTo (defaulting to today) —
+   * see sakhi.repository.ts's endLocationAssignment doc comment for why this
+   * table has no delete/deactivate flag to use instead.
+   */
+  async endLocationAssignment(
+    sakhiId: string,
+    assignmentId: string,
+    effectiveTo: Date | undefined,
+    caller: CallerScope,
+  ) {
+    await this.assertCallerCanManageAssignments(sakhiId, caller);
+    const existing = await this.repository.findLocationAssignmentById(assignmentId);
+    if (!existing || existing.sakhiId !== sakhiId) {
+      throw notFound('Location assignment not found.');
+    }
+    const resolvedEffectiveTo = effectiveTo ?? new Date();
+    if (resolvedEffectiveTo < existing.effectiveFrom) {
+      throw badRequest("effectiveTo: Must not be before the assignment's effectiveFrom.");
+    }
+    const updated = await this.repository.endLocationAssignment(assignmentId, resolvedEffectiveTo);
+    return toApiLocationAssignment(updated);
   }
 }

@@ -60,4 +60,53 @@ export class SakhiRepository {
       },
     });
   }
+
+  /** A single location assignment by its own id, regardless of Sakhi — the
+   * service checks `sakhiId` matches the route param before returning it, so
+   * a mismatched pair (assignmentId belonging to a different Sakhi) 404s
+   * rather than leaking cross-Sakhi existence via a 403. */
+  findLocationAssignmentById(assignmentId: string) {
+    return this.prisma.sakhiLocationAssignment.findUnique({
+      where: { id: assignmentId },
+    });
+  }
+
+  createLocationAssignment(data: {
+    sakhiId: string;
+    projectId: string;
+    villageId: string;
+    padaId: string | null;
+    effectiveFrom: Date;
+    effectiveTo: Date | null;
+  }) {
+    return this.prisma.sakhiLocationAssignment.create({ data });
+  }
+
+  updateLocationAssignment(
+    assignmentId: string,
+    data: {
+      villageId?: string;
+      padaId?: string | null;
+      effectiveFrom?: Date;
+      effectiveTo?: Date | null;
+    },
+  ) {
+    return this.prisma.sakhiLocationAssignment.update({
+      where: { id: assignmentId },
+      data,
+    });
+  }
+
+  /** "Ending" an assignment sets effectiveTo — this table has no delete flag
+   * (statusLookupId is a separate, currently-unused concept; see
+   * findActiveLocationAssignments's doc comment) and no isDeleted column
+   * (unlike most tables in this codebase — the ERD gives this table no audit
+   * columns at all), so a closed date range is the only "inactive" signal
+   * available today. */
+  endLocationAssignment(assignmentId: string, effectiveTo: Date) {
+    return this.prisma.sakhiLocationAssignment.update({
+      where: { id: assignmentId },
+      data: { effectiveTo },
+    });
+  }
 }
