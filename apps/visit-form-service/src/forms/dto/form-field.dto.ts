@@ -127,6 +127,13 @@ export const formFieldSchema = z
         'CHILD_AGE_MONTHS',
         'UNIQUE_ID',
         'AGE_FROM_DOB',
+        // CH-09 / SRS FR-S-4.7 Category 4 — Infant Registration's
+        // date_of_last_visit_12months (DOB + 365 days). Named for the
+        // formula rather than the value (unlike AGE_FROM_DOB/CHILD_AGE_
+        // MONTHS's describes-the-value convention) to match the exact token
+        // the mobile team's InfantVisitFormComputedFieldEvaluator.kt keys
+        // off — confirmed with them before adding this.
+        'DOB_PLUS_365',
       ])
       .optional(),
     captureMode: z.enum(['LIVE_CAMERA_ONLY']).optional(),
