@@ -195,6 +195,19 @@ export function createBeneficiaryController(service: BeneficiaryService) {
       res.json(ok(updated));
     }),
 
+    applyMotherDeliveryDate: asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const updated = await service.applyMotherDeliveryDate(
+        req.params.id,
+        req.body.dateOfDelivery,
+        req.user,
+        authorizationHeader,
+      );
+      res.json(ok(updated));
+    }),
+
     upsertRiskConditionSummary: asyncHandler(async (req, res, next) => {
       if (!req.user) return next(unauthorized());
       const authorizationHeader = req.header('authorization');

@@ -1070,6 +1070,52 @@ export class BeneficiaryService {
   }
 
   /**
+   * Records a mother case's delivery date after a DELIVERY_VISIT
+   * submission. Called server-to-server by visit-form-service, forwarding
+   * the submitting SAKHI's own token — same no-machine-identity stance as
+   * applyPhaseChange/setCcvOpeningRiskState.
+   *
+   * Feeds FR-S-2.5's re-enrolment duplicate-detection prompt: without this
+   * write, `evaluateDuplicateMatch` can never tell a completed prior
+   * pregnancy apart from an open one, since it needs a confirmed delivery
+   * date to know the journey actually finished.
+   *
+   * MOTHER-only — a CHILD case (no `motherCaseDetails` row) 409s rather
+   * than silently no-op'ing, since this method is only ever meant to be
+   * called for the mother's own beneficiaryId after a DELIVERY_VISIT.
+   */
+  async applyMotherDeliveryDate(
+    beneficiaryId: string,
+    dateOfDelivery: Date,
+    caller: AuthenticatedUser,
+    authorizationHeader: string,
+  ) {
+    const existing = await this.repository.findById(beneficiaryId);
+    if (!existing) throw notFound('Beneficiary case not found.');
+
+    if (caller.roles.includes('SAKHI')) {
+      if (existing.sakhiId !== caller.id) {
+        throw forbidden('This beneficiary case is outside your own roster.');
+      }
+    } else {
+      await assertCallerCanTouchCase(existing.sakhiId, caller, authorizationHeader);
+    }
+
+    if (existing.currentStatus === 'PENDING_TRANSFER') {
+      throw conflict('Cannot record a delivery date for a case pending Manager transfer review.');
+    }
+
+    if (existing.caseType !== 'MOTHER') {
+      throw conflict('Delivery date can only be recorded for a MOTHER case.');
+    }
+
+    const updated = await this.repository.applyMotherDeliveryDate(beneficiaryId, dateOfDelivery);
+    if (!updated) throw notFound('No MotherCaseDetails row exists for this beneficiary.');
+
+    return this.projectCase(beneficiaryId, authorizationHeader);
+  }
+
+  /**
    * Closes a beneficiary case after a closure submission (ANC_CLOSURE_VISIT
    * / CHILD_CLOSURE_VISIT) — the "beneficiary moves to the Closed list"
    * consequence closure-reopen-service's own ClosureService is documented

@@ -78,3 +78,44 @@ export async function setCcvOpeningRiskState(
     );
   }
 }
+
+/**
+ * Records a mother's delivery date via beneficiary-service's
+ * `PATCH /beneficiaries/:id/delivery-date` — called once, for the mother's
+ * own beneficiaryId, after a DELIVERY_VISIT submission. Feeds FR-S-2.5's
+ * re-enrolment duplicate-detection prompt: without this call, a completed
+ * prior pregnancy can never be told apart from an open one.
+ *
+ * Best-effort by design, same stance as updateBeneficiaryPhase: the Delivery
+ * submission is already durably saved by the time this runs, and a stale
+ * delivery date is a follow-up/ops concern, not a reason to reject a
+ * completed delivery record in the field.
+ */
+export async function setMotherDeliveryDate(
+  beneficiaryId: string,
+  dateOfDelivery: string,
+  authorizationHeader: string,
+): Promise<void> {
+  try {
+    const res = await fetch(
+      `${API_GATEWAY_BASE_URL}/api/v1/beneficiaries/${beneficiaryId}/delivery-date`,
+      {
+        method: 'PATCH',
+        headers: { Authorization: authorizationHeader, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dateOfDelivery }),
+      },
+    );
+    if (!res.ok) {
+      console.warn(
+        `Failed to record dateOfDelivery for beneficiary ${beneficiaryId} ` +
+          `(beneficiary-service returned ${res.status}); the Delivery submission itself was still saved.`,
+      );
+    }
+  } catch (err) {
+    console.warn(
+      `Unable to reach beneficiary-service to record dateOfDelivery for beneficiary ` +
+        `${beneficiaryId}; the Delivery submission itself was still saved. ` +
+        `${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
