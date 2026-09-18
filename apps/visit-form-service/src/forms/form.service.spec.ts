@@ -23,7 +23,10 @@ import {
   findBeneficiaryIds,
 } from '../beneficiaries/beneficiary.client';
 import { createChildBeneficiary } from '../beneficiaries/create-child.client';
-import { updateBeneficiaryPhase } from '../beneficiaries/update-phase.client';
+import {
+  updateBeneficiaryPhase,
+  setMotherDeliveryDate,
+} from '../beneficiaries/update-phase.client';
 import { createClosure, resolveClosureReasonLookupId } from '../closures/closure.client';
 import { triggerRiskAssessment } from '../risk-assessments/riskAssessment.client';
 import { listSakhiIdsForSupervisor } from '../sakhis/sakhi.client';
@@ -2157,6 +2160,65 @@ describe('FormService', () => {
           'PP',
           'Bearer test-token',
         );
+      });
+
+      it('records the mother own delivery date when date_of_delivery is present', async () => {
+        jest.mocked(createChildBeneficiary).mockResolvedValue(null);
+
+        await service.createSubmission(
+          'DELIVERY_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: { date_of_delivery: '2026-08-01' },
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(setMotherDeliveryDate)).toHaveBeenCalledWith(
+          'b1',
+          new Date('2026-08-01').toISOString(),
+          'Bearer test-token',
+        );
+      });
+
+      it('does not call setMotherDeliveryDate when date_of_delivery is absent', async () => {
+        jest.mocked(createChildBeneficiary).mockResolvedValue(null);
+
+        await service.createSubmission(
+          'DELIVERY_VISIT',
+          {
+            formVersionId: 'version-1',
+            beneficiaryId: 'b1',
+            localSubmissionUuid: 'uuid-1',
+            formData: {},
+          },
+          'u1',
+          'Bearer test-token',
+        );
+
+        expect(jest.mocked(setMotherDeliveryDate)).not.toHaveBeenCalled();
+      });
+
+      it('still completes the submission when setMotherDeliveryDate rejects', async () => {
+        jest.mocked(createChildBeneficiary).mockResolvedValue(null);
+        jest.mocked(setMotherDeliveryDate).mockRejectedValueOnce(new Error('network down'));
+
+        await expect(
+          service.createSubmission(
+            'DELIVERY_VISIT',
+            {
+              formVersionId: 'version-1',
+              beneficiaryId: 'b1',
+              localSubmissionUuid: 'uuid-1',
+              formData: { date_of_delivery: '2026-08-01' },
+            },
+            'u1',
+            'Bearer test-token',
+          ),
+        ).resolves.toBeDefined();
       });
 
       it('advances each successfully created child to NN', async () => {

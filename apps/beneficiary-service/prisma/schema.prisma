@@ -291,6 +291,12 @@ model MotherCaseDetails {
   bmiAtRegistration        Decimal?        @map("bmi_at_registration") @db.Decimal(5, 2)
   baselineRiskFlag         Boolean         @default(false) @map("baseline_risk_flag")
   currentPhase             MotherCasePhase @default(ANC) @map("current_phase")
+  // Set by visit-form-service (PATCH /beneficiaries/:id/delivery-date) when
+  // a DELIVERY_VISIT is submitted for this mother. Feeds FR-S-2.5's
+  // re-enrolment duplicate-detection prompt (beneficiary.duplicate-
+  // detection.ts) — null until a delivery is recorded, or for any mother
+  // registered before this column existed.
+  dateOfDelivery           DateTime?       @map("date_of_delivery") @db.Date
   createdAt                DateTime        @default(now()) @map("created_at")
   createdByUserId          String?         @map("created_by_user_id")
   updatedAt                DateTime        @updatedAt @map("updated_at")

@@ -44,6 +44,7 @@ describe('BeneficiaryService', () => {
     createEnrollment: jest.fn(),
     updateMotherLmp: jest.fn(),
     updatePhase: jest.fn(),
+    applyMotherDeliveryDate: jest.fn(),
     closeCase: jest.fn(),
     reactivateCase: jest.fn(),
     restoreForSakhi: jest.fn(),
@@ -538,6 +539,146 @@ describe('BeneficiaryService', () => {
       );
 
       expect(repository.updatePhase).toHaveBeenCalledWith(beneficiaryId, 'MOTHER', 'ANC', 'PP');
+    });
+  });
+
+  describe('applyMotherDeliveryDate', () => {
+    const beneficiaryId = '22222222-2222-2222-2222-222222222222';
+    const sakhiId = '55555555-5555-5555-5555-555555555555';
+    const otherSakhiId = '66666666-6666-6666-6666-666666666666';
+    const dateOfDelivery = new Date('2026-06-10');
+
+    function caseRow(overrides: Partial<Record<string, unknown>> = {}) {
+      return {
+        id: beneficiaryId,
+        sakhiId,
+        caseType: 'MOTHER',
+        currentStatus: 'ACTIVE',
+        pii: { id: 'pii-1', fullNameEnc: encryptPii('Jane Doe') },
+        ...overrides,
+      };
+    }
+
+    it('records dateOfDelivery on a MOTHER case', async () => {
+      repository.findById.mockResolvedValue(caseRow() as never);
+      repository.applyMotherDeliveryDate.mockResolvedValue(true);
+
+      await service.applyMotherDeliveryDate(
+        beneficiaryId,
+        dateOfDelivery,
+        caller({ id: sakhiId, roles: ['SAKHI'] }),
+        AUTH_HEADER,
+      );
+
+      expect(repository.applyMotherDeliveryDate).toHaveBeenCalledWith(
+        beneficiaryId,
+        dateOfDelivery,
+      );
+    });
+
+    it('returns the updated case via getById', async () => {
+      repository.findById.mockResolvedValue(caseRow() as never);
+      repository.applyMotherDeliveryDate.mockResolvedValue(true);
+
+      const result = await service.applyMotherDeliveryDate(
+        beneficiaryId,
+        dateOfDelivery,
+        caller({ id: sakhiId, roles: ['SAKHI'] }),
+        AUTH_HEADER,
+      );
+      expect(result).toMatchObject({ id: beneficiaryId });
+    });
+
+    it('404s on an unknown beneficiary id', async () => {
+      repository.findById.mockResolvedValue(null);
+
+      await expect(
+        service.applyMotherDeliveryDate(
+          beneficiaryId,
+          dateOfDelivery,
+          caller({ id: sakhiId, roles: ['SAKHI'] }),
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 404 });
+      expect(repository.applyMotherDeliveryDate).not.toHaveBeenCalled();
+    });
+
+    it('403s when a SAKHI targets a case outside their own roster', async () => {
+      repository.findById.mockResolvedValue(caseRow() as never);
+
+      await expect(
+        service.applyMotherDeliveryDate(
+          beneficiaryId,
+          dateOfDelivery,
+          caller({ id: otherSakhiId, roles: ['SAKHI'] }),
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(repository.applyMotherDeliveryDate).not.toHaveBeenCalled();
+    });
+
+    it('409s for a CHILD case', async () => {
+      repository.findById.mockResolvedValue(caseRow({ caseType: 'CHILD' }) as never);
+
+      await expect(
+        service.applyMotherDeliveryDate(
+          beneficiaryId,
+          dateOfDelivery,
+          caller({ id: sakhiId, roles: ['SAKHI'] }),
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 409 });
+      expect(repository.applyMotherDeliveryDate).not.toHaveBeenCalled();
+    });
+
+    it('409s a case in PENDING_TRANSFER', async () => {
+      repository.findById.mockResolvedValue(
+        caseRow({ currentStatus: 'PENDING_TRANSFER' }) as never,
+      );
+
+      await expect(
+        service.applyMotherDeliveryDate(
+          beneficiaryId,
+          dateOfDelivery,
+          caller({ id: sakhiId, roles: ['SAKHI'] }),
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 409 });
+      expect(repository.applyMotherDeliveryDate).not.toHaveBeenCalled();
+    });
+
+    it('404s when no MotherCaseDetails row exists for this beneficiary', async () => {
+      repository.findById.mockResolvedValue(caseRow() as never);
+      repository.applyMotherDeliveryDate.mockResolvedValue(false);
+
+      await expect(
+        service.applyMotherDeliveryDate(
+          beneficiaryId,
+          dateOfDelivery,
+          caller({ id: sakhiId, roles: ['SAKHI'] }),
+          AUTH_HEADER,
+        ),
+      ).rejects.toMatchObject({ status: 404 });
+    });
+
+    it('is idempotent — recording the same date twice both succeed', async () => {
+      repository.findById.mockResolvedValue(caseRow() as never);
+      repository.applyMotherDeliveryDate.mockResolvedValue(true);
+
+      await service.applyMotherDeliveryDate(
+        beneficiaryId,
+        dateOfDelivery,
+        caller({ id: sakhiId, roles: ['SAKHI'] }),
+        AUTH_HEADER,
+      );
+      await service.applyMotherDeliveryDate(
+        beneficiaryId,
+        dateOfDelivery,
+        caller({ id: sakhiId, roles: ['SAKHI'] }),
+        AUTH_HEADER,
+      );
+
+      expect(repository.applyMotherDeliveryDate).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -2210,15 +2351,22 @@ describe('BeneficiaryService', () => {
 
   describe('create — duplicate detection (FR-S-2.4 / FR-S-2.5)', () => {
     // A matched case as findDuplicateCandidate now returns it: the case with
-    // its currentSummary (delivery/closure/lmp) and currentStatus.
+    // its currentSummary (delivery/closure/lmp), currentStatus, and (for a
+    // MOTHER match) motherCaseDetails — the real, populated source of
+    // delivery date/LMP, since currentSummary's own copies are never
+    // written by any code path today.
     function matchedCase(overrides: {
       currentStatus?: string;
       dateOfDelivery?: Date | null;
       closureDate?: Date | null;
       lmpDate?: Date | null;
       summary?: boolean; // false → no summary row at all
+      motherDeliveryDate?: Date | null;
+      motherLmpDate?: Date | null;
+      motherCaseDetails?: boolean; // false → no motherCaseDetails row at all (a CHILD match)
     }) {
       const hasSummary = overrides.summary !== false;
+      const hasMotherCaseDetails = overrides.motherCaseDetails !== false;
       return {
         id: 'existing-id',
         currentStatus: overrides.currentStatus ?? 'ACTIVE',
@@ -2227,6 +2375,12 @@ describe('BeneficiaryService', () => {
               dateOfDelivery: overrides.dateOfDelivery ?? null,
               closureDate: overrides.closureDate ?? null,
               lmpDate: overrides.lmpDate ?? null,
+            }
+          : null,
+        motherCaseDetails: hasMotherCaseDetails
+          ? {
+              dateOfDelivery: overrides.motherDeliveryDate ?? null,
+              lmpDate: overrides.motherLmpDate ?? null,
             }
           : null,
       };
@@ -2294,6 +2448,36 @@ describe('BeneficiaryService', () => {
         details: expect.objectContaining({ reason: 'RE_ENROLLMENT' }),
       });
       expect(repository.createEnrollment).not.toHaveBeenCalled();
+    });
+
+    it('surfaces the FR-S-2.5 re-enrolment prompt using motherCaseDetails.dateOfDelivery/lmpDate — currentSummary is never populated for a MOTHER case today', async () => {
+      repository.findDuplicateCandidate.mockResolvedValue(
+        matchedCase({
+          currentStatus: 'CLOSED',
+          summary: false,
+          motherDeliveryDate: new Date('2025-08-01'),
+          motherLmpDate: new Date('2024-11-01'), // differs from baseMotherInput's 2025-10-01
+        }) as never,
+      );
+
+      await expect(service.create(baseMotherInput, CALLER_ID, AUTH_HEADER)).rejects.toMatchObject({
+        status: 409,
+        details: expect.objectContaining({
+          reason: 'RE_ENROLLMENT',
+          existingBeneficiaryId: 'existing-id',
+        }),
+      });
+      expect(repository.createEnrollment).not.toHaveBeenCalled();
+    });
+
+    it('falls through to a plain hard duplicate when neither currentSummary nor motherCaseDetails has a delivery date', async () => {
+      repository.findDuplicateCandidate.mockResolvedValue(
+        matchedCase({ currentStatus: 'CLOSED', summary: false }) as never,
+      );
+
+      const err = await service.create(baseMotherInput, CALLER_ID, AUTH_HEADER).catch((e) => e);
+      expect(err.status).toBe(409);
+      expect(err.details?.reason).toBeUndefined();
     });
 
     it('treats an ACTIVE match (not a completed journey) as a plain hard duplicate, not a re-enrolment', async () => {

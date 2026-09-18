@@ -1,4 +1,4 @@
-import { updateBeneficiaryPhase } from './update-phase.client';
+import { updateBeneficiaryPhase, setMotherDeliveryDate } from './update-phase.client';
 
 describe('updateBeneficiaryPhase', () => {
   const originalFetch = global.fetch;
@@ -48,6 +48,59 @@ describe('updateBeneficiaryPhase', () => {
 
     await expect(
       updateBeneficiaryPhase('mother-1', 'PP', 'Bearer test-token'),
+    ).resolves.toBeUndefined();
+    expect(warnSpy).toHaveBeenCalled();
+  });
+});
+
+describe('setMotherDeliveryDate', () => {
+  const originalFetch = global.fetch;
+  const fetchMock = jest.fn();
+  let warnSpy: jest.SpyInstance;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    global.fetch = fetchMock as unknown as typeof fetch;
+    warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    warnSpy.mockRestore();
+  });
+
+  afterAll(() => {
+    global.fetch = originalFetch;
+  });
+
+  it('PATCHes dateOfDelivery to beneficiary-service via the gateway', async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 200 });
+
+    await setMotherDeliveryDate('mother-1', '2026-06-10T00:00:00.000Z', 'Bearer test-token');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/beneficiaries/mother-1/delivery-date'),
+      expect.objectContaining({
+        method: 'PATCH',
+        headers: expect.objectContaining({ Authorization: 'Bearer test-token' }),
+        body: JSON.stringify({ dateOfDelivery: '2026-06-10T00:00:00.000Z' }),
+      }),
+    );
+  });
+
+  it('swallows a non-ok response so the Delivery submission is never failed by it', async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 409 });
+
+    await expect(
+      setMotherDeliveryDate('mother-1', '2026-06-10T00:00:00.000Z', 'Bearer test-token'),
+    ).resolves.toBeUndefined();
+    expect(warnSpy).toHaveBeenCalled();
+  });
+
+  it('swallows a network failure so the Delivery submission is never failed by it', async () => {
+    fetchMock.mockRejectedValue(new Error('network down'));
+
+    await expect(
+      setMotherDeliveryDate('mother-1', '2026-06-10T00:00:00.000Z', 'Bearer test-token'),
     ).resolves.toBeUndefined();
     expect(warnSpy).toHaveBeenCalled();
   });

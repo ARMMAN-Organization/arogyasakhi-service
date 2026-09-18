@@ -21,7 +21,10 @@ import { findBeneficiaryById, findBeneficiaryIds } from '../beneficiaries/benefi
 import type { ListFormSubmissionsQueryInput } from './dto/list-form-submissions.dto';
 import { assertCallerOwnsBeneficiary } from '../beneficiaries/beneficiaryOwnership.guard';
 import { createChildBeneficiary } from '../beneficiaries/create-child.client';
-import { updateBeneficiaryPhase } from '../beneficiaries/update-phase.client';
+import {
+  updateBeneficiaryPhase,
+  setMotherDeliveryDate,
+} from '../beneficiaries/update-phase.client';
 import { createClosure, resolveClosureReasonLookupId } from '../closures/closure.client';
 import { getActiveLocationAssignments, getAncestorChain } from '../geography/geography.client';
 import type { AuthenticatedUser } from '@armman/service-commons';
@@ -1029,6 +1032,16 @@ export class FormService {
     await toleratePhaseAdvance(
       updateBeneficiaryPhase(dto.beneficiaryId, 'PP', authorizationHeader),
     );
+
+    // Records the mother's own delivery date (feeds FR-S-2.5's re-enrolment
+    // duplicate-detection prompt) — only when the form actually supplied
+    // one, matching the same guard used for child auto-creation above.
+    // Tolerated the same way as every other best-effort call in this method.
+    if (dateOfDelivery) {
+      await toleratePhaseAdvance(
+        setMotherDeliveryDate(dto.beneficiaryId, dateOfDelivery.toISOString(), authorizationHeader),
+      );
+    }
 
     return childResults.filter((r): r is ChildBeneficiaryResult => r !== undefined);
   }

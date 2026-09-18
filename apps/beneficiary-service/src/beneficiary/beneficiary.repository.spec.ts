@@ -3,6 +3,7 @@ import { BeneficiaryRepository } from './beneficiary.repository';
 describe('BeneficiaryRepository', () => {
   const groupBy = jest.fn();
   const findMany = jest.fn();
+  const searchTokenFindMany = jest.fn();
   const beneficiaryCaseUpdateMany = jest.fn();
   const beneficiaryPiiUpdateMany = jest.fn();
   const motherCaseDetailsUpdateMany = jest.fn();
@@ -13,6 +14,7 @@ describe('BeneficiaryRepository', () => {
   const prisma = {
     beneficiaryCase: { groupBy, findMany, updateMany: beneficiaryCaseUpdateMany },
     beneficiaryPii: { updateMany: beneficiaryPiiUpdateMany },
+    beneficiarySearchToken: { findMany: searchTokenFindMany },
     motherCaseDetails: { updateMany: motherCaseDetailsUpdateMany },
     childCaseDetails: { updateMany: childCaseDetailsUpdateMany },
     consentRecord: { updateMany: consentRecordUpdateMany },
@@ -182,6 +184,52 @@ describe('BeneficiaryRepository', () => {
 
       expect(result).toBe(false);
       expect(childCaseDetailsUpdateMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('findDuplicateCandidate', () => {
+    it('does not filter on lmpDateToken — FR-S-2.5 needs to find a match whose LMP differs from the new submission, not one whose LMP is identical', async () => {
+      searchTokenFindMany.mockResolvedValue([]);
+
+      await repository.findDuplicateCandidate({
+        nameToken: Buffer.from('name'),
+        caseTypeLookupId: 'case-type-1',
+        dobToken: 'dob-token',
+        phoneHash: null,
+        geographyToken: 'geo-token',
+        lmpDateToken: 'lmp-token',
+      });
+
+      const call = searchTokenFindMany.mock.calls[0][0];
+      expect(call.where).not.toHaveProperty('lmpDateToken');
+      expect(call.where).toMatchObject({
+        nameToken: Buffer.from('name').toString('base64'),
+        caseTypeLookupId: 'case-type-1',
+        dobToken: 'dob-token',
+        geographyToken: 'geo-token',
+      });
+    });
+  });
+
+  describe('applyMotherDeliveryDate', () => {
+    it('persists dateOfDelivery onto mother_case_details', async () => {
+      motherCaseDetailsUpdateMany.mockResolvedValue({ count: 1 });
+
+      const result = await repository.applyMotherDeliveryDate('ben-1', new Date('2026-06-10'));
+
+      expect(result).toBe(true);
+      expect(motherCaseDetailsUpdateMany).toHaveBeenCalledWith({
+        where: { beneficiaryId: 'ben-1' },
+        data: { dateOfDelivery: new Date('2026-06-10') },
+      });
+    });
+
+    it('returns false when no MotherCaseDetails row exists', async () => {
+      motherCaseDetailsUpdateMany.mockResolvedValue({ count: 0 });
+
+      const result = await repository.applyMotherDeliveryDate('ben-1', new Date('2026-06-10'));
+
+      expect(result).toBe(false);
     });
   });
 

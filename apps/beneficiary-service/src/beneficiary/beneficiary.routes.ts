@@ -26,6 +26,7 @@ import { upsertRiskConditionSummarySchema } from './dto/upsert-risk-condition-su
 import { applyLmpChangeSchema } from './dto/apply-lmp-change.dto';
 import { updatePhaseSchema } from './dto/update-phase.dto';
 import { setCcvOpeningRiskStateSchema } from './dto/set-ccv-opening-risk-state.dto';
+import { applyDeliveryDateSchema } from './dto/apply-delivery-date.dto';
 import { applyClosureSchema } from './dto/apply-closure.dto';
 import {
   errorResponse,
@@ -832,6 +833,39 @@ export function registerBeneficiaryRoutes(doc: DocumentedRouter, service: Benefi
     validate(idParamsSchema, 'params'),
     validateBody(setCcvOpeningRiskStateSchema),
     controller.setCcvOpeningRiskState,
+  );
+
+  doc.patch(
+    '/beneficiaries/:id/delivery-date',
+    {
+      summary:
+        "Record a MOTHER case's delivery date after a DELIVERY_VISIT submission — " +
+        "gated by requireRoles('SAKHI') since this codebase has no machine/service-account " +
+        "identity: the call chain originates from visit-form-service's own DELIVERY_VISIT " +
+        "handler, forwarding the submitting SAKHI's own token. Feeds FR-S-2.5's re-enrolment " +
+        'duplicate-detection prompt. 409s for a CHILD case (no MotherCaseDetails row).',
+      tags: ['Beneficiaries'],
+      params: idParamsSchema,
+      responses: {
+        200: {
+          description: 'dateOfDelivery recorded; the updated case is returned',
+          schema: envelope(beneficiaryCaseDetailSchema),
+        },
+        400: errorResponse(400, { message: 'dateOfDelivery: Required' }),
+        401: errorResponse(401),
+        403: errorResponse(403, { message: 'This beneficiary case is outside your own roster.' }),
+        404: errorResponse(404, { message: 'Beneficiary case not found.' }),
+        409: errorResponse(409, {
+          message: 'Delivery date can only be recorded for a MOTHER case.',
+        }),
+        500: errorResponse(500),
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI'),
+    validate(idParamsSchema, 'params'),
+    validateBody(applyDeliveryDateSchema),
+    controller.applyMotherDeliveryDate,
   );
 
   doc.patch(

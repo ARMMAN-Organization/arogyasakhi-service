@@ -506,14 +506,29 @@ export class BeneficiaryRepository {
     };
     if (tokens.dobToken) where.dobToken = tokens.dobToken;
     if (tokens.geographyToken) where.geographyToken = tokens.geographyToken;
-    if (tokens.lmpDateToken) where.lmpDateToken = tokens.lmpDateToken;
+    // lmpDateToken is deliberately NOT part of the match — FR-S-2.5's whole
+    // premise is a *different* LMP on the new submission than the matched
+    // prior record, so filtering the match itself on an exact lmpDateToken
+    // equality would make that record unfindable the moment its LMP
+    // differs, silently defeating the re-enrolment prompt. The LMP is
+    // still compared, just later and on the plaintext value (see
+    // evaluateDuplicateMatch's lmpDiffers), after identity alone has
+    // already found the record.
 
     const candidates = await this.prisma.beneficiarySearchToken.findMany({
       where,
       // currentSummary carries the matched case's delivery/closure/status/LMP,
       // which FR-S-2.4 (new-pregnancy-vs-hard-duplicate) and FR-S-2.5
       // (re-enrolment prompt) need to decide how to handle the match.
-      include: { beneficiaryCase: { include: { pii: true, currentSummary: true } } },
+      // motherCaseDetails.dateOfDelivery is the real, populated source of a
+      // MOTHER case's delivery date (currentSummary's own copy is never
+      // written by any code path today) — selected alongside it so FR-S-2.5
+      // can actually detect a confirmed delivery for a MOTHER match.
+      include: {
+        beneficiaryCase: {
+          include: { pii: true, currentSummary: true, motherCaseDetails: true },
+        },
+      },
     });
 
     const phoneHash = tokens.phoneHash;
@@ -634,6 +649,20 @@ export class BeneficiaryRepository {
     const result = await this.prisma.motherCaseDetails.updateMany({
       where: { beneficiaryId },
       data: { lmpDate, eddDate },
+    });
+    return result.count > 0;
+  }
+
+  /**
+   * Records a mother case's delivery date after a DELIVERY_VISIT submission
+   * (feeds FR-S-2.5's re-enrolment duplicate-detection prompt). Returns null
+   * if no `mother_case_details` row exists — the service turns that into a
+   * 404/409, same as updateMotherLmp.
+   */
+  async applyMotherDeliveryDate(beneficiaryId: string, dateOfDelivery: Date) {
+    const result = await this.prisma.motherCaseDetails.updateMany({
+      where: { beneficiaryId },
+      data: { dateOfDelivery },
     });
     return result.count > 0;
   }

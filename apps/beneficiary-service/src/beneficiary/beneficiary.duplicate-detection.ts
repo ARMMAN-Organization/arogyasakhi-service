@@ -15,6 +15,13 @@ export interface DuplicateMatch {
     closureDate: Date | null;
     lmpDate: Date | null;
   } | null;
+  /**
+   * The matched case's own MotherCaseDetails.dateOfDelivery/lmpDate — the
+   * real, populated source for a MOTHER case (currentSummary's own copies
+   * of these are never written by any code path today). Null for a CHILD
+   * match, which has no motherCaseDetails row.
+   */
+  motherCaseDetails: { dateOfDelivery: Date | null; lmpDate: Date | null } | null;
 }
 
 /** Builds the non-reversible search tokens used for duplicate detection. */
@@ -43,7 +50,10 @@ export function buildSearchTokens(
  * Decides how to handle a duplicate-detection match, per SRS FR-S-2.4/2.5.
  * Throws to block or prompt; returns normally to allow the enrollment.
  *
- * The matched case's `currentSummary` carries delivery/closure/status/LMP.
+ * The matched case's `currentSummary` carries delivery/closure/status/LMP —
+ * for a MOTHER match, delivery date/LMP fall back to `motherCaseDetails`
+ * (the real, populated source; `currentSummary`'s own copies of these two
+ * fields are never written by any code path today).
  *
  * - FR-S-2.5 (re-enrolment): matched case is JOURNEY_COMPLETE/CLOSED, has a
  *   confirmed delivery, and the new LMP differs from the matched case's LMP
@@ -59,13 +69,14 @@ export function buildSearchTokens(
  */
 export function evaluateDuplicateMatch(match: DuplicateMatch, dto: CreateBeneficiaryInput): void {
   const summary = match.currentSummary;
-  const hasDelivery = Boolean(summary?.dateOfDelivery);
+  const hasDelivery =
+    Boolean(summary?.dateOfDelivery) || Boolean(match.motherCaseDetails?.dateOfDelivery);
   const hasClosure = Boolean(summary?.closureDate);
   const isCompletedJourney =
     match.currentStatus === 'JOURNEY_COMPLETE' || match.currentStatus === 'CLOSED';
 
   const newLmp = dto.motherDetails?.lmpDate;
-  const priorLmp = summary?.lmpDate;
+  const priorLmp = summary?.lmpDate ?? match.motherCaseDetails?.lmpDate ?? null;
   const lmpDiffers =
     newLmp != null &&
     priorLmp != null &&
