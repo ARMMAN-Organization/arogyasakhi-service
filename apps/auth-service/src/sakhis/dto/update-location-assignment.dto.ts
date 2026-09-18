@@ -12,7 +12,15 @@ export const updateLocationAssignmentSchema = z
   .object({
     villageId: z.string().uuid().optional(),
     padaId: z.string().uuid().nullable().optional(),
-    effectiveFrom: z.coerce.date().optional(),
+    // z.coerce.date() alone would coerce an explicit `null` to the Unix epoch
+    // (new Date(null) is a valid Date) instead of failing — .nullable() lets
+    // Zod see the null before coercion runs, and the refine then rejects it,
+    // since effectiveFrom has no "clear" semantics (unlike effectiveTo below).
+    effectiveFrom: z.coerce
+      .date()
+      .nullable()
+      .optional()
+      .refine((v) => v !== null, { message: 'effectiveFrom cannot be null.' }),
     effectiveTo: z.coerce.date().nullable().optional(),
   })
   .strict();

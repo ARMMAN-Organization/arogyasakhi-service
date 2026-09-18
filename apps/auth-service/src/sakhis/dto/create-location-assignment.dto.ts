@@ -18,7 +18,11 @@ export const createLocationAssignmentSchema = z
     villageId: z.string().uuid(),
     padaId: z.string().uuid().optional(),
     effectiveFrom: z.coerce.date(),
-    effectiveTo: z.coerce.date().optional(),
+    // .nullable() so an explicit `{"effectiveTo": null}` (open-ended
+    // assignment) parses as null instead of z.coerce.date() silently
+    // coercing null to the Unix epoch — see sakhi.service.ts's
+    // `input.effectiveTo ?? null`, which already treats null/undefined alike.
+    effectiveTo: z.coerce.date().nullable().optional(),
   })
   .strict();
 

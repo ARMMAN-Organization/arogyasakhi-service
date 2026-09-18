@@ -7,7 +7,10 @@ import { z } from 'zod';
  */
 export const endLocationAssignmentSchema = z
   .object({
-    effectiveTo: z.coerce.date().optional(),
+    // .nullable() so an explicit `{"effectiveTo": null}` parses as null (the
+    // service's `effectiveTo ?? new Date()` then defaults to today) instead
+    // of z.coerce.date() silently coercing null to the Unix epoch.
+    effectiveTo: z.coerce.date().nullable().optional(),
   })
   .strict();
 

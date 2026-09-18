@@ -1,4 +1,5 @@
 import { badRequest, forbidden, notFound } from '@armman/service-commons';
+import { startOfUTCDay } from '@armman/core';
 import type { SakhiRepository } from './sakhi.repository';
 import type { GeographyRepository } from '../geography/geography.repository';
 import type { CreateLocationAssignmentInput } from './dto/create-location-assignment.dto';
@@ -201,6 +202,16 @@ export class SakhiService {
    * name a project the Sakhi doesn't actually belong to (security review
    * finding: an unvalidated input.projectId let a caller create a location
    * assignment misattributed to an arbitrary project).
+   *
+   * Unlike getById/getActiveLocationAssignments's read-side project check
+   * (`caller.projectId && caller.projectId !== profile.primaryProjectId`),
+   * this write-side check does NOT treat a null caller.projectId as
+   * unrestricted. Nothing prevents a SUPERVISOR-role user from being
+   * created/left with `projectId: null` (auth.service.ts only requires a
+   * projectId for SAKHI), so `caller.projectId &&` short-circuiting to false
+   * would let such a SUPERVISOR mutate any Sakhi's assignments in any
+   * project — a read-scope leak on the GET routes, but an unrestricted
+   * cross-project write here (PR #240 review).
    */
   private async assertCallerCanManageAssignments(sakhiId: string, caller: CallerScope) {
     if (caller.roles.includes('SAKHI') && !isPrivileged(caller)) {
@@ -208,11 +219,7 @@ export class SakhiService {
     }
     const profile = await this.repository.findById(sakhiId);
     if (!profile) throw notFound('Sakhi not found.');
-    if (
-      !isPrivileged(caller) &&
-      caller.projectId &&
-      caller.projectId !== profile.primaryProjectId
-    ) {
+    if (!isPrivileged(caller) && caller.projectId !== profile.primaryProjectId) {
       throw forbidden('You do not have access to this Sakhi.');
     }
     return profile;
@@ -226,19 +233,44 @@ export class SakhiService {
    * inconsistent assignment otherwise).
    */
   private async assertValidVillageAndPada(villageId: string, padaId: string | undefined | null) {
-    const village = await this.geographyRepository.findById(villageId);
+    // The village and pada lookups don't depend on each other, so they run
+    // concurrently rather than sequentially (PR #240 review: halves the
+    // added latency on every create and every geography-changing update).
+    const [village, pada] = await Promise.all([
+      this.geographyRepository.findById(villageId),
+      padaId ? this.geographyRepository.findById(padaId) : Promise.resolve(null),
+    ]);
     if (!village || village.geoType !== 'VILLAGE' || village.status !== 'ACTIVE') {
       throw badRequest('villageId: Must reference an active VILLAGE geography unit.');
     }
     if (padaId) {
-      const pada = await this.geographyRepository.findById(padaId);
-      if (!pada || pada.geoType !== 'PADA' || pada.status !== 'ACTIVE') {
-        throw badRequest('padaId: Must reference an active PADA geography unit.');
-      }
-      if (pada.parentId !== villageId) {
-        throw badRequest('padaId: Must be a child of the given villageId.');
-      }
+      this.assertPadaBelongsToVillage(pada, villageId);
     }
+  }
+
+  /** Shared by assertValidVillageAndPada and the padaId-only update path below. */
+  private assertPadaBelongsToVillage(
+    pada: { geoType: string; status: string; parentId: string | null } | null,
+    villageId: string,
+  ) {
+    if (!pada || pada.geoType !== 'PADA' || pada.status !== 'ACTIVE') {
+      throw badRequest('padaId: Must reference an active PADA geography unit.');
+    }
+    if (pada.parentId !== villageId) {
+      throw badRequest('padaId: Must be a child of the given villageId.');
+    }
+  }
+
+  /**
+   * Validates a new padaId against an already-known-valid villageId, without
+   * re-checking the village itself — used when an update only touches padaId
+   * (village unchanged), so an unrelated village deactivation after the
+   * assignment was created doesn't retroactively 400 an edit that never
+   * touched villageId (PR #240 review).
+   */
+  private async assertValidPadaForExistingVillage(villageId: string, padaId: string) {
+    const pada = await this.geographyRepository.findById(padaId);
+    this.assertPadaBelongsToVillage(pada, villageId);
   }
 
   /**
@@ -295,8 +327,16 @@ export class SakhiService {
     }
     const nextVillageId = input.villageId ?? existing.villageId;
     const nextPadaId = input.padaId === undefined ? existing.padaId : input.padaId;
-    if (input.villageId || input.padaId !== undefined) {
+    // Only re-validate villageId when it's actually being changed — otherwise
+    // an edit that touches only padaId (village unchanged) re-checks the
+    // Sakhi's existing, already-valid villageId too, and wrongly 400s if that
+    // village was deactivated after the assignment was created (PR #240
+    // review). padaId is still (re)validated whenever either field changes,
+    // since a new villageId can invalidate an unchanged padaId's parentage.
+    if (input.villageId && input.villageId !== existing.villageId) {
       await this.assertValidVillageAndPada(nextVillageId, nextPadaId);
+    } else if (input.padaId !== undefined && nextPadaId) {
+      await this.assertValidPadaForExistingVillage(nextVillageId, nextPadaId);
     }
     const nextFrom = input.effectiveFrom ?? existing.effectiveFrom;
     const nextTo = input.effectiveTo === undefined ? existing.effectiveTo : input.effectiveTo;
@@ -320,7 +360,7 @@ export class SakhiService {
   async endLocationAssignment(
     sakhiId: string,
     assignmentId: string,
-    effectiveTo: Date | undefined,
+    effectiveTo: Date | null | undefined,
     caller: CallerScope,
   ) {
     await this.assertCallerCanManageAssignments(sakhiId, caller);
@@ -329,7 +369,12 @@ export class SakhiService {
       throw notFound('Location assignment not found.');
     }
     const resolvedEffectiveTo = effectiveTo ?? new Date();
-    if (resolvedEffectiveTo < existing.effectiveFrom) {
+    // effectiveTo/effectiveFrom are `@db.Date` columns — Postgres truncates
+    // the write to a plain date under the session timezone, which can
+    // disagree with an in-memory full-timestamp comparison near a UTC day
+    // boundary (PR #240 review). Truncate both sides to UTC midnight first
+    // so this guard matches what's actually persisted.
+    if (startOfUTCDay(resolvedEffectiveTo) < startOfUTCDay(existing.effectiveFrom)) {
       throw badRequest("effectiveTo: Must not be before the assignment's effectiveFrom.");
     }
     const updated = await this.repository.endLocationAssignment(assignmentId, resolvedEffectiveTo);
