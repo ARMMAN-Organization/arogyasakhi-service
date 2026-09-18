@@ -9,6 +9,7 @@ import { findSakhiById, listSakhiIdsForSupervisor } from '../sakhis/sakhi.client
 import { resolveVisitStatusCode, resolveVisitStatusCodes } from '../lookups/lookup.client';
 import { getActiveTransferWindow } from '../escalations/escalation.client';
 import { assertCallerOwnsBeneficiary } from '../beneficiaries/beneficiaryOwnership.guard';
+import { findBeneficiaryById } from '../beneficiaries/beneficiary.client';
 import { resolveFormCodeForVisitType } from '../forms/visit-code-form-map';
 import { EMPTY_VISIT_HISTORY_VITALS, extractVisitHistoryVitals } from '../forms/vitalsExtractor';
 
@@ -139,6 +140,42 @@ export class VisitInstanceService {
     const visit = await this.repository.findById(id);
     if (!visit) throw notFound('Visit instance not found.');
     return visit;
+  }
+
+  /**
+   * SRS 3C.4.1 linelist fields (Neonatal Visit / Infant Visit) — ageInDays
+   * and ageInMonths, derived from actualVisitDate and the beneficiary's own
+   * childDateOfBirth (owned by beneficiary-service, no cross-service DB
+   * join per the forklift rule — resolved via findBeneficiaryById instead).
+   * Deliberately a separate endpoint from GET /visits/:id rather than
+   * added to that response: this is MIS-reporting-only, GET /visits/:id
+   * already has its own internal contract (Quick Response card
+   * enrichment) that shouldn't grow a mandatory beneficiary-service round
+   * trip it doesn't need.
+   *
+   * Both fields are null — not an error — whenever age can't be resolved
+   * (visit not yet completed, a MOTHER-case visit with no
+   * childDateOfBirth, or the beneficiary not found): "unknown" is a valid
+   * report value here, unlike a hard failure.
+   */
+  async getMisSummary(id: string, authorizationHeader: string) {
+    const visit = await this.repository.findById(id);
+    if (!visit) throw notFound('Visit instance not found.');
+
+    if (!visit.actualVisitDate) {
+      return { ageInDays: null, ageInMonths: null };
+    }
+
+    const beneficiary = await findBeneficiaryById(visit.beneficiaryId, authorizationHeader);
+    if (!beneficiary?.childDateOfBirth) {
+      return { ageInDays: null, ageInMonths: null };
+    }
+
+    const dob = new Date(beneficiary.childDateOfBirth);
+    const ageInDays = Math.floor(
+      (visit.actualVisitDate.getTime() - dob.getTime()) / (24 * 60 * 60 * 1000),
+    );
+    return { ageInDays, ageInMonths: Math.floor(ageInDays / 30) };
   }
 
   /**

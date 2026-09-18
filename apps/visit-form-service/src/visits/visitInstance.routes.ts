@@ -400,6 +400,45 @@ export function registerVisitInstanceRoutes(doc: DocumentedRouter, service: Visi
     controller.getById,
   );
 
+  doc.get(
+    '/visits/:id/mis-summary',
+    {
+      summary:
+        'SRS 3C.4.1 MIS linelist fields for one visit: ageInDays/ageInMonths, derived from ' +
+        "actualVisitDate and the beneficiary's own date of birth (resolved via " +
+        'beneficiary-service). Both null (not an error) when age cannot be resolved — visit ' +
+        'not yet completed, a MOTHER-case visit, or the beneficiary not found. Separate from ' +
+        "GET /visits/:id (an existing internal contract for Quick Response's card " +
+        "enrichment) so that endpoint doesn't grow a mandatory beneficiary-service round trip " +
+        'it does not need.',
+      tags: ['Visits'],
+      params: idParamsSchema,
+      responses: {
+        200: {
+          description: 'MIS-linelist derived fields for this visit',
+          schema: envelope(
+            z.object({
+              ageInDays: z.number().int().nullable().openapi({ example: 151 }),
+              ageInMonths: z.number().int().nullable().openapi({ example: 5 }),
+            }),
+          ),
+        },
+        400: errorResponse(400),
+        401: errorResponse(401),
+        403: errorResponse(403),
+        404: errorResponse(404, { message: 'Visit instance not found.' }),
+        500: errorResponse(500),
+        502: errorResponse(502, {
+          message: 'Unable to verify the beneficiary — beneficiary-service is unreachable.',
+        }),
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(idParamsSchema, 'params'),
+    controller.getMisSummary,
+  );
+
   doc.patch(
     '/visits/:id',
     {

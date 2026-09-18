@@ -4,7 +4,7 @@ import type { CreateVisitInstanceInput } from './dto/create-visitInstance.dto';
 import { findSakhiById, listSakhiIdsForSupervisor } from '../sakhis/sakhi.client';
 import { resolveVisitStatusCode, resolveVisitStatusCodes } from '../lookups/lookup.client';
 import { getActiveTransferWindow } from '../escalations/escalation.client';
-import { findBeneficiaryOwnership } from '../beneficiaries/beneficiary.client';
+import { findBeneficiaryOwnership, findBeneficiaryById } from '../beneficiaries/beneficiary.client';
 
 jest.mock('../sakhis/sakhi.client');
 jest.mock('../lookups/lookup.client');
@@ -38,6 +38,7 @@ describe('VisitInstanceService', () => {
   const resolveVisitStatusCodesMock = jest.mocked(resolveVisitStatusCodes);
   const getActiveTransferWindowMock = jest.mocked(getActiveTransferWindow);
   const findBeneficiaryOwnershipMock = jest.mocked(findBeneficiaryOwnership);
+  const findBeneficiaryByIdMock = jest.mocked(findBeneficiaryById);
 
   // Distinct from sampleRow.statusLookupValueId ('aaaaaaaa-...') below, so
   // "transitioning to COMPLETED" tests aren't accidentally a no-op re-completion.
@@ -228,6 +229,95 @@ describe('VisitInstanceService', () => {
       repository.findById.mockResolvedValue(null);
 
       await expect(service.getById('unknown-id')).rejects.toMatchObject({ status: 404 });
+    });
+  });
+
+  describe('getMisSummary', () => {
+    const CHILD_VISIT = { ...sampleRow, actualVisitDate: new Date('2026-06-01') };
+
+    it('returns ageInDays/ageInMonths derived from actualVisitDate and the beneficiary childDateOfBirth', async () => {
+      repository.findById.mockResolvedValue(CHILD_VISIT);
+      findBeneficiaryByIdMock.mockResolvedValue({
+        id: CHILD_VISIT.beneficiaryId,
+        childDateOfBirth: '2026-01-01',
+      } as never);
+
+      const result = await service.getMisSummary(CHILD_VISIT.id, AUTH_HEADER);
+
+      // 2026-01-01 -> 2026-06-01 = 151 days = 5 months (floored)
+      expect(result).toEqual({ ageInDays: 151, ageInMonths: 5 });
+    });
+
+    it('floors partial months rather than rounding', async () => {
+      repository.findById.mockResolvedValue({
+        ...sampleRow,
+        actualVisitDate: new Date('2026-02-15'),
+      });
+      findBeneficiaryByIdMock.mockResolvedValue({
+        id: sampleRow.beneficiaryId,
+        childDateOfBirth: '2026-01-01',
+      } as never);
+
+      // 45 days = 1 month 15 days -> floors to 1, not 1.5.
+      const result = await service.getMisSummary(sampleRow.id, AUTH_HEADER);
+
+      expect(result.ageInMonths).toBe(1);
+    });
+
+    it('returns null for both when actualVisitDate is null (visit not yet completed)', async () => {
+      repository.findById.mockResolvedValue({ ...sampleRow, actualVisitDate: null });
+      findBeneficiaryByIdMock.mockResolvedValue({
+        id: sampleRow.beneficiaryId,
+        childDateOfBirth: '2026-01-01',
+      } as never);
+
+      await expect(service.getMisSummary(sampleRow.id, AUTH_HEADER)).resolves.toEqual({
+        ageInDays: null,
+        ageInMonths: null,
+      });
+    });
+
+    it('returns null for both for a MOTHER-case visit (no childDateOfBirth)', async () => {
+      repository.findById.mockResolvedValue(CHILD_VISIT);
+      findBeneficiaryByIdMock.mockResolvedValue({
+        id: CHILD_VISIT.beneficiaryId,
+        childDateOfBirth: null,
+      } as never);
+
+      await expect(service.getMisSummary(CHILD_VISIT.id, AUTH_HEADER)).resolves.toEqual({
+        ageInDays: null,
+        ageInMonths: null,
+      });
+    });
+
+    it('returns null for both when the beneficiary cannot be resolved, rather than throwing', async () => {
+      repository.findById.mockResolvedValue(CHILD_VISIT);
+      findBeneficiaryByIdMock.mockResolvedValue(null);
+
+      await expect(service.getMisSummary(CHILD_VISIT.id, AUTH_HEADER)).resolves.toEqual({
+        ageInDays: null,
+        ageInMonths: null,
+      });
+    });
+
+    it('404s on an unknown visit id before calling beneficiary-service at all', async () => {
+      repository.findById.mockResolvedValue(null);
+
+      await expect(service.getMisSummary('unknown-id', AUTH_HEADER)).rejects.toMatchObject({
+        status: 404,
+      });
+      expect(findBeneficiaryByIdMock).not.toHaveBeenCalled();
+    });
+
+    it('propagates a beneficiary-service failure (e.g. 502) rather than swallowing it', async () => {
+      repository.findById.mockResolvedValue(CHILD_VISIT);
+      findBeneficiaryByIdMock.mockRejectedValue(
+        Object.assign(new Error('unreachable'), { status: 502 }),
+      );
+
+      await expect(service.getMisSummary(CHILD_VISIT.id, AUTH_HEADER)).rejects.toMatchObject({
+        status: 502,
+      });
     });
   });
 
