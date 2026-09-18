@@ -1,3 +1,4 @@
+import { diffInDays } from '@armman/core';
 import { decryptPii } from '@armman/service-commons';
 
 /** Encrypted-name-bearing PII row as read from Prisma (only the fields the
@@ -190,8 +191,6 @@ export function computeBmi(
   return Math.round((weightKg / (heightM * heightM)) * 100) / 100;
 }
 
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
-
 /**
  * India's Apr-Mar fiscal year for a registration date, as `FY<start>-<end>`
  * (e.g. `FY2026-27`). A date in Jan-Mar belongs to the fiscal year that
@@ -216,7 +215,7 @@ export function computeGestationalAgeAtRegWeeks(
   lmpDate: Date | null | undefined,
 ): number | null {
   if (!lmpDate) return null;
-  const days = Math.floor((registrationDate.getTime() - lmpDate.getTime()) / MS_PER_DAY);
+  const days = diffInDays(lmpDate, registrationDate);
   if (days < 0) return null;
   return Math.floor(days / 7);
 }

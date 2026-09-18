@@ -345,6 +345,38 @@ describe('VisitInstanceService', () => {
       });
     });
 
+    it('returns null age fields (not negative) when childDateOfBirth is after actualVisitDate', async () => {
+      repository.findById.mockResolvedValue({
+        ...sampleRow,
+        actualVisitDate: new Date('2026-01-01'),
+      });
+      findBeneficiaryByIdMock.mockResolvedValue({
+        id: sampleRow.beneficiaryId,
+        childDateOfBirth: '2026-06-01',
+      } as never);
+
+      await expect(service.getMisSummary(sampleRow.id, AUTH_HEADER)).resolves.toEqual({
+        ageInDays: null,
+        ageInMonths: null,
+        daysPostDelivery: null,
+      });
+    });
+
+    it('returns null daysPostDelivery (not negative) when the delivery visit is later than this visit', async () => {
+      repository.findById.mockResolvedValue(CHILD_VISIT);
+      findBeneficiaryByIdMock.mockResolvedValue({
+        id: CHILD_VISIT.beneficiaryId,
+        childDateOfBirth: null,
+      } as never);
+      repository.findDeliveryVisit.mockResolvedValue({
+        actualVisitDate: new Date('2026-12-01'),
+      } as never);
+
+      const result = await service.getMisSummary(CHILD_VISIT.id, AUTH_HEADER);
+
+      expect(result.daysPostDelivery).toBeNull();
+    });
+
     it('404s on an unknown visit id before calling beneficiary-service at all', async () => {
       repository.findById.mockResolvedValue(null);
 

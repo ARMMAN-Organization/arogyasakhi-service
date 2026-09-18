@@ -229,6 +229,22 @@ describe('ClosureService', () => {
       });
       expect(beneficiaryClient.getById).not.toHaveBeenCalled();
     });
+
+    it('returns null ageAtClosureDays (not negative) when closureDate predates dateOfBirth', async () => {
+      const closure = closureRow({ closureDate: new Date('2026-01-01') });
+      repository.findById.mockResolvedValue(closure);
+      beneficiaryClient.getById.mockResolvedValue({
+        id: closure.beneficiaryId,
+        currentStatus: 'CLOSED',
+        pii: { fullName: 'Test Child' },
+        caseType: 'CHILD',
+        childCaseDetails: { dateOfBirth: '2026-06-01' },
+      } as never);
+
+      await expect(service.getMisSummary(closure.id, AUTH_HEADER)).resolves.toEqual({
+        ageAtClosureDays: null,
+      });
+    });
   });
 
   describe('create', () => {
