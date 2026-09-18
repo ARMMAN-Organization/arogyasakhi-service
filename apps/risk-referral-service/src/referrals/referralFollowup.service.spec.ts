@@ -76,7 +76,11 @@ describe('ReferralFollowupService', () => {
 
   it("403s when the referral's beneficiary is not assigned to the calling SAKHI", async () => {
     referralRepository.findById.mockResolvedValue(referral() as never);
-    beneficiaryClient.getById.mockResolvedValue({ id: 'ben-1', sakhiId: 'someone-else' });
+    beneficiaryClient.getById.mockResolvedValue({
+      id: 'ben-1',
+      sakhiId: 'someone-else',
+      caseType: 'MOTHER',
+    });
 
     await expect(service.create('ref-1', dto(), caller(), AUTH_HEADER)).rejects.toMatchObject({
       status: 403,
@@ -86,7 +90,11 @@ describe('ReferralFollowupService', () => {
 
   it('409s when the referral is not PENDING_FOLLOWUP', async () => {
     referralRepository.findById.mockResolvedValue(referral({ status: 'COMPLETED' }) as never);
-    beneficiaryClient.getById.mockResolvedValue({ id: 'ben-1', sakhiId: SAKHI_ID });
+    beneficiaryClient.getById.mockResolvedValue({
+      id: 'ben-1',
+      sakhiId: SAKHI_ID,
+      caseType: 'MOTHER',
+    });
 
     await expect(service.create('ref-1', dto(), caller(), AUTH_HEADER)).rejects.toMatchObject({
       status: 409,
@@ -96,7 +104,11 @@ describe('ReferralFollowupService', () => {
 
   it('marks COMPLETED when visitedFacilityFlag is true', async () => {
     referralRepository.findById.mockResolvedValue(referral() as never);
-    beneficiaryClient.getById.mockResolvedValue({ id: 'ben-1', sakhiId: SAKHI_ID });
+    beneficiaryClient.getById.mockResolvedValue({
+      id: 'ben-1',
+      sakhiId: SAKHI_ID,
+      caseType: 'MOTHER',
+    });
     followupRepository.create.mockResolvedValue({
       followup: { id: 'fu-1' },
       referral: referral({ status: 'COMPLETED' }),
@@ -110,12 +122,17 @@ describe('ReferralFollowupService', () => {
       'COMPLETED',
       expect.objectContaining({ visitedFacilityFlag: true }),
       SAKHI_ID,
+      { entityType: 'MOTHER', childId: null },
     );
   });
 
   it('passes diagnosis through to the repository when provided', async () => {
     referralRepository.findById.mockResolvedValue(referral() as never);
-    beneficiaryClient.getById.mockResolvedValue({ id: 'ben-1', sakhiId: SAKHI_ID });
+    beneficiaryClient.getById.mockResolvedValue({
+      id: 'ben-1',
+      sakhiId: SAKHI_ID,
+      caseType: 'MOTHER',
+    });
     followupRepository.create.mockResolvedValue({
       followup: { id: 'fu-1' },
       referral: referral({ status: 'COMPLETED' }),
@@ -134,12 +151,17 @@ describe('ReferralFollowupService', () => {
       'COMPLETED',
       expect.objectContaining({ diagnosis: 'yyy' }),
       SAKHI_ID,
+      { entityType: 'MOTHER', childId: null },
     );
   });
 
   it('marks INCOMPLETE and leaves the referral PENDING_FOLLOWUP when visitedFacilityFlag is false', async () => {
     referralRepository.findById.mockResolvedValue(referral() as never);
-    beneficiaryClient.getById.mockResolvedValue({ id: 'ben-1', sakhiId: SAKHI_ID });
+    beneficiaryClient.getById.mockResolvedValue({
+      id: 'ben-1',
+      sakhiId: SAKHI_ID,
+      caseType: 'MOTHER',
+    });
     followupRepository.create.mockResolvedValue({
       followup: { id: 'fu-1' },
       referral: referral(),
@@ -158,12 +180,17 @@ describe('ReferralFollowupService', () => {
       'PENDING_FOLLOWUP',
       expect.objectContaining({ visitedFacilityFlag: false }),
       SAKHI_ID,
+      { entityType: 'MOTHER', childId: null },
     );
   });
 
   it('accepts a follow-up with multiple valid media asset ids', async () => {
     referralRepository.findById.mockResolvedValue(referral() as never);
-    beneficiaryClient.getById.mockResolvedValue({ id: 'ben-1', sakhiId: SAKHI_ID });
+    beneficiaryClient.getById.mockResolvedValue({
+      id: 'ben-1',
+      sakhiId: SAKHI_ID,
+      caseType: 'MOTHER',
+    });
     mediaAssetExistsMock.mockResolvedValue(true);
     followupRepository.create.mockResolvedValue({
       followup: { id: 'fu-1' },
@@ -189,7 +216,11 @@ describe('ReferralFollowupService', () => {
 
   it('422s naming the specific media asset id that does not exist', async () => {
     referralRepository.findById.mockResolvedValue(referral() as never);
-    beneficiaryClient.getById.mockResolvedValue({ id: 'ben-1', sakhiId: SAKHI_ID });
+    beneficiaryClient.getById.mockResolvedValue({
+      id: 'ben-1',
+      sakhiId: SAKHI_ID,
+      caseType: 'MOTHER',
+    });
     mediaAssetExistsMock.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
 
     const badId = '99999999-9999-9999-9999-999999999999';
@@ -209,7 +240,11 @@ describe('ReferralFollowupService', () => {
 
   it('409s when the referral is no longer PENDING_FOLLOWUP by the time the transaction commits (concurrent submission)', async () => {
     referralRepository.findById.mockResolvedValue(referral() as never);
-    beneficiaryClient.getById.mockResolvedValue({ id: 'ben-1', sakhiId: SAKHI_ID });
+    beneficiaryClient.getById.mockResolvedValue({
+      id: 'ben-1',
+      sakhiId: SAKHI_ID,
+      caseType: 'MOTHER',
+    });
     followupRepository.create.mockRejectedValue(new ReferralNoLongerPendingFollowupError());
 
     await expect(
@@ -217,9 +252,69 @@ describe('ReferralFollowupService', () => {
     ).rejects.toMatchObject({ status: 409 });
   });
 
+  it(
+    "derives entityType MOTHER and a null childId from the beneficiary's caseType " +
+      '(SRS 3C.4.1)',
+    async () => {
+      referralRepository.findById.mockResolvedValue(referral() as never);
+      beneficiaryClient.getById.mockResolvedValue({
+        id: 'ben-1',
+        sakhiId: SAKHI_ID,
+        caseType: 'MOTHER',
+      });
+      followupRepository.create.mockResolvedValue({
+        followup: { id: 'fu-1' },
+        referral: referral({ status: 'COMPLETED' }),
+      } as never);
+
+      await service.create('ref-1', dto({ visitedFacilityFlag: true }), caller(), AUTH_HEADER);
+
+      expect(followupRepository.create).toHaveBeenCalledWith(
+        'ref-1',
+        'COMPLETED',
+        'COMPLETED',
+        expect.anything(),
+        SAKHI_ID,
+        { entityType: 'MOTHER', childId: null },
+      );
+    },
+  );
+
+  it(
+    "derives entityType CHILD and childId from the beneficiary's own id when " +
+      'caseType is CHILD (SRS 3C.4.1)',
+    async () => {
+      referralRepository.findById.mockResolvedValue(referral() as never);
+      beneficiaryClient.getById.mockResolvedValue({
+        id: 'child-ben-1',
+        sakhiId: SAKHI_ID,
+        caseType: 'CHILD',
+      });
+      followupRepository.create.mockResolvedValue({
+        followup: { id: 'fu-1' },
+        referral: referral({ status: 'COMPLETED' }),
+      } as never);
+
+      await service.create('ref-1', dto({ visitedFacilityFlag: true }), caller(), AUTH_HEADER);
+
+      expect(followupRepository.create).toHaveBeenCalledWith(
+        'ref-1',
+        'COMPLETED',
+        'COMPLETED',
+        expect.anything(),
+        SAKHI_ID,
+        { entityType: 'CHILD', childId: 'child-ben-1' },
+      );
+    },
+  );
+
   it('defaults to an empty media list when none are submitted', async () => {
     referralRepository.findById.mockResolvedValue(referral() as never);
-    beneficiaryClient.getById.mockResolvedValue({ id: 'ben-1', sakhiId: SAKHI_ID });
+    beneficiaryClient.getById.mockResolvedValue({
+      id: 'ben-1',
+      sakhiId: SAKHI_ID,
+      caseType: 'MOTHER',
+    });
     followupRepository.create.mockResolvedValue({
       followup: { id: 'fu-1' },
       referral: referral({ status: 'COMPLETED' }),

@@ -10,6 +10,7 @@ const API_GATEWAY_BASE_URL = process.env.API_GATEWAY_BASE_URL ?? 'http://localho
 export interface BeneficiaryCaseRecord {
   id: string;
   sakhiId: string;
+  caseType: 'MOTHER' | 'CHILD';
 }
 
 /**

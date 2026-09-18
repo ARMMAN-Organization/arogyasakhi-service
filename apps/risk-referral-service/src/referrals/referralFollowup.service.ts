@@ -40,7 +40,12 @@ export class ReferralFollowupService {
     const referral = await this.referralRepository.findById(referralId);
     if (!referral) throw notFound('Referral not found.');
 
-    await assertSakhiOwnsReferral(referral, caller, this.beneficiaryClient, authorizationHeader);
+    const beneficiary = await assertSakhiOwnsReferral(
+      referral,
+      caller,
+      this.beneficiaryClient,
+      authorizationHeader,
+    );
 
     if (referral.status !== 'PENDING_FOLLOWUP') {
       throw conflict(`Cannot submit a follow-up for a referral with status ${referral.status}.`);
@@ -65,6 +70,13 @@ export class ReferralFollowupService {
     const referralStatus = dto.visitedFacilityFlag ? 'COMPLETED' : 'PENDING_FOLLOWUP';
 
     const { mediaAssetIds, ...followupFields } = dto;
+    // entityType/childId (SRS 3C.4.1 Referral Follow-up linelist) come from
+    // the same beneficiary record assertSakhiOwnsReferral already fetched
+    // above — no extra round trip to beneficiary-service.
+    const entity = {
+      entityType: beneficiary.caseType,
+      childId: beneficiary.caseType === 'CHILD' ? beneficiary.id : null,
+    };
     try {
       const result = await this.repository.create(
         referralId,
@@ -72,6 +84,7 @@ export class ReferralFollowupService {
         referralStatus,
         followupFields,
         caller.id,
+        entity,
       );
       return { ...result, mediaAssetIds };
     } catch (err) {

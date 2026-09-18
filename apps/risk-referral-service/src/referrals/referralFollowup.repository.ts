@@ -1,5 +1,6 @@
 import type { PrismaService } from '../prisma/prisma.service';
 import type { CreateReferralFollowupInput } from './dto/create-referral-followup.dto';
+import type { RiskEntityType } from '../../../../node_modules/.prisma/client-risk-referral-service';
 
 /** Thrown by `create()` when the referral is no longer PENDING_FOLLOWUP by
  * the time the transaction runs — see `create()`'s doc comment. */
@@ -32,10 +33,26 @@ export class ReferralFollowupRepository {
     referralStatus: 'COMPLETED' | 'PENDING_FOLLOWUP',
     data: Omit<CreateReferralFollowupInput, 'mediaAssetIds'>,
     createdByUserId: string,
+    entity: { entityType: RiskEntityType; childId: string | null },
   ) {
     return this.prisma.$transaction(async (tx) => {
+      // followupAttemptNumber (SRS 3C.4.1) is the 1-based sequence of this
+      // row among all follow-ups for this referral, mirroring the "RFU1,
+      // RFU2..." label the app form already computes and displays but
+      // never persists. Counted inside this transaction, not read-then-
+      // insert outside it, so two concurrent submissions for the same
+      // referral can't both compute the same attempt number.
+      const priorAttempts = await tx.referralFollowup.count({ where: { referralId } });
       const followup = await tx.referralFollowup.create({
-        data: { ...data, referralId, followupStatus, createdByUserId },
+        data: {
+          ...data,
+          referralId,
+          followupStatus,
+          createdByUserId,
+          entityType: entity.entityType,
+          childId: entity.childId,
+          followupAttemptNumber: priorAttempts + 1,
+        },
       });
       const updateResult = await tx.referral.updateMany({
         where: { id: referralId, status: 'PENDING_FOLLOWUP' },

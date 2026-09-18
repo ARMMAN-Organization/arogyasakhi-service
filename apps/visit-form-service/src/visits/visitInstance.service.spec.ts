@@ -181,6 +181,10 @@ describe('VisitInstanceService', () => {
     sakhiId: '33333333-3333-3333-3333-333333333333',
     localVisitUuid: 'local-visit-1',
     actualVisitDate: null,
+    // SRS 3C.4.1 linelist placeholders — always null unless explicitly
+    // overridden by a test exercising PP/Neonatal-specific behavior.
+    maternalDeathDate: null,
+    temperature: null,
     // A row written after the enum→lookup migration: statusLookupValueId is
     // set directly, statusCode is null (it only carries legacy enum values on
     // rows migrated from the old column).

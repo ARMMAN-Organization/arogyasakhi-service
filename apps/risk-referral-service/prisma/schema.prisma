@@ -289,6 +289,12 @@ model Referral {
   // ReferralType Postgres enum (STANDARD/ACCOMPANIED — same value_codes).
   referralTypeLookupValueId String                   @map("referral_type_lookup_value_id")
   referralDate              DateTime                 @map("referral_date") @db.Date
+  // SRS 3C.4.1 PP Visit linelist field. No "referral level" concept exists
+  // anywhere in the product yet (not on the app form, not defined by
+  // ARMMAN) — added as an unpopulated placeholder per explicit instruction
+  // not to add a new form question until ARMMAN defines the value set.
+  // Always null until that decision lands and a write path is added.
+  referralLevel             String?                  @map("referral_level") @db.VarChar(50)
   triggerConditionListJson  Json?                    @map("trigger_condition_list_json")
   facilityType              FacilityType?            @map("facility_type")
   facilityName              String?                  @map("facility_name") @db.VarChar(200)
@@ -339,9 +345,23 @@ model ReferralTriggerSource {
 }
 
 model ReferralFollowup {
-  id                  String                 @id @default(uuid()) @map("followup_id")
-  referralId          String                 @map("referral_id")
-  followupDate        DateTime               @map("followup_date") @db.Date
+  id                    String                 @id @default(uuid()) @map("followup_id")
+  referralId            String                 @map("referral_id")
+  // SRS 3C.4.1 Referral Follow-up linelist fields. entityType/childId are
+  // backfilled once via a batch job joining beneficiary-service's
+  // BeneficiaryCase.caseType by the parent Referral's beneficiaryId (no
+  // live cross-service join, per the forklift rule) and set directly at
+  // write time thereafter. followupAttemptNumber is the 1-based sequence
+  // of this row among all ReferralFollowup rows for the same referralId,
+  // ordered by followupDate — mirrors the "RFU1, RFU2..." label the app
+  // form already displays but never persisted.
+  entityType            RiskEntityType?        @map("entity_type")
+  // beneficiary_cases.beneficiary_id (CHILD case) — owned by another
+  // service, no cross-service relation. Null when entityType is MOTHER
+  // or unresolved.
+  childId               String?                @map("child_id")
+  followupAttemptNumber Int?                   @map("followup_attempt_number")
+  followupDate          DateTime               @map("followup_date") @db.Date
   visitedFacilityFlag Boolean?               @map("visited_facility_flag")
   notVisitedReason    String?                @map("not_visited_reason") @db.VarChar(255)
   diagnosis           String?                @map("diagnosis")

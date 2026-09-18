@@ -31,6 +31,7 @@ function referral(overrides: Partial<Record<string, unknown>> = {}) {
     sourceSubmissionId: null,
     referralTypeLookupValueId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
     referralDate: new Date('2026-07-01'),
+    referralLevel: null,
     triggerConditionListJson: null,
     facilityType: null,
     facilityName: null,
@@ -388,7 +389,11 @@ describe('ReferralService', () => {
 
     it('403s when a SUPERVISOR targets a referral outside their own roster', async () => {
       repository.findById.mockResolvedValue(referral());
-      beneficiaryClient.getById.mockResolvedValue({ id: 'ben-1', sakhiId: 'some-other-sakhi' });
+      beneficiaryClient.getById.mockResolvedValue({
+        id: 'ben-1',
+        sakhiId: 'some-other-sakhi',
+        caseType: 'MOTHER',
+      });
       listSakhiIdsForSupervisorMock.mockResolvedValue(['sakhi-a']);
 
       await expect(
@@ -407,7 +412,11 @@ describe('ReferralService', () => {
       const decided = referral({ status: 'LAPSED' });
       repository.findById.mockResolvedValueOnce(pending).mockResolvedValueOnce(decided);
       repository.updateStatus.mockResolvedValue(true);
-      beneficiaryClient.getById.mockResolvedValue({ id: 'ben-1', sakhiId: 'sakhi-a' });
+      beneficiaryClient.getById.mockResolvedValue({
+        id: 'ben-1',
+        sakhiId: 'sakhi-a',
+        caseType: 'MOTHER',
+      });
       listSakhiIdsForSupervisorMock.mockResolvedValue(['sakhi-a']);
 
       await expect(
@@ -522,6 +531,7 @@ describe('ReferralService', () => {
       beneficiaryClient.getById.mockResolvedValue({
         id: '22222222-2222-2222-2222-222222222222',
         sakhiId: 'sakhi-a',
+        caseType: 'MOTHER',
       });
     });
 
@@ -747,6 +757,7 @@ describe('ReferralService', () => {
           sourceSubmissionId: null,
           referralTypeLookupValueId: listDto.referralTypeLookupValueId,
           referralDate: listDto.referralDate,
+          referralLevel: null,
           triggerConditionListJson: null,
           facilityType: listDto.facilityType ?? null,
           facilityName: listDto.facilityName ?? null,
@@ -848,7 +859,11 @@ describe('ReferralService', () => {
         },
       };
       repository.findById.mockResolvedValue(row);
-      beneficiaryClient.getById.mockResolvedValue({ id: row.beneficiaryId, sakhiId: 'sakhi-a' });
+      beneficiaryClient.getById.mockResolvedValue({
+        id: row.beneficiaryId,
+        sakhiId: 'sakhi-a',
+        caseType: 'MOTHER',
+      });
       repository.findFollowupSummary.mockResolvedValue(summary);
 
       await expect(
@@ -875,7 +890,11 @@ describe('ReferralService', () => {
       const row = referral();
       const summary = { incompleteCount: 0, latestFollowup: null };
       repository.findById.mockResolvedValue(row);
-      beneficiaryClient.getById.mockResolvedValue({ id: row.beneficiaryId, sakhiId: 'sakhi-a' });
+      beneficiaryClient.getById.mockResolvedValue({
+        id: row.beneficiaryId,
+        sakhiId: 'sakhi-a',
+        caseType: 'MOTHER',
+      });
       repository.findFollowupSummary.mockResolvedValue(summary);
 
       await expect(

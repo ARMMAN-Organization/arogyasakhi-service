@@ -65,7 +65,11 @@ describe('RiskAssessmentService', () => {
     jest.resetAllMocks();
     consoleErrorSpy.mockClear();
     service = new RiskAssessmentService(repository, beneficiaryClient);
-    beneficiaryClient.getById.mockResolvedValue({ id: BENEFICIARY_ID, sakhiId: CALLER_ID });
+    beneficiaryClient.getById.mockResolvedValue({
+      id: BENEFICIARY_ID,
+      sakhiId: CALLER_ID,
+      caseType: 'MOTHER',
+    });
     repository.findPhasesByConditionIds.mockResolvedValue(new Map([['cond-1', 'ANC']]));
     repository.findConditionIdsByPhase.mockResolvedValue(new Map([['ANEMIA', 'cond-1']]));
     repository.findEverFlaggedConditionCodes.mockResolvedValue(new Set());
@@ -89,6 +93,7 @@ describe('RiskAssessmentService', () => {
       beneficiaryClient.getById.mockResolvedValue({
         id: BENEFICIARY_ID,
         sakhiId: 'someone-else',
+        caseType: 'MOTHER',
       });
 
       await expect(
@@ -101,6 +106,7 @@ describe('RiskAssessmentService', () => {
       beneficiaryClient.getById.mockResolvedValue({
         id: BENEFICIARY_ID,
         sakhiId: 'sakhi-outside',
+        caseType: 'MOTHER',
       });
       listSakhiIdsForSupervisorMock.mockResolvedValue(['sakhi-inside']);
 
@@ -121,6 +127,7 @@ describe('RiskAssessmentService', () => {
       beneficiaryClient.getById.mockResolvedValue({
         id: BENEFICIARY_ID,
         sakhiId: 'any-sakhi',
+        caseType: 'MOTHER',
       });
       evaluateRuleSetMock.mockResolvedValue({
         ruleVersionId: 'rule-version-1',
@@ -768,6 +775,7 @@ describe('RiskAssessmentService', () => {
       beneficiaryClient.getById.mockResolvedValue({
         id: BENEFICIARY_ID,
         sakhiId: 'some-other-sakhi',
+        caseType: 'MOTHER',
       });
 
       await expect(
@@ -785,6 +793,7 @@ describe('RiskAssessmentService', () => {
       beneficiaryClient.getById.mockResolvedValue({
         id: BENEFICIARY_ID,
         sakhiId: 'some-other-sakhi',
+        caseType: 'MOTHER',
       });
       listSakhiIdsForSupervisorMock.mockResolvedValue(['a-different-sakhi']);
 
@@ -803,6 +812,7 @@ describe('RiskAssessmentService', () => {
       beneficiaryClient.getById.mockResolvedValue({
         id: BENEFICIARY_ID,
         sakhiId: 'some-other-sakhi',
+        caseType: 'MOTHER',
       });
       repository.findByVisitIds.mockResolvedValue([]);
 

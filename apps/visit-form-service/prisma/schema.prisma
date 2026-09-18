@@ -134,6 +134,16 @@ model VisitInstance {
   sakhiId             String              @map("sakhi_id")
   localVisitUuid      String              @unique @map("local_visit_uuid") @db.VarChar(80)
   actualVisitDate     DateTime?           @map("actual_visit_date") @db.Date
+  // SRS 3C.4.1 linelist fields, added as unpopulated placeholders per
+  // explicit instruction not to add a new form question yet. Provisional
+  // home: VisitInstance is the only visit-level table today (no dedicated
+  // pp_visit_details/neonatal_visit_details tables exist yet per the Track A
+  // design) — move onto those typed tables once they ship. Meaningful only
+  // for PP visits (maternalDeathDate) and Neonatal visits (temperature)
+  // respectively; always null on every other visit type by convention, not
+  // enforced at the DB level.
+  maternalDeathDate   DateTime?           @map("maternal_death_date") @db.Date
+  temperature         Decimal?            @map("temperature") @db.Decimal(4, 1)
   // Transitional pair replacing the VisitInstanceStatus Postgres enum.
   // statusCode carries the legacy enum value (STARTED/PENDING/MISSED/
   // COMPLETED/DISCARDED) ONLY for rows migrated from the old column — it is

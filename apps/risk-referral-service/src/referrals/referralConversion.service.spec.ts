@@ -47,7 +47,11 @@ describe('ReferralConversionService', () => {
   beforeEach(() => {
     jest.resetAllMocks();
     resolveReferralTypeLookupIdMock.mockResolvedValue(ACCOMPANIED_LOOKUP_ID);
-    beneficiaryClient.getById.mockResolvedValue({ id: 'ben-1', sakhiId: SAKHI_ID });
+    beneficiaryClient.getById.mockResolvedValue({
+      id: 'ben-1',
+      sakhiId: SAKHI_ID,
+      caseType: 'MOTHER',
+    });
     service = new ReferralConversionService(referralRepository, beneficiaryClient);
   });
 
@@ -61,7 +65,11 @@ describe('ReferralConversionService', () => {
 
   it("403s when the referral's beneficiary is not assigned to the calling SAKHI", async () => {
     referralRepository.findById.mockResolvedValue(referral() as never);
-    beneficiaryClient.getById.mockResolvedValue({ id: 'ben-1', sakhiId: 'someone-else' });
+    beneficiaryClient.getById.mockResolvedValue({
+      id: 'ben-1',
+      sakhiId: 'someone-else',
+      caseType: 'MOTHER',
+    });
 
     await expect(
       service.convertToAccompanied('ref-1', caller(), AUTH_HEADER),
