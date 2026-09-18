@@ -1,4 +1,4 @@
-import { addDays } from '@armman/core';
+import { addDays, diffInDays } from '@armman/core';
 import {
   badGateway,
   badRequest,
@@ -19,6 +19,21 @@ import { resolveReferralTypeLookupId } from './lookup.client';
 import { IncentiveClient } from './incentive.client';
 import { isUniqueConstraintViolation } from './referral.prisma-errors';
 import { assertSakhiOwnsReferral } from './assertSakhiOwnsReferral';
+
+/**
+ * SRS 3C.4.1 linelist field — whole days between a referral and its most
+ * recent follow-up. Null (not negative) when there's no follow-up yet, or
+ * in the shouldn't-happen case where the follow-up predates the referral
+ * (data-entry error, not a valid duration).
+ */
+function computeDaysBetweenReferralAndFollowup(
+  referralDate: Date,
+  followupDate: Date | null | undefined,
+): number | null {
+  if (!followupDate) return null;
+  const days = diffInDays(referralDate, followupDate);
+  return days < 0 ? null : days;
+}
 
 /** Referral domain logic. Data access is delegated to the repository. */
 export class ReferralService {
@@ -196,7 +211,19 @@ export class ReferralService {
     if (!referral) throw notFound('Referral not found.');
     await this.beneficiaryClient.getById(referral.beneficiaryId, authorizationHeader);
     const followupSummary = await this.repository.findFollowupSummary(id);
-    return { ...referral, ...followupSummary };
+    return {
+      ...referral,
+      ...followupSummary,
+      // SRS 3C.4.1 linelist field — derived, not persisted, from the
+      // referral's own referralDate and its most recent follow-up's
+      // followupDate (already fetched above for incompleteCount). Null
+      // (not negative) when there's no follow-up yet, or in the
+      // shouldn't-happen case where the follow-up predates the referral.
+      daysBetweenReferralAndFollowup: computeDaysBetweenReferralAndFollowup(
+        referral.referralDate,
+        followupSummary.latestFollowup?.followupDate,
+      ),
+    };
   }
 
   /**
