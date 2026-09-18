@@ -48,6 +48,25 @@ export class GeographyService {
     return toApiGeographyUnit(unit as unknown as Record<string, unknown>);
   }
 
+  /**
+   * Fetches `id` and asserts it's an ACTIVE unit of exactly `geoType` —
+   * the "usable geography unit" check other services need before attaching a
+   * villageId/padaId (etc.) to their own records, shared here so each caller
+   * doesn't re-derive its own copy of "must exist, be ACTIVE, and match the
+   * expected level" (PR #240 review: sakhi.service.ts's location-assignment
+   * validation duplicated this). `create`'s own parent-level check above is
+   * a different, more general rule (any ACTIVE parent, one level below) and
+   * isn't replaced by this — this is for a caller who already knows the
+   * exact level a referenced id must be at.
+   */
+  async assertActiveUnitOfType(id: string, geoType: (typeof GEO_TYPE_ORDER)[number]) {
+    const unit = await this.repository.findById(id);
+    if (!unit || unit.geoType !== geoType || unit.status !== 'ACTIVE') {
+      throw badRequest(`Must reference an active ${geoType} geography unit.`);
+    }
+    return unit;
+  }
+
   /** Returns `id`'s full ancestor chain, ordered from `id` itself up to STATE. */
   async getAncestors(id: string) {
     const chain = await this.repository.findAncestors(id);

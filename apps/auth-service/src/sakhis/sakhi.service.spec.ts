@@ -1,6 +1,7 @@
+import { badRequest } from '@armman/service-commons';
 import { SakhiService } from './sakhi.service';
 import type { SakhiRepository } from './sakhi.repository';
-import type { GeographyRepository } from '../geography/geography.repository';
+import type { GeographyService } from '../geography/geography.service';
 
 describe('SakhiService', () => {
   const repository = {
@@ -13,9 +14,9 @@ describe('SakhiService', () => {
     updateLocationAssignment: jest.fn(),
     endLocationAssignment: jest.fn(),
   } as unknown as jest.Mocked<SakhiRepository>;
-  const geographyRepository = {
-    findById: jest.fn(),
-  } as unknown as jest.Mocked<GeographyRepository>;
+  const geographyService = {
+    assertActiveUnitOfType: jest.fn(),
+  } as unknown as jest.Mocked<GeographyService>;
 
   let service: SakhiService;
 
@@ -28,7 +29,7 @@ describe('SakhiService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    service = new SakhiService(repository, geographyRepository);
+    service = new SakhiService(repository, geographyService);
   });
 
   const rawProfile = () => ({
@@ -388,8 +389,8 @@ describe('SakhiService', () => {
 
     it('creates the assignment when the caller is unscoped (MANAGER/ADMIN)', async () => {
       repository.findById.mockResolvedValue(rawProfile() as never); // primaryProjectId: 'project-1'
-      (geographyRepository.findById as jest.Mock).mockImplementation(async (id: string) =>
-        id === 'village-1' ? village() : (pada() as never),
+      geographyService.assertActiveUnitOfType.mockImplementation(async (id: string) =>
+        id === 'village-1' ? (village() as never) : (pada() as never),
       );
       repository.createLocationAssignment.mockResolvedValue(createdRow() as never);
 
@@ -416,8 +417,8 @@ describe('SakhiService', () => {
           ...rawProfile(),
           primaryProjectId: 'the-sakhis-real-project',
         } as never);
-        (geographyRepository.findById as jest.Mock).mockImplementation(async (id: string) =>
-          id === 'village-1' ? village() : (pada() as never),
+        geographyService.assertActiveUnitOfType.mockImplementation(async (id: string) =>
+          id === 'village-1' ? (village() as never) : (pada() as never),
         );
         repository.createLocationAssignment.mockResolvedValue(createdRow() as never);
 
@@ -435,8 +436,8 @@ describe('SakhiService', () => {
 
     it('allows a scoped caller (SUPERVISOR) to create an assignment for a Sakhi in their own project', async () => {
       repository.findById.mockResolvedValue(rawProfile() as never); // primaryProjectId: 'project-1'
-      (geographyRepository.findById as jest.Mock).mockImplementation(async (id: string) =>
-        id === 'village-1' ? village() : (pada() as never),
+      geographyService.assertActiveUnitOfType.mockImplementation(async (id: string) =>
+        id === 'village-1' ? (village() as never) : (pada() as never),
       );
       repository.createLocationAssignment.mockResolvedValue(createdRow() as never);
 
@@ -464,23 +465,8 @@ describe('SakhiService', () => {
     });
 
     it('rejects when villageId does not reference an ACTIVE VILLAGE geography unit', async () => {
-      geographyRepository.findById.mockResolvedValue({
-        geographyUnitId: 'village-1',
-        geoType: 'DISTRICT',
-        status: 'ACTIVE',
-      } as never);
-
-      await expect(
-        service.createLocationAssignment('user-1', input(), unscopedCaller),
-      ).rejects.toMatchObject({ status: 400 });
-      expect(repository.createLocationAssignment).not.toHaveBeenCalled();
-    });
-
-    it('rejects when padaId does not reference an ACTIVE PADA geography unit', async () => {
-      (geographyRepository.findById as jest.Mock).mockImplementation(async (id: string) =>
-        id === 'village-1'
-          ? village()
-          : ({ geographyUnitId: 'pada-1', geoType: 'VILLAGE', status: 'ACTIVE' } as never),
+      geographyService.assertActiveUnitOfType.mockRejectedValue(
+        badRequest('Must reference an active VILLAGE geography unit.'),
       );
 
       await expect(
@@ -489,9 +475,21 @@ describe('SakhiService', () => {
       expect(repository.createLocationAssignment).not.toHaveBeenCalled();
     });
 
+    it('rejects when padaId does not reference an ACTIVE PADA geography unit', async () => {
+      geographyService.assertActiveUnitOfType.mockImplementation(async (id: string) => {
+        if (id === 'village-1') return village() as never;
+        throw badRequest('Must reference an active PADA geography unit.');
+      });
+
+      await expect(
+        service.createLocationAssignment('user-1', input(), unscopedCaller),
+      ).rejects.toMatchObject({ status: 400 });
+      expect(repository.createLocationAssignment).not.toHaveBeenCalled();
+    });
+
     it("rejects when padaId's parentId does not match the given villageId", async () => {
-      (geographyRepository.findById as jest.Mock).mockImplementation(async (id: string) =>
-        id === 'village-1' ? village() : (pada('some-other-village') as never),
+      geographyService.assertActiveUnitOfType.mockImplementation(async (id: string) =>
+        id === 'village-1' ? (village() as never) : (pada('some-other-village') as never),
       );
 
       await expect(
@@ -501,8 +499,8 @@ describe('SakhiService', () => {
     });
 
     it('rejects when effectiveTo is before effectiveFrom', async () => {
-      (geographyRepository.findById as jest.Mock).mockImplementation(async (id: string) =>
-        id === 'village-1' ? village() : (pada() as never),
+      geographyService.assertActiveUnitOfType.mockImplementation(async (id: string) =>
+        id === 'village-1' ? (village() as never) : (pada() as never),
       );
 
       await expect(
@@ -516,7 +514,7 @@ describe('SakhiService', () => {
     });
 
     it('allows creating without a padaId (village-only assignment)', async () => {
-      geographyRepository.findById.mockResolvedValue(village() as never);
+      geographyService.assertActiveUnitOfType.mockResolvedValue(village() as never);
       repository.createLocationAssignment.mockResolvedValue({
         ...createdRow(),
         padaId: null,
@@ -542,6 +540,12 @@ describe('SakhiService', () => {
       padaId: 'pada-1',
       effectiveFrom: new Date('2026-01-01'),
       effectiveTo: null,
+    });
+    const pada = (parentId = 'village-1') => ({
+      geographyUnitId: 'pada-2',
+      parentId,
+      geoType: 'PADA',
+      status: 'ACTIVE',
     });
 
     it('updates the assignment when the caller is unscoped (MANAGER/ADMIN)', async () => {
@@ -611,11 +615,9 @@ describe('SakhiService', () => {
 
     it('re-validates villageId/padaId when either is being changed', async () => {
       repository.findLocationAssignmentById.mockResolvedValue(existingRow() as never);
-      geographyRepository.findById.mockResolvedValue({
-        geographyUnitId: 'new-village',
-        geoType: 'DISTRICT',
-        status: 'ACTIVE',
-      } as never);
+      geographyService.assertActiveUnitOfType.mockRejectedValue(
+        badRequest('Must reference an active VILLAGE geography unit.'),
+      );
 
       await expect(
         service.updateLocationAssignment(
@@ -639,8 +641,36 @@ describe('SakhiService', () => {
         unscopedCaller,
       );
 
-      expect(geographyRepository.findById).not.toHaveBeenCalled();
+      expect(geographyService.assertActiveUnitOfType).not.toHaveBeenCalled();
     });
+
+    it(
+      'validates only padaId (not villageId) when an edit changes padaId but leaves the ' +
+        'existing, unchanged villageId alone — regression: previously re-checking the ' +
+        'unchanged villageId could wrongly 400 an edit that never touched it if that ' +
+        'village was deactivated after the assignment was created',
+      async () => {
+        repository.findLocationAssignmentById.mockResolvedValue(existingRow() as never);
+        geographyService.assertActiveUnitOfType.mockResolvedValue(pada() as never);
+        repository.updateLocationAssignment.mockResolvedValue({
+          ...existingRow(),
+          padaId: 'pada-2',
+        } as never);
+
+        await service.updateLocationAssignment(
+          'user-1',
+          'assignment-1',
+          { padaId: 'pada-2' },
+          unscopedCaller,
+        );
+
+        expect(geographyService.assertActiveUnitOfType).toHaveBeenCalledWith('pada-2', 'PADA');
+        expect(geographyService.assertActiveUnitOfType).not.toHaveBeenCalledWith(
+          'village-1',
+          'VILLAGE',
+        );
+      },
+    );
 
     it('rejects when the resulting effectiveTo would be before the resulting effectiveFrom', async () => {
       repository.findLocationAssignmentById.mockResolvedValue(existingRow() as never);
