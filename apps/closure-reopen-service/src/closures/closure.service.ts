@@ -1,3 +1,4 @@
+import { diffInDays } from '@armman/core';
 import { conflict, notFound, unprocessable } from '@armman/service-commons';
 import type { ClosureRepository } from './closure.repository';
 import type { ApprovalClient } from '../reopen-requests/approval.client';
@@ -82,7 +83,12 @@ export class ClosureService {
    * forklift rule). A separate endpoint from GET /closures/:id rather than
    * an addition to that response — this is MIS-reporting-only and always
    * needs the beneficiary round trip, unlike the existing detail read.
-   * Null for a MOTHER-case closure (no childDateOfBirth), not an error.
+   * Null for a MOTHER-case closure (no childDateOfBirth), not an error —
+   * and also null (not negative) when closureDate predates dateOfBirth
+   * (mis-keyed closure date, or a DOB correction applied after closure),
+   * matching the same convention as this PR's sibling derivations
+   * (referral.service.ts's computeDaysBetweenReferralAndFollowup,
+   * visitInstance.service.ts's computeAgeFields/daysPostDelivery).
    */
   async getMisSummary(id: string, authorizationHeader: string) {
     const closure = await this.repository.findById(id);
@@ -97,10 +103,8 @@ export class ClosureService {
     }
 
     const dob = new Date(beneficiary.childCaseDetails.dateOfBirth);
-    const ageAtClosureDays = Math.floor(
-      (closure.closureDate.getTime() - dob.getTime()) / (24 * 60 * 60 * 1000),
-    );
-    return { ageAtClosureDays };
+    const days = diffInDays(dob, closure.closureDate);
+    return { ageAtClosureDays: days < 0 ? null : days };
   }
 
   /**
