@@ -221,6 +221,33 @@ export function registerVisitInstanceRoutes(doc: DocumentedRouter, service: Visi
   );
 
   doc.get(
+    '/beneficiaries/:beneficiaryId/mis-summary',
+    {
+      summary:
+        'SRS 3C.4.1 MIS linelist field (Delivery Form): completed4PlusAnc — whether the ' +
+        'beneficiary has 4 or more COMPLETED ANC-family visits (ANC/ANC_HR/ANC_POST_EDD). A ' +
+        'beneficiary-level fact (asked once at delivery time), unlike GET /visits/:id/' +
+        "mis-summary's per-visit fields.",
+      tags: ['Visits'],
+      params: beneficiaryIdParamsSchema,
+      responses: {
+        200: {
+          description: 'MIS-linelist derived field for this beneficiary',
+          schema: envelope(z.object({ completed4PlusAnc: z.boolean() })),
+        },
+        400: errorResponse(400),
+        401: errorResponse(401),
+        403: errorResponse(403),
+        500: errorResponse(500),
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(beneficiaryIdParamsSchema, 'params'),
+    controller.getBeneficiaryMisSummary,
+  );
+
+  doc.get(
     '/beneficiaries/:beneficiaryId/visit-history',
     {
       summary:
@@ -406,8 +433,11 @@ export function registerVisitInstanceRoutes(doc: DocumentedRouter, service: Visi
       summary:
         'SRS 3C.4.1 MIS linelist fields for one visit: ageInDays/ageInMonths, derived from ' +
         "actualVisitDate and the beneficiary's own date of birth (resolved via " +
-        'beneficiary-service). Both null (not an error) when age cannot be resolved — visit ' +
-        'not yet completed, a MOTHER-case visit, or the beneficiary not found. Separate from ' +
+        'beneficiary-service); daysPostDelivery (PP Visit linelist), derived from this ' +
+        "visit's own actualVisitDate and the beneficiary's completed DELIVERY visit. All " +
+        'null (not an error) when the underlying date cannot be resolved — visit not yet ' +
+        'completed, a MOTHER-case visit (age fields only), the beneficiary not found, or no ' +
+        'completed DELIVERY visit exists yet (daysPostDelivery only). Separate from ' +
         "GET /visits/:id (an existing internal contract for Quick Response's card " +
         "enrichment) so that endpoint doesn't grow a mandatory beneficiary-service round trip " +
         'it does not need.',
@@ -420,6 +450,7 @@ export function registerVisitInstanceRoutes(doc: DocumentedRouter, service: Visi
             z.object({
               ageInDays: z.number().int().nullable().openapi({ example: 151 }),
               ageInMonths: z.number().int().nullable().openapi({ example: 5 }),
+              daysPostDelivery: z.number().int().nullable().openapi({ example: 31 }),
             }),
           ),
         },
