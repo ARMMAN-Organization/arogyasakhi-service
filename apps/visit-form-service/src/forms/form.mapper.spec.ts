@@ -174,20 +174,28 @@ describe('buildFormAnswers', () => {
   });
 
   describe('toApiFormSubmission', () => {
-    it('omits childBeneficiaryIds when called without a second argument', () => {
+    it('omits childBeneficiaries when called without a second argument', () => {
       const result = toApiFormSubmission(submissionRow());
-      expect('childBeneficiaryIds' in result).toBe(false);
+      expect('childBeneficiaries' in result).toBe(false);
     });
 
-    it('omits childBeneficiaryIds when passed an empty array', () => {
+    it('omits childBeneficiaries when passed an empty array', () => {
       const result = toApiFormSubmission(submissionRow(), []);
-      expect('childBeneficiaryIds' in result).toBe(false);
+      expect('childBeneficiaries' in result).toBe(false);
     });
 
-    it('includes childBeneficiaryIds, in order, when passed a non-empty array', () => {
-      const result = toApiFormSubmission(submissionRow(), ['child-1', 'child-2']);
+    it('includes childBeneficiaries, in order, when passed a non-empty array', () => {
+      const result = toApiFormSubmission(submissionRow(), [
+        { birthOrder: 1, localChildId: 'local-1', beneficiaryId: 'child-1' },
+        { birthOrder: 2, localChildId: null, beneficiaryId: 'child-2' },
+      ]);
       expect(result).toEqual(
-        expect.objectContaining({ childBeneficiaryIds: ['child-1', 'child-2'] }),
+        expect.objectContaining({
+          childBeneficiaries: [
+            { birthOrder: 1, localChildId: 'local-1', beneficiaryId: 'child-1' },
+            { birthOrder: 2, localChildId: null, beneficiaryId: 'child-2' },
+          ],
+        }),
       );
     });
   });

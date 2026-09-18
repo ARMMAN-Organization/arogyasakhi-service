@@ -10,6 +10,7 @@ import {
   computeChecksum,
   toApiFormSubmission,
   toApiFormVersion,
+  type ChildBeneficiaryResult,
 } from './form.mapper';
 import { applyDefaults, validateSubmission } from './form-validation';
 import { getEditableFieldCodes } from './form-answer-edit-allowlist';
@@ -377,7 +378,7 @@ export class FormService {
     const existing = await this.repository.findSubmissionByLocalUuid(dto.localSubmissionUuid);
     // idempotent replay — matches sync's local_submission_uuid dedup key
     if (existing) {
-      const childBeneficiaryIds =
+      const childBeneficiaries =
         formCode === 'DELIVERY_VISIT'
           ? await this.resolveDeliveryChildren(dto, existing.beneficiaryId, authorizationHeader)
           : undefined;
@@ -410,7 +411,7 @@ export class FormService {
         existing.createdAt,
         authorizationHeader,
       );
-      return toApiFormSubmission(existing, childBeneficiaryIds, stageEducationContent);
+      return toApiFormSubmission(existing, childBeneficiaries, stageEducationContent);
     }
 
     const version = await this.repository.findVersionById(dto.formVersionId);
@@ -560,7 +561,7 @@ export class FormService {
     // profile on submission") and returns their ids so the caller can
     // prefill the new child's records in the same mobile session — see
     // resolveDeliveryChildren for the per-child best-effort details.
-    const childBeneficiaryIds =
+    const childBeneficiaries =
       formCode === 'DELIVERY_VISIT'
         ? await this.resolveDeliveryChildren(dto, dto.beneficiaryId, authorizationHeader)
         : undefined;
@@ -702,7 +703,7 @@ export class FormService {
       ),
     ]);
 
-    return toApiFormSubmission(created, childBeneficiaryIds, stageEducationContent);
+    return toApiFormSubmission(created, childBeneficiaries, stageEducationContent);
   }
 
   /**
@@ -712,7 +713,7 @@ export class FormService {
    * failing call (e.g. in a twin/triplet birth) never blocks the others or
    * the already-saved submission. Also advances the mother's phase to PP and
    * each created child's phase to NN (CR-041) — a phase-advance failure never
-   * drops that child's id from the result, since the id already exists by
+   * drops that child's result from the array, since the id already exists by
    * the time phase-advance is attempted.
    *
    * Deliberately re-run on an idempotent replay (same localSubmissionUuid) as
@@ -720,7 +721,7 @@ export class FormService {
    * on its deterministic per-child localCaseUuid (beneficiary-service's own
    * POST /beneficiaries dedup), so a replay resolves to the same child ids
    * that were created the first time, without creating duplicates — this is
-   * what lets a retried submission still return childBeneficiaryIds instead
+   * what lets a retried submission still return childBeneficiaries instead
    * of the caller having no way to find the child it already created.
    *
    * `beneficiaryId` is a separate parameter (not read off `dto`) so a replay
@@ -730,6 +731,14 @@ export class FormService {
    * retried request with a swapped beneficiaryId in its body must not run
    * child-creation against a different beneficiary than the one actually
    * recorded.
+   *
+   * CR-041 item 2.4: each result entry carries `localChildId` — the
+   * offline-first mobile client's own identifier for that birth slot (read
+   * from `childN_local_id` in formData, `null` if not supplied) — plus
+   * `birthOrder` and the server-assigned `beneficiaryId`, so an app that
+   * created a local placeholder record before syncing can unambiguously
+   * match it to the right server case even when a non-last slot was
+   * stillborn (a plain array of ids alone can't disambiguate that).
    */
   /**
    * Fetches the ANC risk pack's registration-time inputs (age, the raw
@@ -920,7 +929,7 @@ export class FormService {
     dto: CreateSubmissionInput,
     beneficiaryId: string,
     authorizationHeader: string,
-  ): Promise<string[] | undefined> {
+  ): Promise<ChildBeneficiaryResult[] | undefined> {
     // Unlike every other downstream call in createSubmission
     // (createChildBeneficiary, updateBeneficiaryPhase, createClosure, risk/
     // socio-demographic/health-history syncs), findBeneficiaryById throws
@@ -951,7 +960,7 @@ export class FormService {
       intersex_other: 'INTERSEX_OTHER',
     };
 
-    const childIds = await Promise.all(
+    const childResults = await Promise.all(
       childPrefixes.map(async (prefix, index) => {
         const outcome = dto.formData[`${prefix}_delivery_outcome`];
         if (outcome !== 'live_birth' || !dateOfDelivery) return undefined;
@@ -959,6 +968,17 @@ export class FormService {
         const sexCode = dto.formData[`${prefix}_sex_of_baby`];
         const birthWeightKg = dto.formData[`${prefix}_birth_weight_kg`];
         const birthLengthCm = dto.formData[`${prefix}_birth_length_cm`];
+        // CR-041 item 2.4: an offline-first mobile client's own local
+        // identifier for this child slot, so it can correlate this
+        // response's server-assigned beneficiaryId back to the local
+        // record it already created before syncing — not the actual
+        // idempotency key (localCaseUuid below is unchanged and already
+        // deterministic), purely response correlation metadata. Only a
+        // string is accepted; anything else (missing, wrong type) is
+        // treated as "not supplied", never a validation error, since
+        // formData's per-field values aren't schema-typed.
+        const rawLocalChildId = dto.formData[`${prefix}_local_id`];
+        const localChildId = typeof rawLocalChildId === 'string' ? rawLocalChildId : null;
 
         const childId = await createChildBeneficiary(
           {
@@ -997,7 +1017,8 @@ export class FormService {
           await toleratePhaseAdvance(updateBeneficiaryPhase(childId, 'NN', authorizationHeader));
         }
 
-        return childId ?? undefined;
+        if (!childId) return undefined;
+        return { birthOrder: index + 1, localChildId, beneficiaryId: childId };
       }),
     );
 
@@ -1009,7 +1030,7 @@ export class FormService {
       updateBeneficiaryPhase(dto.beneficiaryId, 'PP', authorizationHeader),
     );
 
-    return childIds.filter((id): id is string => id !== undefined);
+    return childResults.filter((r): r is ChildBeneficiaryResult => r !== undefined);
   }
 
   /**

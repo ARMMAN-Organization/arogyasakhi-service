@@ -18,28 +18,63 @@ function submission(overrides: Partial<Record<string, unknown>> = {}) {
 }
 
 describe('formSubmissionSchema', () => {
-  it('accepts a submission without childBeneficiaryIds', () => {
+  it('accepts a submission without childBeneficiaries', () => {
     expect(() => formSubmissionSchema.parse(submission())).not.toThrow();
   });
 
-  it('accepts a submission with childBeneficiaryIds', () => {
+  it('accepts a submission with childBeneficiaries, including a null localChildId', () => {
     const result = formSubmissionSchema.parse(
       submission({
-        childBeneficiaryIds: [
-          '34197cd7-7a54-4e7f-885c-f297313b9e81',
-          '9a1b2c3d-4e5f-6789-0abc-def012345678',
+        childBeneficiaries: [
+          {
+            birthOrder: 1,
+            localChildId: 'device-abc-child1',
+            beneficiaryId: '34197cd7-7a54-4e7f-885c-f297313b9e81',
+          },
+          {
+            birthOrder: 2,
+            localChildId: null,
+            beneficiaryId: '9a1b2c3d-4e5f-6789-0abc-def012345678',
+          },
         ],
       }),
     );
-    expect(result.childBeneficiaryIds).toEqual([
-      '34197cd7-7a54-4e7f-885c-f297313b9e81',
-      '9a1b2c3d-4e5f-6789-0abc-def012345678',
+    expect(result.childBeneficiaries).toEqual([
+      {
+        birthOrder: 1,
+        localChildId: 'device-abc-child1',
+        beneficiaryId: '34197cd7-7a54-4e7f-885c-f297313b9e81',
+      },
+      {
+        birthOrder: 2,
+        localChildId: null,
+        beneficiaryId: '9a1b2c3d-4e5f-6789-0abc-def012345678',
+      },
     ]);
   });
 
-  it('rejects a childBeneficiaryIds entry that is not a uuid', () => {
+  it('rejects a childBeneficiaries entry whose beneficiaryId is not a uuid', () => {
     expect(() =>
-      formSubmissionSchema.parse(submission({ childBeneficiaryIds: ['not-a-uuid'] })),
+      formSubmissionSchema.parse(
+        submission({
+          childBeneficiaries: [{ birthOrder: 1, localChildId: null, beneficiaryId: 'not-a-uuid' }],
+        }),
+      ),
+    ).toThrow();
+  });
+
+  it('rejects a childBeneficiaries entry missing birthOrder', () => {
+    expect(() =>
+      formSubmissionSchema.parse(
+        submission({
+          childBeneficiaries: [
+            {
+              localChildId: null,
+              beneficiaryId: '34197cd7-7a54-4e7f-885c-f297313b9e81',
+            },
+          ],
+        }),
+      ),
     ).toThrow();
   });
 });
