@@ -1,5 +1,61 @@
-import { applyDefaults, isVisible, validateSubmission } from './form-validation';
+import { applyDefaults, isEmpty, isVisible, validateSubmission } from './form-validation';
 import type { FormField, CrossFieldRule } from './dto/form-field.dto';
+
+describe('isEmpty', () => {
+  it('treats an empty array as empty — a required multiselect with no options selected must not pass', () => {
+    expect(isEmpty([])).toBe(true);
+  });
+
+  it('treats a non-empty array as not empty', () => {
+    expect(isEmpty(['bcg'])).toBe(false);
+  });
+
+  it('still treats undefined, null, and empty string as empty', () => {
+    expect(isEmpty(undefined)).toBe(true);
+    expect(isEmpty(null)).toBe(true);
+    expect(isEmpty('')).toBe(true);
+  });
+});
+
+describe('validateSubmission — required multiselect', () => {
+  const vaccinationField: FormField = {
+    question_code: 'vaccination_taken_at_birth',
+    label: 'Vaccination taken at birth?',
+    input_type: 'multiselect',
+    required: true,
+  };
+
+  const optionalMultiselectField: FormField = {
+    question_code: 'optional_tags',
+    label: 'Optional tags',
+    input_type: 'multiselect',
+    required: false,
+  };
+
+  it('rejects a required multiselect submitted as an empty array — at least one option must be selected', () => {
+    const violations = validateSubmission([vaccinationField], [], {
+      vaccination_taken_at_birth: [],
+    });
+
+    expect(violations).toEqual(['Missing required field: vaccination_taken_at_birth']);
+  });
+
+  it('accepts a required multiselect with at least one option selected', () => {
+    const violations = validateSubmission([vaccinationField], [], {
+      vaccination_taken_at_birth: ['bcg'],
+    });
+
+    expect(violations).toEqual([]);
+  });
+
+  it('does not flag an optional multiselect submitted as an empty array', () => {
+    const violations = validateSubmission([optionalMultiselectField], [], {
+      optional_tags: [],
+    });
+
+    expect(violations).toEqual([]);
+  });
+});
 
 const gravidaField: FormField = {
   question_code: 'gravida_total_number_of_pregnancies',
