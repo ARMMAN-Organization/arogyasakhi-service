@@ -239,6 +239,9 @@ export function registerVisitInstanceRoutes(doc: DocumentedRouter, service: Visi
         401: errorResponse(401),
         403: errorResponse(403),
         500: errorResponse(500),
+        502: errorResponse(502, {
+          message: 'Unable to resolve VISIT_STATUS code "COMPLETED" to a lookup_value_id.',
+        }),
       },
     },
     trustGatewayIdentity,

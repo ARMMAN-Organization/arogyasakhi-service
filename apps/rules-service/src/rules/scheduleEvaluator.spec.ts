@@ -193,7 +193,10 @@ describe('evaluateSchedulePack', () => {
   });
 
   // 8. BR-02/INC two-formula: Day 58 boundary inclusive both directions;
-  // late-reg floor formula exact match.
+  // late-reg round formula exact match. The SRS is internally inconsistent
+  // (§3A body text says round(), Appendix A.4 says floor()) — QA (SC-03/
+  // SC-04) flagged the floor() implementation as producing one fewer visit
+  // than expected; the client (Bharath) confirmed round() is correct.
   describe('INC', () => {
     it('early registration (Day 30): 11 visits, INC1 = DOB + 58', async () => {
       const result = await evaluateSchedulePack('INC', incRulesJson, {
@@ -214,16 +217,61 @@ describe('evaluateSchedulePack', () => {
       expect(result.registrationCategory).toBe('EARLY');
     });
 
-    it('late registration (Day 100): INC1 = registration date, correct floor-formula visit count', async () => {
+    it('late registration (Day 100): INC1 = registration date, round-formula visit count, INC10 lands exactly on the DOB+370 cutoff and is kept', async () => {
       const result = await evaluateSchedulePack('INC', incRulesJson, {
         dob: '2026-01-01',
         registrationDate: '2026-04-11', // Day 100
       });
       expect(result.registrationCategory).toBe('LATE');
       const visits = result.visits as Array<Record<string, string>>;
-      // floor((365-100)/30) = 8 additional visits + INC1 = 9 total.
-      expect(visits.length).toBe(9);
+      const dropped = result.droppedVisits as string[];
+      // round((365-100)/30) = round(8.833) = 9 additional visits + INC1 = 10 total.
+      expect(visits.length).toBe(10);
       expect(visits[0]).toMatchObject({ visitName: 'INC1', scheduledDate: '2026-04-11' });
+      // INC10 = 2026-04-11 + 9*30 days = 2027-01-06 = DOB (2026-01-01) + 370
+      // days exactly — the boundary case the CR called out, confirming the
+      // existing isAfter(cutoff) check keeps a visit landing ON the cutoff.
+      expect(visits[9]).toMatchObject({ visitName: 'INC10', scheduledDate: '2027-01-06' });
+      expect(dropped).toEqual([]);
+    });
+
+    it('late registration (Day 59, just past the early/late boundary): round formula applies correctly', async () => {
+      const result = await evaluateSchedulePack('INC', incRulesJson, {
+        dob: '2026-01-01',
+        registrationDate: '2026-03-01', // Day 59
+      });
+      expect(result.registrationCategory).toBe('LATE');
+      const visits = result.visits as Array<Record<string, string>>;
+      // round((365-59)/30) = round(10.2) = 10 additional visits + INC1 = 11 total.
+      expect(visits.length).toBe(11);
+    });
+
+    it('late registration with a round-down fractional remainder (Day 82, remainder .433): rounds down, not up', async () => {
+      const result = await evaluateSchedulePack('INC', incRulesJson, {
+        dob: '2026-01-01',
+        registrationDate: '2026-03-24', // Day 82
+      });
+      expect(result.registrationCategory).toBe('LATE');
+      const visits = result.visits as Array<Record<string, string>>;
+      // round((365-82)/30) = round(9.433) = 9 additional visits + INC1 = 10
+      // total — confirms this is genuine nearest-integer rounding, not a
+      // hidden ceiling that would always round up.
+      expect(visits.length).toBe(10);
+    });
+
+    it('late registration where the last additional visit lands one day past the DOB+370 cutoff: still dropped', async () => {
+      const result = await evaluateSchedulePack('INC', incRulesJson, {
+        dob: '2026-01-01',
+        registrationDate: '2026-03-13', // Day 71
+      });
+      expect(result.registrationCategory).toBe('LATE');
+      const visits = result.visits as Array<Record<string, string>>;
+      const dropped = result.droppedVisits as string[];
+      // round((365-71)/30) = round(9.8) = 10 additional visits raw, but the
+      // 10th (INC11) lands on 2027-01-07 — one day past DOB+370
+      // (2027-01-06) — so it must still be dropped, not kept.
+      expect(visits.length).toBe(10);
+      expect(dropped).toEqual(['INC11']);
     });
 
     // 9. BR-12: visit beyond DOB+370 dropped silently, not flagged missed;

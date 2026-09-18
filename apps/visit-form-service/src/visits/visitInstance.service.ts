@@ -1,3 +1,4 @@
+import { diffInDays } from '@armman/core';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '@armman/service-commons';
 import type { VisitInstanceRepository } from './visitInstance.repository';
 import type { CreateVisitInstanceInput } from './dto/create-visitInstance.dto';
@@ -24,10 +25,24 @@ export interface CallerIdentity {
   readonly projectId?: string | null;
 }
 
-/** ageInDays (floored) and ageInMonths (floored, 30-day months) from two dates. */
-function computeAgeFields(onDate: Date, dob: Date): { ageInDays: number; ageInMonths: number } {
-  const ageInDays = Math.floor((onDate.getTime() - dob.getTime()) / (24 * 60 * 60 * 1000));
-  return { ageInDays, ageInMonths: Math.floor(ageInDays / 30) };
+/**
+ * Whole days from `from` to `to`, or null (not negative) when `to` predates
+ * `from` — a data-entry error (e.g. a DOB or delivery-date correction
+ * applied after the fact), not a valid duration. Same convention as
+ * referral.service.ts's computeDaysBetweenReferralAndFollowup.
+ */
+function diffInDaysOrNull(from: Date, to: Date): number | null {
+  const days = diffInDays(from, to);
+  return days < 0 ? null : days;
+}
+
+/** ageInDays and ageInMonths (floored, 30-day months) from two dates. Both null when negative — see diffInDaysOrNull. */
+function computeAgeFields(
+  onDate: Date,
+  dob: Date,
+): { ageInDays: number | null; ageInMonths: number | null } {
+  const ageInDays = diffInDaysOrNull(dob, onDate);
+  return { ageInDays, ageInMonths: ageInDays === null ? null : Math.floor(ageInDays / 30) };
 }
 
 /** MANAGER and ADMIN are unrestricted — same convention as every other service. */
@@ -193,7 +208,12 @@ export class VisitInstanceService {
    * beneficiary's completed DELIVERY visit's actualVisitDate (there is no
    * dedicated typed delivery-date column yet; see
    * VisitInstanceRepository.findDeliveryVisit's doc comment). Null when
-   * either date is unavailable.
+   * either date is unavailable — and also null (not negative) when the
+   * delivery visit's own actualVisitDate is later than this visit's (a
+   * backdated PP entry, or a later-corrected delivery date), matching the
+   * same convention as this PR's sibling derivations
+   * (referral.service.ts's computeDaysBetweenReferralAndFollowup,
+   * closure.service.ts's ageAtClosureDays).
    */
   async getMisSummary(id: string, authorizationHeader: string) {
     const visit = await this.repository.findById(id);
@@ -213,10 +233,7 @@ export class VisitInstanceService {
       : { ageInDays: null, ageInMonths: null };
 
     const daysPostDelivery = deliveryVisit?.actualVisitDate
-      ? Math.floor(
-          (visit.actualVisitDate.getTime() - deliveryVisit.actualVisitDate.getTime()) /
-            (24 * 60 * 60 * 1000),
-        )
+      ? diffInDaysOrNull(deliveryVisit.actualVisitDate, visit.actualVisitDate)
       : null;
 
     return { ...ageFields, daysPostDelivery };

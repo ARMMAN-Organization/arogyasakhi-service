@@ -7,8 +7,13 @@
  *  - Early registration: 11 fixed visits, INC1 anchored at DOB+58, chained
  *    every 30 days.
  *  - Late registration: INC1 = registration date itself; additional visit
- *    count = floor((365 - (registrationDate - DOB)) / 30), chained every
- *    30 days from INC1.
+ *    count = round((365 - (registrationDate - DOB)) / 30), chained every
+ *    30 days from INC1. The SRS itself is internally inconsistent here —
+ *    the §3A body text specifies round(), Appendix A.4's table says
+ *    floor() — this pack originally implemented Appendix A.4's floor(),
+ *    which QA (SC-03/SC-04) flagged as producing one fewer visit than
+ *    expected for late registrations. The client (Bharath) confirmed
+ *    round() is the correct reading; changed accordingly.
  *
  * Hard cutoff (BR-12): any visit scheduled beyond DOB+370 is dropped -
  * silently excluded from the output, never marked missed.
@@ -46,7 +51,7 @@ const handler = (input, { dayjs }) => {
     // Late registration: INC1 = registration date itself.
     registrationCategory = 'LATE';
     anchor = reg;
-    additionalVisitCount = Math.floor((365 - daysSinceDob) / 30);
+    additionalVisitCount = Math.round((365 - daysSinceDob) / 30);
   }
 
   const rawVisits = [];
