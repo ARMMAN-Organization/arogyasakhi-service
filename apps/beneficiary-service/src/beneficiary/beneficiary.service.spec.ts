@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { badGateway, encryptPii, type AuthenticatedUser } from '@armman/service-commons';
 import { BeneficiaryService } from './beneficiary.service';
+import type { AuditClient } from './audit.client';
 import type { BeneficiaryRepository } from './beneficiary.repository';
 import type { CreateBeneficiaryInput } from './dto/create-beneficiary.dto';
 import {
@@ -38,6 +39,7 @@ describe('BeneficiaryService', () => {
     findManyFullDetail: jest.fn(),
     findById: jest.fn(),
     findOwnershipById: jest.fn(),
+    findVillageIdById: jest.fn(),
     findByLocalCaseUuid: jest.fn(),
     findDuplicateCandidate: jest.fn(),
     nextUniqueIdSequence: jest.fn(),
@@ -56,6 +58,7 @@ describe('BeneficiaryService', () => {
     upsertRiskConditionSummary: jest.fn(),
     findRiskConditionSummariesByBeneficiaryIds: jest.fn(),
   } as unknown as jest.Mocked<BeneficiaryRepository>;
+  const auditClient = { log: jest.fn() } as unknown as jest.Mocked<AuditClient>;
   let service: BeneficiaryService;
 
   const CALLER_ID = '99999999-9999-9999-9999-999999999999';
@@ -163,11 +166,32 @@ describe('BeneficiaryService', () => {
     isStillbirthOutcomeMock.mockImplementation((outcome) =>
       ['antepartum_still_birth_fresh', 'intrapartum_still_birth_macerated'].includes(outcome),
     );
-    service = new BeneficiaryService(repository);
+    auditClient.log.mockResolvedValue(undefined);
+    service = new BeneficiaryService(repository, auditClient);
   });
 
   afterEach(() => {
     process.env = { ...originalEnv };
+  });
+
+  describe('resolveVillageId', () => {
+    it("returns the case's pii.villageId", async () => {
+      repository.findVillageIdById.mockResolvedValue({ pii: { villageId: 'village-1' } } as never);
+
+      await expect(service.resolveVillageId('ben-1')).resolves.toBe('village-1');
+    });
+
+    it('returns null when villageId itself is null (pii row exists but has no village set)', async () => {
+      repository.findVillageIdById.mockResolvedValue({ pii: { villageId: null } } as never);
+
+      await expect(service.resolveVillageId('ben-1')).resolves.toBeNull();
+    });
+
+    it('returns null when no matching case exists', async () => {
+      repository.findVillageIdById.mockResolvedValue(null);
+
+      await expect(service.resolveVillageId('unknown-id')).resolves.toBeNull();
+    });
   });
 
   describe('applyLmpChange', () => {
@@ -572,6 +596,61 @@ describe('BeneficiaryService', () => {
       expect(repository.closeCase).toHaveBeenCalledWith(beneficiaryId, sakhiId, 'MEDICAL');
     });
 
+    it('writes a BENEFICIARY_STATUS_CLOSED audit entry on success', async () => {
+      repository.findById.mockResolvedValue(caseRow() as never);
+      repository.closeCase.mockResolvedValue(true);
+
+      await service.applyClosure(
+        beneficiaryId,
+        'MEDICAL',
+        caller({ id: sakhiId, roles: ['SAKHI'] }),
+        AUTH_HEADER,
+      );
+
+      expect(auditClient.log).toHaveBeenCalledWith(
+        sakhiId,
+        'BENEFICIARY_STATUS_CLOSED',
+        'BeneficiaryCase',
+        beneficiaryId,
+        expect.objectContaining({ currentStatus: 'ACTIVE' }),
+        expect.objectContaining({ currentStatus: 'CLOSED', reasonCode: 'MEDICAL' }),
+        AUTH_HEADER,
+      );
+    });
+
+    it('does not fail the closure when the audit write rejects', async () => {
+      repository.findById.mockResolvedValue(caseRow() as never);
+      repository.closeCase.mockResolvedValue(true);
+      auditClient.log.mockRejectedValueOnce(new Error('audit-service unreachable'));
+
+      const result = await service.applyClosure(
+        beneficiaryId,
+        'MEDICAL',
+        caller({ id: sakhiId, roles: ['SAKHI'] }),
+        AUTH_HEADER,
+      );
+
+      expect(result).toMatchObject({ id: beneficiaryId });
+    });
+
+    it('does not write an audit entry when the case is already CLOSED (idempotent no-op)', async () => {
+      repository.findById.mockResolvedValue(
+        caseRow({
+          currentStatus: 'CLOSED',
+          statusHistory: [{ toStatus: 'CLOSED', reasonCode: 'MEDICAL' }],
+        }) as never,
+      );
+
+      await service.applyClosure(
+        beneficiaryId,
+        'MEDICAL',
+        caller({ id: sakhiId, roles: ['SAKHI'] }),
+        AUTH_HEADER,
+      );
+
+      expect(auditClient.log).not.toHaveBeenCalled();
+    });
+
     it('returns the closed case via getById', async () => {
       repository.findById.mockResolvedValue(caseRow() as never);
       repository.closeCase.mockResolvedValue(true);
@@ -872,6 +951,26 @@ describe('BeneficiaryService', () => {
       expect(result).toMatchObject({ id: beneficiaryId });
     });
 
+    it('writes a BENEFICIARY_STATUS_REACTIVATED audit entry on success', async () => {
+      repository.findById
+        .mockResolvedValueOnce(caseRow() as never)
+        .mockResolvedValueOnce(caseRow() as never);
+      repository.reactivateCase.mockResolvedValue(true);
+      const admin = caller({ id: supervisorId, roles: ['ADMIN'] });
+
+      await service.reactivateCase(beneficiaryId, supervisorId, admin, AUTH_HEADER);
+
+      expect(auditClient.log).toHaveBeenCalledWith(
+        supervisorId,
+        'BENEFICIARY_STATUS_REACTIVATED',
+        'BeneficiaryCase',
+        beneficiaryId,
+        expect.objectContaining({ currentStatus: 'CLOSED' }),
+        expect.objectContaining({ currentStatus: 'ACTIVE' }),
+        AUTH_HEADER,
+      );
+    });
+
     it('404s on an unknown beneficiary id', async () => {
       repository.findById.mockResolvedValue(null);
 
@@ -976,6 +1075,26 @@ describe('BeneficiaryService', () => {
 
       expect(repository.markPendingTransfer).toHaveBeenCalledWith(beneficiaryId, CALLER_ID);
       expect(result).toMatchObject({ id: beneficiaryId });
+    });
+
+    it('writes a BENEFICIARY_STATUS_PENDING_TRANSFER audit entry on success', async () => {
+      repository.findById
+        .mockResolvedValueOnce(caseRow() as never)
+        .mockResolvedValueOnce(caseRow({ currentStatus: 'PENDING_TRANSFER' }) as never);
+      repository.markPendingTransfer.mockResolvedValue(true);
+      const admin = caller({ roles: ['ADMIN'] });
+
+      await service.applyTransfer(beneficiaryId, admin, AUTH_HEADER);
+
+      expect(auditClient.log).toHaveBeenCalledWith(
+        admin.id,
+        'BENEFICIARY_STATUS_PENDING_TRANSFER',
+        'BeneficiaryCase',
+        beneficiaryId,
+        expect.objectContaining({ currentStatus: 'ACTIVE' }),
+        expect.objectContaining({ currentStatus: 'PENDING_TRANSFER' }),
+        AUTH_HEADER,
+      );
     });
 
     it('404s on an unknown beneficiary id', async () => {

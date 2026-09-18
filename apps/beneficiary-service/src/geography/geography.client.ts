@@ -199,6 +199,45 @@ export async function resolveVillageNames(
 }
 
 /**
+ * Resolves a geography unit's full ancestor chain via auth-service's
+ * `GET /geography-units/:id/ancestors`, called through the gateway (per
+ * AUTH_SERVICE_BASE_URL) so the gateway can verify `authorizationHeader` —
+ * the original caller's own bearer token, forwarded unchanged. Returns the
+ * chain ordered from `geographyUnitId` itself up to STATE. Used by
+ * requireGeographyScope (service-commons) as the `resolveAncestorChain`
+ * parameter for beneficiary-service's own geography-scoped routes — mirrors
+ * visit-form-service's identical function (no cross-service imports, per
+ * the forklift rule), except this file's own badGateway convention for a
+ * non-404 upstream failure, matching every other function here.
+ */
+export async function getAncestorChain(
+  geographyUnitId: string,
+  authorizationHeader: string,
+): Promise<GeographyUnit[]> {
+  let res: Response;
+  try {
+    res = await fetch(
+      `${AUTH_SERVICE_BASE_URL}/api/v1/geography-units/${geographyUnitId}/ancestors`,
+      {
+        headers: { Authorization: authorizationHeader },
+      },
+    );
+  } catch {
+    throw badGateway('Unable to resolve the geography chain — the auth service is unreachable.');
+  }
+
+  if (res.status === 404) {
+    throw unprocessable('The target geography unit was not found.');
+  }
+  if (!res.ok) {
+    throw badGateway('Unable to resolve the geography chain — the auth service returned an error.');
+  }
+
+  const body = (await res.json()) as { data: GeographyUnit[] };
+  return body.data;
+}
+
+/**
  * Resolves geographyUnitId -> {name, parentId} for every PADA-level unit, via
  * auth-service's existing `GET /geography-units?geoType=PADA`. Used by the
  * pada-breakdown widget to enrich each padaId with a display-ready padaName

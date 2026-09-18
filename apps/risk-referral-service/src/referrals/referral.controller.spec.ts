@@ -3,9 +3,11 @@
  * ./config/app-config, which calls process.exit(1) at module-load time if
  * DATABASE_URL isn't a valid URL — so it must be set before the module
  * under test is required (see riskCondition.controller.spec.ts for the
- * same workaround).
+ * same workaround). Same for INTERNAL_HEADER_SECRET: trust-gateway-identity.ts
+ * reads it once at module load and fails closed (401) if unset.
  */
 process.env.DATABASE_URL ??= 'postgresql://user:pass@localhost:5432/test';
+process.env.INTERNAL_HEADER_SECRET ??= 'test-internal-secret-at-least-32-chars-long';
 
 import express from 'express';
 import type { AddressInfo } from 'node:net';
@@ -17,6 +19,8 @@ import {
   notFound,
   TRUSTED_USER_ID_HEADER,
   TRUSTED_ROLES_HEADER,
+  TRUSTED_SIGNATURE_HEADER,
+  signInternalIdentity,
 } from '@armman/service-commons';
 import { createReferralRouter } from './referral.controller';
 import type { ReferralService } from './referral.service';
@@ -55,20 +59,28 @@ describe('referral routes', () => {
     jest.resetAllMocks();
   });
 
-  function sakhiHeaders() {
+  /** Signed trusted-identity headers, matching what verifyAndForwardIdentity
+   * sets on a real proxied request — trustGatewayIdentity rejects an
+   * unsigned/mismatched header set (see the note at the top of this file). */
+  function trustedHeaders(userId: string, roles: string) {
+    const fields = { userId, roles, projectId: '', geographyUnitId: '' };
     return {
-      [TRUSTED_USER_ID_HEADER]: 'sakhi-user-1',
-      [TRUSTED_ROLES_HEADER]: 'SAKHI',
+      [TRUSTED_USER_ID_HEADER]: fields.userId,
+      [TRUSTED_ROLES_HEADER]: fields.roles,
+      [TRUSTED_SIGNATURE_HEADER]: signInternalIdentity(
+        fields,
+        process.env.INTERNAL_HEADER_SECRET as string,
+      ),
       authorization: 'Bearer test-token',
     };
   }
 
+  function sakhiHeaders() {
+    return trustedHeaders('sakhi-user-1', 'SAKHI');
+  }
+
   function supervisorHeaders() {
-    return {
-      [TRUSTED_USER_ID_HEADER]: 'supervisor-user-1',
-      [TRUSTED_ROLES_HEADER]: 'SUPERVISOR',
-      authorization: 'Bearer test-token',
-    };
+    return trustedHeaders('supervisor-user-1', 'SUPERVISOR');
   }
 
   /** Parses a fetch Response's JSON body as the standard success/failure envelope. */

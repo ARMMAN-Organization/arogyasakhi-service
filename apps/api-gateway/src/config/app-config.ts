@@ -39,6 +39,15 @@ const schema = z.object({
     .min(1)
     .transform((v) => v.replace(/\\n/g, '\n')),
 
+  // HMAC-SHA256 shared secret the gateway signs the trusted-identity headers
+  // with (see @armman/service-commons' internal-identity-signature.ts) —
+  // every downstream service must be provisioned with this same value
+  // (their own INTERNAL_HEADER_SECRET) so trustGatewayIdentity can verify a
+  // header set genuinely came from this gateway. Required, not optional —
+  // downstream services fail-closed (401) with no signature to check
+  // against if this is ever missing on either side.
+  INTERNAL_HEADER_SECRET: z.string().min(32),
+
   // Downstream service base URLs. The gateway reaches every service ONLY via
   // these URLs (HTTP) — it never imports another service's code. In production
   // these become internal DNS names (e.g. http://auth-service.internal:3002).

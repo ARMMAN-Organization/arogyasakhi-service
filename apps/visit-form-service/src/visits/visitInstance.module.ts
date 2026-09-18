@@ -1,5 +1,6 @@
 import { createDocumentedRouter, type DocumentedRouter } from '../app.module';
 import type { PrismaService } from '../prisma/prisma.service';
+import { AuditClient } from '../forms/audit.client';
 import { VisitInstanceRepository } from './visitInstance.repository';
 import { VisitInstanceService } from './visitInstance.service';
 import { registerVisitInstanceRoutes } from './visitInstance.routes';
@@ -10,7 +11,7 @@ import { registerVisitInstanceRoutes } from './visitInstance.routes';
  */
 export function createVisitInstanceModule(prisma: PrismaService): DocumentedRouter {
   const repository = new VisitInstanceRepository(prisma);
-  const service = new VisitInstanceService(repository);
+  const service = new VisitInstanceService(repository, new AuditClient());
   const doc = createDocumentedRouter();
   registerVisitInstanceRoutes(doc, service);
   return doc;

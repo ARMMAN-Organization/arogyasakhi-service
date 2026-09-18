@@ -2,9 +2,13 @@
  * app.module.ts imports ./config/app-config, which calls process.exit(1) at
  * module-load time if DATABASE_URL isn't a valid URL — so it must be set
  * before that module is required (see approval-service's
- * lmp-change-request.routes.spec.ts for the same workaround).
+ * lmp-change-request.routes.spec.ts for the same workaround). Same for
+ * INTERNAL_HEADER_SECRET: trust-gateway-identity.ts reads it once at module
+ * load and fails closed (401) if unset — must be set before
+ * createDocumentedRouter/registerFormRoutes below pull that module in.
  */
 process.env.DATABASE_URL ??= 'postgresql://user:pass@localhost:5432/test';
+process.env.INTERNAL_HEADER_SECRET ??= 'test-internal-secret-at-least-32-chars-long';
 
 import express from 'express';
 import type { AddressInfo } from 'node:net';
@@ -14,6 +18,8 @@ import {
   errorHandler,
   TRUSTED_USER_ID_HEADER,
   TRUSTED_ROLES_HEADER,
+  TRUSTED_SIGNATURE_HEADER,
+  signInternalIdentity,
 } from '@armman/service-commons';
 import { registerFormRoutes } from './form.routes';
 import type { FormService } from './form.service';
@@ -55,20 +61,30 @@ describe('form routes — PATCH /form-submissions/:id/answers', () => {
     jest.resetAllMocks();
   });
 
-  function sakhiHeaders() {
+  /** Builds a signed set of trusted-identity headers, matching what
+   * verifyAndForwardIdentity would set on a real proxied request —
+   * trustGatewayIdentity now rejects any request whose signature doesn't
+   * verify against INTERNAL_HEADER_SECRET (see the note at the top of this
+   * file), so a hand-built header set must be signed the same way. */
+  function trustedHeaders(userId: string, roles: string) {
+    const fields = { userId, roles, projectId: '', geographyUnitId: '' };
     return {
-      [TRUSTED_USER_ID_HEADER]: 'sakhi-user-1',
-      [TRUSTED_ROLES_HEADER]: 'SAKHI',
+      [TRUSTED_USER_ID_HEADER]: fields.userId,
+      [TRUSTED_ROLES_HEADER]: fields.roles,
+      [TRUSTED_SIGNATURE_HEADER]: signInternalIdentity(
+        fields,
+        process.env.INTERNAL_HEADER_SECRET as string,
+      ),
       authorization: 'Bearer test-token',
     };
   }
 
+  function sakhiHeaders() {
+    return trustedHeaders('sakhi-user-1', 'SAKHI');
+  }
+
   function supervisorHeaders() {
-    return {
-      [TRUSTED_USER_ID_HEADER]: 'supervisor-user-1',
-      [TRUSTED_ROLES_HEADER]: 'SUPERVISOR',
-      authorization: 'Bearer test-token',
-    };
+    return trustedHeaders('supervisor-user-1', 'SUPERVISOR');
   }
 
   async function jsonBody(

@@ -2,8 +2,10 @@
  * `routes.ts` imports `appConfig`, which calls `process.exit(1)` at
  * module-load time if `JWT_PUBLIC_KEY` isn't set — true in CI, unlike local
  * dev's `.env` — so it must be set before the module under test is required.
+ * Same for `INTERNAL_HEADER_SECRET`, now also required by that schema.
  */
 process.env.JWT_PUBLIC_KEY ??= 'test-key';
+process.env.INTERNAL_HEADER_SECRET ??= 'test-internal-secret-at-least-32-chars-long';
 
 const { SERVICE_ROUTES } = require('./routes') as typeof import('./routes');
 const appConfig = require('../config/app-config')

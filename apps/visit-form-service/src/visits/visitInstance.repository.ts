@@ -132,13 +132,13 @@ export class VisitInstanceRepository {
     scheduleId: string,
     missedStatusLookupValueId: string,
     changedByUserId: string,
-  ): Promise<number> {
+  ): Promise<{ visitId: string; fromStatusLookupValueId: string | null }[]> {
     return this.prisma.$transaction(async (tx) => {
       const targets = await tx.visitInstance.findMany({
         where: { scheduleId, isDeleted: false, completedAt: null },
         select: { id: true, statusLookupValueId: true },
       });
-      if (targets.length === 0) return 0;
+      if (targets.length === 0) return [];
 
       await tx.visitInstance.updateMany({
         where: { id: { in: targets.map((t) => t.id) } },
@@ -155,7 +155,13 @@ export class VisitInstanceRepository {
         })),
       });
 
-      return targets.length;
+      // Returned so the caller (missedVisit.job.ts) can write one
+      // BENEFICIARY-audit-log entry per transitioned instance — a bare count
+      // gives it no entityId to log against.
+      return targets.map((t) => ({
+        visitId: t.id,
+        fromStatusLookupValueId: t.statusLookupValueId,
+      }));
     });
   }
 

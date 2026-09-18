@@ -433,13 +433,16 @@ describe('VisitInstanceRepository', () => {
       ]);
       const txRepository = new VisitInstanceRepository({ $transaction } as never);
 
-      const count = await txRepository.markMissedByScheduleId(
+      const result = await txRepository.markMissedByScheduleId(
         'schedule-1',
         'missed-id',
         'missed-visit-escalation-job',
       );
 
-      expect(count).toBe(2);
+      expect(result).toEqual([
+        { visitId: 'vi-1', fromStatusLookupValueId: 'pending-id' },
+        { visitId: 'vi-2', fromStatusLookupValueId: 'pending-id' },
+      ]);
       expect(txFindMany).toHaveBeenCalledWith({
         where: { scheduleId: 'schedule-1', isDeleted: false, completedAt: null },
         select: { id: true, statusLookupValueId: true },
@@ -468,17 +471,17 @@ describe('VisitInstanceRepository', () => {
       });
     });
 
-    it('does nothing and returns 0 when the schedule has no not-yet-completed instances', async () => {
+    it('does nothing and returns an empty array when the schedule has no not-yet-completed instances', async () => {
       const { $transaction, txUpdateMany, txCreateMany } = buildTxMock([]);
       const txRepository = new VisitInstanceRepository({ $transaction } as never);
 
-      const count = await txRepository.markMissedByScheduleId(
+      const result = await txRepository.markMissedByScheduleId(
         'schedule-1',
         'missed-id',
         'missed-visit-escalation-job',
       );
 
-      expect(count).toBe(0);
+      expect(result).toEqual([]);
       expect(txUpdateMany).not.toHaveBeenCalled();
       expect(txCreateMany).not.toHaveBeenCalled();
     });

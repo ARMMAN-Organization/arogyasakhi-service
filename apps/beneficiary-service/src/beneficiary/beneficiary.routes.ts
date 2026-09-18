@@ -29,12 +29,14 @@ import { setCcvOpeningRiskStateSchema } from './dto/set-ccv-opening-risk-state.d
 import { applyClosureSchema } from './dto/apply-closure.dto';
 import {
   errorResponse,
+  requireGeographyScope,
   requireRoles,
   trustGatewayIdentity,
   validate,
   validateBody,
   type DocumentedRouter,
 } from '../app.module';
+import { getAncestorChain } from '../geography/geography.client';
 
 extendZodWithOpenApi(z);
 
@@ -650,6 +652,16 @@ export function registerBeneficiaryRoutes(doc: DocumentedRouter, service: Benefi
     trustGatewayIdentity,
     requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'SYSTEM'),
     validate(idParamsSchema, 'params'),
+    // Second, independent authorization layer alongside getById's own
+    // sakhiId-roster scoping (SAKHI own case / SUPERVISOR roster via
+    // assertCallerCanTouchCase) — this checks the case's own geography
+    // (villageId) against the caller's assigned geographyUnitId. A SAKHI/
+    // SUPERVISOR whose roster check already passes but whose own geography
+    // doesn't cover this case's village is still denied here. MANAGER/ADMIN/
+    // SYSTEM are unrestricted (see requireGeographyScope's own doc comment).
+    requireGeographyScope(getAncestorChain, (req) =>
+      service.resolveVillageId((req.params as { id: string }).id),
+    ),
     controller.getById,
   );
 

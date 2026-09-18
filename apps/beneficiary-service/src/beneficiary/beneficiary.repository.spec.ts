@@ -402,6 +402,34 @@ describe('BeneficiaryRepository', () => {
     });
   });
 
+  describe('findVillageIdById', () => {
+    it('selects only pii.villageId, not the full enriched projection', async () => {
+      const findFirst = jest.fn().mockResolvedValue({ pii: { villageId: 'village-1' } });
+      const txRepository = new BeneficiaryRepository({
+        beneficiaryCase: { findFirst },
+      } as never);
+
+      const result = await txRepository.findVillageIdById('ben-1');
+
+      expect(findFirst).toHaveBeenCalledWith({
+        where: { id: 'ben-1', isDeleted: false },
+        select: { pii: { select: { villageId: true } } },
+      });
+      expect(result).toEqual({ pii: { villageId: 'village-1' } });
+    });
+
+    it('returns null when no matching case exists', async () => {
+      const findFirst = jest.fn().mockResolvedValue(null);
+      const txRepository = new BeneficiaryRepository({
+        beneficiaryCase: { findFirst },
+      } as never);
+
+      const result = await txRepository.findVillageIdById('unknown-id');
+
+      expect(result).toBeNull();
+    });
+  });
+
   describe('findMotherIdsWithEddOnOrBefore', () => {
     it('queries MOTHER/ACTIVE/ANC-phase beneficiaries with eddDate <= cutoffDate', async () => {
       findMany.mockResolvedValue([]);

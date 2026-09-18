@@ -46,14 +46,45 @@ const ALLOWED_ACTION_PREFIXES: Record<string, readonly string[]> = {
   // card's decide endpoint is the same requireRoles('SUPERVISOR')-gated
   // POST /quick-response/:cardId/decision, so DATA_RESTORE_* entries are
   // always attributed to the deciding Supervisor, never the Sakhi.
-  SUPERVISOR: ['QUICK_RESPONSE_', 'LMP_CHANGE_', 'DATA_RESTORE_'],
+  //
+  // BENEFICIARY_STATUS_* covers beneficiary-service's status-change audit
+  // entries (close/transfer/reactivate — see beneficiary.service.ts's
+  // applyClosure/applyTransfer/reactivateCase) and VISIT_STATUS_ covers
+  // visit-form-service's updateStatus audit entry, both forwarding the
+  // deciding caller's own Authorization header the same way as
+  // FORM_ANSWER_EDIT/LMP_CHANGE_ above.
+  //
+  // KNOWN GAP: /beneficiaries/:id/close, /transfer, /reactivate, and
+  // PATCH /visits/:id are all also reachable by a MANAGER caller (see
+  // beneficiary.routes.ts / visitInstance.routes.ts), but this route's own
+  // role gate (auditLog.routes.ts POST /audit) only allows
+  // ADMIN/SUPERVISOR/SAKHI — MANAGER has no entry below and is not ADMIN, so
+  // a MANAGER-performed status change's audit write 403s here. The caller
+  // swallows that failure (logs and continues) rather than failing the
+  // status change itself, so this is a silent audit-trail gap for MANAGER
+  // specifically, not a functional break — tracked as a follow-up; closing
+  // it means widening POST /audit's own requireRoles to include MANAGER.
+  SUPERVISOR: [
+    'QUICK_RESPONSE_',
+    'LMP_CHANGE_',
+    'DATA_RESTORE_',
+    'BENEFICIARY_STATUS_',
+    'VISIT_STATUS_',
+  ],
   // visit-form-service will forward a Sakhi's own form answer edit audit
   // entry the same way. The prefix is written without a trailing underscore
   // (deliberately just 'FORM_ANSWER_EDIT') because the sibling task that adds
   // the actual caller logs the literal action 'FORM_ANSWER_EDIT' with no
   // suffix (see the plan's Task 5) — a trailing-underscore prefix would not
   // match that literal and would 403 the caller this allowance exists for.
-  SAKHI: ['FORM_ANSWER_EDIT'],
+  SAKHI: ['FORM_ANSWER_EDIT', 'BENEFICIARY_STATUS_', 'VISIT_STATUS_'],
+  // missedVisit.job.ts's cron-driven MISSED transition — the only
+  // SYSTEM-authenticated caller of this route today (see
+  // visitInstance.repository.ts's markMissedByScheduleId). Scoped to the one
+  // literal action it writes, not a broad VISIT_STATUS_ prefix, since a
+  // machine identity has no "own decisions" boundary to fall back on the way
+  // caller.id does for a human role.
+  SYSTEM: ['VISIT_STATUS_MISSED'],
 };
 
 // entityType a non-ADMIN caller must supply for a given action prefix —
@@ -69,6 +100,13 @@ const REQUIRED_ENTITY_TYPE_BY_ACTION_PREFIX: Record<string, string> = {
   FORM_ANSWER_EDIT: 'FormSubmission',
   LMP_CHANGE_: 'MotherCaseDetails',
   DATA_RESTORE_: 'User',
+  BENEFICIARY_STATUS_: 'BeneficiaryCase',
+  VISIT_STATUS_: 'VisitInstance',
+  // Keyed on the exact literal SYSTEM's allowlist uses (not the 'VISIT_STATUS_'
+  // prefix above) — matchedPrefix from ALLOWED_ACTION_PREFIXES is looked up
+  // here verbatim, so a SYSTEM-scoped exact-string prefix needs its own entry
+  // or the entityType check above is silently skipped for that role.
+  VISIT_STATUS_MISSED: 'VisitInstance',
 };
 
 /**

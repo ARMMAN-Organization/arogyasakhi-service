@@ -9,6 +9,7 @@ import {
 } from '../lookups/lookup.client';
 import { getActiveTransferWindow } from '../escalations/escalation.client';
 import { findBeneficiaryOwnership, findBeneficiaryById } from '../beneficiaries/beneficiary.client';
+import type { AuditClient } from '../forms/audit.client';
 
 jest.mock('../sakhis/sakhi.client');
 jest.mock('../lookups/lookup.client');
@@ -35,6 +36,7 @@ describe('VisitInstanceService', () => {
     findDeliveryVisit: jest.fn(),
     countCompletedAncVisits: jest.fn(),
   } as unknown as jest.Mocked<VisitInstanceRepository>;
+  const auditClient = { log: jest.fn() } as unknown as jest.Mocked<AuditClient>;
   let service: VisitInstanceService;
 
   const AUTH_HEADER = 'Bearer test-token';
@@ -54,7 +56,8 @@ describe('VisitInstanceService', () => {
 
   beforeEach(() => {
     jest.resetAllMocks();
-    service = new VisitInstanceService(repository);
+    auditClient.log.mockResolvedValue(undefined);
+    service = new VisitInstanceService(repository, auditClient);
   });
 
   describe('list', () => {
@@ -561,6 +564,49 @@ describe('VisitInstanceService', () => {
         expect.objectContaining({ completedAt: expect.any(Date) }),
         SAKHI_ID,
       );
+    });
+
+    it('writes a VISIT_STATUS_ audit entry on a successful status change', async () => {
+      repository.findById.mockResolvedValueOnce(sampleRow).mockResolvedValueOnce(sampleRow);
+      resolveVisitStatusCodeMock.mockImplementation((id) =>
+        Promise.resolve(id === COMPLETED_ID ? 'COMPLETED' : 'PENDING'),
+      );
+      repository.updateStatus.mockResolvedValue(true);
+
+      await service.updateStatus(
+        sampleRow.id,
+        { statusLookupValueId: COMPLETED_ID },
+        { id: SAKHI_ID, roles: ['SAKHI'] },
+        AUTH_HEADER,
+      );
+
+      expect(auditClient.log).toHaveBeenCalledWith(
+        SAKHI_ID,
+        'VISIT_STATUS_COMPLETED',
+        'VisitInstance',
+        sampleRow.id,
+        expect.objectContaining({ statusCode: 'PENDING' }),
+        expect.objectContaining({ statusCode: 'COMPLETED' }),
+        AUTH_HEADER,
+      );
+    });
+
+    it('does not fail the status update when the audit write rejects', async () => {
+      repository.findById.mockResolvedValueOnce(sampleRow).mockResolvedValueOnce(sampleRow);
+      resolveVisitStatusCodeMock.mockImplementation((id) =>
+        Promise.resolve(id === COMPLETED_ID ? 'COMPLETED' : 'PENDING'),
+      );
+      repository.updateStatus.mockResolvedValue(true);
+      auditClient.log.mockRejectedValueOnce(new Error('audit-service unreachable'));
+
+      await expect(
+        service.updateStatus(
+          sampleRow.id,
+          { statusLookupValueId: COMPLETED_ID },
+          { id: SAKHI_ID, roles: ['SAKHI'] },
+          AUTH_HEADER,
+        ),
+      ).resolves.toBeDefined();
     });
 
     it('leaves completedAt null when the new status resolves to MISSED', async () => {

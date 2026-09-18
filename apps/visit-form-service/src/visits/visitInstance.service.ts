@@ -17,6 +17,7 @@ import { assertCallerOwnsBeneficiary } from '../beneficiaries/beneficiaryOwnersh
 import { findBeneficiaryById } from '../beneficiaries/beneficiary.client';
 import { resolveFormCodeForVisitType } from '../forms/visit-code-form-map';
 import { EMPTY_VISIT_HISTORY_VITALS, extractVisitHistoryVitals } from '../forms/vitalsExtractor';
+import { AuditClient } from '../forms/audit.client';
 
 /** The calling principal's own identity, as carried on their trusted-identity headers. */
 export interface CallerIdentity {
@@ -119,7 +120,10 @@ async function resolveCallerScopingWithQuery(
 
 /** Visit instance domain logic. Data access is delegated to the repository. */
 export class VisitInstanceService {
-  constructor(private readonly repository: VisitInstanceRepository) {}
+  constructor(
+    private readonly repository: VisitInstanceRepository,
+    private readonly auditClient: AuditClient,
+  ) {}
 
   /**
    * Cursor-paginated visit list, scoped per the caller's own role (SAKHI
@@ -351,6 +355,20 @@ export class VisitInstanceService {
       // conditional update — same outcome as the check above, just caught a
       // beat later instead of trusting a stale read (mirrors reactivateCase).
       throw conflict('This visit was already updated by another request.');
+    }
+
+    try {
+      await this.auditClient.log(
+        caller.id,
+        `VISIT_STATUS_${toStatusCode ?? 'UNKNOWN'}`,
+        'VisitInstance',
+        id,
+        { statusLookupValueId: existing.statusLookupValueId, statusCode: fromStatusCode },
+        { statusLookupValueId: dto.statusLookupValueId, statusCode: toStatusCode },
+        authorizationHeader,
+      );
+    } catch (err) {
+      console.error(`Visit ${id}'s status was updated but writing the audit entry failed:`, err);
     }
 
     return this.repository.findById(id);

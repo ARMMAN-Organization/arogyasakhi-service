@@ -37,6 +37,7 @@ import {
   resolvePadaUnits,
   resolveVillageNames,
 } from '../geography/geography.client';
+import { AuditClient } from './audit.client';
 import {
   resolveLookupIdsByValueCode,
   resolveLookupValues,
@@ -389,7 +390,26 @@ async function resolveSakhiScoping(
 
 /** Business logic for the beneficiary enrollment lifecycle. */
 export class BeneficiaryService {
-  constructor(private readonly repository: BeneficiaryRepository) {}
+  constructor(
+    private readonly repository: BeneficiaryRepository,
+    private readonly auditClient: AuditClient,
+  ) {}
+
+  /**
+   * Bare villageId for one case, or `null` when the case doesn't exist —
+   * used by requireGeographyScope (service-commons) as the
+   * `resolveTargetGeographyId` parameter for GET /beneficiaries/:id, called
+   * from route middleware before this class's own getById runs. Deliberately
+   * returns `null` (not throwing 404) on a missing case: requireGeographyScope
+   * treats a null target as "nothing to scope against," and getById's own
+   * findById will still 404 the request properly moments later — this
+   * method's only job is resolving the field, not re-deciding what a missing
+   * case means for the response.
+   */
+  async resolveVillageId(id: string): Promise<string | null> {
+    const found = await this.repository.findVillageIdById(id);
+    return found?.pii.villageId ?? null;
+  }
 
   /**
    * Lists beneficiary cases per SRS FR-S-9.2 / HLD's filter set, scoped by
@@ -1168,6 +1188,23 @@ export class BeneficiaryService {
       throw conflict('Unable to close this beneficiary case.');
     }
 
+    try {
+      await this.auditClient.log(
+        caller.id,
+        'BENEFICIARY_STATUS_CLOSED',
+        'BeneficiaryCase',
+        beneficiaryId,
+        { currentStatus: existing.currentStatus, reasonCode: null },
+        { currentStatus: 'CLOSED', reasonCode },
+        authorizationHeader,
+      );
+    } catch (err) {
+      console.error(
+        `Beneficiary case ${beneficiaryId} was closed but writing the audit entry failed:`,
+        err,
+      );
+    }
+
     return this.projectCase(beneficiaryId, authorizationHeader);
   }
 
@@ -1198,6 +1235,23 @@ export class BeneficiaryService {
       // conditional update — same outcome as the check above, just caught a
       // beat later instead of trusting a stale read (mirrors reactivateCase).
       throw conflict('Cannot transfer a CLOSED beneficiary case.');
+    }
+
+    try {
+      await this.auditClient.log(
+        caller.id,
+        'BENEFICIARY_STATUS_PENDING_TRANSFER',
+        'BeneficiaryCase',
+        beneficiaryId,
+        { currentStatus: existing.currentStatus },
+        { currentStatus: 'PENDING_TRANSFER' },
+        authorizationHeader,
+      );
+    } catch (err) {
+      console.error(
+        `Beneficiary case ${beneficiaryId} was marked PENDING_TRANSFER but writing the audit entry failed:`,
+        err,
+      );
     }
 
     return this.projectCase(beneficiaryId, authorizationHeader);
@@ -1233,6 +1287,23 @@ export class BeneficiaryService {
       // conditional update — same outcome as the check above, just caught a
       // beat later instead of trusting a stale read.
       throw conflict(`Cannot reactivate a case with status ${existing.currentStatus}.`);
+    }
+
+    try {
+      await this.auditClient.log(
+        caller.id,
+        'BENEFICIARY_STATUS_REACTIVATED',
+        'BeneficiaryCase',
+        beneficiaryId,
+        { currentStatus: 'CLOSED' },
+        { currentStatus: 'ACTIVE' },
+        authorizationHeader,
+      );
+    } catch (err) {
+      console.error(
+        `Beneficiary case ${beneficiaryId} was reactivated but writing the audit entry failed:`,
+        err,
+      );
     }
 
     return this.projectCase(beneficiaryId, authorizationHeader);
