@@ -31,6 +31,12 @@ export function createClosureController(service: ClosureService) {
       res.json(ok(await service.getById(req.params.id)));
     }),
 
+    getMisSummary: asyncHandler(async (req, res, next) => {
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      res.json(ok(await service.getMisSummary(req.params.id, authorizationHeader)));
+    }),
+
     create: asyncHandler(async (req, res) => {
       const created = await service.create(req.body, req.headers.authorization ?? '');
       res.status(201).json(ok(created));
