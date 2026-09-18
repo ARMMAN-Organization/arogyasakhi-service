@@ -119,10 +119,14 @@ describe('child-registration.json', () => {
     expect(childRegistration.schemaJson).toHaveLength(56);
   });
 
+  // 365 days, matching beneficiary-service's CHILD_AGE_CEILING_DAYS — both
+  // mother-linked and independent registrations share the same 0-12-month
+  // eligibility window (deliberate FR-S-2.3 deviation, confirmed with
+  // product/ARMMAN).
   it('applies the DOB-of-infant date rule (Infant Registration form Q6)', () => {
     expect(byCode.get('date_of_birth_of_infant')?.dateRule).toEqual({
       notFuture: true,
-      maxDaysFrom: { field: 'registrtion_date', days: 183 },
+      maxDaysFrom: { field: 'registrtion_date', days: 365 },
     });
   });
 

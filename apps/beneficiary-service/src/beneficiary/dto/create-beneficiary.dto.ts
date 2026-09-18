@@ -156,13 +156,11 @@ const motherDetailsSchema = z
   });
 
 /**
- * Child eligibility window per FR-S-2.3. The upper bound depends on whether
- * this registration is linked to an enrolled mother's journey (0-6 months /
- * 0-183 days) or independent (0-12 months / 0-365 days) — that depends on
- * `case.motherBeneficiaryId`, a sibling field this schema can't see, so only
- * the future-date check and a same-object-scoped placeholder run here; the
- * mother-linked-vs-independent day-count check runs in the top-level
- * `createBeneficiarySchema.superRefine` below, where both fields are visible.
+ * Child eligibility window (see CHILD_AGE_CEILING_DAYS below). The
+ * future-date check runs here; the day-count ceiling check runs in the
+ * top-level `createBeneficiarySchema.superRefine` below, where
+ * `case.motherBeneficiaryId` (a sibling field this schema can't see) is
+ * visible.
  */
 const childDetailsSchema = z
   .object({
@@ -189,13 +187,17 @@ const childDetailsSchema = z
     }
   });
 
-/** FR-S-2.3 upper bound, in days, on a child's age at registration. */
-const CHILD_AGE_CEILING_DAYS = {
-  /** Registered through an enrolled mother's ANC journey: 0-6 months. */
-  MOTHER_LINKED: 183,
-  /** Registered independently (mother was not ANC-enrolled): 0-12 months. */
-  INDEPENDENT: 365,
-} as const;
+/**
+ * Upper bound, in days, on a child's age at registration — 0-12 months for
+ * both the mother-linked and independent paths. Product/ARMMAN confirmed a
+ * deliberate deviation from FR-S-2.3 (which specifies a tighter 0-183-day
+ * window for mother-linked registrations, matching independent's 0-365
+ * only): both paths now share this single ceiling. Kept as a named
+ * constant even though the two branches merged, so a future re-split (if
+ * product ever wants a tighter mother-linked window again) only touches
+ * this one spot.
+ */
+const CHILD_AGE_CEILING_DAYS = 365;
 
 const consentSchema = z
   .object({
@@ -329,24 +331,20 @@ export const createBeneficiarySchema = z
         });
       }
 
-      // FR-S-2.3: mother-linked registrations get the tighter 0-183-day
-      // window; independent registrations get 0-365. Skipped if dateOfBirth
-      // is already flagged as future-dated by childDetailsSchema above, to
-      // avoid a redundant second issue on the same field.
+      // Both mother-linked and independent registrations share the same
+      // 0-12-month/0-365-day eligibility window (see CHILD_AGE_CEILING_DAYS's
+      // own doc comment). Skipped if dateOfBirth is already flagged as
+      // future-dated by childDetailsSchema above, to avoid a redundant
+      // second issue on the same field.
       if (data.childDetails && data.childDetails.dateOfBirth <= new Date()) {
         const ageDays = Math.floor(
           (Date.now() - data.childDetails.dateOfBirth.getTime()) / (24 * 60 * 60 * 1000),
         );
-        const ceiling = data.case.motherBeneficiaryId
-          ? CHILD_AGE_CEILING_DAYS.MOTHER_LINKED
-          : CHILD_AGE_CEILING_DAYS.INDEPENDENT;
-        if (ageDays > ceiling) {
+        if (ageDays > CHILD_AGE_CEILING_DAYS) {
           ctx.addIssue({
             code: 'custom',
             path: ['childDetails', 'dateOfBirth'],
-            message: data.case.motherBeneficiaryId
-              ? 'child linked to an enrolled mother must be registered within 0-6 months (0-183 days) of birth'
-              : 'child is outside the 0-12 month (0-365 day) independent enrollment eligibility window',
+            message: 'child is outside the 0-12 month (0-365 day) enrollment eligibility window',
           });
         }
       }
