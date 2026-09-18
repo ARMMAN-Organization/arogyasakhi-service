@@ -26,8 +26,22 @@ export function createVisitInstanceController(service: VisitInstanceService) {
       res.json(ok(await service.listByBeneficiaryId(req.params.beneficiaryId)));
     }),
 
+    getBeneficiaryMisSummary: asyncHandler(async (req, res, next) => {
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      res.json(
+        ok(await service.getBeneficiaryMisSummary(req.params.beneficiaryId, authorizationHeader)),
+      );
+    }),
+
     getById: asyncHandler(async (req, res) => {
       res.json(ok(await service.getById(req.params.id)));
+    }),
+
+    getMisSummary: asyncHandler(async (req, res, next) => {
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      res.json(ok(await service.getMisSummary(req.params.id, authorizationHeader)));
     }),
 
     getVisitSummary: asyncHandler(async (req, res, next) => {

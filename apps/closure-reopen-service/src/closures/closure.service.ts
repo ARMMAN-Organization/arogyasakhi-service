@@ -76,6 +76,34 @@ export class ClosureService {
   }
 
   /**
+   * SRS 3C.4.1 linelist field (Infant/Child Closure) — ageAtClosureDays,
+   * derived from closureDate and the beneficiary's own childDateOfBirth
+   * (resolved cross-service via beneficiaryClient, no DB join per the
+   * forklift rule). A separate endpoint from GET /closures/:id rather than
+   * an addition to that response — this is MIS-reporting-only and always
+   * needs the beneficiary round trip, unlike the existing detail read.
+   * Null for a MOTHER-case closure (no childDateOfBirth), not an error.
+   */
+  async getMisSummary(id: string, authorizationHeader: string) {
+    const closure = await this.repository.findById(id);
+    if (!closure) throw notFound('Closure not found.');
+
+    const beneficiary = await this.beneficiaryClient.getById(
+      closure.beneficiaryId,
+      authorizationHeader,
+    );
+    if (!beneficiary.childCaseDetails) {
+      return { ageAtClosureDays: null };
+    }
+
+    const dob = new Date(beneficiary.childCaseDetails.dateOfBirth);
+    const ageAtClosureDays = Math.floor(
+      (closure.closureDate.getTime() - dob.getTime()) / (24 * 60 * 60 * 1000),
+    );
+    return { ageAtClosureDays };
+  }
+
+  /**
    * Idempotent replay: a dropped-connection retry of a Sakhi's closure
    * submission resubmits the same client-generated localClosureUuid. Return
    * the original closure unchanged instead of creating a duplicate row or

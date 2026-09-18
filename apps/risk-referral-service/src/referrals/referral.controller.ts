@@ -286,7 +286,9 @@ export function createReferralRouter(service: ReferralService) {
         '(approval-service resolves ACCOMPANIED_REFERRAL/REFERRAL_INCOMPLETE cards through ' +
         'this), not a general SAKHI-facing read; the app has no existing single-referral-' +
         'read flow. The follow-up summary is always computed, not gated by referral type — ' +
-        'an ACCOMPANIED_REFERRAL caller simply ignores it.',
+        'an ACCOMPANIED_REFERRAL caller simply ignores it. daysBetweenReferralAndFollowup ' +
+        "(SRS 3C.4.1 linelist field) is derived from referralDate and the latest follow-up's " +
+        'own followupDate — null when there is no follow-up yet.',
       tags: ['Referrals'],
       params: referralIdParamsSchema,
       responses: {
@@ -302,6 +304,7 @@ export function createReferralRouter(service: ReferralService) {
                   outcome: z.string().nullable(),
                 })
                 .nullable(),
+              daysBetweenReferralAndFollowup: z.number().int().nullable().openapi({ example: 14 }),
             }),
           ),
         },

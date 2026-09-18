@@ -6,9 +6,14 @@ import type { VisitSummaryQueryInput } from './dto/visit-summary-query.dto';
 import type { VisitHistoryQueryInput } from './dto/visit-history-query.dto';
 import type { ListVisitsQueryInput } from './dto/list-visits.dto';
 import { findSakhiById, listSakhiIdsForSupervisor } from '../sakhis/sakhi.client';
-import { resolveVisitStatusCode, resolveVisitStatusCodes } from '../lookups/lookup.client';
+import {
+  resolveVisitStatusCode,
+  resolveVisitStatusCodes,
+  resolveVisitStatusIdByCode,
+} from '../lookups/lookup.client';
 import { getActiveTransferWindow } from '../escalations/escalation.client';
 import { assertCallerOwnsBeneficiary } from '../beneficiaries/beneficiaryOwnership.guard';
+import { findBeneficiaryById } from '../beneficiaries/beneficiary.client';
 import { resolveFormCodeForVisitType } from '../forms/visit-code-form-map';
 import { EMPTY_VISIT_HISTORY_VITALS, extractVisitHistoryVitals } from '../forms/vitalsExtractor';
 
@@ -17,6 +22,12 @@ export interface CallerIdentity {
   readonly id: string;
   readonly roles: readonly string[];
   readonly projectId?: string | null;
+}
+
+/** ageInDays (floored) and ageInMonths (floored, 30-day months) from two dates. */
+function computeAgeFields(onDate: Date, dob: Date): { ageInDays: number; ageInMonths: number } {
+  const ageInDays = Math.floor((onDate.getTime() - dob.getTime()) / (24 * 60 * 60 * 1000));
+  return { ageInDays, ageInMonths: Math.floor(ageInDays / 30) };
 }
 
 /** MANAGER and ADMIN are unrestricted — same convention as every other service. */
@@ -130,6 +141,25 @@ export class VisitInstanceService {
   }
 
   /**
+   * SRS 3C.4.1 linelist field (Delivery Form) — completed4PlusAnc: whether
+   * the beneficiary has 4 or more COMPLETED ANC-family visits
+   * (ANC/ANC_HR/ANC_POST_EDD). A beneficiary-level fact (asked once, at
+   * delivery time) rather than a per-visit one — unlike getMisSummary's
+   * ageInDays/daysPostDelivery, which are properties of one specific visit.
+   */
+  async getBeneficiaryMisSummary(beneficiaryId: string, authorizationHeader: string) {
+    const completedStatusLookupValueId = await resolveVisitStatusIdByCode(
+      'COMPLETED',
+      authorizationHeader,
+    );
+    const completedAncCount = await this.repository.countCompletedAncVisits(
+      beneficiaryId,
+      completedStatusLookupValueId,
+    );
+    return { completed4PlusAnc: completedAncCount >= 4 };
+  }
+
+  /**
    * A single visit's detail — added for Quick Response's card-enrichment
    * endpoint (approval-service resolves REFERRAL_INCOMPLETE cards' "visit
    * reference" through this), not a general SAKHI-facing read; the app has
@@ -139,6 +169,57 @@ export class VisitInstanceService {
     const visit = await this.repository.findById(id);
     if (!visit) throw notFound('Visit instance not found.');
     return visit;
+  }
+
+  /**
+   * SRS 3C.4.1 linelist fields (Neonatal Visit / Infant Visit) — ageInDays
+   * and ageInMonths, derived from actualVisitDate and the beneficiary's own
+   * childDateOfBirth (owned by beneficiary-service, no cross-service DB
+   * join per the forklift rule — resolved via findBeneficiaryById instead).
+   * Deliberately a separate endpoint from GET /visits/:id rather than
+   * added to that response: this is MIS-reporting-only, GET /visits/:id
+   * already has its own internal contract (Quick Response card
+   * enrichment) that shouldn't grow a mandatory beneficiary-service round
+   * trip it doesn't need.
+   *
+   * Both age fields are null — not an error — whenever age can't be
+   * resolved (visit not yet completed, a MOTHER-case visit with no
+   * childDateOfBirth, or the beneficiary not found): "unknown" is a valid
+   * report value here, unlike a hard failure.
+   *
+   * daysPostDelivery (SRS 3C.4.1, PP Visit linelist) is also included here
+   * rather than a third endpoint — it's the same "one derived field per
+   * visit" shape, computed from this visit's own actualVisitDate and the
+   * beneficiary's completed DELIVERY visit's actualVisitDate (there is no
+   * dedicated typed delivery-date column yet; see
+   * VisitInstanceRepository.findDeliveryVisit's doc comment). Null when
+   * either date is unavailable.
+   */
+  async getMisSummary(id: string, authorizationHeader: string) {
+    const visit = await this.repository.findById(id);
+    if (!visit) throw notFound('Visit instance not found.');
+
+    if (!visit.actualVisitDate) {
+      return { ageInDays: null, ageInMonths: null, daysPostDelivery: null };
+    }
+
+    const [beneficiary, deliveryVisit] = await Promise.all([
+      findBeneficiaryById(visit.beneficiaryId, authorizationHeader),
+      this.repository.findDeliveryVisit(visit.beneficiaryId),
+    ]);
+
+    const ageFields = beneficiary?.childDateOfBirth
+      ? computeAgeFields(visit.actualVisitDate, new Date(beneficiary.childDateOfBirth))
+      : { ageInDays: null, ageInMonths: null };
+
+    const daysPostDelivery = deliveryVisit?.actualVisitDate
+      ? Math.floor(
+          (visit.actualVisitDate.getTime() - deliveryVisit.actualVisitDate.getTime()) /
+            (24 * 60 * 60 * 1000),
+        )
+      : null;
+
+    return { ...ageFields, daysPostDelivery };
   }
 
   /**

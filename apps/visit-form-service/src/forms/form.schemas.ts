@@ -74,15 +74,46 @@ export const formSubmissionSchema = z.object({
   validationStatus: z.enum(['VALID', 'INVALID', 'WARNING']).openapi({ example: 'VALID' }),
   createdAt: z.string().datetime().openapi({ example: '2026-07-20T10:15:00.000Z' }),
   updatedAt: z.string().datetime().openapi({ example: '2026-07-20T10:15:00.000Z' }),
-  childBeneficiaryIds: z
-    .array(z.string().uuid())
+  childBeneficiaries: z
+    .array(
+      z.object({
+        birthOrder: z.number().int().openapi({
+          description: '1-based DELIVERY_VISIT child slot (1 = child1, 2 = child2, 3 = child3).',
+          example: 1,
+        }),
+        localChildId: z
+          .string()
+          .nullable()
+          .openapi({
+            description:
+              "The mobile client's own identifier for this birth slot, echoed back from " +
+              "that slot's childN_local_id in the submission (CR-041 item 2.4) — lets an " +
+              'offline-first client match this beneficiaryId to the local placeholder ' +
+              'record it already created before syncing. Null if the client sent nothing ' +
+              'for this slot.',
+            example: 'device-abc-child1',
+          }),
+        beneficiaryId: z.string().uuid().openapi({
+          description: 'The server-assigned CHILD beneficiary case id for this slot.',
+          example: '34197cd7-7a54-4e7f-885c-f297313b9e81',
+        }),
+      }),
+    )
     .optional()
     .openapi({
       description:
-        'Ids of the CHILD beneficiary cases auto-created from this submission, in ' +
-        'child1/child2/child3 order — present only for a DELIVERY_VISIT submission ' +
-        'with at least one live birth. Omitted (not an empty array) otherwise.',
-      example: ['34197cd7-7a54-4e7f-885c-f297313b9e81'],
+        'The CHILD beneficiary cases auto-created from this submission, one entry per ' +
+        'birth slot that actually resulted in a created case — present only for a ' +
+        'DELIVERY_VISIT submission with at least one live birth. A stillborn or ' +
+        'otherwise-failed slot has no entry at all (not a null-beneficiaryId entry). ' +
+        'Omitted entirely (not an empty array) when no child case was created.',
+      example: [
+        {
+          birthOrder: 1,
+          localChildId: 'device-abc-child1',
+          beneficiaryId: '34197cd7-7a54-4e7f-885c-f297313b9e81',
+        },
+      ],
     }),
   stageEducationContent: z
     .array(
@@ -128,7 +159,7 @@ export const formSubmissionSchema = z.object({
         'this submission — e.g. Danger Signs on every ANC visit, POSTPARTUM Counselling on ' +
         'every PP visit, Neonatal Care on NN1/NN2, gestational-week/age-gated content, and ' +
         'pregnancy-loss content on a qualifying closure or delivery outcome. Always an ' +
-        "array (possibly empty) once present — distinct from childBeneficiaryIds's " +
+        "array (possibly empty) once present — distinct from childBeneficiaries's " +
         '"omit if empty" convention. Independent of risk-referral-service\'s risk-flag-' +
         'triggered educationContent (GET /beneficiaries/:id/risk) — see ' +
         "healthEducationStage.resolver.ts's own doc comment for why these are two " +

@@ -837,8 +837,8 @@ describe('ReferralService', () => {
   });
 
   describe('getById', () => {
-    it('SUPERVISOR in the beneficiary roster: returns the referral merged with its follow-up summary', async () => {
-      const row = referral();
+    it('SUPERVISOR in the beneficiary roster: returns the referral merged with its follow-up summary, plus daysBetweenReferralAndFollowup', async () => {
+      const row = referral({ referralDate: new Date('2026-07-01') });
       const summary = {
         incompleteCount: 2,
         latestFollowup: {
@@ -853,7 +853,7 @@ describe('ReferralService', () => {
 
       await expect(
         service.getById(row.id, caller({ roles: ['SUPERVISOR'] }), AUTH_HEADER),
-      ).resolves.toEqual({ ...row, ...summary });
+      ).resolves.toEqual({ ...row, ...summary, daysBetweenReferralAndFollowup: 14 });
       expect(beneficiaryClient.getById).toHaveBeenCalledWith(row.beneficiaryId, AUTH_HEADER);
       expect(repository.findFollowupSummary).toHaveBeenCalledWith(row.id);
     });
@@ -880,7 +880,7 @@ describe('ReferralService', () => {
 
       await expect(
         service.getById(row.id, caller({ roles: ['MANAGER'] }), AUTH_HEADER),
-      ).resolves.toEqual({ ...row, ...summary });
+      ).resolves.toEqual({ ...row, ...summary, daysBetweenReferralAndFollowup: null });
       expect(beneficiaryClient.getById).toHaveBeenCalledWith(row.beneficiaryId, AUTH_HEADER);
     });
 
@@ -892,6 +892,37 @@ describe('ReferralService', () => {
       ).rejects.toMatchObject({ status: 404 });
       expect(beneficiaryClient.getById).not.toHaveBeenCalled();
       expect(repository.findFollowupSummary).not.toHaveBeenCalled();
+    });
+
+    it('returns null daysBetweenReferralAndFollowup when there is no follow-up yet', async () => {
+      const row = referral({ referralDate: new Date('2026-07-01') });
+      const summary = { incompleteCount: 0, latestFollowup: null };
+      repository.findById.mockResolvedValue(row);
+      beneficiaryClient.getById.mockResolvedValue({ id: row.beneficiaryId, sakhiId: 'sakhi-a' });
+      repository.findFollowupSummary.mockResolvedValue(summary);
+
+      const result = await service.getById(row.id, caller({ roles: ['MANAGER'] }), AUTH_HEADER);
+
+      expect(result.daysBetweenReferralAndFollowup).toBeNull();
+    });
+
+    it('returns null (not negative) daysBetweenReferralAndFollowup if the latest follow-up somehow predates the referral', async () => {
+      const row = referral({ referralDate: new Date('2026-07-15') });
+      const summary = {
+        incompleteCount: 0,
+        latestFollowup: {
+          followupDate: new Date('2026-07-01'),
+          notVisitedReason: null,
+          outcome: null,
+        },
+      };
+      repository.findById.mockResolvedValue(row);
+      beneficiaryClient.getById.mockResolvedValue({ id: row.beneficiaryId, sakhiId: 'sakhi-a' });
+      repository.findFollowupSummary.mockResolvedValue(summary);
+
+      const result = await service.getById(row.id, caller({ roles: ['MANAGER'] }), AUTH_HEADER);
+
+      expect(result.daysBetweenReferralAndFollowup).toBeNull();
     });
   });
 
