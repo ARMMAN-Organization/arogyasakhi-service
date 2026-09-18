@@ -225,10 +225,18 @@ describe('FormService', () => {
       );
 
       expect(geographyClient.getAncestorChain).toHaveBeenCalledWith('pada-1', 'Bearer test-token');
-      // Only geographyUnitId/geoType/name are exposed — parentId/geoCode/status dropped.
+      // geoType/name are exposed, plus parentGeographyUnitId (from parentId) —
+      // geoCode/status still dropped.
       expect(result).toEqual(
         expect.objectContaining({
-          geography: [{ geographyUnitId: 'pada-1', geoType: 'PADA', name: 'Sample Pada' }],
+          geography: [
+            {
+              geographyUnitId: 'pada-1',
+              geoType: 'PADA',
+              name: 'Sample Pada',
+              parentGeographyUnitId: 'village-1',
+            },
+          ],
         }),
       );
     });
@@ -330,13 +338,34 @@ describe('FormService', () => {
       expect(geographyClient.getAncestorChain).toHaveBeenCalledWith('pada-2', 'Bearer test-token');
 
       const geography = (result as { geography: { geographyUnitId: string }[] }).geography;
-      // Divergent levels (PADA, VILLAGE) return one row per distinct unit.
+      // Divergent levels (PADA, VILLAGE) return one row per distinct unit,
+      // each carrying its real parentGeographyUnitId.
       expect(geography).toEqual(
         expect.arrayContaining([
-          { geographyUnitId: 'pada-1', geoType: 'PADA', name: 'Pada One' },
-          { geographyUnitId: 'pada-2', geoType: 'PADA', name: 'Pada Two' },
-          { geographyUnitId: 'village-1', geoType: 'VILLAGE', name: 'Village One' },
-          { geographyUnitId: 'village-2', geoType: 'VILLAGE', name: 'Village Two' },
+          {
+            geographyUnitId: 'pada-1',
+            geoType: 'PADA',
+            name: 'Pada One',
+            parentGeographyUnitId: 'village-1',
+          },
+          {
+            geographyUnitId: 'pada-2',
+            geoType: 'PADA',
+            name: 'Pada Two',
+            parentGeographyUnitId: 'village-2',
+          },
+          {
+            geographyUnitId: 'village-1',
+            geoType: 'VILLAGE',
+            name: 'Village One',
+            parentGeographyUnitId: 'district-1',
+          },
+          {
+            geographyUnitId: 'village-2',
+            geoType: 'VILLAGE',
+            name: 'Village Two',
+            parentGeographyUnitId: 'district-1',
+          },
         ]),
       );
       // Shared level (DISTRICT) collapses to a single row, not duplicated.
@@ -403,7 +432,14 @@ describe('FormService', () => {
         // still resolves and appears in the response.
         expect(result).toEqual(
           expect.objectContaining({
-            geography: [{ geographyUnitId: 'pada-2', geoType: 'PADA', name: 'Pada Two' }],
+            geography: [
+              {
+                geographyUnitId: 'pada-2',
+                geoType: 'PADA',
+                name: 'Pada Two',
+                parentGeographyUnitId: 'village-2',
+              },
+            ],
           }),
         );
       },
@@ -503,7 +539,14 @@ describe('FormService', () => {
       expect(geographyClient.getAncestorChain).toHaveBeenCalledWith('pada-1', 'Bearer test-token');
       expect(result).toEqual(
         expect.objectContaining({
-          geography: [{ geographyUnitId: 'pada-1', geoType: 'PADA', name: 'Sample Pada' }],
+          geography: [
+            {
+              geographyUnitId: 'pada-1',
+              geoType: 'PADA',
+              name: 'Sample Pada',
+              parentGeographyUnitId: 'village-1',
+            },
+          ],
         }),
       );
     });

@@ -10,9 +10,15 @@ export function envelope<T extends z.ZodTypeAny>(data: T) {
 }
 
 /**
- * One level of the caller's geography chain — only the fields a client needs
- * to map a level onto pii.<level>Id (geoType) and show to a user (name).
- * parentId/geoCode/status are internal/display-only and dropped here.
+ * One level of the caller's geography chain — geoType/name are what a
+ * client shows to a user; geoCode/status are internal and dropped.
+ * parentGeographyUnitId (frontend request following CR-237's multi-pada
+ * fix) is the real geography_units.parentId — null only for STATE, the
+ * top level. Lets a client reconstruct the actual
+ * STATE -> DISTRICT -> BLOCK -> VILLAGE -> SUBCENTRE -> PHC -> PADA tree
+ * itself: once a SAKHI can have multiple assignments, this array can
+ * contain more than one DISTRICT/BLOCK/etc. with no other way to tell
+ * which one nests under which.
  */
 const geographyUnitSchema = z.object({
   geographyUnitId: z.string().uuid().openapi({ example: '99999999-9999-9999-9999-999999999999' }),
@@ -20,6 +26,11 @@ const geographyUnitSchema = z.object({
     .enum(['STATE', 'DISTRICT', 'BLOCK', 'PHC', 'SUBCENTRE', 'VILLAGE', 'PADA'])
     .openapi({ example: 'PHC' }),
   name: z.string().openapi({ example: 'Sample PHC' }),
+  parentGeographyUnitId: z
+    .string()
+    .uuid()
+    .nullable()
+    .openapi({ example: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' }),
 });
 
 /** Response shape for a form version (matches FormService.toApiFormVersion). */

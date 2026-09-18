@@ -194,7 +194,7 @@ export class FormService {
         );
         const byUnitId = new Map<
           string,
-          { geographyUnitId: string; geoType: string; name: string }
+          { geographyUnitId: string; geoType: string; name: string; parentId: string | null }
         >();
         for (const result of results) {
           if (result.status === 'rejected') continue;
@@ -202,13 +202,18 @@ export class FormService {
             byUnitId.set(unit.geographyUnitId, unit);
           }
         }
-        // Only the fields a client needs to map a level onto pii.<level>Id
-        // (geoType) and show to a user (name) — parentId/geoCode/status are
-        // internal/display-only and dropped here.
+        // geoType/name are what a client shows to a user; geoCode/status are
+        // internal and still dropped. parentGeographyUnitId (frontend request,
+        // following CR-237's multi-pada fix) lets a client reconstruct the
+        // STATE -> DISTRICT -> BLOCK -> VILLAGE -> SUBCENTRE -> PHC -> PADA
+        // tree itself — without it, a Sakhi with assignments spanning more
+        // than one district/state got back a flat, unordered union with no
+        // way to tell which BLOCK/VILLAGE belongs under which DISTRICT.
         return [...byUnitId.values()].map((unit) => ({
           geographyUnitId: unit.geographyUnitId,
           geoType: unit.geoType,
           name: unit.name,
+          parentGeographyUnitId: unit.parentId,
         }));
       }
     }
@@ -219,6 +224,7 @@ export class FormService {
       geographyUnitId: unit.geographyUnitId,
       geoType: unit.geoType,
       name: unit.name,
+      parentGeographyUnitId: unit.parentId,
     }));
   }
 
