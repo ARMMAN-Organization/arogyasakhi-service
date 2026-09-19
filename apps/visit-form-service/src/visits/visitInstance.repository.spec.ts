@@ -93,6 +93,208 @@ describe('VisitInstanceRepository', () => {
     });
   });
 
+  describe('countByCaseType', () => {
+    it('returns each in-scope visit’s schedule.visitType', async () => {
+      findMany.mockResolvedValue([
+        { schedule: { visitType: 'ANC' } },
+        { schedule: { visitType: 'NN' } },
+        { schedule: { visitType: 'NN' } },
+      ]);
+
+      const result = await repository.countByCaseType({});
+
+      expect(findMany).toHaveBeenCalledWith({
+        where: { isDeleted: false },
+        select: { schedule: { select: { visitType: true } } },
+      });
+      expect(result).toEqual(['ANC', 'NN', 'NN']);
+    });
+
+    it('applies the sakhiId filter', async () => {
+      findMany.mockResolvedValue([]);
+
+      await repository.countByCaseType({ sakhiId: 'sakhi-1' });
+
+      expect(findMany).toHaveBeenCalledWith({
+        where: { isDeleted: false, sakhiId: 'sakhi-1' },
+        select: { schedule: { select: { visitType: true } } },
+      });
+    });
+
+    it('applies the sakhiIds filter', async () => {
+      findMany.mockResolvedValue([]);
+
+      await repository.countByCaseType({ sakhiIds: ['sakhi-a', 'sakhi-b'] });
+
+      expect(findMany).toHaveBeenCalledWith({
+        where: { isDeleted: false, sakhiId: { in: ['sakhi-a', 'sakhi-b'] } },
+        select: { schedule: { select: { visitType: true } } },
+      });
+    });
+
+    it('applies the fromDate/toDate range on schedule.scheduledDate', async () => {
+      findMany.mockResolvedValue([]);
+
+      await repository.countByCaseType({ fromDate: '2026-08-01', toDate: '2026-08-31' });
+
+      expect(findMany).toHaveBeenCalledWith({
+        where: {
+          isDeleted: false,
+          schedule: {
+            scheduledDate: {
+              gte: new Date('2026-08-01T00:00:00.000Z'),
+              lte: new Date('2026-08-31T23:59:59.999Z'),
+            },
+          },
+        },
+        select: { schedule: { select: { visitType: true } } },
+      });
+    });
+
+    it('returns an empty array when no visits match', async () => {
+      findMany.mockResolvedValue([]);
+
+      const result = await repository.countByCaseType({ sakhiId: 'sakhi-1' });
+
+      expect(result).toEqual([]);
+    });
+  });
+
+  describe('countByStatusAndCaseType', () => {
+    it('returns each in-scope visit’s statusLookupValueId + schedule.visitType pair', async () => {
+      findMany.mockResolvedValue([
+        { statusLookupValueId: 'status-1', schedule: { visitType: 'ANC' } },
+        { statusLookupValueId: 'status-2', schedule: { visitType: 'NN' } },
+      ]);
+
+      const result = await repository.countByStatusAndCaseType({});
+
+      expect(findMany).toHaveBeenCalledWith({
+        where: { isDeleted: false },
+        select: { statusLookupValueId: true, schedule: { select: { visitType: true } } },
+      });
+      expect(result).toEqual([
+        { statusLookupValueId: 'status-1', schedule: { visitType: 'ANC' } },
+        { statusLookupValueId: 'status-2', schedule: { visitType: 'NN' } },
+      ]);
+    });
+
+    it('applies the sakhiId/sakhiIds/date-range filters identically to countByStatus/countByCaseType', async () => {
+      findMany.mockResolvedValue([]);
+
+      await repository.countByStatusAndCaseType({
+        sakhiIds: ['sakhi-a', 'sakhi-b'],
+        fromDate: '2026-08-01',
+        toDate: '2026-08-31',
+      });
+
+      expect(findMany).toHaveBeenCalledWith({
+        where: {
+          isDeleted: false,
+          sakhiId: { in: ['sakhi-a', 'sakhi-b'] },
+          schedule: {
+            scheduledDate: {
+              gte: new Date('2026-08-01T00:00:00.000Z'),
+              lte: new Date('2026-08-31T23:59:59.999Z'),
+            },
+          },
+        },
+        select: { statusLookupValueId: true, schedule: { select: { visitType: true } } },
+      });
+    });
+
+    it('returns an empty array when no visits match', async () => {
+      findMany.mockResolvedValue([]);
+
+      const result = await repository.countByStatusAndCaseType({ sakhiId: 'sakhi-1' });
+
+      expect(result).toEqual([]);
+    });
+  });
+
+  describe('countCompletedByTypeInWindow', () => {
+    const COMPLETED_ID = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
+    const FROM = new Date('2026-08-17T00:00:00.000Z');
+    const TO = new Date('2026-08-24T00:00:00.000Z');
+
+    it('returns each in-scope completed visit’s schedule.visitType within the window', async () => {
+      findMany.mockResolvedValue([
+        { schedule: { visitType: 'ANC' } },
+        { schedule: { visitType: 'NN' } },
+      ]);
+
+      const result = await repository.countCompletedByTypeInWindow({
+        from: FROM,
+        to: TO,
+        completedStatusLookupValueId: COMPLETED_ID,
+      });
+
+      expect(findMany).toHaveBeenCalledWith({
+        where: {
+          isDeleted: false,
+          statusLookupValueId: COMPLETED_ID,
+          completedAt: { gte: FROM, lt: TO },
+        },
+        select: { schedule: { select: { visitType: true } } },
+      });
+      expect(result).toEqual(['ANC', 'NN']);
+    });
+
+    it('applies the sakhiId filter', async () => {
+      findMany.mockResolvedValue([]);
+
+      await repository.countCompletedByTypeInWindow({
+        sakhiId: 'sakhi-1',
+        from: FROM,
+        to: TO,
+        completedStatusLookupValueId: COMPLETED_ID,
+      });
+
+      expect(findMany).toHaveBeenCalledWith({
+        where: {
+          isDeleted: false,
+          statusLookupValueId: COMPLETED_ID,
+          completedAt: { gte: FROM, lt: TO },
+          sakhiId: 'sakhi-1',
+        },
+        select: { schedule: { select: { visitType: true } } },
+      });
+    });
+
+    it('applies the sakhiIds filter', async () => {
+      findMany.mockResolvedValue([]);
+
+      await repository.countCompletedByTypeInWindow({
+        sakhiIds: ['sakhi-a', 'sakhi-b'],
+        from: FROM,
+        to: TO,
+        completedStatusLookupValueId: COMPLETED_ID,
+      });
+
+      expect(findMany).toHaveBeenCalledWith({
+        where: {
+          isDeleted: false,
+          statusLookupValueId: COMPLETED_ID,
+          completedAt: { gte: FROM, lt: TO },
+          sakhiId: { in: ['sakhi-a', 'sakhi-b'] },
+        },
+        select: { schedule: { select: { visitType: true } } },
+      });
+    });
+
+    it('returns an empty array when no completed visits fall in the window', async () => {
+      findMany.mockResolvedValue([]);
+
+      const result = await repository.countCompletedByTypeInWindow({
+        from: FROM,
+        to: TO,
+        completedStatusLookupValueId: COMPLETED_ID,
+      });
+
+      expect(result).toEqual([]);
+    });
+  });
+
   describe('countByBeneficiary', () => {
     it('groups due/overdue counts by beneficiaryId + statusLookupValueId, scoped to the caller', async () => {
       groupBy.mockResolvedValue([
@@ -178,6 +380,26 @@ describe('VisitInstanceRepository', () => {
       findFirst.mockResolvedValue(null);
 
       await expect(repository.findDeliveryVisit('ben-1')).resolves.toBeNull();
+    });
+  });
+
+  describe('findByScheduleId', () => {
+    it('returns the non-deleted VisitInstance for the given scheduleId', async () => {
+      const visit = { id: 'visit-1', scheduleId: 'schedule-1' };
+      findFirst.mockResolvedValue(visit);
+
+      const result = await repository.findByScheduleId('schedule-1');
+
+      expect(findFirst).toHaveBeenCalledWith({
+        where: { scheduleId: 'schedule-1', isDeleted: false },
+      });
+      expect(result).toBe(visit);
+    });
+
+    it('returns null when no non-deleted instance exists for the scheduleId', async () => {
+      findFirst.mockResolvedValue(null);
+
+      await expect(repository.findByScheduleId('schedule-1')).resolves.toBeNull();
     });
   });
 
@@ -410,6 +632,62 @@ describe('VisitInstanceRepository', () => {
           where: { beneficiaryId: 'ben-1', isDeleted: false, completedAt: { not: null } },
         }),
       );
+    });
+  });
+
+  describe('updateStatus', () => {
+    function buildTxMock() {
+      const txUpdateMany = jest.fn().mockResolvedValue({ count: 1 });
+      const txCreate = jest.fn().mockResolvedValue({});
+      const tx = {
+        visitInstance: { updateMany: txUpdateMany },
+        visitStatusHistory: { create: txCreate },
+      };
+      const $transaction = jest.fn((fn: (tx: unknown) => unknown) => fn(tx));
+      return { $transaction, txUpdateMany, txCreate };
+    }
+
+    it('writes isDeleted/deletedAt when provided in the update payload', async () => {
+      const { $transaction, txUpdateMany } = buildTxMock();
+      const txRepository = new VisitInstanceRepository({ $transaction } as never);
+      const deletedAt = new Date('2026-08-20T00:00:00.000Z');
+
+      await txRepository.updateStatus(
+        'visit-1',
+        'from-status-id',
+        {
+          statusLookupValueId: 'discarded-id',
+          completedAt: null,
+          isDeleted: true,
+          deletedAt,
+        },
+        'caller-1',
+      );
+
+      expect(txUpdateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ isDeleted: true, deletedAt }) }),
+      );
+    });
+
+    it('omits isDeleted/deletedAt from the update payload when not provided (regression guard)', async () => {
+      const { $transaction, txUpdateMany } = buildTxMock();
+      const txRepository = new VisitInstanceRepository({ $transaction } as never);
+
+      await txRepository.updateStatus(
+        'visit-1',
+        'from-status-id',
+        {
+          statusLookupValueId: 'completed-id',
+          actualVisitDate: new Date('2026-08-20'),
+          meetBeneficiaryFlag: true,
+          completedAt: new Date('2026-08-20T10:00:00.000Z'),
+        },
+        'caller-1',
+      );
+
+      const [call] = txUpdateMany.mock.calls;
+      expect(call[0].data).not.toHaveProperty('isDeleted');
+      expect(call[0].data).not.toHaveProperty('deletedAt');
     });
   });
 

@@ -286,6 +286,10 @@ const riskSummarySchema = z.object({
   byGrade: z.record(z.string(), z.number().int()),
   everAtRiskCount: z.number().int(),
   referralTriggerCount: z.number().int(),
+  byCaseType: z.object({
+    MOTHER: z.number().int(),
+    CHILD: z.number().int(),
+  }),
 });
 
 function envelope<T extends z.ZodTypeAny>(data: T) {
@@ -538,11 +542,12 @@ export function registerBeneficiaryRoutes(doc: DocumentedRouter, service: Benefi
     '/beneficiaries/risk-summary',
     {
       summary:
-        "Risk Summary widget — counts of in-scope beneficiaries' risk condition summaries " +
-        'grouped by latestGrade, plus everAtRiskCount/referralTriggerCount. Same role-scoping ' +
-        '(sakhiId) and registrationDate range (fromDate/toDate) as GET /beneficiaries. Counts ' +
-        'per condition (a beneficiary with 2 HIGH conditions contributes 2 to byGrade.HIGH), ' +
-        'not collapsed to one grade per beneficiary.',
+        'Risk Summary widget — counts of in-scope, DISTINCT beneficiaries grouped by their ' +
+        'single most-severe latestGrade, plus everAtRiskCount/referralTriggerCount. Same ' +
+        'role-scoping (sakhiId) and registrationDate range (fromDate/toDate) as ' +
+        'GET /beneficiaries. Beneficiary-grained (a beneficiary with both a HIGH and a MILD ' +
+        'condition contributes only 1 to byGrade.HIGH, not to both buckets) — matches ' +
+        'GET /beneficiaries?atRiskOnly=true’s count.',
       tags: ['Beneficiaries'],
       responses: {
         200: { description: 'Risk grade counts', schema: envelope(riskSummarySchema) },

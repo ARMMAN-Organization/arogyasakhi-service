@@ -9,6 +9,7 @@ describe('BeneficiaryRepository', () => {
   const motherCaseDetailsUpdateMany = jest.fn();
   const childCaseDetailsUpdateMany = jest.fn();
   const consentRecordUpdateMany = jest.fn();
+  const riskConditionSummaryFindMany = jest.fn();
   const $transaction = jest.fn((ops: unknown[]) => Promise.all(ops));
   const $queryRaw = jest.fn();
   const prisma = {
@@ -18,6 +19,7 @@ describe('BeneficiaryRepository', () => {
     motherCaseDetails: { updateMany: motherCaseDetailsUpdateMany },
     childCaseDetails: { updateMany: childCaseDetailsUpdateMany },
     consentRecord: { updateMany: consentRecordUpdateMany },
+    beneficiaryRiskConditionSummary: { findMany: riskConditionSummaryFindMany },
     $transaction,
     $queryRaw,
   } as never;
@@ -133,6 +135,281 @@ describe('BeneficiaryRepository', () => {
       const result = await repository.countByCaseType({});
 
       expect(result.activeMothersHighRiskCount).toBe(0);
+    });
+  });
+
+  describe('countByRiskGrade', () => {
+    it('counts a beneficiary with 2 differently-graded rows once, under her most-severe grade', async () => {
+      riskConditionSummaryFindMany.mockResolvedValue([
+        {
+          beneficiaryId: 'ben-1',
+          latestGrade: 'MILD',
+          everAtRiskFlag: true,
+          currentReferralTriggerFlag: false,
+          beneficiaryCase: { caseType: 'MOTHER' },
+        },
+        {
+          beneficiaryId: 'ben-1',
+          latestGrade: 'SEVERE',
+          everAtRiskFlag: true,
+          currentReferralTriggerFlag: true,
+          beneficiaryCase: { caseType: 'MOTHER' },
+        },
+      ]);
+
+      const result = await repository.countByRiskGrade({});
+
+      expect(result).toEqual({
+        total: 1,
+        byGrade: { SEVERE: 1 },
+        everAtRiskCount: 1,
+        referralTriggerCount: 1,
+        byCaseType: { MOTHER: 1, CHILD: 0 },
+      });
+    });
+
+    it('picks the correct most-severe grade across the full 6-value RISK_GRADE order', async () => {
+      riskConditionSummaryFindMany.mockResolvedValue([
+        {
+          beneficiaryId: 'ben-1',
+          latestGrade: 'MODERATE',
+          everAtRiskFlag: false,
+          currentReferralTriggerFlag: false,
+          beneficiaryCase: { caseType: 'MOTHER' },
+        },
+        {
+          beneficiaryId: 'ben-1',
+          latestGrade: 'HIGH',
+          everAtRiskFlag: false,
+          currentReferralTriggerFlag: false,
+          beneficiaryCase: { caseType: 'MOTHER' },
+        },
+        {
+          beneficiaryId: 'ben-1',
+          latestGrade: 'SEVERE',
+          everAtRiskFlag: false,
+          currentReferralTriggerFlag: false,
+          beneficiaryCase: { caseType: 'MOTHER' },
+        },
+      ]);
+
+      const result = await repository.countByRiskGrade({});
+
+      expect(result.byGrade).toEqual({ HIGH: 1 });
+    });
+
+    it('a real grade always wins over a null-grade row for the same beneficiary, regardless of order', async () => {
+      riskConditionSummaryFindMany.mockResolvedValue([
+        {
+          beneficiaryId: 'ben-1',
+          latestGrade: 'MILD',
+          everAtRiskFlag: true,
+          currentReferralTriggerFlag: false,
+          beneficiaryCase: { caseType: 'MOTHER' },
+        },
+        {
+          beneficiaryId: 'ben-1',
+          latestGrade: null,
+          everAtRiskFlag: true,
+          currentReferralTriggerFlag: false,
+          beneficiaryCase: { caseType: 'MOTHER' },
+        },
+      ]);
+
+      const result = await repository.countByRiskGrade({});
+
+      expect(result.byGrade).toEqual({ MILD: 1 });
+    });
+
+    it('buckets a beneficiary as UNGRADED only when every one of her rows has a null grade', async () => {
+      riskConditionSummaryFindMany.mockResolvedValue([
+        {
+          beneficiaryId: 'ben-1',
+          latestGrade: null,
+          everAtRiskFlag: true,
+          currentReferralTriggerFlag: false,
+          beneficiaryCase: { caseType: 'CHILD' },
+        },
+        {
+          beneficiaryId: 'ben-1',
+          latestGrade: null,
+          everAtRiskFlag: false,
+          currentReferralTriggerFlag: false,
+          beneficiaryCase: { caseType: 'CHILD' },
+        },
+      ]);
+
+      const result = await repository.countByRiskGrade({});
+
+      expect(result.total).toBe(1);
+      expect(result.byGrade).toEqual({ UNGRADED: 1 });
+    });
+
+    it('ORs everAtRiskFlag/currentReferralTriggerFlag across a beneficiary’s rows', async () => {
+      riskConditionSummaryFindMany.mockResolvedValue([
+        {
+          beneficiaryId: 'ben-1',
+          latestGrade: 'MILD',
+          everAtRiskFlag: false,
+          currentReferralTriggerFlag: false,
+          beneficiaryCase: { caseType: 'MOTHER' },
+        },
+        {
+          beneficiaryId: 'ben-1',
+          latestGrade: 'MILD',
+          everAtRiskFlag: true,
+          currentReferralTriggerFlag: true,
+          beneficiaryCase: { caseType: 'MOTHER' },
+        },
+      ]);
+
+      const result = await repository.countByRiskGrade({});
+
+      expect(result.everAtRiskCount).toBe(1);
+      expect(result.referralTriggerCount).toBe(1);
+    });
+
+    it('counts a beneficiary’s multiple flagged rows as exactly one increment in byCaseType', async () => {
+      riskConditionSummaryFindMany.mockResolvedValue([
+        {
+          beneficiaryId: 'ben-1',
+          latestGrade: 'MILD',
+          everAtRiskFlag: true,
+          currentReferralTriggerFlag: false,
+          beneficiaryCase: { caseType: 'CHILD' },
+        },
+        {
+          beneficiaryId: 'ben-1',
+          latestGrade: 'SEVERE',
+          everAtRiskFlag: true,
+          currentReferralTriggerFlag: false,
+          beneficiaryCase: { caseType: 'CHILD' },
+        },
+      ]);
+
+      const result = await repository.countByRiskGrade({});
+
+      expect(result.byCaseType).toEqual({ MOTHER: 0, CHILD: 1 });
+    });
+
+    it('counts distinct beneficiaries for total, not raw rows — reproduces the reported 10-vs-7-style discrepancy', async () => {
+      riskConditionSummaryFindMany.mockResolvedValue([
+        // ben-1: 2 rows -> 1 beneficiary
+        {
+          beneficiaryId: 'ben-1',
+          latestGrade: 'MILD',
+          everAtRiskFlag: true,
+          currentReferralTriggerFlag: false,
+          beneficiaryCase: { caseType: 'MOTHER' },
+        },
+        {
+          beneficiaryId: 'ben-1',
+          latestGrade: 'SEVERE',
+          everAtRiskFlag: true,
+          currentReferralTriggerFlag: false,
+          beneficiaryCase: { caseType: 'MOTHER' },
+        },
+        // ben-2: 2 rows -> 1 beneficiary
+        {
+          beneficiaryId: 'ben-2',
+          latestGrade: 'NORMAL',
+          everAtRiskFlag: false,
+          currentReferralTriggerFlag: false,
+          beneficiaryCase: { caseType: 'CHILD' },
+        },
+        {
+          beneficiaryId: 'ben-2',
+          latestGrade: 'MODERATE',
+          everAtRiskFlag: false,
+          currentReferralTriggerFlag: false,
+          beneficiaryCase: { caseType: 'CHILD' },
+        },
+        // ben-3: 1 row -> 1 beneficiary
+        {
+          beneficiaryId: 'ben-3',
+          latestGrade: 'NORMAL',
+          everAtRiskFlag: false,
+          currentReferralTriggerFlag: false,
+          beneficiaryCase: { caseType: 'MOTHER' },
+        },
+      ]);
+
+      const result = await repository.countByRiskGrade({});
+
+      expect(result.total).toBe(3);
+    });
+
+    it('applies sakhiId/sakhiIds/date-range filters to the beneficiaryCase where clause', async () => {
+      riskConditionSummaryFindMany.mockResolvedValue([]);
+
+      await repository.countByRiskGrade({
+        sakhiIds: ['sakhi-a', 'sakhi-b'],
+        fromDate: '2026-08-01',
+        toDate: '2026-08-31',
+      });
+
+      expect(riskConditionSummaryFindMany).toHaveBeenCalledWith({
+        where: {
+          beneficiaryCase: {
+            isDeleted: false,
+            sakhiId: { in: ['sakhi-a', 'sakhi-b'] },
+            registrationDate: {
+              gte: new Date('2026-08-01T00:00:00.000Z'),
+              lte: new Date('2026-08-31T23:59:59.999Z'),
+            },
+          },
+        },
+        select: {
+          beneficiaryId: true,
+          latestGrade: true,
+          everAtRiskFlag: true,
+          currentReferralTriggerFlag: true,
+          beneficiaryCase: { select: { caseType: true } },
+        },
+      });
+    });
+
+    it('returns all-zero counts when no summaries match', async () => {
+      riskConditionSummaryFindMany.mockResolvedValue([]);
+
+      const result = await repository.countByRiskGrade({});
+
+      expect(result).toEqual({
+        total: 0,
+        byGrade: {},
+        everAtRiskCount: 0,
+        referralTriggerCount: 0,
+        byCaseType: { MOTHER: 0, CHILD: 0 },
+      });
+    });
+
+    it('behaves identically to a per-row tally for the common case of one row per beneficiary', async () => {
+      riskConditionSummaryFindMany.mockResolvedValue([
+        {
+          beneficiaryId: 'ben-1',
+          latestGrade: 'HIGH',
+          everAtRiskFlag: true,
+          currentReferralTriggerFlag: false,
+          beneficiaryCase: { caseType: 'MOTHER' },
+        },
+        {
+          beneficiaryId: 'ben-2',
+          latestGrade: 'NORMAL',
+          everAtRiskFlag: false,
+          currentReferralTriggerFlag: false,
+          beneficiaryCase: { caseType: 'CHILD' },
+        },
+      ]);
+
+      const result = await repository.countByRiskGrade({});
+
+      expect(result).toEqual({
+        total: 2,
+        byGrade: { HIGH: 1, NORMAL: 1 },
+        everAtRiskCount: 1,
+        referralTriggerCount: 0,
+        byCaseType: { MOTHER: 1, CHILD: 0 },
+      });
     });
   });
 

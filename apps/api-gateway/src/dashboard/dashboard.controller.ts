@@ -49,6 +49,12 @@ interface VisitSummary {
   total: number;
   byStatus: Record<string, number>;
   endingSoonVisitsCount: number;
+  byCaseType: { MOTHER: number; CHILD: number };
+  byStatusAndCaseType: Record<string, { MOTHER: number; CHILD: number }>;
+}
+
+interface RiskSummary {
+  byCaseType: { MOTHER: number; CHILD: number };
 }
 
 interface LastSynced {
@@ -116,40 +122,49 @@ export function createDashboardRouter(signer: Pick<TokenSigner, 'verify'>): Rout
 
       const sakhi = await resolveSakhiAndAuthorize(sakhiId, caller, authorizationHeader);
 
-      const [beneficiarySummary, referralSummary, visitSummary, lastSynced] = await Promise.all([
-        degrade(
-          'beneficiary registration-summary',
-          fetchJson<RegistrationSummary>(
-            `${BENEFICIARY_SERVICE_URL}/api/v1/beneficiaries/registration-summary?sakhiId=${sakhiId}`,
-            caller,
-            authorizationHeader,
+      const [beneficiarySummary, referralSummary, visitSummary, riskSummary, lastSynced] =
+        await Promise.all([
+          degrade(
+            'beneficiary registration-summary',
+            fetchJson<RegistrationSummary>(
+              `${BENEFICIARY_SERVICE_URL}/api/v1/beneficiaries/registration-summary?sakhiId=${sakhiId}`,
+              caller,
+              authorizationHeader,
+            ),
           ),
-        ),
-        degrade(
-          'referral referral-summary',
-          fetchJson<ReferralSummary>(
-            `${RISK_REFERRAL_SERVICE_URL}/api/v1/referrals/referral-summary?sakhiId=${sakhiId}`,
-            caller,
-            authorizationHeader,
+          degrade(
+            'referral referral-summary',
+            fetchJson<ReferralSummary>(
+              `${RISK_REFERRAL_SERVICE_URL}/api/v1/referrals/referral-summary?sakhiId=${sakhiId}`,
+              caller,
+              authorizationHeader,
+            ),
           ),
-        ),
-        degrade(
-          'visit visit-summary',
-          fetchJson<VisitSummary>(
-            `${VISIT_FORM_SERVICE_URL}/api/v1/visits/visit-summary?sakhiId=${sakhiId}`,
-            caller,
-            authorizationHeader,
+          degrade(
+            'visit visit-summary',
+            fetchJson<VisitSummary>(
+              `${VISIT_FORM_SERVICE_URL}/api/v1/visits/visit-summary?sakhiId=${sakhiId}`,
+              caller,
+              authorizationHeader,
+            ),
           ),
-        ),
-        degrade(
-          'sync last-synced',
-          fetchJson<LastSynced>(
-            `${SYNC_SERVICE_URL}/api/v1/sync/last-synced?userId=${sakhiId}`,
-            caller,
-            authorizationHeader,
+          degrade(
+            'beneficiary risk-summary',
+            fetchJson<RiskSummary>(
+              `${BENEFICIARY_SERVICE_URL}/api/v1/beneficiaries/risk-summary?sakhiId=${sakhiId}`,
+              caller,
+              authorizationHeader,
+            ),
           ),
-        ),
-      ]);
+          degrade(
+            'sync last-synced',
+            fetchJson<LastSynced>(
+              `${SYNC_SERVICE_URL}/api/v1/sync/last-synced?userId=${sakhiId}`,
+              caller,
+              authorizationHeader,
+            ),
+          ),
+        ]);
 
       res.json(
         ok({
@@ -182,6 +197,13 @@ export function createDashboardRouter(signer: Pick<TokenSigner, 'verify'>): Rout
                 dueVisitsCount: visitSummary.byStatus['PENDING'] ?? 0,
                 overdueVisitsCount: visitSummary.byStatus['MISSED'] ?? 0,
                 endingSoonVisitsCount: visitSummary.endingSoonVisitsCount,
+                byCaseType: visitSummary.byCaseType,
+                byStatusAndCaseType: visitSummary.byStatusAndCaseType,
+              }
+            : null,
+          riskSummary: riskSummary
+            ? {
+                byCaseType: riskSummary.byCaseType,
               }
             : null,
         }),

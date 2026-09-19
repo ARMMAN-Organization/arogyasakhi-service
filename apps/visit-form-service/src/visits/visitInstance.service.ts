@@ -4,6 +4,7 @@ import type { VisitInstanceRepository } from './visitInstance.repository';
 import type { CreateVisitInstanceInput } from './dto/create-visitInstance.dto';
 import type { UpdateVisitInstanceInput } from './dto/update-visitInstance.dto';
 import type { VisitSummaryQueryInput } from './dto/visit-summary-query.dto';
+import type { VisitSummaryByTypeQueryInput } from './dto/visit-summary-by-type-query.dto';
 import type { VisitHistoryQueryInput } from './dto/visit-history-query.dto';
 import type { ListVisitsQueryInput } from './dto/list-visits.dto';
 import { findSakhiById, listSakhiIdsForSupervisor } from '../sakhis/sakhi.client';
@@ -16,6 +17,8 @@ import { getActiveTransferWindow } from '../escalations/escalation.client';
 import { assertCallerOwnsBeneficiary } from '../beneficiaries/beneficiaryOwnership.guard';
 import { findBeneficiaryById } from '../beneficiaries/beneficiary.client';
 import { resolveFormCodeForVisitType } from '../forms/visit-code-form-map';
+import { resolveCaseTypeForVisitCode, VISIT_CODE_TO_CASE_TYPE } from './visit-code-case-type-map';
+import { currentMonthWindow, currentWeekWindow } from './calendar-window';
 import { EMPTY_VISIT_HISTORY_VITALS, extractVisitHistoryVitals } from '../forms/vitalsExtractor';
 
 /** The calling principal's own identity, as carried on their trusted-identity headers. */
@@ -48,6 +51,22 @@ function computeAgeFields(
 /** MANAGER and ADMIN are unrestricted — same convention as every other service. */
 function isPrivileged(caller: CallerIdentity): boolean {
   return caller.roles.includes('MANAGER') || caller.roles.includes('ADMIN');
+}
+
+/**
+ * Buckets a list of visitType strings into a zero-filled count per
+ * VisitCodeType key, for getVisitSummaryByType — every enum value is
+ * present even at 0, so the Dashboard never has to handle a missing key.
+ */
+function tallyByVisitType(visitTypes: string[]): Record<string, number> {
+  const tally: Record<string, number> = {};
+  for (const visitType of Object.keys(VISIT_CODE_TO_CASE_TYPE)) {
+    tally[visitType] = 0;
+  }
+  for (const visitType of visitTypes) {
+    if (visitType in tally) tally[visitType]++;
+  }
+  return tally;
 }
 
 /**
@@ -250,6 +269,15 @@ export class VisitInstanceService {
     const existing = await this.repository.findByLocalVisitUuid(dto.localVisitUuid);
     if (existing) return existing;
 
+    // A retry with a genuinely new localVisitUuid but the same scheduleId
+    // (e.g. a client-side bug regenerating the idempotency key) must still
+    // be recognized as the same visit, not create a duplicate — a schedule
+    // maps to at most one non-deleted VisitInstance (see the partial unique
+    // index on schedule_id in the migrations, which enforces this
+    // race-safely; this check just returns cleanly instead of hitting it).
+    const existingForSchedule = await this.repository.findByScheduleId(dto.scheduleId);
+    if (existingForSchedule) return existingForSchedule;
+
     const schedule = await this.repository.findScheduleById(dto.scheduleId);
     if (!schedule) {
       // 422, not 409 — this is "the referenced scheduleId doesn't exist"
@@ -340,10 +368,19 @@ export class VisitInstanceService {
       }
     }
 
+    // A visit transitioning to DISCARDED is treated as soft-deleted — it's
+    // an abandoned attempt, not a real visit outcome, so it must disappear
+    // from GET /visits, visit history, and summaries (all isDeleted:false
+    // filtered) and free its scheduleId for a fresh attempt (the partial
+    // unique index on schedule_id only excludes isDeleted:true rows).
     const updated = await this.repository.updateStatus(
       id,
       existing.statusLookupValueId,
-      { ...dto, completedAt: toStatusCode === 'COMPLETED' ? new Date() : null },
+      {
+        ...dto,
+        completedAt: toStatusCode === 'COMPLETED' ? new Date() : null,
+        ...(toStatusCode === 'DISCARDED' ? { isDeleted: true, deletedAt: new Date() } : {}),
+      },
       caller.id,
     );
     if (!updated) {
@@ -378,7 +415,7 @@ export class VisitInstanceService {
       authorizationHeader,
     );
 
-    const [grouped, statusCodes] = await Promise.all([
+    const [grouped, statusCodes, visitTypes, statusAndCaseTypeRows] = await Promise.all([
       this.repository.countByStatus({
         sakhiId,
         sakhiIds,
@@ -386,6 +423,18 @@ export class VisitInstanceService {
         toDate: query.toDate,
       }),
       resolveVisitStatusCodes(authorizationHeader),
+      this.repository.countByCaseType({
+        sakhiId,
+        sakhiIds,
+        fromDate: query.fromDate,
+        toDate: query.toDate,
+      }),
+      this.repository.countByStatusAndCaseType({
+        sakhiId,
+        sakhiIds,
+        fromDate: query.fromDate,
+        toDate: query.toDate,
+      }),
     ]);
 
     const byStatus: Record<string, number> = {};
@@ -396,6 +445,23 @@ export class VisitInstanceService {
         : 'UNKNOWN';
       byStatus[code] = (byStatus[code] ?? 0) + row._count._all;
       total += row._count._all;
+    }
+
+    const byCaseType = { MOTHER: 0, CHILD: 0 };
+    for (const visitType of visitTypes) {
+      const caseType = resolveCaseTypeForVisitCode(visitType);
+      if (caseType) byCaseType[caseType]++;
+    }
+
+    const byStatusAndCaseType: Record<string, { MOTHER: number; CHILD: number }> = {};
+    for (const row of statusAndCaseTypeRows) {
+      const caseType = resolveCaseTypeForVisitCode(row.schedule.visitType);
+      if (!caseType) continue;
+      const code = row.statusLookupValueId
+        ? (statusCodes.get(row.statusLookupValueId) ?? 'UNKNOWN')
+        : 'UNKNOWN';
+      byStatusAndCaseType[code] ??= { MOTHER: 0, CHILD: 0 };
+      byStatusAndCaseType[code][caseType]++;
     }
 
     // "Ending soon" = a due (PENDING) or overdue (MISSED) visit whose
@@ -418,7 +484,59 @@ export class VisitInstanceService {
       endBoundary,
     });
 
-    return { total, byStatus, endingSoonVisitsCount };
+    return { total, byStatus, endingSoonVisitsCount, byCaseType, byStatusAndCaseType };
+  }
+
+  /**
+   * "Visits Completed by type" Dashboard widget (SRS FR-SV-5.1) — counts of
+   * COMPLETED visits grouped by VisitCodeType, for the current calendar
+   * week (Monday-start UTC) and current calendar month (UTC), independent
+   * of each other (the month window naturally overlaps the week window —
+   * by design, not a bug). Same role-scoping as getVisitSummary. Every
+   * VisitCodeType key is present in both buckets, zero-filled, so the
+   * Dashboard never has to handle a missing key.
+   */
+  async getVisitSummaryByType(
+    query: VisitSummaryByTypeQueryInput,
+    caller: CallerIdentity,
+    authorizationHeader: string,
+  ) {
+    const { sakhiId, sakhiIds } = await resolveCallerScopingWithQuery(
+      caller,
+      query.sakhiId,
+      authorizationHeader,
+    );
+
+    const completedStatusLookupValueId = await resolveVisitStatusIdByCode(
+      'COMPLETED',
+      authorizationHeader,
+    );
+
+    const now = new Date();
+    const week = currentWeekWindow(now);
+    const month = currentMonthWindow(now);
+
+    const [thisWeekVisitTypes, thisMonthVisitTypes] = await Promise.all([
+      this.repository.countCompletedByTypeInWindow({
+        sakhiId,
+        sakhiIds,
+        from: week.from,
+        to: week.to,
+        completedStatusLookupValueId,
+      }),
+      this.repository.countCompletedByTypeInWindow({
+        sakhiId,
+        sakhiIds,
+        from: month.from,
+        to: month.to,
+        completedStatusLookupValueId,
+      }),
+    ]);
+
+    return {
+      thisWeek: tallyByVisitType(thisWeekVisitTypes),
+      thisMonth: tallyByVisitType(thisMonthVisitTypes),
+    };
   }
 
   /**

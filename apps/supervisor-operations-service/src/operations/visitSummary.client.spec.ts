@@ -25,7 +25,16 @@ describe('VisitSummaryClient', () => {
   });
 
   it('returns the visit summary on a successful response', async () => {
-    const summary = { total: 3, byStatus: { COMPLETED: 2, MISSED: 1 }, endingSoonVisitsCount: 1 };
+    const summary = {
+      total: 3,
+      byStatus: { COMPLETED: 2, MISSED: 1 },
+      endingSoonVisitsCount: 1,
+      byCaseType: { MOTHER: 2, CHILD: 1 },
+      byStatusAndCaseType: {
+        COMPLETED: { MOTHER: 1, CHILD: 1 },
+        MISSED: { MOTHER: 1, CHILD: 0 },
+      },
+    };
     fetchMock.mockResolvedValue({ ok: true, json: async () => ({ data: summary }) });
 
     await expect(client.getBySakhi('sakhi-1', {}, 'Bearer test-token')).resolves.toEqual(summary);
@@ -39,7 +48,15 @@ describe('VisitSummaryClient', () => {
   it('passes fromDate/toDate through as query params when provided', async () => {
     fetchMock.mockResolvedValue({
       ok: true,
-      json: async () => ({ data: { total: 0, byStatus: {}, endingSoonVisitsCount: 0 } }),
+      json: async () => ({
+        data: {
+          total: 0,
+          byStatus: {},
+          endingSoonVisitsCount: 0,
+          byCaseType: { MOTHER: 0, CHILD: 0 },
+          byStatusAndCaseType: {},
+        },
+      }),
     });
 
     await client.getBySakhi(

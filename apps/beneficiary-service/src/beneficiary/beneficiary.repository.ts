@@ -27,6 +27,37 @@ export type {
 } from './beneficiary.repository.types';
 
 /**
+ * RISK_GRADE's fixed 6-value severity order (see auth-service's seed-data.ts
+ * and risk-referral-service's riskGradeSchema) — used only to pick a single
+ * beneficiary's most-severe grade across her risk-condition-summary rows
+ * for the Risk Summary widget's byGrade bucket. Deliberately NOT
+ * latestGradeRank: that field is ranked "within its own risk_condition's
+ * gradeScale" (BINARY / NORMAL_MILD_MODERATE_SEVERE / NORMAL_LOW_MEDIUM_HIGH
+ * per the ERD), so it isn't safely comparable across a beneficiary's
+ * different risk conditions — this fixed string order is.
+ */
+const RISK_GRADE_RANK: Record<string, number> = {
+  NORMAL: 0,
+  MILD: 1,
+  MODERATE: 2,
+  SEVERE: 3,
+  HIGH: 4,
+  CRITICAL: 5,
+};
+
+/**
+ * True if `candidate` outranks `current` on the RISK_GRADE severity scale. A
+ * null grade (self-reported/ungraded — see upsertRiskConditionSummary) never
+ * outranks a real one; an unrecognized grade string ranks below every known
+ * grade rather than throwing, so a bad/legacy value can't silently win.
+ */
+function isMoreSevereGrade(candidate: string | null, current: string | null): boolean {
+  if (candidate === null) return false;
+  if (current === null) return true;
+  return (RISK_GRADE_RANK[candidate] ?? -1) > (RISK_GRADE_RANK[current] ?? -1);
+}
+
+/**
  * Encodes a row's (sortKey, id) pair as an opaque pagination cursor, keyed
  * by `field` — generic so every cursor-paginated method in this file (and
  * any future one) shares the same codec instead of each cloning its own
@@ -301,10 +332,21 @@ export class BeneficiaryRepository {
   }
 
   /**
-   * Counts in-scope beneficiaries' latest risk grade per condition for the
-   * Risk Summary widget. Counts per-condition (one BeneficiaryRiskConditionSummary
-   * row per beneficiary+condition), not collapsed to one grade per beneficiary
-   * — matches the table's own grain.
+   * Counts DISTINCT in-scope beneficiaries for the Risk Summary widget,
+   * matching GET /beneficiaries?atRiskOnly=true's beneficiary-grained count.
+   * BeneficiaryRiskConditionSummary is one row per beneficiary+condition
+   * (@@unique([beneficiaryId, riskConditionId])), so a beneficiary flagged
+   * on multiple conditions is first reduced to a single representative
+   * record before tallying — every field here is per-beneficiary, not
+   * per-condition-row:
+   *   - grade: her single most-severe latestGrade (RISK_GRADE_RANK order),
+   *     falling back to UNGRADED only if every one of her rows has a null
+   *     grade (a null grade carries no rank and never outranks a real one —
+   *     see upsertRiskConditionSummary's same rule for everHighestGrade).
+   *   - everAtRiskFlag / currentReferralTriggerFlag: true if ANY of her
+   *     rows has it true (an OR, not a rank).
+   *   - caseType: read once from the joined BeneficiaryCase (one per
+   *     beneficiary already, no reduction needed).
    */
   async countByRiskGrade(filters: BeneficiarySummaryFilters) {
     const caseWhere: NonNullable<
@@ -321,20 +363,65 @@ export class BeneficiaryRepository {
 
     const summaries = await this.prisma.beneficiaryRiskConditionSummary.findMany({
       where: { beneficiaryCase: caseWhere },
-      select: { latestGrade: true, everAtRiskFlag: true, currentReferralTriggerFlag: true },
+      select: {
+        beneficiaryId: true,
+        latestGrade: true,
+        everAtRiskFlag: true,
+        currentReferralTriggerFlag: true,
+        beneficiaryCase: { select: { caseType: true } },
+      },
     });
 
-    const byGrade: Record<string, number> = {};
-    let everAtRiskCount = 0;
-    let referralTriggerCount = 0;
+    const byBeneficiary = new Map<
+      string,
+      {
+        grade: string | null;
+        everAtRiskFlag: boolean;
+        currentReferralTriggerFlag: boolean;
+        caseType: 'MOTHER' | 'CHILD';
+      }
+    >();
     for (const summary of summaries) {
-      const grade = summary.latestGrade ?? 'UNGRADED';
-      byGrade[grade] = (byGrade[grade] ?? 0) + 1;
-      if (summary.everAtRiskFlag) everAtRiskCount++;
-      if (summary.currentReferralTriggerFlag) referralTriggerCount++;
+      const existing = byBeneficiary.get(summary.beneficiaryId);
+      if (!existing) {
+        byBeneficiary.set(summary.beneficiaryId, {
+          grade: summary.latestGrade,
+          everAtRiskFlag: summary.everAtRiskFlag,
+          currentReferralTriggerFlag: summary.currentReferralTriggerFlag,
+          caseType: summary.beneficiaryCase.caseType,
+        });
+        continue;
+      }
+      if (isMoreSevereGrade(summary.latestGrade, existing.grade))
+        existing.grade = summary.latestGrade;
+      existing.everAtRiskFlag ||= summary.everAtRiskFlag;
+      existing.currentReferralTriggerFlag ||= summary.currentReferralTriggerFlag;
     }
 
-    return { total: summaries.length, byGrade, everAtRiskCount, referralTriggerCount };
+    const byGrade: Record<string, number> = {};
+    // Mother/Child split of at-risk beneficiaries only (everAtRiskFlag),
+    // not every in-scope beneficiary — matches everAtRiskCount's own
+    // filter, so byCaseType.MOTHER + byCaseType.CHILD === everAtRiskCount.
+    const byCaseType = { MOTHER: 0, CHILD: 0 };
+    let everAtRiskCount = 0;
+    let referralTriggerCount = 0;
+    for (const beneficiary of byBeneficiary.values()) {
+      const grade = beneficiary.grade ?? 'UNGRADED';
+      byGrade[grade] = (byGrade[grade] ?? 0) + 1;
+      if (beneficiary.everAtRiskFlag) {
+        byCaseType[beneficiary.caseType]++;
+        everAtRiskCount++;
+      }
+      if (beneficiary.currentReferralTriggerFlag) referralTriggerCount++;
+    }
+
+    return {
+      total: byBeneficiary.size,
+      byGrade,
+      everAtRiskCount,
+      referralTriggerCount,
+      byCaseType,
+    };
   }
 
   /**

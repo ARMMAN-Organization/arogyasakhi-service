@@ -5,6 +5,7 @@ import { createVisitInstanceController } from './visitInstance.controller';
 import { createVisitInstanceSchema } from './dto/create-visitInstance.dto';
 import { updateVisitInstanceSchema } from './dto/update-visitInstance.dto';
 import { visitSummaryQuerySchema } from './dto/visit-summary-query.dto';
+import { visitSummaryByTypeQuerySchema } from './dto/visit-summary-by-type-query.dto';
 import { countByBeneficiarySchema } from './dto/count-by-beneficiary.dto';
 import { byPadaSchema } from './dto/by-pada.dto';
 import { visitHistoryQuerySchema } from './dto/visit-history-query.dto';
@@ -84,6 +85,37 @@ const visitSummarySchema = z.object({
   total: z.number().int(),
   byStatus: z.record(z.string(), z.number().int()),
   endingSoonVisitsCount: z.number().int(),
+  byCaseType: z.object({
+    MOTHER: z.number().int(),
+    CHILD: z.number().int(),
+  }),
+  byStatusAndCaseType: z.record(
+    z.string(),
+    z.object({
+      MOTHER: z.number().int(),
+      CHILD: z.number().int(),
+    }),
+  ),
+});
+
+const visitTypeCountsSchema = z.object({
+  ANC: z.number().int(),
+  ANC_HR: z.number().int(),
+  ANC_POST_EDD: z.number().int(),
+  DELIVERY: z.number().int(),
+  PP: z.number().int(),
+  PP_HR: z.number().int(),
+  NN: z.number().int(),
+  NN_HR: z.number().int(),
+  INC: z.number().int(),
+  INC_HR: z.number().int(),
+  CCV: z.number().int(),
+  CCV_HR: z.number().int(),
+});
+
+const visitSummaryByTypeSchema = z.object({
+  thisWeek: visitTypeCountsSchema,
+  thisMonth: visitTypeCountsSchema,
 });
 
 const countByBeneficiaryResponseSchema = z.record(
@@ -192,6 +224,32 @@ export function registerVisitInstanceRoutes(doc: DocumentedRouter, service: Visi
     requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
     validate(visitSummaryQuerySchema, 'query'),
     controller.getVisitSummary,
+  );
+
+  doc.get(
+    '/visits/visit-summary/by-type',
+    {
+      summary:
+        'Visits Completed Dashboard widget (SRS FR-SV-5.1) — counts of COMPLETED visits ' +
+        'grouped by visitType, for the current calendar week (Monday-start UTC) and current ' +
+        'calendar month (UTC), filtered by VisitInstance.completedAt (when it actually ' +
+        'happened). Same role-scoping as GET /visits/visit-summary: SAKHI sees own visits, ' +
+        'SUPERVISOR sees roster visits, MANAGER/ADMIN unscoped.',
+      tags: ['Visits'],
+      responses: {
+        200: {
+          description: 'Completed-visit counts by type, this week and this month',
+          schema: envelope(visitSummaryByTypeSchema),
+        },
+        401: errorResponse(401),
+        403: errorResponse(403, { message: "sakhiId is not in this Supervisor's roster." }),
+        500: errorResponse(500),
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(visitSummaryByTypeQuerySchema, 'query'),
+    controller.getVisitSummaryByType,
   );
 
   doc.get(

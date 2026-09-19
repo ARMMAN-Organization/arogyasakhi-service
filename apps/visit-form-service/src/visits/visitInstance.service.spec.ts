@@ -22,10 +22,14 @@ describe('VisitInstanceService', () => {
     findManyByBeneficiaryId: jest.fn(),
     findById: jest.fn(),
     findByLocalVisitUuid: jest.fn(),
+    findByScheduleId: jest.fn(),
     findScheduleById: jest.fn(),
     create: jest.fn(),
     updateStatus: jest.fn(),
     countByStatus: jest.fn(),
+    countByCaseType: jest.fn(),
+    countByStatusAndCaseType: jest.fn(),
+    countCompletedByTypeInWindow: jest.fn(),
     countEndingSoon: jest.fn(),
     countDueTodayByBeneficiary: jest.fn(),
     findByPada: jest.fn(),
@@ -436,8 +440,9 @@ describe('VisitInstanceService', () => {
     statusLookupValueId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
   };
 
-  it('creates via repository when the schedule resolves and no row exists for this localVisitUuid', async () => {
+  it('creates via repository when the schedule resolves and no row exists for this localVisitUuid or scheduleId', async () => {
     repository.findByLocalVisitUuid.mockResolvedValue(null);
+    repository.findByScheduleId.mockResolvedValue(null);
     repository.findScheduleById.mockResolvedValue({ id: dto.scheduleId } as never);
     const created = sampleRow;
     repository.create.mockResolvedValue(created);
@@ -450,12 +455,24 @@ describe('VisitInstanceService', () => {
     repository.findByLocalVisitUuid.mockResolvedValue(sampleRow);
 
     await expect(service.create(dto)).resolves.toBe(sampleRow);
+    expect(repository.findByScheduleId).not.toHaveBeenCalled();
+    expect(repository.findScheduleById).not.toHaveBeenCalled();
+    expect(repository.create).not.toHaveBeenCalled();
+  });
+
+  it('returns the existing row for the scheduleId on a retry with a fresh localVisitUuid, without calling create', async () => {
+    repository.findByLocalVisitUuid.mockResolvedValue(null);
+    repository.findByScheduleId.mockResolvedValue(sampleRow);
+
+    await expect(service.create(dto)).resolves.toBe(sampleRow);
+    expect(repository.findByScheduleId).toHaveBeenCalledWith(dto.scheduleId);
     expect(repository.findScheduleById).not.toHaveBeenCalled();
     expect(repository.create).not.toHaveBeenCalled();
   });
 
   it('rejects with a typed 422 when scheduleId does not resolve, without calling create', async () => {
     repository.findByLocalVisitUuid.mockResolvedValue(null);
+    repository.findByScheduleId.mockResolvedValue(null);
     repository.findScheduleById.mockResolvedValue(null);
 
     await expect(service.create(dto)).rejects.toMatchObject({ status: 422 });
@@ -464,6 +481,7 @@ describe('VisitInstanceService', () => {
 
   it('propagates repository errors on create', async () => {
     repository.findByLocalVisitUuid.mockResolvedValue(null);
+    repository.findByScheduleId.mockResolvedValue(null);
     repository.findScheduleById.mockResolvedValue({ id: dto.scheduleId } as never);
     repository.create.mockRejectedValue(new Error('db down'));
 
@@ -581,6 +599,46 @@ describe('VisitInstanceService', () => {
         expect.objectContaining({ completedAt: null }),
         SAKHI_ID,
       );
+    });
+
+    it('sets isDeleted/deletedAt when the new status resolves to DISCARDED', async () => {
+      const DISCARDED_ID = 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee';
+      repository.findById.mockResolvedValue(sampleRow);
+      resolveVisitStatusCodeMock.mockImplementation((id) =>
+        Promise.resolve(id === DISCARDED_ID ? 'DISCARDED' : 'PENDING'),
+      );
+      repository.updateStatus.mockResolvedValue(true);
+
+      await service.updateStatus(
+        sampleRow.id,
+        { statusLookupValueId: DISCARDED_ID },
+        { id: SAKHI_ID, roles: ['SAKHI'] },
+        AUTH_HEADER,
+      );
+
+      expect(repository.updateStatus).toHaveBeenCalledWith(
+        sampleRow.id,
+        sampleRow.statusLookupValueId,
+        expect.objectContaining({ isDeleted: true, deletedAt: expect.any(Date) }),
+        SAKHI_ID,
+      );
+    });
+
+    it('does not set isDeleted/deletedAt for a non-DISCARDED transition (regression guard)', async () => {
+      repository.findById.mockResolvedValue(sampleRow);
+      resolveVisitStatusCodeMock.mockResolvedValue('MISSED');
+      repository.updateStatus.mockResolvedValue(true);
+
+      await service.updateStatus(
+        sampleRow.id,
+        { statusLookupValueId: MISSED_ID },
+        { id: SAKHI_ID, roles: ['SAKHI'] },
+        AUTH_HEADER,
+      );
+
+      const [call] = repository.updateStatus.mock.calls;
+      expect(call[2]).not.toHaveProperty('isDeleted');
+      expect(call[2]).not.toHaveProperty('deletedAt');
     });
 
     it('409s when re-completing an already-COMPLETED visit', async () => {
@@ -747,6 +805,8 @@ describe('VisitInstanceService', () => {
         { statusLookupValueId: COMPLETED_ID, _count: { _all: 3 } },
       ]);
       resolveVisitStatusCodesMock.mockResolvedValue(new Map([[COMPLETED_ID, 'COMPLETED']]));
+      repository.countByCaseType.mockResolvedValue([]);
+      repository.countByStatusAndCaseType.mockResolvedValue([]);
       repository.countEndingSoon.mockResolvedValue(0);
 
       const result = await service.getVisitSummary(
@@ -758,16 +818,30 @@ describe('VisitInstanceService', () => {
       expect(repository.countByStatus).toHaveBeenCalledWith(
         expect.objectContaining({ sakhiId: SAKHI_ID }),
       );
+      expect(repository.countByCaseType).toHaveBeenCalledWith(
+        expect.objectContaining({ sakhiId: SAKHI_ID }),
+      );
+      expect(repository.countByStatusAndCaseType).toHaveBeenCalledWith(
+        expect.objectContaining({ sakhiId: SAKHI_ID }),
+      );
       expect(repository.countEndingSoon).toHaveBeenCalledWith(
         expect.objectContaining({ sakhiId: SAKHI_ID }),
       );
-      expect(result).toEqual({ total: 3, byStatus: { COMPLETED: 3 }, endingSoonVisitsCount: 0 });
+      expect(result).toEqual({
+        total: 3,
+        byStatus: { COMPLETED: 3 },
+        endingSoonVisitsCount: 0,
+        byCaseType: { MOTHER: 0, CHILD: 0 },
+        byStatusAndCaseType: {},
+      });
     });
 
     it('scopes a SUPERVISOR caller to their roster', async () => {
       listSakhiIdsForSupervisorMock.mockResolvedValue(['sakhi-a', 'sakhi-b']);
       repository.countByStatus.mockResolvedValue([]);
       resolveVisitStatusCodesMock.mockResolvedValue(new Map());
+      repository.countByCaseType.mockResolvedValue([]);
+      repository.countByStatusAndCaseType.mockResolvedValue([]);
       repository.countEndingSoon.mockResolvedValue(0);
 
       await service.getVisitSummary(
@@ -777,6 +851,12 @@ describe('VisitInstanceService', () => {
       );
 
       expect(repository.countByStatus).toHaveBeenCalledWith(
+        expect.objectContaining({ sakhiIds: ['sakhi-a', 'sakhi-b'] }),
+      );
+      expect(repository.countByCaseType).toHaveBeenCalledWith(
+        expect.objectContaining({ sakhiIds: ['sakhi-a', 'sakhi-b'] }),
+      );
+      expect(repository.countByStatusAndCaseType).toHaveBeenCalledWith(
         expect.objectContaining({ sakhiIds: ['sakhi-a', 'sakhi-b'] }),
       );
       expect(repository.countEndingSoon).toHaveBeenCalledWith(
@@ -797,6 +877,8 @@ describe('VisitInstanceService', () => {
     it('leaves a MANAGER caller unscoped', async () => {
       repository.countByStatus.mockResolvedValue([]);
       resolveVisitStatusCodesMock.mockResolvedValue(new Map());
+      repository.countByCaseType.mockResolvedValue([]);
+      repository.countByStatusAndCaseType.mockResolvedValue([]);
       repository.countEndingSoon.mockResolvedValue(0);
 
       await service.getVisitSummary({}, { id: 'manager-1', roles: ['MANAGER'] }, AUTH_HEADER);
@@ -819,6 +901,8 @@ describe('VisitInstanceService', () => {
     it('returns all-zero counts when no visits are in scope', async () => {
       repository.countByStatus.mockResolvedValue([]);
       resolveVisitStatusCodesMock.mockResolvedValue(new Map());
+      repository.countByCaseType.mockResolvedValue([]);
+      repository.countByStatusAndCaseType.mockResolvedValue([]);
       repository.countEndingSoon.mockResolvedValue(0);
 
       const result = await service.getVisitSummary(
@@ -827,7 +911,13 @@ describe('VisitInstanceService', () => {
         AUTH_HEADER,
       );
 
-      expect(result).toEqual({ total: 0, byStatus: {}, endingSoonVisitsCount: 0 });
+      expect(result).toEqual({
+        total: 0,
+        byStatus: {},
+        endingSoonVisitsCount: 0,
+        byCaseType: { MOTHER: 0, CHILD: 0 },
+        byStatusAndCaseType: {},
+      });
     });
 
     it('resolves endingSoonVisitsCount from the repository, restricted to PENDING/MISSED lookup ids', async () => {
@@ -842,6 +932,8 @@ describe('VisitInstanceService', () => {
           [COMPLETED_ID, 'COMPLETED'],
         ]),
       );
+      repository.countByCaseType.mockResolvedValue([]);
+      repository.countByStatusAndCaseType.mockResolvedValue([]);
       repository.countEndingSoon.mockResolvedValue(1);
 
       const result = await service.getVisitSummary(
@@ -858,6 +950,288 @@ describe('VisitInstanceService', () => {
       const [call] = repository.countEndingSoon.mock.calls;
       expect(call[0].dueOrOverdueStatusLookupValueIds).not.toContain(COMPLETED_ID);
       expect(result.endingSoonVisitsCount).toBe(1);
+    });
+
+    it('buckets visit types into byCaseType via the MOTHER/CHILD lookup', async () => {
+      repository.countByStatus.mockResolvedValue([]);
+      resolveVisitStatusCodesMock.mockResolvedValue(new Map());
+      repository.countByCaseType.mockResolvedValue(['ANC', 'ANC', 'PP', 'NN', 'CCV', 'CCV']);
+      repository.countByStatusAndCaseType.mockResolvedValue([]);
+      repository.countEndingSoon.mockResolvedValue(0);
+
+      const result = await service.getVisitSummary(
+        {},
+        { id: SAKHI_ID, roles: ['SAKHI'] },
+        AUTH_HEADER,
+      );
+
+      expect(result.byCaseType).toEqual({ MOTHER: 3, CHILD: 3 });
+    });
+
+    it('excludes an unrecognized visitType from byCaseType without affecting total/byStatus', async () => {
+      repository.countByStatus.mockResolvedValue([
+        { statusLookupValueId: COMPLETED_ID, _count: { _all: 1 } },
+      ]);
+      resolveVisitStatusCodesMock.mockResolvedValue(new Map([[COMPLETED_ID, 'COMPLETED']]));
+      repository.countByCaseType.mockResolvedValue([
+        'ANC',
+        'SOME_UNKNOWN_TYPE',
+      ] as unknown as Awaited<ReturnType<typeof repository.countByCaseType>>);
+      repository.countByStatusAndCaseType.mockResolvedValue([]);
+      repository.countEndingSoon.mockResolvedValue(0);
+
+      const result = await service.getVisitSummary(
+        {},
+        { id: SAKHI_ID, roles: ['SAKHI'] },
+        AUTH_HEADER,
+      );
+
+      expect(result.byCaseType).toEqual({ MOTHER: 1, CHILD: 0 });
+      expect(result.total).toBe(1);
+      expect(result.byStatus).toEqual({ COMPLETED: 1 });
+    });
+
+    it('cross-tabulates status x case type into byStatusAndCaseType', async () => {
+      const PENDING_ID = 'dddddddd-dddd-dddd-dddd-dddddddddddd';
+      repository.countByStatus.mockResolvedValue([]);
+      resolveVisitStatusCodesMock.mockResolvedValue(
+        new Map([
+          [PENDING_ID, 'PENDING'],
+          [MISSED_ID, 'MISSED'],
+          [COMPLETED_ID, 'COMPLETED'],
+        ]),
+      );
+      repository.countByCaseType.mockResolvedValue([]);
+      repository.countByStatusAndCaseType.mockResolvedValue([
+        { statusLookupValueId: PENDING_ID, schedule: { visitType: 'ANC' } },
+        { statusLookupValueId: PENDING_ID, schedule: { visitType: 'NN' } },
+        { statusLookupValueId: MISSED_ID, schedule: { visitType: 'PP' } },
+        { statusLookupValueId: COMPLETED_ID, schedule: { visitType: 'ANC' } },
+        { statusLookupValueId: COMPLETED_ID, schedule: { visitType: 'ANC' } },
+        { statusLookupValueId: COMPLETED_ID, schedule: { visitType: 'ANC' } },
+        { statusLookupValueId: COMPLETED_ID, schedule: { visitType: 'ANC' } },
+        { statusLookupValueId: COMPLETED_ID, schedule: { visitType: 'ANC' } },
+        { statusLookupValueId: COMPLETED_ID, schedule: { visitType: 'ANC' } },
+        { statusLookupValueId: COMPLETED_ID, schedule: { visitType: 'ANC' } },
+        { statusLookupValueId: COMPLETED_ID, schedule: { visitType: 'NN' } },
+        { statusLookupValueId: COMPLETED_ID, schedule: { visitType: 'NN' } },
+        { statusLookupValueId: COMPLETED_ID, schedule: { visitType: 'NN' } },
+        { statusLookupValueId: COMPLETED_ID, schedule: { visitType: 'NN' } },
+        { statusLookupValueId: COMPLETED_ID, schedule: { visitType: 'NN' } },
+        { statusLookupValueId: COMPLETED_ID, schedule: { visitType: 'NN' } },
+      ]);
+      repository.countEndingSoon.mockResolvedValue(0);
+
+      const result = await service.getVisitSummary(
+        {},
+        { id: SAKHI_ID, roles: ['SAKHI'] },
+        AUTH_HEADER,
+      );
+
+      expect(result.byStatusAndCaseType).toEqual({
+        PENDING: { MOTHER: 1, CHILD: 1 },
+        MISSED: { MOTHER: 1, CHILD: 0 },
+        COMPLETED: { MOTHER: 7, CHILD: 6 },
+      });
+    });
+
+    it('zero-fills the case type with no visits under a given status', async () => {
+      repository.countByStatus.mockResolvedValue([]);
+      resolveVisitStatusCodesMock.mockResolvedValue(new Map([[MISSED_ID, 'MISSED']]));
+      repository.countByCaseType.mockResolvedValue([]);
+      repository.countByStatusAndCaseType.mockResolvedValue([
+        { statusLookupValueId: MISSED_ID, schedule: { visitType: 'ANC' } },
+      ]);
+      repository.countEndingSoon.mockResolvedValue(0);
+
+      const result = await service.getVisitSummary(
+        {},
+        { id: SAKHI_ID, roles: ['SAKHI'] },
+        AUTH_HEADER,
+      );
+
+      expect(result.byStatusAndCaseType).toEqual({ MISSED: { MOTHER: 1, CHILD: 0 } });
+    });
+
+    it('excludes an unrecognized visitType from byStatusAndCaseType without throwing', async () => {
+      repository.countByStatus.mockResolvedValue([]);
+      resolveVisitStatusCodesMock.mockResolvedValue(new Map([[COMPLETED_ID, 'COMPLETED']]));
+      repository.countByCaseType.mockResolvedValue([]);
+      repository.countByStatusAndCaseType.mockResolvedValue([
+        { statusLookupValueId: COMPLETED_ID, schedule: { visitType: 'ANC' } },
+        {
+          statusLookupValueId: COMPLETED_ID,
+          schedule: { visitType: 'SOME_UNKNOWN_TYPE' },
+        },
+      ] as unknown as Awaited<ReturnType<typeof repository.countByStatusAndCaseType>>);
+      repository.countEndingSoon.mockResolvedValue(0);
+
+      const result = await service.getVisitSummary(
+        {},
+        { id: SAKHI_ID, roles: ['SAKHI'] },
+        AUTH_HEADER,
+      );
+
+      expect(result.byStatusAndCaseType).toEqual({ COMPLETED: { MOTHER: 1, CHILD: 0 } });
+    });
+
+    it('returns an empty byStatusAndCaseType when no visits are in scope', async () => {
+      repository.countByStatus.mockResolvedValue([]);
+      resolveVisitStatusCodesMock.mockResolvedValue(new Map());
+      repository.countByCaseType.mockResolvedValue([]);
+      repository.countByStatusAndCaseType.mockResolvedValue([]);
+      repository.countEndingSoon.mockResolvedValue(0);
+
+      const result = await service.getVisitSummary(
+        {},
+        { id: SAKHI_ID, roles: ['SAKHI'] },
+        AUTH_HEADER,
+      );
+
+      expect(result.byStatusAndCaseType).toEqual({});
+    });
+  });
+
+  describe('getVisitSummaryByType', () => {
+    const SAKHI_ID = 'sakhi-1';
+    const ALL_ZERO_VISIT_TYPE_COUNTS = {
+      ANC: 0,
+      ANC_HR: 0,
+      ANC_POST_EDD: 0,
+      DELIVERY: 0,
+      PP: 0,
+      PP_HR: 0,
+      NN: 0,
+      NN_HR: 0,
+      INC: 0,
+      INC_HR: 0,
+      CCV: 0,
+      CCV_HR: 0,
+    };
+
+    beforeEach(() => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-08-19T14:30:00.000Z'));
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('returns thisWeek/thisMonth with every VisitCodeType key zero-filled by default', async () => {
+      resolveVisitStatusIdByCodeMock.mockResolvedValue(COMPLETED_ID);
+      repository.countCompletedByTypeInWindow.mockResolvedValue([]);
+
+      const result = await service.getVisitSummaryByType(
+        {},
+        { id: SAKHI_ID, roles: ['SAKHI'] },
+        AUTH_HEADER,
+      );
+
+      expect(result).toEqual({
+        thisWeek: ALL_ZERO_VISIT_TYPE_COUNTS,
+        thisMonth: ALL_ZERO_VISIT_TYPE_COUNTS,
+      });
+    });
+
+    it('tallies mixed visit types into the right buckets for each window independently', async () => {
+      resolveVisitStatusIdByCodeMock.mockResolvedValue(COMPLETED_ID);
+      repository.countCompletedByTypeInWindow
+        .mockResolvedValueOnce(['ANC', 'ANC', 'PP'])
+        .mockResolvedValueOnce(['ANC', 'NN', 'NN', 'CCV']);
+
+      const result = await service.getVisitSummaryByType(
+        {},
+        { id: SAKHI_ID, roles: ['SAKHI'] },
+        AUTH_HEADER,
+      );
+
+      expect(result.thisWeek).toEqual({ ...ALL_ZERO_VISIT_TYPE_COUNTS, ANC: 2, PP: 1 });
+      expect(result.thisMonth).toEqual({ ...ALL_ZERO_VISIT_TYPE_COUNTS, ANC: 1, NN: 2, CCV: 1 });
+    });
+
+    it('resolves the COMPLETED status lookup id and passes it to both window calls', async () => {
+      resolveVisitStatusIdByCodeMock.mockResolvedValue(COMPLETED_ID);
+      repository.countCompletedByTypeInWindow.mockResolvedValue([]);
+
+      await service.getVisitSummaryByType({}, { id: SAKHI_ID, roles: ['SAKHI'] }, AUTH_HEADER);
+
+      expect(resolveVisitStatusIdByCodeMock).toHaveBeenCalledWith('COMPLETED', AUTH_HEADER);
+      expect(repository.countCompletedByTypeInWindow).toHaveBeenCalledTimes(2);
+      for (const call of repository.countCompletedByTypeInWindow.mock.calls) {
+        expect(call[0].completedStatusLookupValueId).toBe(COMPLETED_ID);
+      }
+    });
+
+    it('propagates the error when the COMPLETED status code cannot be resolved', async () => {
+      resolveVisitStatusIdByCodeMock.mockRejectedValue(
+        new Error('Unable to resolve VISIT_STATUS code "COMPLETED" to a lookup_value_id.'),
+      );
+
+      await expect(
+        service.getVisitSummaryByType({}, { id: SAKHI_ID, roles: ['SAKHI'] }, AUTH_HEADER),
+      ).rejects.toThrow('Unable to resolve VISIT_STATUS code "COMPLETED"');
+      expect(repository.countCompletedByTypeInWindow).not.toHaveBeenCalled();
+    });
+
+    it('scopes a SAKHI caller to their own visits', async () => {
+      resolveVisitStatusIdByCodeMock.mockResolvedValue(COMPLETED_ID);
+      repository.countCompletedByTypeInWindow.mockResolvedValue([]);
+
+      await service.getVisitSummaryByType({}, { id: SAKHI_ID, roles: ['SAKHI'] }, AUTH_HEADER);
+
+      for (const call of repository.countCompletedByTypeInWindow.mock.calls) {
+        expect(call[0]).toMatchObject({ sakhiId: SAKHI_ID });
+      }
+    });
+
+    it('scopes a SUPERVISOR caller to their roster', async () => {
+      listSakhiIdsForSupervisorMock.mockResolvedValue(['sakhi-a', 'sakhi-b']);
+      resolveVisitStatusIdByCodeMock.mockResolvedValue(COMPLETED_ID);
+      repository.countCompletedByTypeInWindow.mockResolvedValue([]);
+
+      await service.getVisitSummaryByType(
+        {},
+        { id: 'supervisor-1', roles: ['SUPERVISOR'], projectId: 'p1' },
+        AUTH_HEADER,
+      );
+
+      for (const call of repository.countCompletedByTypeInWindow.mock.calls) {
+        expect(call[0]).toMatchObject({ sakhiIds: ['sakhi-a', 'sakhi-b'] });
+      }
+    });
+
+    it('rejects a SUPERVISOR caller with no project scope', async () => {
+      await expect(
+        service.getVisitSummaryByType(
+          {},
+          { id: 'supervisor-1', roles: ['SUPERVISOR'], projectId: null },
+          AUTH_HEADER,
+        ),
+      ).rejects.toThrow('Supervisor caller has no project scope.');
+    });
+
+    it('leaves a MANAGER caller unscoped', async () => {
+      resolveVisitStatusIdByCodeMock.mockResolvedValue(COMPLETED_ID);
+      repository.countCompletedByTypeInWindow.mockResolvedValue([]);
+
+      await service.getVisitSummaryByType({}, { id: 'manager-1', roles: ['MANAGER'] }, AUTH_HEADER);
+
+      for (const call of repository.countCompletedByTypeInWindow.mock.calls) {
+        expect(call[0]).not.toMatchObject({ sakhiId: expect.anything() });
+      }
+    });
+
+    it('computes a Monday-start UTC week window and a calendar-month UTC window from "now"', async () => {
+      resolveVisitStatusIdByCodeMock.mockResolvedValue(COMPLETED_ID);
+      repository.countCompletedByTypeInWindow.mockResolvedValue([]);
+
+      await service.getVisitSummaryByType({}, { id: SAKHI_ID, roles: ['SAKHI'] }, AUTH_HEADER);
+
+      const [weekCall, monthCall] = repository.countCompletedByTypeInWindow.mock.calls;
+      expect(weekCall[0].from.toISOString()).toBe('2026-08-17T00:00:00.000Z');
+      expect(weekCall[0].to.toISOString()).toBe('2026-08-24T00:00:00.000Z');
+      expect(monthCall[0].from.toISOString()).toBe('2026-08-01T00:00:00.000Z');
+      expect(monthCall[0].to.toISOString()).toBe('2026-09-01T00:00:00.000Z');
     });
   });
 
