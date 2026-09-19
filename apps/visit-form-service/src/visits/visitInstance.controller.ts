@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { asyncHandler, ok, unauthorized } from '../app.module';
 import type { VisitInstanceService } from './visitInstance.service';
 import type { visitSummaryQuerySchema } from './dto/visit-summary-query.dto';
+import type { visitSummaryByTypeQuerySchema } from './dto/visit-summary-by-type-query.dto';
 import type { countByBeneficiarySchema } from './dto/count-by-beneficiary.dto';
 import type { byPadaSchema } from './dto/by-pada.dto';
 import type { visitHistoryQuerySchema } from './dto/visit-history-query.dto';
@@ -50,6 +51,14 @@ export function createVisitInstanceController(service: VisitInstanceService) {
       if (!authorizationHeader) return next(unauthorized());
       const query = req.query as unknown as z.infer<typeof visitSummaryQuerySchema>;
       res.json(ok(await service.getVisitSummary(query, req.user, authorizationHeader)));
+    }),
+
+    getVisitSummaryByType: asyncHandler(async (req, res, next) => {
+      if (!req.user) return next(unauthorized());
+      const authorizationHeader = req.header('authorization');
+      if (!authorizationHeader) return next(unauthorized());
+      const query = req.query as unknown as z.infer<typeof visitSummaryByTypeQuerySchema>;
+      res.json(ok(await service.getVisitSummaryByType(query, req.user, authorizationHeader)));
     }),
 
     getCountByBeneficiary: asyncHandler(async (req, res, next) => {

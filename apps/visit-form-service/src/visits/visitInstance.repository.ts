@@ -90,6 +90,21 @@ export class VisitInstanceRepository {
   }
 
   /**
+   * Finds the in-scope (non-deleted) VisitInstance for a scheduleId, if
+   * any — scheduleId isn't unique at the column level (only localVisitUuid
+   * is), so this is a findFirst rather than findUnique. Used by create()'s
+   * idempotent-return check: a retry with a fresh localVisitUuid but the
+   * same scheduleId must return the existing instance, not create a
+   * duplicate (see the partial unique index on schedule_id in the
+   * migrations, which is the actual race-safe enforcement — this check
+   * exists so a legitimate retry gets a clean 200 instead of a raw
+   * constraint-violation error).
+   */
+  findByScheduleId(scheduleId: string) {
+    return this.prisma.visitInstance.findFirst({ where: { scheduleId, isDeleted: false } });
+  }
+
+  /**
    * Full visit history for one beneficiary (Beneficiary Data Download screen
    * — offline reference, so no take/limit: a Sakhi needs the complete
    * history, not just the most recent page). Ordered by actualVisitDate
@@ -241,6 +256,108 @@ export class VisitInstanceRepository {
       where,
       _count: { _all: true },
     });
+  }
+
+  /**
+   * Fetches each in-scope visit's schedule.visitType for the Visit Summary
+   * widget's Mother/Child split — same scoping as countByStatus. Not a
+   * groupBy because Prisma can't group by a related model's field
+   * (visitType lives on VisitSchedule, not VisitInstance); the service layer
+   * tallies these into byCaseType via VISIT_CODE_TO_CASE_TYPE.
+   */
+  async countByCaseType(filters: {
+    sakhiId?: string;
+    sakhiIds?: string[];
+    fromDate?: string;
+    toDate?: string;
+  }) {
+    const where: NonNullable<Parameters<typeof this.prisma.visitInstance.findMany>[0]>['where'] = {
+      isDeleted: false,
+    };
+    if (filters.sakhiId) where.sakhiId = filters.sakhiId;
+    if (filters.sakhiIds) where.sakhiId = { in: filters.sakhiIds };
+    if (filters.fromDate || filters.toDate) {
+      where.schedule = {
+        scheduledDate: {
+          ...(filters.fromDate ? { gte: new Date(`${filters.fromDate}T00:00:00.000Z`) } : {}),
+          ...(filters.toDate ? { lte: new Date(`${filters.toDate}T23:59:59.999Z`) } : {}),
+        },
+      };
+    }
+
+    const visits = await this.prisma.visitInstance.findMany({
+      where,
+      select: { schedule: { select: { visitType: true } } },
+    });
+    return visits.map((v) => v.schedule.visitType);
+  }
+
+  /**
+   * Fetches each in-scope visit's statusLookupValueId + schedule.visitType
+   * together, for the Visit Summary widget's byStatusAndCaseType cross-tab
+   * (status × Mother/Child) — neither countByStatus nor countByCaseType
+   * joins both fields, so this is its own query rather than a derivation of
+   * either. Same scoping/filtering (on schedule.scheduledDate) as its
+   * siblings; the service layer resolves statusLookupValueId to a valueCode
+   * and visitType to a CaseType.
+   */
+  async countByStatusAndCaseType(filters: {
+    sakhiId?: string;
+    sakhiIds?: string[];
+    fromDate?: string;
+    toDate?: string;
+  }) {
+    const where: NonNullable<Parameters<typeof this.prisma.visitInstance.findMany>[0]>['where'] = {
+      isDeleted: false,
+    };
+    if (filters.sakhiId) where.sakhiId = filters.sakhiId;
+    if (filters.sakhiIds) where.sakhiId = { in: filters.sakhiIds };
+    if (filters.fromDate || filters.toDate) {
+      where.schedule = {
+        scheduledDate: {
+          ...(filters.fromDate ? { gte: new Date(`${filters.fromDate}T00:00:00.000Z`) } : {}),
+          ...(filters.toDate ? { lte: new Date(`${filters.toDate}T23:59:59.999Z`) } : {}),
+        },
+      };
+    }
+
+    return this.prisma.visitInstance.findMany({
+      where,
+      select: { statusLookupValueId: true, schedule: { select: { visitType: true } } },
+    });
+  }
+
+  /**
+   * Fetches each in-scope COMPLETED visit's schedule.visitType within
+   * [from, to) — for the Dashboard's "Visits Completed by type" widget
+   * (this-week/this-month windows, computed server-side by the service
+   * layer via calendar-window.ts). Filtered on completedAt (when the visit
+   * actually happened), unlike countByStatus/countByCaseType which filter
+   * on schedule.scheduledDate (when it was due) — "Visits Completed" is
+   * about actual completions, not due dates. Not a groupBy for the same
+   * reason as countByCaseType: visitType lives on VisitSchedule, not
+   * VisitInstance.
+   */
+  async countCompletedByTypeInWindow(filters: {
+    sakhiId?: string;
+    sakhiIds?: string[];
+    from: Date;
+    to: Date;
+    completedStatusLookupValueId: string;
+  }) {
+    const where: NonNullable<Parameters<typeof this.prisma.visitInstance.findMany>[0]>['where'] = {
+      isDeleted: false,
+      statusLookupValueId: filters.completedStatusLookupValueId,
+      completedAt: { gte: filters.from, lt: filters.to },
+    };
+    if (filters.sakhiId) where.sakhiId = filters.sakhiId;
+    if (filters.sakhiIds) where.sakhiId = { in: filters.sakhiIds };
+
+    const visits = await this.prisma.visitInstance.findMany({
+      where,
+      select: { schedule: { select: { visitType: true } } },
+    });
+    return visits.map((v) => v.schedule.visitType);
   }
 
   /**
@@ -528,7 +645,11 @@ export class VisitInstanceRepository {
   async updateStatus(
     id: string,
     fromStatusLookupValueId: string | null,
-    data: UpdateVisitInstanceInput & { completedAt: Date | null },
+    data: UpdateVisitInstanceInput & {
+      completedAt: Date | null;
+      isDeleted?: boolean;
+      deletedAt?: Date | null;
+    },
     changedByUserId: string,
   ): Promise<boolean> {
     return this.prisma.$transaction(async (tx) => {
@@ -540,6 +661,8 @@ export class VisitInstanceRepository {
           meetBeneficiaryFlag: data.meetBeneficiaryFlag,
           notMetReason: data.notMetReason,
           completedAt: data.completedAt,
+          ...(data.isDeleted !== undefined ? { isDeleted: data.isDeleted } : {}),
+          ...(data.deletedAt !== undefined ? { deletedAt: data.deletedAt } : {}),
         },
       });
       if (result.count === 0) return false;

@@ -159,6 +159,14 @@ model VisitInstance {
   visitStatusHistory VisitStatusHistory[]
   formSubmissions    FormSubmission[]
 
+  // Partial unique index (WHERE is_deleted = false) in the migration SQL —
+  // Prisma's @@index/@@unique can't express a WHERE clause, so this
+  // declaration exists for documentation/drift-detection only; the real
+  // constraint is hand-written in the migration. Enforces "at most one
+  // non-deleted VisitInstance per scheduleId" — a schedule represents one
+  // visit opportunity; create()'s findByScheduleId check makes a legitimate
+  // retry idempotently return the existing row instead of hitting this.
+  @@index([scheduleId])
   @@map("visit_instances")
 }
 
