@@ -89,6 +89,16 @@ describe('SakhiService', () => {
       expect(repository.findByProject).toHaveBeenCalledWith('project-1');
     });
 
+    it('returns every Sakhi in the project for a SYSTEM caller — a cron job service token has no supervisorId any real Sakhi would match', async () => {
+      repository.findByProject.mockResolvedValue([rawProfile()] as never);
+      const systemCaller = { id: 'sync-delay-sweep-svc', roles: ['SYSTEM'], projectId: null };
+
+      const result = await service.listByProject('project-1', systemCaller);
+
+      expect(result).toHaveLength(1);
+      expect(result[0].supervisorId).toBe('supervisor-1');
+    });
+
     it('allows a scoped caller (SUPERVISOR) to list their own project', async () => {
       repository.findByProject.mockResolvedValue([]);
       await expect(service.listByProject('project-1', scopedCaller('project-1'))).resolves.toEqual(

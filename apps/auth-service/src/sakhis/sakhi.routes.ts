@@ -104,7 +104,12 @@ export function registerSakhiRoutes(
       },
     },
     authenticate(signer),
-    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN'),
+    // SYSTEM is included for automated cron jobs (e.g. sync-service's
+    // SYNC_DELAY escalation sweep — apps/sync-service/src/jobs/
+    // syncDelayEscalation.job.ts) enumerating every project's roster via
+    // their own service-token identity — same pattern as GET
+    // /sakhis/:sakhiId and GET /sakhis/:sakhiId/location-assignments below.
+    requireRoles('SUPERVISOR', 'MANAGER', 'ADMIN', 'SYSTEM'),
     validate(projectIdParamsSchema, 'params'),
     controller.listByProject,
   );
