@@ -53,4 +53,27 @@ export class SyncBatchRepository {
     }
     return byUserId;
   }
+
+  /**
+   * The most recent COMPLETED batch's completedAt per deviceId, for one
+   * user — a finer-grained view than findLastSyncedAtByUserIds's per-user
+   * aggregate (SRS §8.4: "stale devices that have not synced within the
+   * configured threshold" — literally per-device, since a Sakhi with
+   * multiple devices could have one stale and one active, which the
+   * per-user aggregate alone can't distinguish). Additive: the existing
+   * per-user roster dashboard is unaffected by this.
+   */
+  async findLastSyncedAtByDeviceIds(userId: string): Promise<Map<string, Date>> {
+    const rows = await this.prisma.syncBatch.groupBy({
+      by: ['deviceId'],
+      where: { userId, status: 'COMPLETED' },
+      _max: { completedAt: true },
+    });
+    const byDeviceId = new Map<string, Date>();
+    for (const row of rows) {
+      if (!row._max.completedAt) continue;
+      byDeviceId.set(row.deviceId, row._max.completedAt);
+    }
+    return byDeviceId;
+  }
 }

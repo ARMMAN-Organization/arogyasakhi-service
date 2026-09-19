@@ -52,6 +52,8 @@ enum SyncItemStatus {
   SUCCESS
   FAILED
   SKIPPED
+  DUPLICATE
+  PARTIAL
 
 }
 
@@ -104,5 +106,11 @@ model SyncItem {
 
   syncBatch SyncBatch @relation(fields: [syncBatchId], references: [id])
 
+  // Supports the duplicate-detection lookup in syncItem.repository.ts's
+  // create(): "has this (localEntityUuid, entityType) already SUCCESSfully
+  // synced, in ANY batch?" — a Sakhi's app may resubmit the same entity
+  // across multiple batches (offline retry, app restart), so the dedupe key
+  // is not scoped to a single syncBatchId.
+  @@index([localEntityUuid, entityType, status])
   @@map("sync_items")
 }

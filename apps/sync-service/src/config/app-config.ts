@@ -42,7 +42,7 @@ const schema = z.object({
   // visitFamily-style branching, and evaluating it via a rules-service round
   // trip on every dashboard read adds latency this check doesn't need.
   // Revisit if this ever needs per-project/per-geography variation.
-  SYNC_DELAY_THRESHOLD_HOURS: z.coerce.number().positive().default(48),
+  SYNC_DELAY_THRESHOLD_HOURS: z.coerce.number().positive().default(72),
 });
 
 export type AppConfig = z.infer<typeof schema>;

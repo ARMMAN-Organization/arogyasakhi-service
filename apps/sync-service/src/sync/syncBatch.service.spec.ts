@@ -27,6 +27,7 @@ describe('SyncBatchService', () => {
     create: jest.fn(),
     findLastSyncedAt: jest.fn(),
     findLastSyncedAtByUserIds: jest.fn(),
+    findLastSyncedAtByDeviceIds: jest.fn(),
   } as unknown as jest.Mocked<SyncBatchRepository>;
   const listSakhiIdsForSupervisorMock = jest.mocked(listSakhiIdsForSupervisor);
   const createSyncDelayEscalationEventMock = jest.mocked(createSyncDelayEscalationEvent);
@@ -197,6 +198,53 @@ describe('SyncBatchService', () => {
         expect(repository.findLastSyncedAt).toHaveBeenCalledWith('some-other-user');
       },
     );
+  });
+
+  describe('getLastSyncedAtByDevice', () => {
+    it('flags a device delayed when its own last sync exceeds the threshold, independent of other devices', async () => {
+      const now = Date.now();
+      repository.findLastSyncedAtByDeviceIds.mockResolvedValue(
+        new Map([
+          ['device-stale', new Date(now - 49 * 60 * 60 * 1000)], // 49h ago, threshold is 48h
+          ['device-fresh', new Date(now - 1 * 60 * 60 * 1000)], // 1h ago
+        ]),
+      );
+
+      const result = await service.getLastSyncedAtByDevice(CALLER_ID, caller(), AUTH_HEADER);
+
+      const stale = result.find((d) => d.deviceId === 'device-stale');
+      const fresh = result.find((d) => d.deviceId === 'device-fresh');
+      expect(stale?.isDelayed).toBe(true);
+      expect(fresh?.isDelayed).toBe(false);
+    });
+
+    it('lists only devices that have synced at least once — no entry for a never-synced device', async () => {
+      repository.findLastSyncedAtByDeviceIds.mockResolvedValue(new Map());
+
+      const result = await service.getLastSyncedAtByDevice(CALLER_ID, caller(), AUTH_HEADER);
+
+      expect(result).toEqual([]);
+    });
+
+    it('403s when a SAKHI caller queries a different userId', async () => {
+      await expect(
+        service.getLastSyncedAtByDevice('some-other-user', caller(), AUTH_HEADER),
+      ).rejects.toThrow('A Sakhi may only view their own last-synced time.');
+      expect(repository.findLastSyncedAtByDeviceIds).not.toHaveBeenCalled();
+    });
+
+    it('allows a SUPERVISOR to view a roster Sakhi', async () => {
+      listSakhiIdsForSupervisorMock.mockResolvedValue(['sakhi-a']);
+      repository.findLastSyncedAtByDeviceIds.mockResolvedValue(new Map());
+
+      await service.getLastSyncedAtByDevice(
+        'sakhi-a',
+        caller({ roles: ['SUPERVISOR'], projectId: 'project-1' }),
+        AUTH_HEADER,
+      );
+
+      expect(repository.findLastSyncedAtByDeviceIds).toHaveBeenCalledWith('sakhi-a');
+    });
   });
 
   describe('getLastSyncedAtByRoster', () => {
