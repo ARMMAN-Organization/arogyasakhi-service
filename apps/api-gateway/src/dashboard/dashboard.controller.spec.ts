@@ -283,6 +283,7 @@ describe('createDashboardRouter (route wiring)', () => {
     beneficiary?: unknown | 'error';
     referral?: unknown | 'error';
     visit?: unknown | 'error';
+    risk?: unknown | 'error';
     sync?: unknown | 'error';
   }) {
     fetchMock.mockImplementation(async (url: string) => {
@@ -301,6 +302,11 @@ describe('createDashboardRouter (route wiring)', () => {
         return responses.visit === 'error'
           ? jsonResponse(500, {})
           : jsonResponse(200, { data: responses.visit });
+      }
+      if (url.includes('/beneficiaries/risk-summary')) {
+        return responses.risk === 'error'
+          ? jsonResponse(500, {})
+          : jsonResponse(200, { data: responses.risk });
       }
       if (url.includes('/sync/last-synced')) {
         return responses.sync === 'error'
@@ -325,6 +331,19 @@ describe('createDashboardRouter (route wiring)', () => {
     total: 10,
     byStatus: { PENDING: 4, MISSED: 2, COMPLETED: 4 },
     endingSoonVisitsCount: 3,
+    byCaseType: { MOTHER: 6, CHILD: 4 },
+    byStatusAndCaseType: {
+      PENDING: { MOTHER: 2, CHILD: 2 },
+      MISSED: { MOTHER: 1, CHILD: 1 },
+      COMPLETED: { MOTHER: 3, CHILD: 1 },
+    },
+  };
+  const RISK_SUMMARY = {
+    total: 5,
+    byGrade: { HIGH: 3, NORMAL: 2 },
+    everAtRiskCount: 2,
+    referralTriggerCount: 1,
+    byCaseType: { MOTHER: 3, CHILD: 2 },
   };
 
   it('surfaces all 3 new fields when every downstream call succeeds', async () => {
@@ -334,6 +353,7 @@ describe('createDashboardRouter (route wiring)', () => {
       beneficiary: BENEFICIARY_SUMMARY,
       referral: { accompaniedReferralsCount: 1, pendingFollowUpsCount: 0 },
       visit: VISIT_SUMMARY,
+      risk: RISK_SUMMARY,
       sync: { lastSyncedAt: null },
     });
     const app = buildApp();
@@ -354,7 +374,64 @@ describe('createDashboardRouter (route wiring)', () => {
       dueVisitsCount: 4,
       overdueVisitsCount: 2,
       endingSoonVisitsCount: 3,
+      byCaseType: { MOTHER: 6, CHILD: 4 },
+      byStatusAndCaseType: {
+        PENDING: { MOTHER: 2, CHILD: 2 },
+        MISSED: { MOTHER: 1, CHILD: 1 },
+        COMPLETED: { MOTHER: 3, CHILD: 1 },
+      },
     });
+    server.close();
+  });
+
+  it('surfaces a new top-level riskSummary block sourced from beneficiary-service', async () => {
+    signer.verify.mockResolvedValue({ sub: SAKHI_ID, roles: ['SAKHI'] });
+    mockDownstream({
+      sakhi: SAKHI_DATA,
+      beneficiary: BENEFICIARY_SUMMARY,
+      referral: { accompaniedReferralsCount: 1, pendingFollowUpsCount: 0 },
+      visit: VISIT_SUMMARY,
+      risk: RISK_SUMMARY,
+      sync: { lastSyncedAt: null },
+    });
+    const app = buildApp();
+    const server = app.listen(0);
+    const { port } = server.address() as { port: number };
+
+    const { status, body } = await getJson(port, `/sakhi/${SAKHI_ID}/dashboard`, {
+      Authorization: AUTH_HEADER,
+    });
+
+    expect(status).toBe(200);
+    const data = (body as { data: Record<string, unknown> }).data;
+    expect(data.riskSummary).toEqual({ byCaseType: { MOTHER: 3, CHILD: 2 } });
+    server.close();
+  });
+
+  it('degrades riskSummary to null when beneficiary-service risk-summary fails, without affecting visitSummary', async () => {
+    signer.verify.mockResolvedValue({ sub: SAKHI_ID, roles: ['SAKHI'] });
+    const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    mockDownstream({
+      sakhi: SAKHI_DATA,
+      beneficiary: BENEFICIARY_SUMMARY,
+      referral: { accompaniedReferralsCount: 0, pendingFollowUpsCount: 0 },
+      visit: VISIT_SUMMARY,
+      risk: 'error',
+      sync: { lastSyncedAt: null },
+    });
+    const app = buildApp();
+    const server = app.listen(0);
+    const { port } = server.address() as { port: number };
+
+    const { status, body } = await getJson(port, `/sakhi/${SAKHI_ID}/dashboard`, {
+      Authorization: AUTH_HEADER,
+    });
+
+    expect(status).toBe(200);
+    const data = (body as { data: Record<string, unknown> }).data;
+    expect(data.riskSummary).toBeNull();
+    expect(data.visitSummary).toMatchObject({ byCaseType: { MOTHER: 6, CHILD: 4 } });
+    consoleErrorSpy.mockRestore();
     server.close();
   });
 
@@ -366,6 +443,7 @@ describe('createDashboardRouter (route wiring)', () => {
       beneficiary: 'error',
       referral: { accompaniedReferralsCount: 0, pendingFollowUpsCount: 0 },
       visit: VISIT_SUMMARY,
+      risk: RISK_SUMMARY,
       sync: { lastSyncedAt: null },
     });
     const app = buildApp();
@@ -384,7 +462,7 @@ describe('createDashboardRouter (route wiring)', () => {
     server.close();
   });
 
-  it('degrades visitSummary to null (including endingSoonVisitsCount) when visit-form-service fails, without affecting beneficiarySummary', async () => {
+  it('degrades visitSummary to null (including endingSoonVisitsCount and byCaseType) when visit-form-service fails, without affecting beneficiarySummary', async () => {
     signer.verify.mockResolvedValue({ sub: SAKHI_ID, roles: ['SAKHI'] });
     const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
     mockDownstream({
@@ -392,6 +470,7 @@ describe('createDashboardRouter (route wiring)', () => {
       beneficiary: BENEFICIARY_SUMMARY,
       referral: { accompaniedReferralsCount: 0, pendingFollowUpsCount: 0 },
       visit: 'error',
+      risk: RISK_SUMMARY,
       sync: { lastSyncedAt: null },
     });
     const app = buildApp();

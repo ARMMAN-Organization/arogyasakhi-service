@@ -6,6 +6,8 @@ interface VisitSummary {
   total: number;
   byStatus: Record<string, number>;
   endingSoonVisitsCount: number;
+  byCaseType: { MOTHER: number; CHILD: number };
+  byStatusAndCaseType: Record<string, { MOTHER: number; CHILD: number }>;
 }
 
 /**
