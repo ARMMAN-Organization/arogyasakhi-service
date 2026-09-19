@@ -38,6 +38,9 @@ describe('VisitInstanceService', () => {
     restoreForSakhi: jest.fn(),
     findDeliveryVisit: jest.fn(),
     countCompletedAncVisits: jest.fn(),
+    findDuplicateScheduleIds: jest.fn(),
+    findNonDeletedByScheduleId: jest.fn(),
+    softDeleteMany: jest.fn(),
   } as unknown as jest.Mocked<VisitInstanceRepository>;
   let service: VisitInstanceService;
 
@@ -1831,6 +1834,87 @@ describe('VisitInstanceService', () => {
       await expect(
         service.restoreForSakhi(targetSakhiId, ADMIN_CALLER, AUTH_HEADER),
       ).rejects.toThrow('db down');
+    });
+  });
+
+  describe('cleanupDuplicateSchedules', () => {
+    it('returns a zeroed summary and writes nothing when there are no duplicate scheduleIds', async () => {
+      repository.findDuplicateScheduleIds.mockResolvedValue([]);
+
+      const result = await service.cleanupDuplicateSchedules(false);
+
+      expect(repository.findNonDeletedByScheduleId).not.toHaveBeenCalled();
+      expect(repository.softDeleteMany).not.toHaveBeenCalled();
+      expect(result).toEqual({ duplicateScheduleCount: 0, softDeletedCount: 0, details: [] });
+    });
+
+    it('keeps the earliest row per scheduleId and soft-deletes the rest when dryRun is false', async () => {
+      repository.findDuplicateScheduleIds.mockResolvedValue(['schedule-1']);
+      repository.findNonDeletedByScheduleId.mockResolvedValue([
+        { id: 'visit-1', createdAt: new Date('2026-09-19T06:30:01.020Z'), localVisitUuid: 'a' },
+        { id: 'visit-2', createdAt: new Date('2026-09-19T06:30:01.024Z'), localVisitUuid: 'b' },
+      ] as never);
+
+      const result = await service.cleanupDuplicateSchedules(false);
+
+      expect(repository.softDeleteMany).toHaveBeenCalledWith(['visit-2']);
+      expect(result).toEqual({
+        duplicateScheduleCount: 1,
+        softDeletedCount: 1,
+        details: [{ scheduleId: 'schedule-1', keptId: 'visit-1', softDeletedIds: ['visit-2'] }],
+      });
+    });
+
+    it('does not write anything when dryRun is true, but still reports what would happen', async () => {
+      repository.findDuplicateScheduleIds.mockResolvedValue(['schedule-1']);
+      repository.findNonDeletedByScheduleId.mockResolvedValue([
+        { id: 'visit-1', createdAt: new Date('2026-09-19T06:30:01.020Z'), localVisitUuid: 'a' },
+        { id: 'visit-2', createdAt: new Date('2026-09-19T06:30:01.024Z'), localVisitUuid: 'b' },
+      ] as never);
+
+      const result = await service.cleanupDuplicateSchedules(true);
+
+      expect(repository.softDeleteMany).not.toHaveBeenCalled();
+      expect(result).toEqual({
+        duplicateScheduleCount: 1,
+        softDeletedCount: 1,
+        details: [{ scheduleId: 'schedule-1', keptId: 'visit-1', softDeletedIds: ['visit-2'] }],
+      });
+    });
+
+    it('resolves multiple duplicate scheduleId groups independently', async () => {
+      repository.findDuplicateScheduleIds.mockResolvedValue(['schedule-1', 'schedule-2']);
+      repository.findNonDeletedByScheduleId
+        .mockResolvedValueOnce([
+          { id: 'visit-1', createdAt: new Date('2026-09-01T00:00:00.000Z') },
+          { id: 'visit-2', createdAt: new Date('2026-09-02T00:00:00.000Z') },
+        ] as never)
+        .mockResolvedValueOnce([
+          { id: 'visit-3', createdAt: new Date('2026-09-03T00:00:00.000Z') },
+          { id: 'visit-4', createdAt: new Date('2026-09-04T00:00:00.000Z') },
+          { id: 'visit-5', createdAt: new Date('2026-09-05T00:00:00.000Z') },
+        ] as never);
+
+      const result = await service.cleanupDuplicateSchedules(false);
+
+      expect(repository.softDeleteMany).toHaveBeenCalledWith(['visit-2']);
+      expect(repository.softDeleteMany).toHaveBeenCalledWith(['visit-4', 'visit-5']);
+      expect(result.duplicateScheduleCount).toBe(2);
+      expect(result.softDeletedCount).toBe(3);
+    });
+
+    it('does not call softDeleteMany for a group with no discard rows', async () => {
+      // Not expected in practice (findDuplicateScheduleIds only returns
+      // scheduleIds with >1 row), but guards the "0 rows to discard" edge
+      // case defensively rather than relying on that invariant holding.
+      repository.findDuplicateScheduleIds.mockResolvedValue(['schedule-1']);
+      repository.findNonDeletedByScheduleId.mockResolvedValue([
+        { id: 'visit-1', createdAt: new Date('2026-09-01T00:00:00.000Z') },
+      ] as never);
+
+      await service.cleanupDuplicateSchedules(false);
+
+      expect(repository.softDeleteMany).not.toHaveBeenCalled();
     });
   });
 });

@@ -911,4 +911,60 @@ describe('VisitInstanceRepository', () => {
       expect(findMany.mock.calls[0][0].where.OR).toBeUndefined();
     });
   });
+
+  describe('findDuplicateScheduleIds', () => {
+    it('returns the scheduleIds groupBy reports as having more than one non-deleted row', async () => {
+      groupBy.mockResolvedValue([
+        { scheduleId: 'schedule-1', _count: { _all: 2 } },
+        { scheduleId: 'schedule-2', _count: { _all: 3 } },
+      ]);
+
+      const result = await repository.findDuplicateScheduleIds();
+
+      expect(groupBy).toHaveBeenCalledWith({
+        by: ['scheduleId'],
+        where: { isDeleted: false },
+        _count: { _all: true },
+        having: { scheduleId: { _count: { gt: 1 } } },
+      });
+      expect(result).toEqual(['schedule-1', 'schedule-2']);
+    });
+
+    it('returns an empty array when no scheduleId has duplicates', async () => {
+      groupBy.mockResolvedValue([]);
+
+      await expect(repository.findDuplicateScheduleIds()).resolves.toEqual([]);
+    });
+  });
+
+  describe('findNonDeletedByScheduleId', () => {
+    it('queries non-deleted rows for the scheduleId ordered by createdAt then id ascending', async () => {
+      findMany.mockResolvedValue([]);
+
+      await repository.findNonDeletedByScheduleId('schedule-1');
+
+      expect(findMany).toHaveBeenCalledWith({
+        where: { scheduleId: 'schedule-1', isDeleted: false },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        select: { id: true, createdAt: true, localVisitUuid: true },
+      });
+    });
+  });
+
+  describe('softDeleteMany', () => {
+    it('soft-deletes the given ids with isDeleted true and a deletedAt timestamp', async () => {
+      await repository.softDeleteMany(['visit-1', 'visit-2']);
+
+      expect(visitInstanceUpdateMany).toHaveBeenCalledWith({
+        where: { id: { in: ['visit-1', 'visit-2'] } },
+        data: { isDeleted: true, deletedAt: expect.any(Date) },
+      });
+    });
+
+    it('does nothing when given an empty id list', async () => {
+      await repository.softDeleteMany([]);
+
+      expect(visitInstanceUpdateMany).not.toHaveBeenCalled();
+    });
+  });
 });

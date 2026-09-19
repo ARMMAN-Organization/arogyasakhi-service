@@ -8,6 +8,7 @@ import type { byPadaSchema } from './dto/by-pada.dto';
 import type { visitHistoryQuerySchema } from './dto/visit-history-query.dto';
 import type { RestoreForSakhiInput } from './dto/restore-for-sakhi.dto';
 import type { listVisitsQuerySchema } from './dto/list-visits.dto';
+import type { CleanupDuplicateSchedulesQuery } from './dto/cleanup-duplicate-schedules-query.dto';
 
 /**
  * Visit instance request handlers. Mounted under the global `api/v1`
@@ -121,6 +122,11 @@ export function createVisitInstanceController(service: VisitInstanceService) {
       const { sakhiUserId } = req.body as RestoreForSakhiInput;
       const result = await service.restoreForSakhi(sakhiUserId, req.user, authorizationHeader);
       res.json(ok(result));
+    }),
+
+    cleanupDuplicateSchedules: asyncHandler(async (req, res) => {
+      const { dryRun } = req.query as unknown as CleanupDuplicateSchedulesQuery;
+      res.json(ok(await service.cleanupDuplicateSchedules(dryRun !== 'false')));
     }),
   };
 }

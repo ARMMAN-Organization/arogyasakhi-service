@@ -733,4 +733,43 @@ export class VisitInstanceRepository {
 
     return { restoredVisitCount: visitIds.length };
   }
+
+  /**
+   * Finds every scheduleId with more than one non-deleted VisitInstance —
+   * backs the API-based cleanup endpoint
+   * (POST /visits/cleanup-duplicate-schedules), for an environment where
+   * only API access, not DB credentials, is available.
+   */
+  async findDuplicateScheduleIds(): Promise<string[]> {
+    const groups = await this.prisma.visitInstance.groupBy({
+      by: ['scheduleId'],
+      where: { isDeleted: false },
+      _count: { _all: true },
+      having: { scheduleId: { _count: { gt: 1 } } },
+    });
+    return groups.map((g) => g.scheduleId);
+  }
+
+  /**
+   * All non-deleted VisitInstance rows for one scheduleId, oldest first —
+   * (createdAt, id) order so a tie on createdAt (seen in production: two
+   * rows completed milliseconds apart) still resolves deterministically
+   * rather than depending on DB row-return order.
+   */
+  findNonDeletedByScheduleId(scheduleId: string) {
+    return this.prisma.visitInstance.findMany({
+      where: { scheduleId, isDeleted: false },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: { id: true, createdAt: true, localVisitUuid: true },
+    });
+  }
+
+  /** Soft-deletes the given VisitInstance ids — used to discard duplicate rows once the earliest is kept. */
+  async softDeleteMany(ids: string[]): Promise<void> {
+    if (ids.length === 0) return;
+    await this.prisma.visitInstance.updateMany({
+      where: { id: { in: ids } },
+      data: { isDeleted: true, deletedAt: new Date() },
+    });
+  }
 }
