@@ -685,10 +685,11 @@ export class BeneficiaryService {
   }
 
   /**
-   * Risk Summary widget — counts of in-scope beneficiaries' risk condition
-   * summaries grouped by latestGrade, same role-scoping/date-range as
-   * `list()`/getRegistrationSummary. Counts per-condition, not collapsed to
-   * one grade per beneficiary (see BeneficiaryRepository.countByRiskGrade).
+   * Risk Summary widget — counts of in-scope, distinct beneficiaries
+   * grouped by their single most-severe latestGrade, same role-scoping/
+   * date-range as `list()`/getRegistrationSummary. Beneficiary-grained, not
+   * per-condition-row — matches GET /beneficiaries?atRiskOnly=true's count
+   * (see BeneficiaryRepository.countByRiskGrade for the reduction rule).
    */
   async getRiskSummary(
     query: SummaryQueryInput,

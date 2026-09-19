@@ -3585,6 +3585,7 @@ describe('BeneficiaryService', () => {
         byGrade: { HIGH: 2, NORMAL: 1 },
         everAtRiskCount: 2,
         referralTriggerCount: 1,
+        byCaseType: { MOTHER: 2, CHILD: 1 },
       });
 
       const result = await service.getRiskSummary({}, caller(), AUTH_HEADER);
@@ -3593,6 +3594,7 @@ describe('BeneficiaryService', () => {
         expect.objectContaining({ sakhiId: CALLER_ID }),
       );
       expect(result.byGrade).toEqual({ HIGH: 2, NORMAL: 1 });
+      expect(result.byCaseType).toEqual({ MOTHER: 2, CHILD: 1 });
     });
 
     it('rejects fromDate after toDate', async () => {
