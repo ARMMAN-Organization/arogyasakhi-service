@@ -731,6 +731,48 @@ export class VisitInstanceService {
     }
     return this.repository.restoreForSakhi(sakhiUserId);
   }
+
+  /**
+   * Ops endpoint support (see visitInstance.routes.ts's
+   * POST /visits/cleanup-duplicate-schedules) for an environment where
+   * only API access, not DB credentials, is available. For each
+   * scheduleId with more than one non-deleted VisitInstance (a retry that
+   * created a second row for the same schedule instead of being
+   * recognized as the same visit), keeps the earliest (createdAt, then
+   * id, for a deterministic tie-break) and soft-deletes the rest.
+   * `dryRun: true` (the default at the route layer) reports what would
+   * happen without writing anything. Idempotent — a scheduleId with 0 or
+   * 1 non-deleted rows is left untouched, so re-running after a partial
+   * run, or on an already-clean DB, is safe.
+   */
+  async cleanupDuplicateSchedules(dryRun: boolean): Promise<{
+    duplicateScheduleCount: number;
+    softDeletedCount: number;
+    details: Array<{ scheduleId: string; keptId: string; softDeletedIds: string[] }>;
+  }> {
+    const duplicateScheduleIds = await this.repository.findDuplicateScheduleIds();
+    if (duplicateScheduleIds.length === 0) {
+      return { duplicateScheduleCount: 0, softDeletedCount: 0, details: [] };
+    }
+
+    const details: Array<{ scheduleId: string; keptId: string; softDeletedIds: string[] }> = [];
+    let softDeletedCount = 0;
+
+    for (const scheduleId of duplicateScheduleIds) {
+      const rows = await this.repository.findNonDeletedByScheduleId(scheduleId);
+      const [keep, ...discard] = rows;
+      const softDeletedIds = discard.map((d) => d.id);
+
+      if (!dryRun && softDeletedIds.length > 0) {
+        await this.repository.softDeleteMany(softDeletedIds);
+      }
+
+      details.push({ scheduleId, keptId: keep.id, softDeletedIds });
+      softDeletedCount += softDeletedIds.length;
+    }
+
+    return { duplicateScheduleCount: duplicateScheduleIds.length, softDeletedCount, details };
+  }
 }
 
 /**

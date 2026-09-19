@@ -11,6 +11,7 @@ import { byPadaSchema } from './dto/by-pada.dto';
 import { visitHistoryQuerySchema } from './dto/visit-history-query.dto';
 import { restoreForSakhiSchema } from './dto/restore-for-sakhi.dto';
 import { listVisitsQuerySchema } from './dto/list-visits.dto';
+import { cleanupDuplicateSchedulesQuerySchema } from './dto/cleanup-duplicate-schedules-query.dto';
 import {
   errorResponse,
   requireRoles,
@@ -556,5 +557,47 @@ export function registerVisitInstanceRoutes(doc: DocumentedRouter, service: Visi
     validate(idParamsSchema, 'params'),
     validateBody(updateVisitInstanceSchema),
     controller.updateStatus,
+  );
+
+  doc.post(
+    '/visits/cleanup-duplicate-schedules',
+    {
+      summary:
+        'Ops/diagnostic endpoint — finds every scheduleId with more than one non-deleted ' +
+        'VisitInstance (a retry that created a second row for the same schedule instead ' +
+        'of being recognized as the same visit) and soft-deletes all but the earliest, ' +
+        'for an environment where only API access (not DB credentials) is available. ' +
+        'Defaults to dryRun=true so a bare POST never mutates data.',
+      tags: ['Visits'],
+      query: cleanupDuplicateSchedulesQuerySchema,
+      responses: {
+        200: {
+          description: 'Cleanup summary (or a dry-run preview if dryRun=true)',
+          schema: envelope(
+            z.object({
+              duplicateScheduleCount: z.number().int().nonnegative(),
+              softDeletedCount: z.number().int().nonnegative(),
+              details: z.array(
+                z.object({
+                  scheduleId: z.string().uuid(),
+                  keptId: z.string().uuid(),
+                  softDeletedIds: z.array(z.string().uuid()),
+                }),
+              ),
+            }),
+          ),
+        },
+        400: errorResponse(400, {
+          message: "dryRun: Invalid enum value. Expected 'true' | 'false'",
+        }),
+        401: errorResponse(401),
+        403: errorResponse(403),
+        500: errorResponse(500),
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('ADMIN', 'SYSTEM'),
+    validate(cleanupDuplicateSchedulesQuerySchema, 'query'),
+    controller.cleanupDuplicateSchedules,
   );
 }
