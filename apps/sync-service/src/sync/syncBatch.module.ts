@@ -7,6 +7,9 @@ import { registerSyncBatchRoutes } from './syncBatch.routes';
 import { SyncPendingRepository } from './syncPending.repository';
 import { SyncPendingService } from './syncPending.service';
 import { registerSyncPendingRoutes } from './syncPending.routes';
+import { SyncItemRepository } from './syncItem.repository';
+import { SyncItemService } from './syncItem.service';
+import { registerSyncItemRoutes } from './syncItem.routes';
 
 /**
  * Composition root for the sync feature: wires repository → service → routes
@@ -34,9 +37,12 @@ export function createSyncBatchModule(
   );
   const pendingRepository = new SyncPendingRepository(prisma);
   const pendingService = new SyncPendingService(pendingRepository);
+  const itemRepository = new SyncItemRepository(prisma);
+  const itemService = new SyncItemService(itemRepository);
 
   const doc = createDocumentedRouter();
   registerSyncBatchRoutes(doc, batchService);
   registerSyncPendingRoutes(doc, pendingService);
+  registerSyncItemRoutes(doc, itemService);
   return doc;
 }

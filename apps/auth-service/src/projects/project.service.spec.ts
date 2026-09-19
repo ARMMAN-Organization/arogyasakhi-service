@@ -45,6 +45,12 @@ describe('ProjectService', () => {
       expect(result).toHaveLength(2);
     });
 
+    it('returns all projects unrestricted for SYSTEM — a cron job service token carries no projectId at all', async () => {
+      repository.findManyActiveProjects.mockResolvedValue(projects as never);
+      const result = await service.list({ roles: ['SYSTEM'], projectId: null });
+      expect(result).toHaveLength(2);
+    });
+
     it("scopes to only the caller's own project for SUPERVISOR", async () => {
       repository.findManyActiveProjects.mockResolvedValue(projects as never);
       const result = await service.list({ roles: ['SUPERVISOR'], projectId: 'p2' });

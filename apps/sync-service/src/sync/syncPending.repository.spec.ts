@@ -12,7 +12,7 @@ describe('SyncPendingRepository', () => {
     repository = new SyncPendingRepository(prisma);
   });
 
-  it('queries non-deleted, non-SUCCESS sync items for the given userId, newest first', async () => {
+  it('queries non-deleted, still-outstanding sync items for the given userId, newest first', async () => {
     findMany.mockResolvedValue([]);
 
     await repository.findPending(userId);
@@ -20,7 +20,7 @@ describe('SyncPendingRepository', () => {
     expect(findMany).toHaveBeenCalledWith({
       where: {
         isDeleted: false,
-        status: { not: 'SUCCESS' },
+        status: { in: ['QUEUED', 'FAILED', 'SKIPPED'] },
         syncBatch: { userId },
       },
       orderBy: { createdAt: 'desc' },
@@ -28,6 +28,16 @@ describe('SyncPendingRepository', () => {
         syncBatch: { select: { deviceId: true, startedAt: true } },
       },
     });
+  });
+
+  it('excludes DUPLICATE and PARTIAL — neither is a genuinely outstanding item', async () => {
+    findMany.mockResolvedValue([]);
+
+    await repository.findPending(userId);
+
+    const call = findMany.mock.calls[0][0];
+    expect(call.where.status.in).not.toContain('DUPLICATE');
+    expect(call.where.status.in).not.toContain('PARTIAL');
   });
 
   it('flattens the parent batch deviceId/startedAt onto each row', async () => {

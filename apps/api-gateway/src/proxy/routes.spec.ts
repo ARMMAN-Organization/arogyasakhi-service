@@ -19,6 +19,17 @@ describe('SERVICE_ROUTES coverage', () => {
     expect(formSubmissionsRoute?.requiresAuth).toBe(true);
     expect(formSubmissionsRoute).not.toBe(formsRoute);
   });
+
+  it("rewrites /sync-items to sync-service's own /sync/items, distinct from /sync", () => {
+    const syncItemsRoute = SERVICE_ROUTES.find((r) => r.prefix === '/sync-items');
+    const syncRoute = SERVICE_ROUTES.find((r) => r.prefix === '/sync');
+
+    expect(syncItemsRoute).toBeDefined();
+    expect(syncItemsRoute?.target).toBe(appConfig.SYNC_SERVICE_URL);
+    expect(syncItemsRoute?.requiresAuth).toBe(true);
+    expect(syncItemsRoute?.downstreamPrefix).toBe('/sync/items');
+    expect(syncItemsRoute).not.toBe(syncRoute);
+  });
 });
 
 describe('SERVICE_ROUTES ordering', () => {

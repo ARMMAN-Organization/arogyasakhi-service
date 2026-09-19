@@ -261,6 +261,17 @@ export const SERVICE_ROUTES: readonly ServiceRoute[] = [
     requiresAuth: true,
   },
   { prefix: '/sync', target: appConfig.SYNC_SERVICE_URL, requiresAuth: true },
+  // The Sakhi app already integrated against POST /sync-items (a distinct
+  // top-level path, not /sync/*) before this route existed downstream —
+  // rewritten to sync-service's own /sync/items so the mobile client needs
+  // no change, while sync-service's own route naming stays consistent with
+  // its sibling /sync/pending, /sync/last-synced routes.
+  {
+    prefix: '/sync-items',
+    target: appConfig.SYNC_SERVICE_URL,
+    requiresAuth: true,
+    downstreamPrefix: '/sync/items',
+  },
   { prefix: '/media', target: appConfig.MEDIA_SERVICE_URL, requiresAuth: true },
   { prefix: '/audit', target: appConfig.AUDIT_SERVICE_URL, requiresAuth: true },
   // SRS Section 9 App Analytics and Product Metrics — Sakhi-app event

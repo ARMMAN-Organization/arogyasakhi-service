@@ -120,6 +120,42 @@ export function registerSyncBatchRoutes(doc: DocumentedRouter, service: SyncBatc
   );
 
   doc.get(
+    '/sync/last-synced/by-device',
+    {
+      summary:
+        "Per-device breakdown of a user's last-synced status (SRS §8.4: 'stale devices that " +
+        "have not synced within the configured threshold') — only lists devices that have " +
+        'synced at least once; there is no device registry here to enumerate never-synced ' +
+        'devices. Same scoping as GET /sync/last-synced: SAKHI own userId only, SUPERVISOR ' +
+        'own roster, MANAGER/ADMIN unscoped.',
+      tags: ['Sync'],
+      responses: {
+        200: {
+          description: 'Per-device last-synced status',
+          schema: envelope(
+            z.array(
+              z.object({
+                deviceId: z.string().uuid(),
+                lastSyncedAt: z.string().datetime().nullable(),
+                isDelayed: z.boolean(),
+              }),
+            ),
+          ),
+        },
+        401: { description: 'Unauthenticated', schema: apiErrorSchema },
+        403: {
+          description: "Caller role not permitted, or userId is not this Supervisor's own",
+          schema: apiErrorSchema,
+        },
+      },
+    },
+    trustGatewayIdentity,
+    requireRoles('SAKHI', 'SUPERVISOR', 'MANAGER', 'ADMIN'),
+    validate(lastSyncedQuerySchema, 'query'),
+    controller.getLastSyncedAtByDevice,
+  );
+
+  doc.get(
     '/sync/last-synced/by-roster',
     {
       summary:

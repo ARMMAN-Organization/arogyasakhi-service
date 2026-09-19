@@ -42,7 +42,13 @@ const schema = z.object({
   // visitFamily-style branching, and evaluating it via a rules-service round
   // trip on every dashboard read adds latency this check doesn't need.
   // Revisit if this ever needs per-project/per-geography variation.
-  SYNC_DELAY_THRESHOLD_HOURS: z.coerce.number().positive().default(48),
+  SYNC_DELAY_THRESHOLD_HOURS: z.coerce.number().positive().default(72),
+  // Cron expression for the proactive SYNC_DELAY escalation sweep
+  // (syncDelayEscalation.job.ts) — every stale Sakhi across every project
+  // gets escalated on this schedule, not only when her Supervisor happens
+  // to open the roster dashboard. Once daily by default, matching
+  // risk-referral-service's OVERDUE_FOLLOWUP_JOB_CRON convention.
+  SYNC_DELAY_SWEEP_CRON: z.string().default('0 7 * * *'),
 });
 
 export type AppConfig = z.infer<typeof schema>;

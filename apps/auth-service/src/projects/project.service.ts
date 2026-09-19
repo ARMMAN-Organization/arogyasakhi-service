@@ -51,9 +51,20 @@ function toApiProject(p: Record<string, unknown>) {
  * not be scoped down just because one of their roles is restrictive.
  * Matches the same isPrivileged() pattern in
  * supervisor-operations-service/operations.service.ts.
+ *
+ * SYSTEM is included so an automated cron job's own service-token identity
+ * (which carries no `projectId` at all — see auth-service's own
+ * service-token issuance) can enumerate every active project, e.g.
+ * sync-service's SYNC_DELAY escalation sweep walking every project's
+ * roster. Without this, `caller.projectId` would be undefined and the
+ * unprivileged filter below would silently return zero projects.
  */
 function isPrivileged(caller: CallerScope): boolean {
-  return caller.roles.includes('MANAGER') || caller.roles.includes('ADMIN');
+  return (
+    caller.roles.includes('MANAGER') ||
+    caller.roles.includes('ADMIN') ||
+    caller.roles.includes('SYSTEM')
+  );
 }
 
 /** Business logic for project/funder master data. */

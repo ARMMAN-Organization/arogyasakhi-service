@@ -30,14 +30,18 @@ export class SyncPendingRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * Finds non-deleted sync items whose `status` is not `SUCCESS` for the
-   * sync batches owned by `userId`, newest first.
+   * Finds non-deleted sync items still genuinely outstanding — `QUEUED`,
+   * `FAILED`, or `SKIPPED` — for the sync batches owned by `userId`, newest
+   * first. Explicit inclusion, not `status: { not: 'SUCCESS' }`: `DUPLICATE`
+   * and `PARTIAL` are also not `SUCCESS`, but neither is "pending" — a
+   * DUPLICATE item is a resubmission of something already synced (nothing
+   * to retry), and PARTIAL is its own terminal outcome, not a queued state.
    */
   async findPending(userId: string): Promise<PendingSyncItem[]> {
     const rows = await this.prisma.syncItem.findMany({
       where: {
         isDeleted: false,
-        status: { not: 'SUCCESS' },
+        status: { in: ['QUEUED', 'FAILED', 'SKIPPED'] },
         syncBatch: { userId },
       },
       orderBy: { createdAt: 'desc' },
@@ -53,7 +57,7 @@ export class SyncPendingRepository {
       entityType: row.entityType,
       entityId: row.entityId,
       operation: row.operation,
-      // Safe: the `status: { not: 'SUCCESS' }` filter above guarantees this
+      // Safe: the `status: { in: [...] }` filter above guarantees this
       // narrowing at runtime; Prisma's generated type just isn't narrowed by it.
       status: row.status as PendingSyncItem['status'],
       errorCode: row.errorCode,

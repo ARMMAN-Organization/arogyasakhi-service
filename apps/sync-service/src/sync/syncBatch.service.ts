@@ -19,6 +19,12 @@ export interface RosterSyncStatus {
   isDelayed: boolean;
 }
 
+export interface DeviceSyncStatus {
+  deviceId: string;
+  lastSyncedAt: Date | null;
+  isDelayed: boolean;
+}
+
 /** Sync-batch domain logic. Data access is delegated to the repository. */
 export class SyncBatchService {
   constructor(
@@ -49,26 +55,62 @@ export class SyncBatchService {
     caller: AuthenticatedUser,
     authorizationHeader: string,
   ): Promise<Date | null> {
-    if (!isPrivileged(caller)) {
-      if (caller.roles.includes('SAKHI')) {
-        if (userId !== caller.id) {
-          throw forbidden('A Sakhi may only view their own last-synced time.');
-        }
-      } else if (caller.roles.includes('SUPERVISOR')) {
-        if (!caller.projectId) {
-          throw forbidden('Supervisor caller has no project scope.');
-        }
-        const roster = await listSakhiIdsForSupervisor(
-          caller.projectId,
-          caller.id,
-          authorizationHeader,
-        );
-        if (!roster.includes(userId)) {
-          throw forbidden("userId is not in this Supervisor's roster.");
-        }
+    await this.assertCallerCanViewUser(userId, caller, authorizationHeader);
+    return this.repository.findLastSyncedAt(userId);
+  }
+
+  /**
+   * Per-device breakdown of `getLastSyncedAt`'s per-user value — SRS §8.4:
+   * "stale devices that have not synced within the configured threshold" is
+   * literally per-device, and a Sakhi who recently synced from a second
+   * device would otherwise mask a first device that's gone stale. Only
+   * ever lists devices this user has synced from at least once — there is
+   * no device_registry in this service (owned elsewhere, forklift rule) to
+   * enumerate devices that have never synced.
+   */
+  async getLastSyncedAtByDevice(
+    userId: string,
+    caller: AuthenticatedUser,
+    authorizationHeader: string,
+  ): Promise<DeviceSyncStatus[]> {
+    await this.assertCallerCanViewUser(userId, caller, authorizationHeader);
+    const byDeviceId = await this.repository.findLastSyncedAtByDeviceIds(userId);
+
+    const thresholdMs = this.syncDelayThresholdHours * 60 * 60 * 1000;
+    const now = Date.now();
+    return Array.from(byDeviceId.entries()).map(([deviceId, lastSyncedAt]) => ({
+      deviceId,
+      lastSyncedAt,
+      isDelayed: now - lastSyncedAt.getTime() > thresholdMs,
+    }));
+  }
+
+  /** Same IDOR guard as getLastSyncedAt — shared since getLastSyncedAtByDevice needs it too. */
+  private async assertCallerCanViewUser(
+    userId: string,
+    caller: AuthenticatedUser,
+    authorizationHeader: string,
+  ): Promise<void> {
+    if (isPrivileged(caller)) return;
+    if (caller.roles.includes('SAKHI')) {
+      if (userId !== caller.id) {
+        throw forbidden('A Sakhi may only view their own last-synced time.');
+      }
+      return;
+    }
+    if (caller.roles.includes('SUPERVISOR')) {
+      if (!caller.projectId) {
+        throw forbidden('Supervisor caller has no project scope.');
+      }
+      const roster = await listSakhiIdsForSupervisor(
+        caller.projectId,
+        caller.id,
+        authorizationHeader,
+      );
+      if (!roster.includes(userId)) {
+        throw forbidden("userId is not in this Supervisor's roster.");
       }
     }
-    return this.repository.findLastSyncedAt(userId);
   }
 
   /**

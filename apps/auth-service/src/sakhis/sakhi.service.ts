@@ -48,9 +48,20 @@ function toApiSakhi(profile: Record<string, unknown>) {
  * scoped down just because one of their roles is restrictive. Matches
  * the same isPrivileged() pattern in
  * supervisor-operations-service/operations.service.ts.
+ *
+ * SYSTEM is included so an automated cron job's own service-token identity
+ * (e.g. sync-service's SYNC_DELAY escalation sweep) can list every Sakhi
+ * in a project, not just those where supervisorId happens to equal the
+ * service token's own subject id (which no real Sakhi's supervisorId
+ * would ever match) — without this, listByProject would silently filter
+ * to an empty list for a SYSTEM caller.
  */
 function isPrivileged(caller: CallerScope): boolean {
-  return caller.roles.includes('MANAGER') || caller.roles.includes('ADMIN');
+  return (
+    caller.roles.includes('MANAGER') ||
+    caller.roles.includes('ADMIN') ||
+    caller.roles.includes('SYSTEM')
+  );
 }
 
 /**
